@@ -1,0 +1,52 @@
+
+/* Back to Worklist Button Fix */
+.btn-dicom-viewer {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: var(--card-bg, #252525);
+    border: 1px solid var(--border-color, #404040);
+    color: var(--text-primary, #ffffff);
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-dicom-viewer:hover {
+    background: var(--accent-color, #00d4ff);
+    color: #000;
+    transform: translateY(-1px);
+}
+
+.btn-dicom-viewer i {
+    font-size: 12px;
+}
+
+/* Ensure button container is visible */
+.top-navbar .nav-right {
+    display: flex !important;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Delete button fixes */
+.btn-delete, .delete-btn, [onclick*="delete"] {
+    display: inline-flex !important;
+    align-items: center;
+    padding: 6px 12px;
+    background: var(--danger-color, #ff4444);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.2s ease;
+}
+
+.btn-delete:hover, .delete-btn:hover {
+    background: #cc3333;
+    transform: translateY(-1px);
+}

@@ -1,0 +1,199 @@
+/**
+ * High-Quality Medical Image Rendering CSS
+ * Optimized for professional medical imaging display
+ * Supports DX, CR, MG, CT, MR, US, XA, RF and other modalities
+ */
+
+/* Global high-quality rendering settings */
+* {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* Enhanced image rendering for all medical images */
+.medical-image,
+.dicom-image,
+.dicom-canvas {
+    /* Progressive enhancement for cross-browser compatibility */
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+    image-rendering: high-quality;
+    image-rendering: optimizeQuality;
+    
+    /* Hardware acceleration */
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    will-change: transform;
+    
+    /* Enhanced visual quality - simplified to prevent white image issue */
+    filter: none;
+    -webkit-filter: none;
+    -moz-filter: none;
+    
+    /* Smooth transitions */
+    transition: filter 0.2s ease, transform 0.1s ease;
+    -webkit-transition: -webkit-filter 0.2s ease, -webkit-transform 0.1s ease;
+}
+
+/* Modality-specific enhancements - disabled to prevent white image issue */
+.medical-image[data-modality="DX"],
+.medical-image[data-modality="CR"],
+.medical-image[data-modality="MG"] {
+    /* Filters disabled to maintain image visibility */
+    filter: none;
+    -webkit-filter: none;
+}
+
+.medical-image[data-modality="CT"] {
+    /* Filters disabled to maintain image visibility */
+    filter: none;
+    -webkit-filter: none;
+}
+
+.medical-image[data-modality="MR"],
+.medical-image[data-modality="MRI"] {
+    /* Filters disabled to maintain image visibility */
+    filter: none;
+    -webkit-filter: none;
+}
+
+.medical-image[data-modality="US"] {
+    /* Filters disabled to maintain image visibility */
+    filter: none;
+    -webkit-filter: none;
+}
+
+.medical-image[data-modality="XA"],
+.medical-image[data-modality="RF"] {
+    /* Filters disabled to maintain image visibility */
+    filter: none;
+    -webkit-filter: none;
+}
+
+.medical-image[data-modality="PT"],
+.medical-image[data-modality="PET"] {
+    /* Filters disabled to maintain image visibility */
+    filter: none;
+    -webkit-filter: none;
+}
+
+.medical-image[data-modality="NM"],
+.medical-image[data-modality="SPECT"] {
+    /* Filters disabled to maintain image visibility */
+    filter: none;
+    -webkit-filter: none;
+}
+
+/* High-DPI display optimizations */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+    .medical-image,
+    .dicom-image,
+    .dicom-canvas {
+        /* Enhanced sharpening for high-DPI displays */
+        filter: contrast(1.2) brightness(1.1) saturate(1.05) blur(0.1px);
+        -webkit-filter: contrast(1.2) brightness(1.1) saturate(1.05) blur(0.1px);
+    }
+}
+
+/* Retina display optimizations */
+@media (-webkit-min-device-pixel-ratio: 3), (min-resolution: 288dpi) {
+    .medical-image,
+    .dicom-image,
+    .dicom-canvas {
+        /* Ultra-high-DPI enhancements */
+        filter: contrast(1.25) brightness(1.12) saturate(1.08) blur(0.05px);
+        -webkit-filter: contrast(1.25) brightness(1.12) saturate(1.08) blur(0.05px);
+    }
+}
+
+/* Canvas-specific enhancements */
+canvas.dicom-canvas {
+    /* Ensure smooth rendering on canvas */
+    image-rendering: optimizeQuality;
+    -ms-interpolation-mode: bicubic;
+    
+    /* Prevent blur on scaling */
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: optimize-contrast;
+}
+
+/* MPR viewport images */
+.mpr-viewport img {
+    /* High-quality MPR rendering */
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+    image-rendering: high-quality;
+    image-rendering: optimizeQuality;
+    
+    filter: contrast(1.15) brightness(1.08) saturate(1.05);
+    -webkit-filter: contrast(1.15) brightness(1.08) saturate(1.05);
+    
+    /* Hardware acceleration */
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+}
+
+/* Loading state with quality preservation */
+.image-container.loading .dicom-image,
+.image-container.loading .dicom-canvas {
+    filter: contrast(1.0) brightness(1.0) blur(1px);
+    -webkit-filter: contrast(1.0) brightness(1.0) blur(1px);
+    transition: filter 0.3s ease;
+}
+
+.image-container:not(.loading) .dicom-image,
+.image-container:not(.loading) .dicom-canvas {
+    transition: filter 0.3s ease;
+}
+
+/* Print-quality rendering */
+@media print {
+    .medical-image,
+    .dicom-image,
+    .dicom-canvas {
+        image-rendering: optimizeQuality;
+        -webkit-print-color-adjust: exact;
+        color-adjust: exact;
+        filter: none;
+        -webkit-filter: none;
+    }
+}
+
+/* Zoom-specific quality enhancements */
+.dicom-image[style*="scale("],
+.dicom-canvas[style*="scale("] {
+    /* Maintain quality during zoom */
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: optimizeQuality;
+}
+
+/* Animation performance optimization */
+.dicom-image,
+.dicom-canvas {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    perspective: 1000px;
+    -webkit-perspective: 1000px;
+}
+
+/* Accessibility and contrast enhancements */
+@media (prefers-contrast: high) {
+    .medical-image,
+    .dicom-image,
+    .dicom-canvas {
+        filter: contrast(1.3) brightness(1.1);
+        -webkit-filter: contrast(1.3) brightness(1.1);
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .dicom-image,
+    .dicom-canvas {
+        transition: none;
+        -webkit-transition: none;
+    }
+}

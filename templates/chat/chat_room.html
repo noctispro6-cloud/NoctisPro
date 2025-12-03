@@ -1,0 +1,377 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ room.name }} - Chat Room - Noctis Pro PACS{% endblock %}
+
+{% block extra_css %}
+<style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-surface: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+        }
+
+    .chat-room-container {
+        background: var(--dark-bg);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .chat-header {
+        background: var(--gradient-primary);
+        border-bottom: 1px solid var(--border-color);
+        padding: 1rem;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+    }
+
+    .chat-body {
+        flex: 1;
+        display: flex;
+        overflow: hidden;
+    }
+
+    .messages-container {
+        flex: 1;
+        padding: 1rem;
+        overflow-y: auto;
+        max-height: calc(100vh - 200px);
+    }
+
+    .participants-sidebar {
+        width: 300px;
+        background: var(--card-bg);
+        border-left: 1px solid var(--border-color);
+        padding: 1rem;
+    }
+
+    .message-item {
+        margin-bottom: 1rem;
+        padding: 1rem;
+        background: var(--card-bg);
+        border-radius: 12px;
+        border: 1px solid var(--border-color);
+    }
+
+    .message-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 0.5rem;
+    }
+
+    .message-avatar {
+        background: var(--gradient-accent);
+        border-radius: 50%;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 0.75rem;
+        font-size: 0.9rem;
+        font-weight: 600;
+    }
+
+    .message-sender {
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-right: 0.5rem;
+    }
+
+    .message-time {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+    }
+
+    .message-content {
+        color: var(--text-primary);
+        line-height: 1.5;
+    }
+
+    .participant-item {
+        display: flex;
+        align-items: center;
+        padding: 0.5rem;
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .participant-avatar {
+        background: var(--gradient-accent);
+        border-radius: 50%;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 0.75rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+
+    .participant-info {
+        flex: 1;
+    }
+
+    .participant-name {
+        color: var(--text-primary);
+        font-weight: 500;
+        font-size: 0.9rem;
+    }
+
+    .participant-role {
+        color: var(--text-secondary);
+        font-size: 0.75rem;
+        text-transform: uppercase;
+    }
+
+    .online-indicator {
+        width: 8px;
+        height: 8px;
+        background: var(--success-color);
+        border-radius: 50%;
+        margin-left: auto;
+    }
+
+    .offline-indicator {
+        width: 8px;
+        height: 8px;
+        background: var(--text-secondary);
+        border-radius: 50%;
+        margin-left: auto;
+    }
+
+    .coming-soon {
+        text-align: center;
+        padding: 3rem;
+        color: var(--text-secondary);
+    }
+
+    .coming-soon i {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+
+    .room-info-badge {
+        background: rgba(14, 165, 233, 0.2);
+        color: var(--accent-color);
+        padding: 0.25rem 0.75rem;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        margin-left: 1rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="chat-room-container">
+    <!-- Chat Header -->
+    <div class="chat-header">
+        <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center">
+                <a href="{% url 'chat:chat_rooms' %}" class="btn-control me-3">
+                    <i class="fas fa-arrow-left"></i>
+                </a>
+                <div>
+                    <h4 class="text-white mb-0">
+                        {% if room.room_type == 'direct' %}
+                            <i class="fas fa-user me-2"></i>
+                        {% elif room.room_type == 'facility' %}
+                            <i class="fas fa-hospital me-2"></i>
+                        {% elif room.room_type == 'study' %}
+                            <i class="fas fa-x-ray me-2"></i>
+                        {% elif room.room_type == 'general' %}
+                            <i class="fas fa-users me-2"></i>
+                        {% elif room.room_type == 'support' %}
+                            <i class="fas fa-tools me-2"></i>
+                        {% else %}
+                            <i class="fas fa-comments me-2"></i>
+                        {% endif %}
+                        {{ room.name }}
+                    </h4>
+                    <p class="text-light opacity-75 mb-0">
+                        {{ room.get_room_type_display }}
+                        {% if room.description %} • {{ room.description }}{% endif %}
+                        <span class="room-info-badge">{{ participants.count|add:1 }} member{{ participants.count|add:1|pluralize }}</span>
+                    </p>
+                </div>
+            </div>
+            <div class="d-flex align-items-center">
+                {% if user_participant.role == 'admin' or user_participant.role == 'moderator' %}
+                <button type="button" class="btn-control me-2" title="Room Settings">
+                    <i class="fas fa-cog"></i>
+                </button>
+                {% endif %}
+                <button type="button" class="btn-control" onclick="toggleSidebar()"   title="Toggle Participants">
+                    <i class="fas fa-users"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Body -->
+    <div class="chat-body">
+        <!-- Messages Container -->
+        <div class="messages-container" id="messagesContainer">
+            {% if messages %}
+                {% for message in messages %}
+                <div class="message-item">
+                    <div class="message-header">
+                        <div class="message-avatar">
+                            {{ message.sender.first_name|first|default:"U" }}{{ message.sender.last_name|first|default:"" }}
+                        </div>
+                        <span class="message-sender">{{ message.sender.get_full_name|default:message.sender.username }}</span>
+                        <span class="message-time">{{ message.created_at|date:"M d, H:i" }}</span>
+                        {% if message.is_edited %}
+                        <span class="badge badge-secondary ms-2">Edited</span>
+                        {% endif %}
+                    </div>
+                    <div class="message-content">
+                        {% if message.message_type == 'text' %}
+                            {{ message.content|linebreaks }}
+                        {% elif message.message_type == 'image' %}
+                            <i class="fas fa-image me-2"></i>
+                            {% if message.attachment %}
+                                <img src="{{ message.attachment.url }}" alt="Image" loading="lazy" decoding="async" style="max-width: 300px; border-radius: 8px;">
+                            {% else %}
+                                Image attachment
+                            {% endif %}
+                        {% elif message.message_type == 'file' %}
+                            <i class="fas fa-file me-2"></i>
+                            {% if message.attachment %}
+                                <a href="{{ message.attachment.url }}" class="text-accent" download>
+                                    {{ message.attachment_name|default:"Download File" }}
+                                </a>
+                            {% else %}
+                                File attachment: {{ message.attachment_name|default:"Unknown file" }}
+                            {% endif %}
+                        {% elif message.message_type == 'study_link' %}
+                            <i class="fas fa-link me-2"></i>
+                            {% if message.study_reference %}
+                                <a href="{% url 'dicom_viewer:launch_study_in_desktop_viewer' message.study_reference.id %}" class="text-accent" target="_blank">
+                                    Launch Desktop Viewer for: {{ message.study_reference.patient.full_name }} - {{ message.study_reference.study_date|date:"M d, Y" }}
+                                </a>
+                            {% endif %}
+                            {% if message.content %}
+                                <br>{{ message.content|linebreaks }}
+                            {% endif %}
+                        {% elif message.message_type == 'system' %}
+                            <em class="text-muted">{{ message.content }}</em>
+                        {% else %}
+                            {{ message.content|linebreaks }}
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="coming-soon">
+                    <i class="fas fa-comments"></i>
+                    <h5>No messages yet</h5>
+                    <p>Be the first to start the conversation in this room!</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Participants Sidebar -->
+        <div class="participants-sidebar" id="participantsSidebar">
+            <h6 class="text-light mb-3">
+                <i class="fas fa-users me-2"></i>Participants ({{ participants.count|add:1 }})
+            </h6>
+            
+            <!-- Current User -->
+            <div class="participant-item">
+                <div class="participant-avatar">
+                    {{ user.first_name|first|default:"U" }}{{ user.last_name|first|default:"" }}
+                </div>
+                <div class="participant-info">
+                    <div class="participant-name">{{ user.get_full_name|default:user.username }} (You)</div>
+                    <div class="participant-role">{{ user_participant.get_role_display }}</div>
+                </div>
+                <div class="online-indicator"></div>
+            </div>
+
+            <!-- Other Participants -->
+            {% for participant in participants %}
+            <div class="participant-item">
+                <div class="participant-avatar">
+                    {{ participant.user.first_name|first|default:"U" }}{{ participant.user.last_name|first|default:"" }}
+                </div>
+                <div class="participant-info">
+                    <div class="participant-name">{{ participant.user.get_full_name|default:participant.user.username }}</div>
+                    <div class="participant-role">{{ participant.get_role_display }}</div>
+                </div>
+                {% if participant.is_online %}
+                    <div class="online-indicator" title="Online"></div>
+                {% else %}
+                    <div class="offline-indicator" title="Last seen {{ participant.last_seen|timesince }} ago"></div>
+                {% endif %}
+            </div>
+            {% endfor %}
+
+            <!-- Room Actions -->
+            <div class="mt-4">
+                <h6 class="text-light mb-2">Room Actions</h6>
+                {% if user_participant.role == 'admin' %}
+                <button type="button" class="btn-control w-100 mb-2">
+                    <i class="fas fa-user-plus me-2"></i>Invite Users
+                </button>
+                <button type="button" class="btn-control w-100 mb-2">
+                    <i class="fas fa-cog me-2"></i>Room Settings
+                </button>
+                {% endif %}
+                <a href="{% url 'chat:leave_room' room.id %}" class="btn-control w-100">
+                    <i class="fas fa-sign-out-alt me-2"></i>Leave Room
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Message Input (Coming Soon) -->
+    <div class="coming-soon" style="padding: 1rem; background: var(--card-bg); border-top: 1px solid var(--border-color);">
+        <div class="d-flex align-items-center justify-content-center">
+            <i class="fas fa-keyboard me-2"></i>
+            <span>Real-time messaging coming soon! This will include text, file sharing, and study links.</span>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleSidebar() {
+    const sidebar = document.getElementById('participantsSidebar');
+    if (sidebar.style.display === 'none') {
+        sidebar.style.display = 'block';
+    } else {
+        sidebar.style.display = 'none';
+    }
+}
+
+// Auto-scroll to bottom of messages
+function scrollToBottom() {
+    const messagesContainer = document.getElementById('messagesContainer');
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+// Scroll to bottom on page load
+document.addEventListener('DOMContentLoaded', function() {
+    scrollToBottom();
+});
+
+// Simulate real-time message updates
+setInterval(function() {
+    // This would typically connect to WebSocket for real-time messages
+    console.log('Checking for new messages...');
+}, 5000);
+</script>
+{% endblock %}

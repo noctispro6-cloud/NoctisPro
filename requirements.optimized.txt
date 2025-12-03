@@ -1,0 +1,43 @@
+# Core Django
+Django>=4.2,<5.0
+Pillow
+django-widget-tweaks
+python-dotenv
+
+# Production server
+gunicorn
+whitenoise
+
+# Database
+psycopg2-binary
+dj-database-url
+
+# Redis and caching
+redis
+django-redis
+
+# API
+djangorestframework
+django-cors-headers
+requests
+
+# DICOM processing
+pydicom
+pynetdicom
+highdicom
+numpy
+
+# Background tasks (requires more memory)
+celery
+
+# Advanced image processing
+opencv-python
+scikit-image
+matplotlib
+
+# AI and machine learning (high memory requirement)
+scipy
+pandas
+torch
+torchvision
+scikit-learn

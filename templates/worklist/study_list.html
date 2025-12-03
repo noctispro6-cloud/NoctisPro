@@ -1,0 +1,567 @@
+{% load dicts %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Studies - Noctis Pro PACS</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    {% load static %}
+    <link rel="icon" href="{% static 'favicon.ico' %}" type="image/x-icon">
+    <link href="{% static 'css/dicom-viewer-buttons.css' %}" rel="stylesheet">
+    <script src="{% static 'js/worklist-button-handlers.js' %}" defer></script>
+    <style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-bg: #252525;
+            --card-surface: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+            --urgent-color: #ff0066;
+            --scheduled-color: #4a90e2;
+            --in-progress-color: #f5a623;
+            --completed-color: #7ed321;
+            --cancelled-color: #d0021b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--primary-bg);
+            color: var(--text-primary);
+            font-size: 12px;
+            overflow: hidden;
+        }
+
+        .dashboard-container {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Top Navigation */
+        .top-navbar {
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo {
+            color: var(--accent-color);
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 8px;
+        }
+
+        .nav-tab {
+            padding: 8px 12px;
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s ease;
+        }
+
+        .nav-tab.active, .nav-tab:hover {
+            background: var(--card-bg);
+            color: var(--text-primary);
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.1) inset;
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--success-color);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--success-color);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: var(--secondary-bg);
+        }
+
+        .user-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--accent-color);
+            color: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+        }
+
+        .btn-control {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 4px 12px;
+            font-size: 11px;
+            cursor: pointer;
+            border-radius: 2px;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            text-decoration: none;
+        }
+
+        .btn-control:hover {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            padding: 16px;
+            overflow: auto;
+        }
+
+        .filters {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(160px, 1fr));
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .filters .btn-control {
+            align-self: end;
+        }
+
+        .table-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .table-card table {
+            width: 100%;
+        }
+
+        .table-card th {
+            background: var(--header-bg);
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-size: 12px;
+            padding: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .table-card td {
+            padding: 10px;
+            border-bottom: 1px solid var(--border-color);
+            vertical-align: top;
+        }
+
+        .badge-mod {
+            display: inline-block;
+            padding: 2px 8px;
+            border: 1px solid var(--accent-color);
+            border-radius: 999px;
+            font-size: 11px;
+            color: var(--accent-color);
+        }
+
+        .status-pill {
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .attachments, .prev-reports {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .attachment-chip {
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            background: rgba(255,255,255,0.03);
+        }
+
+        .attachment-chip i {
+            margin-right: 6px;
+        }
+
+        .search-input {
+            position: relative;
+        }
+
+        .search-input input {
+            width: 100%;
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: 8px;
+            padding: 8px 12px;
+        }
+
+        .form-select {
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: 8px;
+            padding: 8px 12px;
+        }
+
+        .empty {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 24px;
+        }
+
+        .pagination-dark .page-link {
+            background: var(--card-bg);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .pagination-dark .page-link:hover {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+        }
+
+        .pagination-dark .page-item.active .page-link {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+            color: var(--primary-bg);
+        }
+
+        .d-flex { display: flex; }
+        .gap-2 { gap: 8px; }
+        .align-items-center { align-items: center; }
+        .justify-content-between { justify-content: space-between; }
+        .fw-bold { font-weight: bold; }
+        .text-secondary { color: var(--text-secondary); }
+        .small { font-size: 0.875em; }
+        .mb-0 { margin-bottom: 0; }
+        .mt-3 { margin-top: 1rem; }
+        .me-1 { margin-right: 0.25rem; }
+        .justify-content-center { justify-content: center; }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Top Navigation -->
+        <nav class="top-navbar">
+            <div class="nav-left">
+                <div class="logo">
+                    <i class="fas fa-hospital-symbol"></i>
+                    Noctis Pro PACS
+                </div>
+                <div class="nav-tabs">
+                    <div class="nav-tab" onclick="window.location.href='{% url 'worklist:dashboard' %}'">WORKLIST</div>
+                    <div class="nav-tab active" onclick="window.location.href='{% url 'worklist:study_list' %}'">STUDIES</div>
+                    <div class="nav-tab" onclick="window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
+                    {% if user.is_authenticated and user.role == 'admin' %}
+                    <div class="nav-tab" onclick="window.location.href='{% url 'admin_panel:dashboard' %}'">ADMIN PANEL</div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="nav-right">
+                <div class="status-indicator">
+                    <div class="status-dot"></div>
+                    <span>ONLINE</span>
+                </div>
+                <div class="user-info">
+                    <div class="user-avatar">{{ user.get_full_name|default:user.username|slice:":2"|upper }}</div>
+                    <div>
+                        <div>{{ user.get_full_name|default:user.username }}</div>
+                        <div style="color: var(--text-muted); font-size: 10px;">{% if user.role == 'admin' %}Administrator{% elif user.role == 'radiologist' %}Radiologist{% else %}Facility User{% endif %}</div>
+                    </div>
+                </div>
+                <button type="button" class="btn-control" onclick="window.location.href='{% url 'notifications:notification_list' %}'"   title="Notifications">
+                    <i class="fas fa-bell"></i><span id="notifBadge" style="display:none">0</span>
+                </button>
+                <button type="button" class="btn-control" onclick="window.location.href='{% url 'chat:chat_rooms' %}'"   title="Chats">
+                    <i class="fas fa-comments"></i>
+                </button>
+                {% if user.is_authenticated %}
+                <button type="button" class="btn-control" onclick="window.location.href='{% url 'accounts:logout' %}'"   title="Logout">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+                {% endif %}
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="main-content">
+	<div class="filters">
+		<div class="search-input"><input type="text" id="search" placeholder="Search patient, accession, description…" value="{{ search_query|default:'' }}"></div>
+		<select id="status" class="form-select form-control-medical">
+			<option value="">All Status</option>
+			<option value="scheduled" {% if status_filter == 'scheduled' %}selected{% endif %}>Scheduled</option>
+			<option value="in_progress" {% if status_filter == 'in_progress' %}selected{% endif %}>In Progress</option>
+			<option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>Completed</option>
+			<option value="cancelled" {% if status_filter == 'cancelled' %}selected{% endif %}>Cancelled</option>
+		</select>
+		<select id="priority" class="form-select form-control-medical">
+			<option value="">All Priority</option>
+			<option value="low" {% if priority_filter == 'low' %}selected{% endif %}>Low</option>
+			<option value="normal" {% if priority_filter == 'normal' %}selected{% endif %}>Normal</option>
+			<option value="high" {% if priority_filter == 'high' %}selected{% endif %}>High</option>
+			<option value="urgent" {% if priority_filter == 'urgent' %}selected{% endif %}>Urgent</option>
+		</select>
+		<select id="modality" class="form-select form-control-medical">
+			<option value="">All Modalities</option>
+			{% for m in modalities %}
+			<option value="{{ m.code }}" {% if modality_filter == m.code %}selected{% endif %}>{{ m.code }}</option>
+			{% endfor %}
+		</select>
+		<button type="button" class="btn-control" id="applyFilters" title="Apply Filters"><i class="fas fa-filter"></i></button>
+	</div>
+
+	<div class="table-card">
+		<table class="table table-dark table-hover mb-0">
+			<thead>
+				<tr>
+					<th>Patient</th>
+					<th>Accession</th>
+					<th>Study Date</th>
+					<th>Mod</th>
+					<th>Status</th>
+					<th>Attachments</th>
+					<th>Previous Reports</th>
+					<th>Actions</th>
+				</tr>
+			</thead>
+			<tbody>
+			{% for s in studies %}
+			<tr>
+				<td>
+					<div class="d-flex align-items-center justify-content-between">
+						<div class="fw-bold">{{ s.patient.full_name }}</div>
+						<a class="btn-control" href="{% url 'worklist:upload_attachment' s.id %}" title="Attach files for {{ s.patient.full_name }}">
+							<i class="fas fa-paperclip"></i>
+						</a>
+					</div>
+					<div class="text-secondary small">{{ s.patient.patient_id }}</div>
+				</td>
+				<td class="accession">{{ s.accession_number }}</td>
+				<td>{{ s.study_date|date:"M d, Y H:i" }}</td>
+				<td><span class="badge-mod">{{ s.modality.code }}</span></td>
+				<td><span class="status-pill">{{ s.status|title }}</span></td>
+				<td>
+					<div class="attachments">
+						{% for a in attachments_map|get_item:s.id %}
+							<a class="attachment-chip" href="{% url 'worklist:view_attachment' a.id %}" title="View attachment">
+								{% if a.file_type == 'dicom_study' %}<i class="fas fa-cubes"></i>{% elif a.file_type == 'pdf_document' %}<i class="fas fa-file-pdf"></i>{% elif a.file_type == 'image' %}<i class="fas fa-image"></i>{% else %}<i class="fas fa-paperclip"></i>{% endif %}
+								{{ a.name|truncatechars:24 }}
+							</a>
+						{% empty %}
+							<span class="text-secondary">None</span>
+						{% endfor %}
+					</div>
+				</td>
+				<td>
+					<div class="prev-reports">
+						{% for r in previous_reports_map|get_item:s.id %}
+							<a class="attachment-chip" href="{% url 'reports:write_report' r.study.id %}" title="{{ r.get_status_display }} by {{ r.radiologist.get_full_name }}">
+								<i class="fas fa-file-medical"></i>{{ r.status|title }} {{ r.report_date|date:"Y-m-d" }}
+							</a>
+						{% empty %}
+							<span class="text-secondary">None</span>
+						{% endfor %}
+					</div>
+				</td>
+				<td>
+					<div class="d-flex gap-2">
+						<!-- View Study Detail - All authenticated users -->
+						<a class="btn-control" href="{% url 'worklist:study_detail' s.id %}" title="Open"><i class="fas fa-folder-open"></i></a>
+						
+						<!-- DICOM Viewer - All authenticated users -->
+						<a class="btn-dicom-viewer btn-sm" href="{% url 'dicom_viewer:viewer' %}?study={{ s.id }}" onclick="openStudyInViewer('{{ s.id }}', event); return false;" title="View in DICOM Viewer"><i class="fas fa-eye"></i></a>
+						
+						<!-- Report Writing - Only admin and radiologist -->
+						{% if user.role == 'admin' or user.role == 'radiologist' %}
+						<a class="btn-control" href="{% url 'reports:write_report' s.id %}" title="Report"><i class="fas fa-file-medical"></i></a>
+						{% endif %}
+						
+						<!-- Delete Study - Only admin and radiologist -->
+						{% if user.role == 'admin' or user.role == 'radiologist' %}
+						<button type="button" class="btn-control" style="background: var(--danger-color);" 
+								onclick="deleteStudy({{ s.id }}, '{{ s.accession_number|escapejs }}')" 
+								title="Delete Study (Admin/Radiologist Only)">
+							<i class="fas fa-trash"></i>
+						</button>
+						{% endif %}
+					</div>
+				</td>
+			</tr>
+			{% empty %}
+			<tr><td colspan="8" class="empty">No studies</td></tr>
+			{% endfor %}
+			</tbody>
+		</table>
+	</div>
+
+	{% if studies.has_other_pages %}
+	<nav aria-label="Studies pagination" class="mt-3">
+		<ul class="pagination pagination-dark justify-content-center">
+			{% if studies.has_previous %}
+			<li class="page-item"><a class="page-link" href="?page=1">«</a></li>
+			<li class="page-item"><a class="page-link" href="?page={{ studies.previous_page_number }}">‹</a></li>
+			{% endif %}
+			{% for num in studies.paginator.page_range %}
+				{% if studies.number == num %}
+				<li class="page-item active"><span class="page-link">{{ num }}</span></li>
+				{% elif num > studies.number|add:'-3' and num < studies.number|add:'3' %}
+				<li class="page-item"><a class="page-link" href="?page={{ num }}">{{ num }}</a></li>
+				{% endif %}
+			{% endfor %}
+			{% if studies.has_next %}
+			<li class="page-item"><a class="page-link" href="?page={{ studies.next_page_number }}">›</a></li>
+			<li class="page-item"><a class="page-link" href="?page={{ studies.paginator.num_pages }}">»</a></li>
+			{% endif %}
+		</ul>
+	</nav>
+	{% endif %}
+</div>
+        </div>
+    </div>
+
+    <script>
+        // Notification count update
+        (function(){
+            async function updateUnread(){
+                try {
+                    const res = await fetch('{% url "notifications:api_unread_count" %}', { credentials: 'same-origin' });
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    const count = (data && (data.unread || data.count || data.unread_count)) || 0;
+                    const el = document.getElementById('notifBadge');
+                    if (el) {
+                        if (count > 0) {
+                            el.textContent = count;
+                            el.style.display = '';
+                        } else {
+                            el.style.display = 'none';
+                        }
+                    }
+                } catch(e) { /* ignore */ }
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', updateUnread);
+            } else { updateUnread(); }
+            setInterval(updateUnread, 30000);
+        })();
+
+        // Filter functionality
+        (function(){
+            function go(){
+                const p = new URLSearchParams();
+                const q = document.getElementById('search').value.trim(); if (q) p.set('search', q);
+                const s = document.getElementById('status').value; if (s) p.set('status', s);
+                const pr = document.getElementById('priority').value; if (pr) p.set('priority', pr);
+                const m = document.getElementById('modality').value; if (m) p.set('modality', m);
+                location.search = p.toString();
+            }
+            document.getElementById('applyFilters').addEventListener('click', go);
+            document.getElementById('search').addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); go(); }});
+        })();
+
+        // Delete study functionality (admin/radiologist only)
+        async function deleteStudy(studyId, accessionNumber) {
+            if (!confirm(`Are you sure you want to delete study ${accessionNumber}?\n\nThis action cannot be undone and will permanently remove all associated data including:\n• DICOM images\n• Series data\n• Reports\n• Measurements\n• Annotations`)) {
+                return;
+            }
+
+            try {
+                // Get CSRF token
+                const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || 
+                                 document.querySelector('meta[name=csrf-token]')?.getAttribute('content') ||
+                                 '{{ csrf_token }}';
+
+                const response = await fetch(`/worklist/api/study/${studyId}/delete/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    credentials: 'same-origin'
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    // Show success message
+                    alert(`Study ${accessionNumber} deleted successfully`);
+                    // Reload the page to refresh the study list
+                    location.reload();
+                } else {
+                    // Show error message
+                    alert(`Failed to delete study: ${data.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error deleting study:', error);
+                alert(`Failed to delete study: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>

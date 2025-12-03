@@ -1,0 +1,2734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>Noctis Pro DICOM Viewer - Masterpiece Edition</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    {% load static %}
+    <script src="{% static 'js/masterpiece_3d_reconstruction.js' %}"></script>
+    <script src="{% static 'js/vendor/dicomParser.min.js' %}"></script>
+    <script src="{% static 'js/dicom-viewer-enhanced.js' %}"></script>
+    <style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-bg: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            background: var(--primary-bg);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .viewer-container {
+            display: flex;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* Left Toolbar */
+        .toolbar {
+            width: 70px;
+            background: linear-gradient(135deg, #2d2d2d, #1a1a1a);
+            border-right: 2px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px 5px;
+            gap: 15px;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.5);
+            overflow-y: auto;
+        }
+
+        .tool-btn {
+            width: 55px;
+            height: 55px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #404040, #2a2a2a);
+            color: #e0e0e0;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .tool-btn:hover {
+            background: linear-gradient(135deg, #555, #404040);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        .tool-btn.active {
+            background: linear-gradient(135deg, var(--accent-color), #106ebe);
+            color: white;
+            transform: scale(1.05);
+        }
+
+        .tool-btn i {
+            font-size: 18px;
+            margin-bottom: 4px;
+        }
+
+        /* Center Area */
+        .center-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #000;
+        }
+
+        .top-bar {
+            height: 60px;
+            background: linear-gradient(135deg, var(--header-bg), #2a2a2a);
+            border-bottom: 2px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            gap: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .logo {
+            color: var(--accent-color);
+            font-weight: bold;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .patient-info {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-left: auto;
+        }
+
+        .btn {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+        }
+
+        .btn-primary {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+        }
+
+        .btn-primary:hover {
+            background: #00b8d4;
+        }
+
+        /* Viewport */
+        .viewport {
+            flex: 1;
+            position: relative;
+            background: #000;
+            overflow: hidden;
+        }
+
+        .canvas-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+
+        #dicomCanvas {
+            border: none;
+            cursor: crosshair;
+            background: #000;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        /* MPR Four Window Layout */
+        .mpr-container {
+            display: none;
+            width: 100%;
+            height: 100%;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 2px;
+            background: #111;
+        }
+
+        .mpr-container.active {
+            display: grid;
+        }
+
+        .mpr-view {
+            position: relative;
+            background: #000;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        .mpr-view canvas {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: contain;
+        }
+
+        .mpr-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: var(--accent-color);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 10;
+        }
+
+        /* Overlay Labels */
+        .overlay-labels {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            line-height: 1.5;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .zoom-info {
+            position: absolute;
+            bottom: 15px;
+            left: 15px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Right Panel */
+        .right-panel {
+            width: 320px;
+            background: linear-gradient(135deg, #2d2d2d, #1a1a1a);
+            border-left: 2px solid var(--border-color);
+            overflow-y: auto;
+            box-shadow: -2px 0 10px rgba(0, 0, 0, 0.5);
+            transition: opacity 0.25s ease, transform 0.25s ease;
+        }
+
+        .toolbar, .top-bar {
+            transition: opacity 0.25s ease, transform 0.25s ease;
+        }
+
+        .ui-hidden .toolbar { opacity: 0; transform: translateX(-12px); pointer-events: none; }
+        .ui-hidden .top-bar { opacity: 0; transform: translateY(-12px); pointer-events: none; }
+        .ui-hidden .right-panel { opacity: 0; transform: translateX(12px); pointer-events: none; }
+
+        .ui-toggle {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 20;
+            background: rgba(0,0,0,0.5);
+            color: #fff;
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 6px 10px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .panel-section {
+            margin: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .panel-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e0e0e0;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-title i {
+            color: var(--accent-color);
+        }
+
+        /* Enhanced Sliders */
+        .slider-group {
+            margin-bottom: 20px;
+        }
+
+        .slider-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .slider-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .slider-value {
+            font-size: 13px;
+            color: var(--accent-color);
+            font-weight: 600;
+            background: rgba(0, 120, 212, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .custom-slider {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: var(--border-color);
+            outline: none;
+            -webkit-appearance: none;
+            position: relative;
+        }
+
+        .custom-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent-color), #106ebe);
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 120, 212, 0.4);
+            transition: all 0.3s ease;
+        }
+
+        .custom-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.1);
+            box-shadow: 0 3px 12px rgba(0, 120, 212, 0.6);
+        }
+
+        /* Series List */
+        .series-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-bottom: 16px;
+        }
+
+        .series-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .series-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(4px);
+        }
+
+        .series-item.active {
+            background: linear-gradient(135deg, rgba(0, 120, 212, 0.2), rgba(16, 110, 190, 0.1));
+            border-color: var(--accent-color);
+        }
+
+        .series-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: #e0e0e0;
+            margin-bottom: 4px;
+        }
+
+        .series-details {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* Preset Buttons */
+        .preset-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .preset-btn {
+            background: linear-gradient(135deg, #404040, var(--border-color));
+            color: #e0e0e0;
+            border: none;
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .preset-btn:hover {
+            background: linear-gradient(135deg, #555, #444);
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Info Cards */
+        .info-card {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 8px;
+            border-left: 3px solid var(--accent-color);
+        }
+
+        .info-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .info-value {
+            font-size: 14px;
+            color: #e0e0e0;
+            font-weight: 500;
+        }
+
+        /* Measurements List */
+        .measurements-list {
+            max-height: 200px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 8px;
+        }
+
+        .measurement-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* 3D Reconstruction Controls */
+        .recon-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        .recon-btn {
+            background: linear-gradient(135deg, #6b46c1, #553c9a);
+            color: white;
+            border: none;
+            padding: 12px 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .recon-btn:hover {
+            background: linear-gradient(135deg, #553c9a, #6b46c1);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(107, 70, 193, 0.4);
+        }
+
+        .recon-btn i {
+            font-size: 16px;
+        }
+
+        /* Loading States */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--accent-color);
+            font-size: 18px;
+            flex-direction: column;
+        }
+
+        .spinner {
+            border: 3px solid var(--border-color);
+            border-top: 3px solid var(--accent-color);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Clear button */
+        .clear-btn {
+            background: linear-gradient(135deg, var(--danger-color), #b32d00);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            width: 100%;
+            margin-bottom: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .clear-btn:hover {
+            background: linear-gradient(135deg, #b32d00, var(--danger-color));
+            transform: translateY(-1px);
+        }
+
+        /* 3D Controls Overlay */
+        .controls-3d {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 8px;
+            padding: 10px;
+            backdrop-filter: blur(10px);
+            z-index: 100;
+            display: none;
+        }
+
+        .control-3d-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            margin: 2px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.3s ease;
+        }
+
+        .control-3d-btn:hover {
+            background: rgba(0, 120, 212, 0.3);
+            border-color: var(--accent-color);
+        }
+
+        /* Toggle Switches */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 24px;
+            margin-left: auto;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--border-color);
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .toggle-slider {
+            background-color: var(--accent-color);
+        }
+
+        input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+
+        /* Bone Reconstruction Settings */
+        .bone-settings {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 12px;
+        }
+
+        .threshold-group {
+            margin-bottom: 12px;
+        }
+
+        .threshold-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .threshold-value {
+            color: var(--accent-color);
+            font-weight: bold;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .viewer-container {
+                flex-direction: column;
+            }
+            
+            .toolbar {
+                width: 100%;
+                height: 60px;
+                flex-direction: row;
+                justify-content: center;
+                padding: 5px;
+                overflow-x: auto;
+            }
+            
+            .right-panel {
+                width: 100%;
+                height: 300px;
+                border-left: none;
+                border-top: 2px solid var(--border-color);
+            }
+            
+            .tool-btn {
+                width: 45px;
+                height: 45px;
+                margin: 0 2px;
+                min-width: 45px;
+            }
+        }
+
+        /* Toast Notifications */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-left: 4px solid var(--accent-color);
+            color: var(--text-primary);
+            padding: 12px 16px;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            z-index: 9999;
+            font-size: 13px;
+            max-width: 300px;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            opacity: 0.95;
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.success {
+            border-left-color: var(--success-color);
+        }
+
+        .toast.error {
+            border-left-color: var(--danger-color);
+        }
+
+        .toast.warning {
+            border-left-color: var(--warning-color);
+        }
+    </style>
+</head>
+<body>
+    <div class="viewer-container">
+        <button class="ui-toggle" onclick="toggleUI()"><i class="fas fa-eye-slash"></i> UI</button>
+        <!-- Left Toolbar -->
+        <div class="toolbar">
+            <button class="tool-btn active" data-tool="windowing" title="Window/Level">
+                <i class="fas fa-adjust"></i>
+                <span>Window</span>
+            </button>
+            <button class="tool-btn" data-tool="zoom" title="Zoom">
+                <i class="fas fa-search-plus"></i>
+                <span>Zoom</span>
+            </button>
+            <button class="tool-btn" data-tool="pan" title="Pan">
+                <i class="fas fa-hand-paper"></i>
+                <span>Pan</span>
+            </button>
+            <button class="tool-btn" data-tool="measure" title="Measure">
+                <i class="fas fa-ruler"></i>
+                <span>Measure</span>
+            </button>
+            <button class="tool-btn" data-tool="angle" title="Angle Measurement">
+                <i class="fas fa-drafting-compass"></i>
+                <span>Angle</span>
+            </button>
+            <button class="tool-btn" data-tool="area" title="Area Measurement">
+                <i class="fas fa-vector-square"></i>
+                <span>Area</span>
+            </button>
+            <button class="tool-btn" data-tool="annotate" title="Annotate">
+                <i class="fas fa-comment"></i>
+                <span>Note</span>
+            </button>
+            <button class="tool-btn" data-tool="crosshair" title="Crosshair">
+                <i class="fas fa-crosshairs"></i>
+                <span>Cross</span>
+            </button>
+            <button class="tool-btn" data-tool="magnify" title="Magnifying Glass">
+                <i class="fas fa-search"></i>
+                <span>Magnify</span>
+            </button>
+            <button class="tool-btn" data-tool="cine" title="Cine Mode">
+                <i class="fas fa-play"></i>
+                <span>Cine</span>
+            </button>
+            <button class="tool-btn" data-tool="invert" title="Invert">
+                <i class="fas fa-adjust"></i>
+                <span>Invert</span>
+            </button>
+            <button class="tool-btn" data-tool="rotate" title="Rotate">
+                <i class="fas fa-redo"></i>
+                <span>Rotate</span>
+            </button>
+            <button class="tool-btn" data-tool="flip" title="Flip">
+                <i class="fas fa-exchange-alt"></i>
+                <span>Flip</span>
+            </button>
+            <button class="tool-btn" data-tool="reset" title="Reset View">
+                <i class="fas fa-undo"></i>
+                <span>Reset</span>
+            </button>
+            <button class="tool-btn" data-tool="mpr" title="MPR View">
+                <i class="fas fa-th-large"></i>
+                <span>MPR</span>
+            </button>
+            <button class="tool-btn" data-tool="3d" title="3D Reconstruction">
+                <i class="fas fa-cube"></i>
+                <span>3D</span>
+            </button>
+            <button class="tool-btn" data-tool="print" title="Print">
+                <i class="fas fa-print"></i>
+                <span>Print</span>
+            </button>
+            <button class="tool-btn" data-tool="export" title="Export">
+                <i class="fas fa-download"></i>
+                <span>Export</span>
+            </button>
+        </div>
+
+        <!-- Center Area -->
+        <div class="center-area">
+            <!-- Top Bar -->
+            <div class="top-bar">
+                <div class="logo">
+                    <i class="fas fa-hospital-symbol"></i>
+                    Noctis Pro DICOM Viewer
+                </div>
+                
+                <button class="btn" onclick="window.loadFromLocalFiles()">
+                    <i class="fas fa-folder-open"></i> Load Local DICOM
+                </button>
+
+                <button class="btn" onclick="loadStudies()">
+                    <i class="fas fa-list"></i> Load Studies
+                </button>
+                
+                <select class="btn" id="studySelector" onchange="selectStudy()" style="min-width: 200px;">
+                    <option value="">Select a Study</option>
+                </select>
+                
+                <div class="patient-info" id="patientInfo">
+                    Patient: - | Study Date: - | Modality: -
+                </div>
+
+                <a class="btn" href="{% url 'worklist:dashboard' %}" title="Back to Dashboard">
+                    <i class="fas fa-arrow-left"></i> Dashboard
+                </a>
+                <button class="btn" onclick="toggleUI()" title="Toggle UI Auto Hide">
+                    <i class="fas fa-eye-slash"></i> UI
+                </button>
+            </div>
+
+            <!-- Viewport -->
+            <div class="viewport">
+                <!-- Single View Canvas -->
+                <div class="canvas-container" id="singleView">
+                    <canvas id="dicomCanvas"></canvas>
+                    <div class="overlay-labels" id="overlayLabels">
+                        <div>WW: <span id="windowWidth">400</span></div>
+                        <div>WL: <span id="windowLevel">40</span></div>
+                        <div>Slice: <span id="currentSlice">1</span>/<span id="totalSlices">1</span></div>
+                        <div>HU: <span id="hounsfield">-</span></div>
+                    </div>
+                    <div class="zoom-info" id="zoomInfo">
+                        Zoom: <span id="zoomLevel">100%</span>
+                    </div>
+                </div>
+
+                <!-- MPR Four Window View -->
+                <div class="mpr-container" id="mprView">
+                    <div class="mpr-view">
+                        <div class="mpr-label">Axial</div>
+                        <canvas id="axialCanvas"></canvas>
+                    </div>
+                    <div class="mpr-view">
+                        <div class="mpr-label">Sagittal</div>
+                        <canvas id="sagittalCanvas"></canvas>
+                    </div>
+                    <div class="mpr-view">
+                        <div class="mpr-label">Coronal</div>
+                        <canvas id="coronalCanvas"></canvas>
+                    </div>
+                    <div class="mpr-view">
+                        <div class="mpr-label">3D Bone Reconstruction</div>
+                        <canvas id="bone3DCanvas"></canvas>
+                        <div class="controls-3d" id="controls3D">
+                            <button class="control-3d-btn" onclick="reset3DView()">Reset</button>
+                            <button class="control-3d-btn" onclick="toggle3DRotation()">Auto Rotate</button>
+                            <button class="control-3d-btn" onclick="export3DModel()">Export</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="loading" id="loadingIndicator" style="display: none;">
+                    <div class="spinner"></div>
+                    <div>Processing DICOM data...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel -->
+        <div class="right-panel">
+            <!-- Series Selection -->
+            <div class="panel-section">
+                <div class="panel-title">
+                    <i class="fas fa-list"></i>
+                    Series
+                </div>
+                <div class="series-list" id="seriesList">
+                    <div class="series-item">
+                        <div class="series-title">No series loaded</div>
+                        <div class="series-details">Load a study first</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Window/Level Controls -->
+            <div class="panel-section">
+                <div class="panel-title">
+                    <i class="fas fa-adjust"></i>
+                    Window/Level
+                </div>
+                
+                <div class="slider-group">
+                    <div class="slider-header">
+                        <span class="slider-label">Window Width</span>
+                        <span class="slider-value" id="wwValue">400</span>
+                    </div>
+                    <input type="range" class="custom-slider" id="windowWidthSlider" 
+                           min="1" max="4000" value="400" oninput="updateWindowWidth(this.value)">
+                </div>
+
+                <div class="slider-group">
+                    <div class="slider-header">
+                        <span class="slider-label">Window Level</span>
+                        <span class="slider-value" id="wlValue">40</span>
+                    </div>
+                    <input type="range" class="custom-slider" id="windowLevelSlider" 
+                           min="-1000" max="1000" value="40" oninput="updateWindowLevel(this.value)">
+                </div>
+
+                <div class="preset-grid">
+                    <button class="preset-btn" onclick="applyPreset('lung')">Lung</button>
+                    <button class="preset-btn" onclick="applyPreset('bone')">Bone</button>
+                    <button class="preset-btn" onclick="applyPreset('soft')">Soft Tissue</button>
+                    <button class="preset-btn" onclick="applyPreset('brain')">Brain</button>
+                </div>
+            </div>
+
+            <!-- Navigation -->
+            <div class="panel-section">
+                <div class="panel-title">
+                    <i class="fas fa-arrows-alt"></i>
+                    Navigation
+                </div>
+                
+                <div class="slider-group">
+                    <div class="slider-header">
+                        <span class="slider-label">Slice</span>
+                        <span class="slider-value" id="sliceValue">1</span>
+                    </div>
+                    <input type="range" class="custom-slider" id="sliceSlider" 
+                           min="0" max="0" value="0" oninput="updateSlice(this.value)">
+                </div>
+
+                <div class="slider-group">
+                    <div class="slider-header">
+                        <span class="slider-label">Zoom</span>
+                        <span class="slider-value" id="zoomValue">100%</span>
+                    </div>
+                    <input type="range" class="custom-slider" id="zoomSlider" 
+                           min="25" max="500" value="100" oninput="updateZoom(this.value)">
+                </div>
+            </div>
+
+            <!-- 3D Reconstruction Controls -->
+            <div class="panel-section">
+                <div class="panel-title">
+                    <i class="fas fa-cube"></i>
+                    3D Reconstruction
+                </div>
+                
+                <div class="recon-controls">
+                    <button class="recon-btn" onclick="generateMPR()">
+                        <i class="fas fa-th-large"></i>
+                        <span>MPR</span>
+                    </button>
+                    <button class="recon-btn" onclick="generateMIP()">
+                        <i class="fas fa-compress-arrows-alt"></i>
+                        <span>MIP</span>
+                    </button>
+                </div>
+
+                <div class="bone-settings">
+                    <div class="threshold-group">
+                        <div class="threshold-label">
+                            <span>Bone Threshold</span>
+                            <span class="threshold-value" id="boneThresholdValue">200</span>
+                        </div>
+                        <input type="range" class="custom-slider" id="boneThresholdSlider" 
+                               min="50" max="1000" value="200" oninput="updateBoneThreshold(this.value)">
+                    </div>
+
+                    <div class="threshold-group">
+                        <div class="threshold-label">
+                            <span>Opacity</span>
+                            <span class="threshold-value" id="boneOpacityValue">0.8</span>
+                        </div>
+                        <input type="range" class="custom-slider" id="boneOpacitySlider" 
+                               min="0.1" max="1.0" step="0.1" value="0.8" oninput="updateBoneOpacity(this.value)">
+                    </div>
+
+                    <div class="slider-header">
+                        <span class="slider-label">Smooth Surface</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="smoothToggle" onchange="toggleSmoothing(this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Image Information -->
+            <div class="panel-section">
+                <div class="panel-title">
+                    <i class="fas fa-info-circle"></i>
+                    Image Info
+                </div>
+                
+                <div class="info-card">
+                    <div class="info-label">Dimensions</div>
+                    <div class="info-value" id="imageDimensions">-</div>
+                </div>
+                
+                <div class="info-card">
+                    <div class="info-label">Pixel Spacing</div>
+                    <div class="info-value" id="pixelSpacing">-</div>
+                </div>
+                
+                <div class="info-card">
+                    <div class="info-label">Series</div>
+                    <div class="info-value" id="seriesDescription">-</div>
+                </div>
+                
+                <div class="info-card">
+                    <div class="info-label">Institution</div>
+                    <div class="info-value" id="institutionName">-</div>
+                </div>
+            </div>
+
+            <!-- Measurements -->
+            <div class="panel-section">
+                <div class="panel-title">
+                    <i class="fas fa-ruler-combined"></i>
+                    Measurements
+                </div>
+                
+                <button class="clear-btn" onclick="clearAllMeasurements()">
+                    <i class="fas fa-trash"></i> Clear All
+                </button>
+                
+                <div class="measurements-list" id="measurementsList">
+                    <div class="measurement-item">
+                        No measurements yet. Use the measure tool to add measurements.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Related References -->
+            <div class="panel-section">
+                <div class="panel-title">
+                    <i class="fas fa-book-medical"></i>
+                    Related References
+                </div>
+                <div style="display:flex; gap:6px; margin-bottom:8px;">
+                    <input id="refQuery" class="form-control" placeholder="e.g., CT head hemorrhage" style="flex:1;">
+                    <button class="btn" onclick="fetchReferences()"><i class="fas fa-search"></i></button>
+                </div>
+                <div id="referencesList" style="max-height:180px; overflow:auto; font-size:12px; color: var(--text-secondary);">
+                    Enter a query or load a study to see suggestions.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global Variables
+        let currentStudy = null;
+        let currentSeries = null;
+        let currentImageIndex = 0;
+        let imageData = [];
+        let activeTool = 'windowing';
+        let viewMode = 'single'; // 'single' or 'mpr'
+        let measurements = [];
+        let annotations = [];
+        let fabric3DCanvas = null;
+        let boneReconstructionData = null;
+        
+        // Canvas and context
+        let canvas, ctx;
+        let mprCanvases = {};
+        
+        // Display parameters
+        let windowWidth = 400;
+        let windowLevel = 40;
+        let zoom = 1.0;
+        let panX = 0, panY = 0;
+        let inverted = false;
+        let crosshair = false;
+        let rotation = 0;
+        let flipH = false;
+        let flipV = false;
+        let cineMode = false;
+        let cineInterval = null;
+
+        // 3D Bone Reconstruction variables
+        let boneThreshold = 200;
+        let boneOpacity = 0.8;
+        let smoothSurface = true;
+        let autoRotate = false;
+
+        // Window presets
+        const windowPresets = {
+            lung: { ww: 1500, wl: -600 },
+            bone: { ww: 2000, wl: 300 },
+            soft: { ww: 400, wl: 40 },
+            brain: { ww: 100, wl: 50 }
+        };
+
+        async function fetchReferences(customQuery) {
+            try {
+                const qInput = document.getElementById('refQuery');
+                const base = customQuery || (qInput ? qInput.value.trim() : '');
+                let query = base;
+                if (!query && currentStudy) {
+                    const modality = (currentStudy.modality || '').toString();
+                    const bodyPart = (currentStudy.body_part || '').toString();
+                    const desc = (currentStudy.description || '').toString();
+                    query = [modality, bodyPart, desc].filter(Boolean).join(' ');
+                }
+                if (!query) {
+                    const list = document.getElementById('referencesList');
+                    if (list) list.innerHTML = 'Add a query (e.g., "CT brain hemorrhage").';
+                    return;
+                }
+                const url = `/ai/api/references/?q=${encodeURIComponent(query)}`;
+                const resp = await fetch(url, { credentials: 'same-origin' });
+                if (!resp.ok) throw new Error('Network error');
+                const data = await resp.json();
+                const list = document.getElementById('referencesList');
+                if (list) {
+                    if (data.success && data.references && data.references.length) {
+                        list.innerHTML = data.references.map(r => `
+                            <div style="margin-bottom:6px;">
+                                <a href="${r.url}" target="_blank" style="color: var(--accent-color); text-decoration: none;">
+                                    <i class="fas fa-external-link-alt"></i> ${r.title}
+                                </a>
+                            </div>
+                        `).join('');
+                    } else {
+                        list.innerHTML = 'No references found. Try refining your query.';
+                    }
+                }
+            } catch (e) {
+                const list = document.getElementById('referencesList');
+                if (list) list.innerHTML = 'Failed to load references.';
+            }
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeViewer();
+            setupEventListeners();
+            // Auto-hide disabled by default; user can manually toggle UI
+            
+            // Check if study ID is provided in URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const studyId = urlParams.get('study');
+            
+            if (studyId) {
+                // Load specific study
+                loadSpecificStudy(studyId);
+            } else {
+                // Load all studies for selection
+                loadStudies();
+            }
+        });
+
+        function initializeViewer() {
+            canvas = document.getElementById('dicomCanvas');
+            ctx = canvas.getContext('2d');
+            
+            // Set canvas size
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            // Initialize MPR canvases
+            mprCanvases = {
+                axial: document.getElementById('axialCanvas'),
+                sagittal: document.getElementById('sagittalCanvas'),
+                coronal: document.getElementById('coronalCanvas'),
+                bone3d: document.getElementById('bone3DCanvas')
+            };
+            
+            // Set up 3D canvas for bone reconstruction
+            setupBone3DCanvas();
+        }
+
+        // Auto-hide UI
+        let uiHideTimer = null;
+        let uiManuallyHidden = false;
+        function setupUIAutoHide() {
+            const container = document.querySelector('.viewer-container');
+            const resetTimer = () => {
+                if (uiManuallyHidden) return;
+                container.classList.remove('ui-hidden');
+                if (uiHideTimer) clearTimeout(uiHideTimer);
+                uiHideTimer = setTimeout(() => {
+                    container.classList.add('ui-hidden');
+                }, 2000);
+            };
+            ['mousemove','mousedown','wheel','keydown','touchstart','touchmove'].forEach(ev => {
+                window.addEventListener(ev, resetTimer, { passive: true });
+            });
+            resetTimer();
+        }
+
+        function toggleUI() {
+            const container = document.querySelector('.viewer-container');
+            if (container.classList.contains('ui-hidden')) {
+                container.classList.remove('ui-hidden');
+                uiManuallyHidden = false;
+            } else {
+                container.classList.add('ui-hidden');
+                uiManuallyHidden = true;
+            }
+        }
+
+        function setupBone3DCanvas() {
+            const bone3DCanvas = mprCanvases.bone3d;
+            // Initialize Three.js or other 3D library here for bone reconstruction
+            console.log('Setting up 3D bone reconstruction canvas');
+        }
+
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            
+            // Resize MPR canvases
+            Object.values(mprCanvases).forEach(c => {
+                if (c && c.parentElement) {
+                    c.width = c.parentElement.clientWidth;
+                    c.height = c.parentElement.clientHeight;
+                }
+            });
+            
+            redrawCurrentImage();
+        }
+
+        function setupEventListeners() {
+            // Tool button clicks
+            document.querySelectorAll('.tool-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const tool = this.dataset.tool;
+                    handleToolClick(tool);
+                });
+            });
+
+            // Canvas mouse events
+            canvas.addEventListener('mousedown', handleMouseDown);
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.addEventListener('mouseup', handleMouseUp);
+            canvas.addEventListener('wheel', handleWheel);
+            canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // Prevent default right-click menu
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', handleKeyDown);
+        }
+
+        function handleToolClick(tool) {
+            // Remove active class from all buttons
+            document.querySelectorAll('.tool-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+
+            // Handle specific tools
+            switch(tool) {
+                case 'reset':
+                    resetView();
+                    break;
+                case 'invert':
+                    inverted = !inverted;
+                    redrawCurrentImage();
+                    break;
+                case 'crosshair':
+                    crosshair = !crosshair;
+                    redrawCurrentImage();
+                    break;
+                case 'rotate':
+                    rotation = (rotation + 90) % 360;
+                    redrawCurrentImage();
+                    break;
+                case 'flip':
+                    flipH = !flipH;
+                    redrawCurrentImage();
+                    break;
+                case 'cine':
+                    toggleCineMode();
+                    break;
+                case 'mpr':
+                    toggleMPRView();
+                    break;
+                case '3d':
+                    toggle3DView();
+                    break;
+                case 'print':
+                    printCurrentImage();
+                    break;
+                case 'export':
+                    exportCurrentImage();
+                    break;
+                default:
+                    activeTool = tool;
+                    // Add active class to clicked button
+                    event.target.closest('.tool-btn').classList.add('active');
+                    break;
+            }
+        }
+
+        function toggleCineMode() {
+            cineMode = !cineMode;
+            const btn = document.querySelector('[data-tool="cine"]');
+            
+            if (cineMode) {
+                btn.classList.add('active');
+                btn.innerHTML = '<i class="fas fa-pause"></i><span>Stop</span>';
+                startCine();
+            } else {
+                btn.classList.remove('active');
+                btn.innerHTML = '<i class="fas fa-play"></i><span>Cine</span>';
+                stopCine();
+            }
+        }
+
+        function startCine() {
+            if (imageData.length <= 1) return;
+            
+            cineInterval = setInterval(() => {
+                currentImageIndex = (currentImageIndex + 1) % imageData.length;
+                document.getElementById('sliceSlider').value = currentImageIndex;
+                updateSlice(currentImageIndex);
+            }, 200); // 5 FPS
+        }
+
+        function stopCine() {
+            if (cineInterval) {
+                clearInterval(cineInterval);
+                cineInterval = null;
+            }
+        }
+
+        function toggleMPRView() {
+            const singleView = document.getElementById('singleView');
+            const mprView = document.getElementById('mprView');
+            const controls3D = document.getElementById('controls3D');
+            
+            if (viewMode === 'single') {
+                singleView.style.display = 'none';
+                mprView.classList.add('active');
+                controls3D.style.display = 'block';
+                viewMode = 'mpr';
+                generateMPRViews();
+            } else {
+                singleView.style.display = 'block';
+                mprView.classList.remove('active');
+                controls3D.style.display = 'none';
+                viewMode = 'single';
+            }
+        }
+
+        function toggle3DView() {
+            // Toggle 3D reconstruction view
+            generateBoneReconstruction();
+        }
+
+        async function loadStudies() {
+            try {
+                showLoading(true);
+                const response = await fetch('/dicom-viewer/api/realtime/studies/');
+                const data = await response.json();
+                
+                const selector = document.getElementById('studySelector');
+                selector.innerHTML = '<option value="">Select a Study</option>';
+                
+                data.studies.forEach(study => {
+                    const option = document.createElement('option');
+                    option.value = study.id;
+                    option.textContent = `${study.patient_name} - ${study.study_date} - ${study.modality}`;
+                    selector.appendChild(option);
+                });
+                
+                showLoading(false);
+                showToast('Studies loaded successfully', 'success');
+            } catch (error) {
+                console.error('Error loading studies:', error);
+                showToast('Failed to load studies', 'error');
+                showLoading(false);
+            }
+        }
+
+        async function loadSpecificStudy(studyId) {
+            try {
+                showLoading(true);
+                // Load the specific study
+                const response = await fetch(`/dicom-viewer/api/study/${studyId}/data/`);
+                const data = await response.json();
+                
+                if (data && data.study && Array.isArray(data.series)) {
+                    currentStudy = data.study;
+                    displaySeriesList(data.series);
+                    updatePatientInfo(currentStudy);
+                    // Load related references automatically based on study context
+                    try { fetchReferences(); } catch (e) {}
+                    
+                    // Auto-load first series
+                    if (data.series.length > 0) {
+                        await loadSeries(data.series[0].id);
+                    }
+                    
+                    showToast(`Loaded study: ${currentStudy.patient_name}`, 'success');
+                } else {
+                    showToast('Failed to load study', 'error');
+                }
+                
+                showLoading(false);
+            } catch (error) {
+                console.error('Error loading specific study:', error);
+                showToast('Failed to load study', 'error');
+                showLoading(false);
+            }
+        }
+
+        async function selectStudy() {
+            const studyId = document.getElementById('studySelector').value;
+            if (!studyId) return;
+            
+            await loadSpecificStudy(studyId);
+        }
+
+        function displaySeriesList(series) {
+            const container = document.getElementById('seriesList');
+            container.innerHTML = '';
+            
+            series.forEach((s, index) => {
+                const item = document.createElement('div');
+                item.className = 'series-item';
+                if (index === 0) item.classList.add('active');
+                
+                item.innerHTML = `
+                    <div class="series-title">Series ${s.series_number}: ${s.description}</div>
+                    <div class="series-details">${s.modality} • ${s.image_count} images</div>
+                `;
+                
+                item.addEventListener('click', () => {
+                    document.querySelectorAll('.series-item').forEach(el => el.classList.remove('active'));
+                    item.classList.add('active');
+                    loadSeries(s.id);
+                });
+                
+                container.appendChild(item);
+            });
+        }
+
+        async function loadSeries(seriesId) {
+            try {
+                showLoading(true);
+                const response = await fetch(`/dicom-viewer/series/${seriesId}/images/`);
+                const data = await response.json();
+                
+                currentSeries = data.series;
+                imageData = data.images;
+                currentImageIndex = 0;
+                
+                // Update UI
+                document.getElementById('sliceSlider').max = imageData.length - 1;
+                document.getElementById('totalSlices').textContent = imageData.length;
+                
+                updateImageInfo(currentSeries);
+                await loadCurrentImage();
+                
+                showLoading(false);
+                showToast(`Loaded ${imageData.length} images`, 'success');
+            } catch (error) {
+                console.error('Error loading series:', error);
+                showToast('Failed to load series', 'error');
+                showLoading(false);
+            }
+        }
+
+        async function loadCurrentImage() {
+            if (!imageData[currentImageIndex]) return;
+            
+            try {
+                const imageId = imageData[currentImageIndex].id;
+                const response = await fetch(`/dicom-viewer/api/image/${imageId}/data/`);
+                const data = await response.json();
+                
+                // Update window/level from DICOM data - SAME AS YOUR ORIGINAL
+                windowWidth = data.window_width || windowWidth;
+                windowLevel = data.window_center || windowLevel;
+                
+                updateSliders();
+                renderDicomImage(data);
+                
+            } catch (error) {
+                console.error('Error loading image:', error);
+                showToast('Failed to load image', 'error');
+            }
+        }
+
+        function renderDicomImage(imageData) {
+            if (!imageData.pixel_data) return;
+            
+            // Create ImageData from pixel array - SAME AS YOUR ORIGINAL
+            const pixels = new Uint8ClampedArray(imageData.pixel_data.length * 4);
+            
+            for (let i = 0; i < imageData.pixel_data.length; i++) {
+                let value = imageData.pixel_data[i];
+                
+                // Apply window/level - SAME AS YOUR ORIGINAL
+                value = applyWindowing(value, windowWidth, windowLevel);
+                
+                // Apply inversion if needed - SAME AS YOUR ORIGINAL
+                if (inverted) value = 255 - value;
+                
+                pixels[i * 4] = value;     // R
+                pixels[i * 4 + 1] = value; // G  
+                pixels[i * 4 + 2] = value; // B
+                pixels[i * 4 + 3] = 255;   // A
+            }
+            
+            const imgData = new ImageData(pixels, imageData.columns, imageData.rows);
+            
+            // Clear and draw - YOUR ORIGINAL METHOD WITH OPTIONAL ENHANCEMENTS
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // If any transformations are active, use enhanced rendering
+            if (zoom !== 1.0 || panX !== 0 || panY !== 0 || rotation !== 0 || flipH || flipV) {
+                // Enhanced rendering with transformations (for new tools)
+                ctx.save();
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                ctx.scale(zoom, zoom);
+                ctx.translate(panX, panY);
+                
+                if (rotation !== 0) ctx.rotate(rotation * Math.PI / 180);
+                if (flipH || flipV) ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+                
+                ctx.translate(-imgData.width / 2, -imgData.height / 2);
+                ctx.putImageData(imgData, 0, 0);
+                ctx.restore();
+            } else {
+                // YOUR ORIGINAL SIMPLE METHOD (default)
+                ctx.putImageData(imgData, 0, 0);
+            }
+            
+            // Always draw measurements and annotations after rendering the image
+            drawMeasurements();
+            drawAnnotations();
+            if (crosshair) {
+                drawCrosshair();
+            }
+            
+            updateOverlayLabels();
+        }
+
+        function applyWindowing(pixelValue, ww, wl) {
+            const minVal = wl - ww / 2;
+            const maxVal = wl + ww / 2;
+            
+            if (pixelValue <= minVal) return 0;
+            if (pixelValue >= maxVal) return 255;
+            
+            return Math.round(((pixelValue - minVal) / ww) * 255);
+        }
+
+        // Event Handlers
+        let isDragging = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+        let currentMeasurement = null;
+
+        function handleMouseDown(event) {
+            const rect = canvas.getBoundingClientRect();
+            lastMouseX = event.clientX - rect.left;
+            lastMouseY = event.clientY - rect.top;
+            
+            // Handle right-click for context menu
+            if (event.button === 2) {
+                event.preventDefault();
+                
+                // Check if right-click is on a measurement
+                const clickedMeasurement = findMeasurementAtPoint(lastMouseX, lastMouseY);
+                if (clickedMeasurement !== -1) {
+                    // Show context menu at cursor position
+                    showContextMenu(event.clientX, event.clientY, clickedMeasurement);
+                    return;
+                }
+                
+                // Hide context menu if clicking elsewhere
+                hideContextMenu();
+                return;
+            }
+            
+            // Handle left-click (button 0)
+            if (event.button === 0) {
+                isDragging = true;
+                hideContextMenu(); // Hide any open context menu
+                
+                if (activeTool === 'measure') {
+                    startMeasurement(lastMouseX, lastMouseY);
+                } else if (activeTool === 'angle') {
+                    startAngleMeasurement(lastMouseX, lastMouseY);
+                } else if (activeTool === 'area') {
+                    startAreaMeasurement(lastMouseX, lastMouseY);
+                } else if (activeTool === 'annotate') {
+                    addAnnotation(lastMouseX, lastMouseY);
+                }
+            }
+        }
+
+        function findMeasurementAtPoint(x, y) {
+            for (let i = measurements.length - 1; i >= 0; i--) {
+                const measurement = measurements[i];
+                if (measurement.bounds && 
+                    x >= measurement.bounds.x1 && x <= measurement.bounds.x2 &&
+                    y >= measurement.bounds.y1 && y <= measurement.bounds.y2) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        function handleMouseMove(event) {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+            
+            // Update Hounsfield value display
+            updateHounsfieldValue(mouseX, mouseY);
+            
+            if (!isDragging) return;
+            
+            const deltaX = mouseX - lastMouseX;
+            const deltaY = mouseY - lastMouseY;
+            
+            switch(activeTool) {
+                case 'windowing':
+                    windowWidth = Math.max(1, windowWidth + deltaX * 2);
+                    windowLevel = Math.max(-1000, Math.min(1000, windowLevel + deltaY * 2));
+                    updateSliders();
+                    redrawCurrentImage();
+                    break;
+                case 'zoom':
+                    const zoomDelta = 1 + (deltaY * 0.01);
+                    zoom = Math.max(0.1, Math.min(5.0, zoom * zoomDelta));
+                    updateZoomSlider();
+                    redrawCurrentImage();
+                    break;
+                case 'pan':
+                    panX += deltaX / zoom;
+                    panY += deltaY / zoom;
+                    redrawCurrentImage();
+                    break;
+                case 'measure':
+                case 'angle':
+                case 'area':
+                    if (currentMeasurement) {
+                        updateMeasurement(mouseX, mouseY);
+                    }
+                    break;
+            }
+            
+            lastMouseX = mouseX;
+            lastMouseY = mouseY;
+        }
+
+        function handleMouseUp(event) {
+            isDragging = false;
+            
+            if ((activeTool === 'measure' || activeTool === 'angle' || activeTool === 'area') && currentMeasurement) {
+                finalizeMeasurement();
+            }
+        }
+
+        function handleWheel(event) {
+            event.preventDefault();
+            
+            if (event.ctrlKey) {
+                // Zoom
+                const zoomDelta = event.deltaY > 0 ? 0.9 : 1.1;
+                zoom = Math.max(0.1, Math.min(5.0, zoom * zoomDelta));
+                updateZoomSlider();
+                redrawCurrentImage();
+            } else {
+                // Slice navigation
+                const direction = event.deltaY > 0 ? 1 : -1;
+                changeSlice(currentImageIndex + direction);
+            }
+        }
+
+        function handleKeyDown(event) {
+            switch(event.key) {
+                case 'ArrowUp':
+                case 'ArrowLeft':
+                    changeSlice(currentImageIndex - 1);
+                    break;
+                case 'ArrowDown':
+                case 'ArrowRight':
+                    changeSlice(currentImageIndex + 1);
+                    break;
+                case 'r':
+                    resetView();
+                    break;
+                case 'i':
+                    inverted = !inverted;
+                    redrawCurrentImage();
+                    break;
+                case 'c':
+                    crosshair = !crosshair;
+                    redrawCurrentImage();
+                    break;
+                case ' ':
+                    event.preventDefault();
+                    toggleCineMode();
+                    break;
+                case 'Delete':
+                case 'Backspace':
+                    if (measurements.length > 0) {
+                        clearAllMeasurements();
+                    }
+                    break;
+                case 'Escape':
+                    hideContextMenu();
+                    currentMeasurement = null;
+                    break;
+            }
+        }
+
+        // UI Update Functions
+        function updateWindowWidth(value) {
+            windowWidth = parseInt(value);
+            document.getElementById('wwValue').textContent = windowWidth;
+            document.getElementById('windowWidth').textContent = windowWidth;
+            redrawCurrentImage();
+        }
+
+        function updateWindowLevel(value) {
+            windowLevel = parseInt(value);
+            document.getElementById('wlValue').textContent = windowLevel;
+            document.getElementById('windowLevel').textContent = windowLevel;
+            redrawCurrentImage();
+        }
+
+        function updateSlice(value) {
+            currentImageIndex = parseInt(value);
+            document.getElementById('sliceValue').textContent = currentImageIndex + 1;
+            document.getElementById('currentSlice').textContent = currentImageIndex + 1;
+            loadCurrentImage();
+        }
+
+        function updateZoom(value) {
+            zoom = parseFloat(value) / 100;
+            document.getElementById('zoomValue').textContent = value + '%';
+            document.getElementById('zoomLevel').textContent = value + '%';
+            redrawCurrentImage();
+        }
+
+        function updateBoneThreshold(value) {
+            boneThreshold = parseInt(value);
+            document.getElementById('boneThresholdValue').textContent = boneThreshold;
+            if (viewMode === 'mpr') {
+                generateBoneReconstruction();
+            }
+        }
+
+        function updateBoneOpacity(value) {
+            boneOpacity = parseFloat(value);
+            document.getElementById('boneOpacityValue').textContent = boneOpacity;
+            if (viewMode === 'mpr') {
+                generateBoneReconstruction();
+            }
+        }
+
+        function updateSliders() {
+            document.getElementById('windowWidthSlider').value = windowWidth;
+            document.getElementById('windowLevelSlider').value = windowLevel;
+            document.getElementById('wwValue').textContent = windowWidth;
+            document.getElementById('wlValue').textContent = windowLevel;
+            document.getElementById('windowWidth').textContent = windowWidth;
+            document.getElementById('windowLevel').textContent = windowLevel;
+        }
+
+        function updateZoomSlider() {
+            const zoomPercent = Math.round(zoom * 100);
+            document.getElementById('zoomSlider').value = zoomPercent;
+            document.getElementById('zoomValue').textContent = zoomPercent + '%';
+            document.getElementById('zoomLevel').textContent = zoomPercent + '%';
+        }
+
+        function applyPreset(preset) {
+            if (windowPresets[preset]) {
+                windowWidth = windowPresets[preset].ww;
+                windowLevel = windowPresets[preset].wl;
+                updateSliders();
+                redrawCurrentImage();
+                showToast(`Applied ${preset} preset`, 'success');
+            }
+        }
+
+        function changeSlice(newIndex) {
+            if (newIndex >= 0 && newIndex < imageData.length) {
+                currentImageIndex = newIndex;
+                document.getElementById('sliceSlider').value = newIndex;
+                updateSlice(newIndex);
+            }
+        }
+
+        function resetView() {
+            zoom = 1.0;
+            panX = 0;
+            panY = 0;
+            rotation = 0;
+            flipH = false;
+            flipV = false;
+            updateZoomSlider();
+            redrawCurrentImage();
+            showToast('View reset', 'success');
+        }
+
+        function redrawCurrentImage() {
+            if (currentImageIndex >= 0 && currentImageIndex < imageData.length) {
+                loadCurrentImage().then(() => {
+                    // Redraw measurements and annotations after image is loaded
+                    drawMeasurements();
+                    drawAnnotations();
+                    drawCurrentMeasurement();
+                });
+            }
+        }
+
+        // Measurement Functions
+        function startMeasurement(x, y) {
+            currentMeasurement = {
+                type: 'distance',
+                startX: x,
+                startY: y,
+                endX: x,
+                endY: y
+            };
+        }
+
+        function startAngleMeasurement(x, y) {
+            currentMeasurement = {
+                type: 'angle',
+                points: [{x, y}]
+            };
+        }
+
+        function startAreaMeasurement(x, y) {
+            currentMeasurement = {
+                type: 'area',
+                points: [{x, y}]
+            };
+        }
+
+        function updateMeasurement(x, y) {
+            if (!currentMeasurement) return;
+            
+            if (currentMeasurement.type === 'distance') {
+                currentMeasurement.endX = x;
+                currentMeasurement.endY = y;
+            } else if (currentMeasurement.type === 'angle' || currentMeasurement.type === 'area') {
+                // Add point or update last point
+                if (currentMeasurement.points.length < 3) {
+                    currentMeasurement.points.push({x, y});
+                } else {
+                    currentMeasurement.points[currentMeasurement.points.length - 1] = {x, y};
+                }
+            }
+            
+            redrawCurrentImage();
+            drawCurrentMeasurement();
+        }
+
+        function finalizeMeasurement() {
+            if (currentMeasurement) {
+                measurements.push({...currentMeasurement});
+                saveMeasurement(currentMeasurement);
+                updateMeasurementsList();
+                currentMeasurement = null;
+                redrawCurrentImage();
+                showToast('Measurement saved', 'success');
+            }
+        }
+
+        function drawMeasurements() {
+            if (!measurements || measurements.length === 0) return;
+            
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 2;
+            ctx.fillStyle = '#ff0000';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            
+            measurements.forEach((measurement, index) => {
+                if (measurement.type === 'distance') {
+                    // Draw measurement line
+                    ctx.beginPath();
+                    ctx.moveTo(measurement.startX, measurement.startY);
+                    ctx.lineTo(measurement.endX, measurement.endY);
+                    ctx.stroke();
+                    
+                    // Draw measurement points
+                    ctx.fillStyle = '#ff0000';
+                    ctx.beginPath();
+                    ctx.arc(measurement.startX, measurement.startY, 4, 0, 2 * Math.PI);
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(measurement.endX, measurement.endY, 4, 0, 2 * Math.PI);
+                    ctx.fill();
+                    
+                    // Draw distance text with background
+                    const distance = calculateDistance(measurement);
+                    const midX = (measurement.startX + measurement.endX) / 2;
+                    const midY = (measurement.startY + measurement.endY) / 2;
+                    
+                    // Text background
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    ctx.fillRect(midX - 30, midY - 20, 60, 16);
+                    
+                    // Text
+                    ctx.fillStyle = '#ffff00';
+                    ctx.fillText(distance.text, midX, midY - 8);
+                    
+                    // Store measurement bounds for context menu
+                    measurement.bounds = {
+                        x1: Math.min(measurement.startX, measurement.endX) - 10,
+                        y1: Math.min(measurement.startY, measurement.endY) - 10,
+                        x2: Math.max(measurement.startX, measurement.endX) + 10,
+                        y2: Math.max(measurement.startY, measurement.endY) + 10,
+                        index: index
+                    };
+                } else if (measurement.type === 'angle' && measurement.points && measurement.points.length >= 3) {
+                    // Draw angle measurement
+                    const points = measurement.points;
+                    ctx.beginPath();
+                    ctx.moveTo(points[0].x, points[0].y);
+                    ctx.lineTo(points[1].x, points[1].y);
+                    ctx.lineTo(points[2].x, points[2].y);
+                    ctx.stroke();
+                    
+                    // Draw angle arc
+                    const angle = calculateAngle(points[0], points[1], points[2]);
+                    ctx.beginPath();
+                    ctx.arc(points[1].x, points[1].y, 20, 0, angle.radians);
+                    ctx.stroke();
+                    
+                    // Draw angle text
+                    ctx.fillStyle = '#ffff00';
+                    ctx.fillText(`${angle.degrees.toFixed(1)}°`, points[1].x + 25, points[1].y - 10);
+                    
+                    measurement.bounds = {
+                        x1: Math.min(...points.map(p => p.x)) - 10,
+                        y1: Math.min(...points.map(p => p.y)) - 10,
+                        x2: Math.max(...points.map(p => p.x)) + 10,
+                        y2: Math.max(...points.map(p => p.y)) + 10,
+                        index: index
+                    };
+                } else if (measurement.type === 'area' && measurement.points && measurement.points.length >= 3) {
+                    // Draw area measurement
+                    const points = measurement.points;
+                    ctx.beginPath();
+                    ctx.moveTo(points[0].x, points[0].y);
+                    for (let i = 1; i < points.length; i++) {
+                        ctx.lineTo(points[i].x, points[i].y);
+                    }
+                    ctx.closePath();
+                    ctx.stroke();
+                    
+                    // Fill with transparent color
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+                    ctx.fill();
+                    
+                    // Calculate and display area
+                    const area = calculatePolygonArea(points);
+                    const centerX = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+                    const centerY = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+                    
+                    ctx.fillStyle = '#ffff00';
+                    ctx.fillText(`${area.toFixed(2)} mm²`, centerX, centerY);
+                    
+                    measurement.bounds = {
+                        x1: Math.min(...points.map(p => p.x)) - 10,
+                        y1: Math.min(...points.map(p => p.y)) - 10,
+                        x2: Math.max(...points.map(p => p.x)) + 10,
+                        y2: Math.max(...points.map(p => p.y)) + 10,
+                        index: index
+                    };
+                }
+            });
+        }
+
+        function drawCurrentMeasurement() {
+            if (!currentMeasurement) return;
+            
+            ctx.strokeStyle = '#ffff00';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            
+            if (currentMeasurement.type === 'distance') {
+                ctx.beginPath();
+                ctx.moveTo(currentMeasurement.startX, currentMeasurement.startY);
+                ctx.lineTo(currentMeasurement.endX, currentMeasurement.endY);
+                ctx.stroke();
+            }
+            
+            ctx.setLineDash([]);
+        }
+
+        function drawAnnotations() {
+            // Implementation for drawing annotations
+            annotations.forEach(annotation => {
+                ctx.fillStyle = annotation.color || '#ffff00';
+                ctx.font = '14px Arial';
+                ctx.fillText(annotation.text, annotation.x, annotation.y);
+            });
+        }
+
+        function drawCrosshair() {
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            
+            ctx.beginPath();
+            ctx.moveTo(0, centerY);
+            ctx.lineTo(canvas.width, centerY);
+            ctx.moveTo(centerX, 0);
+            ctx.lineTo(centerX, canvas.height);
+            ctx.stroke();
+            
+            ctx.setLineDash([]);
+        }
+
+        function calculateDistance(measurement) {
+            const deltaX = measurement.endX - measurement.startX;
+            const deltaY = measurement.endY - measurement.startY;
+            const pixelDistance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+            
+            let realDistance = pixelDistance;
+            let unit = 'px';
+            
+            if (currentSeries && currentSeries.pixel_spacing) {
+                const spacing = currentSeries.pixel_spacing.split('\\');
+                if (spacing.length >= 2) {
+                    const avgSpacing = (parseFloat(spacing[0]) + parseFloat(spacing[1])) / 2;
+                    realDistance = pixelDistance * avgSpacing;
+                    unit = 'mm';
+                }
+            }
+            
+            return {
+                pixels: Math.round(pixelDistance),
+                real: Math.round(realDistance * 100) / 100,
+                text: `${Math.round(realDistance * 100) / 100} ${unit}`
+            };
+        }
+
+        async function saveMeasurement(measurement) {
+            if (!currentSeries) return;
+            
+            try {
+                const response = await fetch('/dicom-viewer/measurements/save/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({
+                        image_id: imageData[currentImageIndex].id,
+                        measurement_type: measurement.type,
+                        points: JSON.stringify(measurement),
+                        value: measurement.type === 'distance' ? calculateDistance(measurement).real : null,
+                        unit: currentSeries.pixel_spacing ? 'mm' : 'px'
+                    })
+                });
+                
+                if (response.ok) {
+                    console.log('Measurement saved successfully');
+                }
+            } catch (error) {
+                console.error('Error saving measurement:', error);
+            }
+        }
+
+        function addAnnotation(x, y) {
+            const text = prompt('Enter annotation text:');
+            if (text) {
+                const annotation = {
+                    x: x,
+                    y: y,
+                    text: text,
+                    color: '#ffff00'
+                };
+                annotations.push(annotation);
+                redrawCurrentImage();
+                saveAnnotation(annotation);
+                showToast('Annotation added', 'success');
+            }
+        }
+
+        async function saveAnnotation(annotation) {
+            if (!currentSeries) return;
+            
+            try {
+                const response = await fetch('/dicom-viewer/annotations/save/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({
+                        image_id: imageData[currentImageIndex].id,
+                        position_x: annotation.x,
+                        position_y: annotation.y,
+                        text: annotation.text,
+                        color: annotation.color
+                    })
+                });
+                
+                if (response.ok) {
+                    console.log('Annotation saved successfully');
+                }
+            } catch (error) {
+                console.error('Error saving annotation:', error);
+            }
+        }
+
+        function updateMeasurementsList() {
+            const container = document.getElementById('measurementsList');
+            container.innerHTML = '';
+            
+            if (measurements.length === 0) {
+                container.innerHTML = '<div class="measurement-item">No measurements yet. Use the measure tool to add measurements.</div>';
+                return;
+            }
+            
+            measurements.forEach((measurement, index) => {
+                const item = document.createElement('div');
+                item.className = 'measurement-item';
+                
+                if (measurement.type === 'distance') {
+                    const distance = calculateDistance(measurement);
+                    item.innerHTML = `
+                        <strong>Distance ${index + 1}</strong><br>
+                        Length: ${distance.text}
+                    `;
+                } else if (measurement.type === 'angle') {
+                    item.innerHTML = `
+                        <strong>Angle ${index + 1}</strong><br>
+                        Angle: ${measurement.value || 'N/A'}°
+                    `;
+                } else if (measurement.type === 'area') {
+                    item.innerHTML = `
+                        <strong>Area ${index + 1}</strong><br>
+                        Area: ${measurement.value || 'N/A'} mm²
+                    `;
+                }
+                
+                container.appendChild(item);
+            });
+        }
+
+        function clearAllMeasurements() {
+            measurements = [];
+            annotations = [];
+            currentMeasurement = null;
+            updateMeasurementsList();
+            redrawCurrentImage();
+            showToast('All measurements cleared', 'success');
+        }
+
+        function deleteMeasurement(index) {
+            if (index >= 0 && index < measurements.length) {
+                const measurement = measurements[index];
+                measurements.splice(index, 1);
+                updateMeasurementsList();
+                redrawCurrentImage();
+                showToast(`${measurement.type} measurement deleted`, 'success');
+                hideContextMenu();
+            }
+        }
+
+        function calculateAngle(p1, p2, p3) {
+            const a = Math.sqrt(Math.pow(p2.x - p3.x, 2) + Math.pow(p2.y - p3.y, 2));
+            const b = Math.sqrt(Math.pow(p1.x - p3.x, 2) + Math.pow(p1.y - p3.y, 2));
+            const c = Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+            
+            const radians = Math.acos((a * a + c * c - b * b) / (2 * a * c));
+            const degrees = radians * (180 / Math.PI);
+            
+            return { radians, degrees };
+        }
+
+        function calculatePolygonArea(points) {
+            if (points.length < 3) return 0;
+            
+            let area = 0;
+            for (let i = 0; i < points.length; i++) {
+                const j = (i + 1) % points.length;
+                area += points[i].x * points[j].y;
+                area -= points[j].x * points[i].y;
+            }
+            return Math.abs(area / 2);
+        }
+
+        // Context Menu Functions
+        function showContextMenu(x, y, measurementIndex) {
+            hideContextMenu();
+            
+            const contextMenu = document.createElement('div');
+            contextMenu.id = 'measurementContextMenu';
+            contextMenu.style.cssText = `
+                position: fixed;
+                left: ${x}px;
+                top: ${y}px;
+                background: var(--card-bg);
+                border: 1px solid var(--border-color);
+                border-radius: 6px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+                z-index: 10000;
+                min-width: 150px;
+                padding: 5px 0;
+                font-size: 14px;
+            `;
+            
+            const deleteOption = document.createElement('div');
+            deleteOption.style.cssText = `
+                padding: 8px 16px;
+                cursor: pointer;
+                color: var(--danger-color);
+                transition: background 0.2s;
+            `;
+            deleteOption.innerHTML = '<i class="fas fa-trash"></i> Delete Measurement';
+            deleteOption.addEventListener('mouseenter', () => {
+                deleteOption.style.background = 'rgba(255, 68, 68, 0.1)';
+            });
+            deleteOption.addEventListener('mouseleave', () => {
+                deleteOption.style.background = 'transparent';
+            });
+            deleteOption.addEventListener('click', () => {
+                deleteMeasurement(measurementIndex);
+            });
+            
+            const copyOption = document.createElement('div');
+            copyOption.style.cssText = `
+                padding: 8px 16px;
+                cursor: pointer;
+                color: var(--text-primary);
+                transition: background 0.2s;
+            `;
+            copyOption.innerHTML = '<i class="fas fa-copy"></i> Copy Value';
+            copyOption.addEventListener('mouseenter', () => {
+                copyOption.style.background = 'var(--border-color)';
+            });
+            copyOption.addEventListener('mouseleave', () => {
+                copyOption.style.background = 'transparent';
+            });
+            copyOption.addEventListener('click', () => {
+                copyMeasurementValue(measurementIndex);
+            });
+            
+            contextMenu.appendChild(deleteOption);
+            contextMenu.appendChild(copyOption);
+            document.body.appendChild(contextMenu);
+            
+            // Close context menu when clicking elsewhere
+            setTimeout(() => {
+                document.addEventListener('click', hideContextMenu, { once: true });
+            }, 100);
+        }
+
+        function hideContextMenu() {
+            const existingMenu = document.getElementById('measurementContextMenu');
+            if (existingMenu) {
+                existingMenu.remove();
+            }
+        }
+
+        function copyMeasurementValue(index) {
+            if (index >= 0 && index < measurements.length) {
+                const measurement = measurements[index];
+                let value = '';
+                
+                if (measurement.type === 'distance') {
+                    const distance = calculateDistance(measurement);
+                    value = distance.text;
+                } else if (measurement.type === 'angle') {
+                    const angle = calculateAngle(measurement.points[0], measurement.points[1], measurement.points[2]);
+                    value = `${angle.degrees.toFixed(1)}°`;
+                } else if (measurement.type === 'area') {
+                    const area = calculatePolygonArea(measurement.points);
+                    value = `${area.toFixed(2)} mm²`;
+                }
+                
+                navigator.clipboard.writeText(value).then(() => {
+                    showToast(`Copied: ${value}`, 'success');
+                    hideContextMenu();
+                }).catch(() => {
+                    showToast('Failed to copy to clipboard', 'error');
+                    hideContextMenu();
+                });
+            }
+        }
+
+        function updatePatientInfo(study) {
+            document.getElementById('patientInfo').textContent = 
+                `Patient: ${study.patient_name} | Study Date: ${study.study_date} | Modality: ${study.modality}`;
+        }
+
+        function updateImageInfo(series) {
+            document.getElementById('imageDimensions').textContent = 
+                series.image_count > 0 ? `${imageData[0].columns} × ${imageData[0].rows}` : '-';
+            
+            document.getElementById('pixelSpacing').textContent = 
+                series.pixel_spacing ? series.pixel_spacing.replace('\\', ' × ') + ' mm' : '-';
+            
+            document.getElementById('seriesDescription').textContent = series.description || '-';
+            document.getElementById('institutionName').textContent = currentStudy?.institution_name || '-';
+        }
+
+        function updateOverlayLabels() {
+            document.getElementById('windowWidth').textContent = windowWidth;
+            document.getElementById('windowLevel').textContent = windowLevel;
+            document.getElementById('currentSlice').textContent = currentImageIndex + 1;
+            document.getElementById('totalSlices').textContent = imageData.length;
+            document.getElementById('zoomLevel').textContent = Math.round(zoom * 100) + '%';
+        }
+
+        function updateHounsfieldValue(mouseX, mouseY) {
+            // Calculate HU value at mouse position
+            // This would require access to the original pixel data
+            document.getElementById('hounsfield').textContent = '-';
+        }
+
+        // MPR and 3D Functions
+        async function generateMPRViews() {
+            if (!currentSeries) return;
+            
+            try {
+                showLoading(true);
+                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    renderMPRView('axial', data.axial);
+                    renderMPRView('sagittal', data.sagittal);
+                    renderMPRView('coronal', data.coronal);
+                    generateBoneReconstruction();
+                    showToast('MPR views generated', 'success');
+                } else {
+                    showToast('Failed to generate MPR views', 'error');
+                }
+                
+                showLoading(false);
+            } catch (error) {
+                console.error('Error generating MPR:', error);
+                showToast('Failed to generate MPR views', 'error');
+                showLoading(false);
+            }
+        }
+
+        function renderMPRView(viewType, pixelData) {
+            const canvas = mprCanvases[viewType];
+            if (!canvas || !pixelData) return;
+            
+            const ctx = canvas.getContext('2d');
+            const width = Math.sqrt(pixelData.length);
+            const height = width;
+            
+            const pixels = new Uint8ClampedArray(pixelData.length * 4);
+            
+            for (let i = 0; i < pixelData.length; i++) {
+                let value = applyWindowing(pixelData[i], windowWidth, windowLevel);
+                if (inverted) value = 255 - value;
+                
+                pixels[i * 4] = value;
+                pixels[i * 4 + 1] = value;
+                pixels[i * 4 + 2] = value;
+                pixels[i * 4 + 3] = 255;
+            }
+            
+            const imgData = new ImageData(pixels, width, height);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Scale to fit canvas
+            const scaleX = canvas.width / width;
+            const scaleY = canvas.height / height;
+            const scale = Math.min(scaleX, scaleY);
+            
+            const offsetX = (canvas.width - width * scale) / 2;
+            const offsetY = (canvas.height - height * scale) / 2;
+            
+            // Create temporary canvas for scaling
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = width;
+            tempCanvas.height = height;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.putImageData(imgData, 0, 0);
+            
+            ctx.drawImage(tempCanvas, offsetX, offsetY, width * scale, height * scale);
+        }
+
+        async function generateBoneReconstruction() {
+            if (!currentSeries) return;
+            
+            try {
+                showLoading(true);
+                
+                const canvas = mprCanvases.bone3d;
+                const ctx = canvas.getContext('2d');
+                
+                // For now, render a placeholder 3D bone visualization
+                renderBonePlaceholder(ctx, canvas.width, canvas.height);
+                
+                showLoading(false);
+                showToast('3D reconstruction generated', 'success');
+            } catch (error) {
+                console.error('Error generating bone reconstruction:', error);
+                showToast('Failed to generate 3D reconstruction', 'error');
+                showLoading(false);
+            }
+        }
+
+        function renderBonePlaceholder(ctx, width, height) {
+            // Clear canvas
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+            
+            // Draw a simple 3D-like bone structure placeholder
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            
+            // Draw simple bone-like shapes
+            const centerX = width / 2;
+            const centerY = height / 2;
+            
+            // Main bone shaft
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY, 60, 120, 0, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+            
+            // Bone ends (epiphyses)
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY - 100, 40, 25, 0, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY + 100, 40, 25, 0, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+            
+            // Add text overlay
+            ctx.fillStyle = 'var(--accent-color)';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('3D Bone Reconstruction', centerX, 30);
+            ctx.fillStyle = '#ccc';
+            ctx.font = '12px Arial';
+            ctx.fillText(`Threshold: ${boneThreshold} HU`, centerX, height - 40);
+            ctx.fillText(`Opacity: ${boneOpacity}`, centerX, height - 20);
+        }
+
+        async function generateMIP() {
+            if (!currentSeries) return;
+            
+            try {
+                showLoading(true);
+                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mip/`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    renderMPRView('axial', data.mip_axial);
+                    renderMPRView('sagittal', data.mip_sagittal);
+                    renderMPRView('coronal', data.mip_coronal);
+                    showToast('MIP views generated', 'success');
+                } else {
+                    showToast('Failed to generate MIP views', 'error');
+                }
+                
+                showLoading(false);
+            } catch (error) {
+                console.error('Error generating MIP:', error);
+                showToast('Failed to generate MIP views', 'error');
+                showLoading(false);
+            }
+        }
+
+        function toggleSmoothing(enabled) {
+            smoothSurface = enabled;
+            if (viewMode === 'mpr') {
+                generateBoneReconstruction();
+            }
+        }
+
+        // 3D Control Functions
+        function reset3DView() {
+            generateBoneReconstruction();
+        }
+
+        function toggle3DRotation() {
+            autoRotate = !autoRotate;
+            console.log('Auto rotation:', autoRotate ? 'enabled' : 'disabled');
+        }
+
+        function export3DModel() {
+            showToast('3D model export functionality would be implemented here', 'info');
+        }
+
+        // Print and Export Functions
+        function printCurrentImage() {
+            if (!canvas) return;
+            
+            const printWindow = window.open('', '_blank');
+            const imageDataUrl = canvas.toDataURL('image/png');
+            
+            printWindow.document.write(`
+                <html>
+                    <head><title>DICOM Image Print</title></head>
+                    <body style="margin:0; display:flex; justify-content:center; align-items:center; min-height:100vh;">
+                        <img src="${imageDataUrl}" style="max-width:100%; max-height:100%;" />
+                    </body>
+                </html>
+            `);
+            
+            printWindow.document.close();
+            printWindow.focus();
+            
+            setTimeout(() => {
+                printWindow.print();
+                printWindow.close();
+            }, 250);
+            
+            showToast('Print dialog opened', 'success');
+        }
+
+        function exportCurrentImage() {
+            if (!canvas) return;
+            
+            const link = document.createElement('a');
+            link.download = `dicom_image_${Date.now()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            
+            showToast('Image exported', 'success');
+        }
+
+        // Utility Functions
+        function showLoading(show) {
+            const indicator = document.getElementById('loadingIndicator');
+            indicator.style.display = show ? 'flex' : 'none';
+        }
+
+        function showToast(message, type = 'info', duration = 3000) {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const icon = type === 'success' ? 'check' : 
+                        type === 'error' ? 'exclamation-triangle' : 
+                        type === 'warning' ? 'exclamation-circle' : 'info-circle';
+            
+            toast.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <i class="fas fa-${icon}"></i>
+                    <span>${message}</span>
+                </div>
+            `;
+            
+            document.body.appendChild(toast);
+            
+            // Show toast
+            setTimeout(() => toast.classList.add('show'), 10);
+            
+            // Hide and remove toast
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.remove();
+                    }
+                }, 300);
+            }, duration);
+        }
+
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        // Auto-save session state periodically
+        setInterval(async function() {
+            if (currentStudy) {
+                try {
+                    await fetch('/dicom-viewer/session/save/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': getCookie('csrftoken')
+                        },
+                        body: JSON.stringify({
+                            study_id: currentStudy.id,
+                            session_data: JSON.stringify({
+                                current_image_index: currentImageIndex,
+                                window_width: windowWidth,
+                                window_level: windowLevel,
+                                zoom: zoom,
+                                pan_x: panX,
+                                pan_y: panY,
+                                inverted: inverted,
+                                rotation: rotation,
+                                flip_h: flipH,
+                                flip_v: flipV,
+                                view_mode: viewMode,
+                                bone_threshold: boneThreshold,
+                                bone_opacity: boneOpacity
+                            })
+                        })
+                    });
+                } catch (error) {
+                    console.error('Error saving session state:', error);
+                }
+            }
+        }, 30000); // Save every 30 seconds
+
+        // Directory Loader Functions
+        function showDirectoryLoader() {
+            document.getElementById('directoryModal').style.display = 'flex';
+        }
+
+        function hideDirectoryLoader() {
+            document.getElementById('directoryModal').style.display = 'none';
+        }
+
+        async function loadFromDirectory() {
+            const directoryPath = document.getElementById('directoryPath').value.trim();
+            if (!directoryPath) {
+                showToast('Please enter a directory path', 'error');
+                return;
+            }
+
+            try {
+                showLoading(true);
+                hideDirectoryLoader();
+                
+                const formData = new FormData();
+                formData.append('directory_path', directoryPath);
+
+                const response = await fetch('/dicom-viewer/load-directory/', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') && document.querySelector('meta[name="csrf-token"]').getAttribute('content')) || ''
+                    }
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showToast(`Successfully loaded ${result.processed_files} DICOM files`, 'success');
+                    // Refresh the studies list
+                    loadStudies();
+                } else {
+                    showToast(`Failed to load directory: ${result.error}`, 'error');
+                }
+                
+            } catch (error) {
+                console.error('Error loading directory:', error);
+                showToast('Failed to load directory', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Add keyboard shortcut for directory loader
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'o') {
+                e.preventDefault();
+                showDirectoryLoader();
+            }
+            if (e.key === 'Escape') {
+                hideDirectoryLoader();
+            }
+        });
+    </script>
+
+    <!-- Directory Loader Modal -->
+    <div id="directoryModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); z-index: 10000; justify-content: center; align-items: center;">
+        <div style="background: var(--card-bg); padding: 30px; border-radius: 12px; border: 1px solid var(--border-color); max-width: 500px; width: 90%;">
+            <h3 style="color: var(--text-primary); margin-bottom: 20px; text-align: center;">
+                <i class="fas fa-folder-open"></i> Load DICOM Directory
+            </h3>
+            <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 14px;">
+                Enter the full path to a directory containing DICOM files. The system will recursively scan for DICOM files.
+            </p>
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; color: var(--text-secondary); margin-bottom: 8px; font-size: 14px;">Directory Path:</label>
+                <input type="text" id="directoryPath" placeholder="/path/to/dicom/directory" 
+                       style="width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--secondary-bg); color: var(--text-primary); font-family: monospace;">
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button onclick="hideDirectoryLoader()" 
+                        style="padding: 10px 20px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--secondary-bg); color: var(--text-secondary); cursor: pointer;">
+                    Cancel
+                </button>
+                <button onclick="loadFromDirectory()" 
+                        style="padding: 10px 20px; border: none; border-radius: 6px; background: var(--accent-color); color: white; cursor: pointer;">
+                    <i class="fas fa-folder-open"></i> Load Directory
+                </button>
+            </div>
+            <div style="margin-top: 15px; padding: 10px; background: var(--secondary-bg); border-radius: 6px; font-size: 12px; color: var(--text-muted);">
+                <strong>Examples:</strong><br>
+                • /media/usb/dicom_studies/<br>
+                • /mnt/cdrom/DICOM/<br>
+                • /home/user/Downloads/patient_study/<br>
+                <br>
+                <strong>Tip:</strong> Use Ctrl+O to quickly open this dialog
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,311 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if facility %}Edit Facility{% else %}Create Facility{% endif %} - Admin Panel{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Header Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <h1 class="text-white mb-0">
+                    <i class="fas fa-hospital me-3"></i>
+                    {% if facility %}Edit Facility{% else %}Create Facility{% endif %}
+                </h1>
+                <div class="btn-group" role="group">
+                    <a href="{% url 'admin_panel:facility_management' %}" class="btn btn-outline-light">
+                        <i class="fas fa-arrow-left me-2"></i>Back to Facilities
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Facility Form -->
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card-medical p-4">
+                <form method="post" enctype="multipart/form-data" class="row g-4">
+                    {% csrf_token %}
+                    
+                    <!-- Basic Information -->
+                    <div class="col-12">
+                        <h5 class="text-white mb-3">
+                            <i class="fas fa-info-circle me-2"></i>Facility Information
+                        </h5>
+                        <hr class="border-secondary mb-4">
+                    </div>
+
+                    <div class="col-md-6">
+                        <label for="id_name" class="form-label text-white">
+                            Facility Name <span class="text-danger">*</span>
+                        </label>
+                        {{ form.name }}
+                        {% if form.name.errors %}
+                          {% for error in form.name.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
+                    <div class="col-md-6">
+                        <label for="id_license_number" class="form-label text-white">
+                            License Number <span class="text-danger">*</span>
+                        </label>
+                        {{ form.license_number }}
+                        {% if form.license_number.errors %}
+                          {% for error in form.license_number.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
+                    <div class="col-md-6">
+                        <label for="id_email" class="form-label text-white">Email</label>
+                        {{ form.email }}
+                        {% if form.email.errors %}
+                          {% for error in form.email.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
+                    <div class="col-md-6">
+                        <label for="id_phone" class="form-label text-white">Phone</label>
+                        {{ form.phone }}
+                        {% if form.phone.errors %}
+                          {% for error in form.phone.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
+                    <div class="col-12">
+                        <label for="id_address" class="form-label text-white">
+                            Address <span class="text-danger">*</span>
+                        </label>
+                        {{ form.address }}
+                        {% if form.address.errors %}
+                          {% for error in form.address.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
+                    <div class="col-md-6">
+                        <label for="id_ae_title" class="form-label text-white">
+                            DICOM AE Title
+                        </label>
+                        {{ form.ae_title }}
+                        <div class="form-text text-secondary">
+                            <small>Must be <= 16 chars, A-Z, 0-9 or underscore. Will be standardized automatically.</small>
+                        </div>
+                        {% if form.ae_title.errors %}
+                          {% for error in form.ae_title.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
+                    <div class="col-md-6">
+                        <label for="id_letterhead" class="form-label text-white">Letterhead (optional)</label>
+                        {{ form.letterhead }}
+                        {% if facility.letterhead %}
+                        <div class="mt-2">
+                            <img src="{{ facility.letterhead.url }}" alt="Current letterhead" class="img-thumbnail" style="max-height: 100px;">
+                        </div>
+                        {% endif %}
+                        {% if form.letterhead.errors %}
+                          {% for error in form.letterhead.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
+                    <div class="col-12 mt-2">
+                        <div class="form-check form-switch">
+                            {{ form.is_active }}
+                            <label class="form-check-label text-white" for="id_is_active">
+                                Facility Active
+                            </label>
+                        </div>
+                        <div class="form-text text-secondary">
+                            <small>Inactive facilities cannot receive new studies</small>
+                        </div>
+                        {% if form.is_active.errors %}
+                          {% for error in form.is_active.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
+                    <!-- Optional Facility Login -->
+                    <div class="col-12 mt-4">
+                        <h5 class="text-white mb-3">
+                            <i class="fas fa-user-lock me-2"></i>Optional Facility Login
+                        </h5>
+                        <hr class="border-secondary mb-4">
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check">
+                            {{ form.create_facility_user }}
+                            <label class="form-check-label text-white" for="id_create_facility_user">Create a facility user account for this facility</label>
+                        </div>
+                        {% if form.create_facility_user.help_text %}
+                        <div class="form-text text-secondary">
+                            <small>{{ form.create_facility_user.help_text }}</small>
+                        </div>
+                        {% else %}
+                        <div class="form-text text-secondary">
+                            <small>If enabled, a Facility User will be created and linked to this facility.</small>
+                        </div>
+                        {% endif %}
+                        {% if form.create_facility_user.errors %}
+                          {% for error in form.create_facility_user.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <label for="id_facility_username" class="form-label text-white">Username</label>
+                        {{ form.facility_username }}
+                        {% if form.facility_username.help_text %}
+                        <div class="form-text text-secondary">
+                            <small>{{ form.facility_username.help_text }}</small>
+                        </div>
+                        {% endif %}
+                        {% if form.facility_username.errors %}
+                          {% for error in form.facility_username.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <label for="id_facility_email" class="form-label text-white">Email (optional)</label>
+                        {{ form.facility_email }}
+                        {% if form.facility_email.help_text %}
+                        <div class="form-text text-secondary">
+                            <small>{{ form.facility_email.help_text }}</small>
+                        </div>
+                        {% endif %}
+                        {% if form.facility_email.errors %}
+                          {% for error in form.facility_email.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <label for="id_facility_password" class="form-label text-white">Password (optional)</label>
+                        {{ form.facility_password }}
+                        {% if form.facility_password.help_text %}
+                        <div class="form-text text-secondary">
+                            <small>{{ form.facility_password.help_text }}</small>
+                        </div>
+                        {% endif %}
+                        {% if form.facility_password.errors %}
+                          {% for error in form.facility_password.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
+                    <!-- Submit Buttons -->
+                    <div class="col-12 mt-5">
+                        <hr class="border-secondary mb-4">
+                        <div class="d-flex justify-content-between">
+                            <a href="{% url 'admin_panel:facility_management' %}" class="btn btn-outline-light">
+                                <i class="fas fa-times me-2"></i>Cancel
+                            </a>
+                            <div>
+                                {% if not facility %}
+                                <button type="button" class="btn btn-outline-secondary me-2" onclick="resetForm()" type="button"  >
+                                    <i class="fas fa-undo me-2"></i>Reset
+                                </button>
+                                {% endif %}
+                                <button type="submit" class="btn btn-medical">
+                                    <i class="fas fa-save me-2"></i>
+                                    {% if facility %}Update Facility{% else %}Create Facility{% endif %}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-surface: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+        }
+
+    .navbar-medical {
+        background: var(--gradient-primary);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    .form-check-input:checked {
+        background-color: var(--accent-color);
+        border-color: var(--accent-color);
+    }
+
+    .form-check-input:focus {
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 0.25rem rgba(14, 165, 233, 0.25);
+    }
+
+    .form-text {
+        margin-top: 0.25rem;
+    }
+
+    hr {
+        opacity: 0.3;
+    }
+
+    .img-thumbnail {
+        background: var(--card-bg);
+        border-color: var(--border-color);
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function resetForm() {
+        document.querySelector('form').reset();
+    }
+
+    // AE Title auto-gen from Facility Name when empty
+    document.addEventListener('DOMContentLoaded', function() {
+        const nameInput = document.getElementById('name');
+        const aeInput = document.getElementById('ae_title');
+        function toAeTitle(str){
+            const up = (str || '').toUpperCase();
+            const sanitized = up.replace(/[^A-Z0-9 ]/g, '').trim().replace(/\s+/g, '_');
+            return sanitized.slice(0, 16) || '';
+        }
+        if (nameInput && aeInput){
+            nameInput.addEventListener('input', ()=>{
+                if (!aeInput.value.trim()){
+                    aeInput.value = toAeTitle(nameInput.value);
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}

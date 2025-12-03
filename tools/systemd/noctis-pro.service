@@ -1,0 +1,17 @@
+[Unit]
+Description=Noctis Pro PACS (Django ASGI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Use environment variable APP_DIR if set, else default to /opt/noctispro
+Environment=APP_DIR=/opt/noctispro
+WorkingDirectory=%E{APP_DIR}
+Environment=DJANGO_SETTINGS_MODULE=noctis_pro.settings
+ExecStart=%E{APP_DIR}/venv/bin/daphne -b 0.0.0.0 -p 8000 noctis_pro.asgi:application
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

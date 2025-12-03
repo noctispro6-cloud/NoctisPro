@@ -1,0 +1,21 @@
+# Professional DICOM Viewer Requirements
+# Core packages for medical imaging excellence
+
+# Essential packages
+numpy>=1.21.0
+pydicom>=2.3.0
+PyQt5>=5.15.0
+matplotlib>=3.5.0
+Pillow>=9.0.0
+
+# Advanced image processing (optional but recommended)
+scipy>=1.7.0
+opencv-python>=4.5.0
+scikit-image>=0.19.0
+
+# Additional medical imaging support
+SimpleITK>=2.1.0  # For advanced DICOM reading
+pydicom[pillow]>=2.3.0  # Enhanced DICOM support
+
+# Development and debugging
+requests>=2.25.0  # For backend connectivity

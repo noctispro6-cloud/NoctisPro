@@ -1,0 +1,14 @@
+[Unit]
+Description=Noctis Pro PACS DICOM Receiver (SCP)
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=APP_DIR=/opt/noctispro
+WorkingDirectory=%E{APP_DIR}
+ExecStart=%E{APP_DIR}/venv/bin/python %E{APP_DIR}/dicom_receiver.py --port 11112 --aet NOCTIS_SCP
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

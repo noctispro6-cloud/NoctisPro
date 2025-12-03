@@ -1,0 +1,74 @@
+# Core Django
+Django
+Pillow
+django-widget-tweaks
+python-dotenv
+
+# Production server
+gunicorn
+whitenoise
+
+# Database
+psycopg2-binary
+dj-database-url
+
+# Redis and caching
+redis
+django-redis
+
+# Background tasks
+celery
+
+# API and WebSockets
+djangorestframework
+django-cors-headers
+channels
+channels-redis
+daphne
+
+# DICOM processing
+pydicom
+pynetdicom
+SimpleITK
+pylibjpeg
+pylibjpeg-libjpeg
+pylibjpeg-openjpeg
+gdcm
+highdicom
+
+# Image processing
+opencv-python
+scikit-image
+matplotlib
+
+# AI and machine learning
+numpy
+scipy
+pandas
+torch
+torchvision
+scikit-learn
+transformers
+
+# Document processing
+PyMuPDF
+python-docx
+openpyxl
+
+# Security and authentication
+cryptography
+PyJWT
+
+# Utilities
+python-magic
+requests
+urllib3
+qrcode
+
+# Extensions
+django-extensions
+
+# Printing support for DICOM images
+reportlab
+# pycups - commented out due to installation issues on some systems
+# python-escpos - commented out due to dependency on pycups

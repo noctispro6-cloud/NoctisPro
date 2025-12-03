@@ -1,0 +1,788 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin Upload Facilities - Noctis Pro PACS{% endblock %}
+
+{% block extra_css %}
+<style>
+    :root {
+        --primary-bg: #0a0a0a;
+        --secondary-bg: #1a1a1a;
+        --card-surface: #252525;
+        --header-bg: #333333;
+        --border-color: #404040;
+        --accent-color: #00d4ff;
+        --text-primary: #ffffff;
+        --text-secondary: #b3b3b3;
+        --text-muted: #666666;
+        --success-color: #00ff88;
+        --warning-color: #ffaa00;
+        --danger-color: #ff4444;
+    }
+
+    .upload-container {
+        background: var(--primary-bg);
+        min-height: 100vh;
+        padding: 2rem;
+    }
+
+    .upload-card {
+        background: var(--card-surface);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 2rem;
+        max-width: 1000px;
+        margin: 0 auto;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .admin-header {
+        text-align: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid var(--accent-color);
+    }
+
+    .admin-badge {
+        background: linear-gradient(135deg, var(--accent-color), #0088cc);
+        color: white;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        display: inline-block;
+        margin-bottom: 1rem;
+    }
+
+    .upload-icon { 
+        background: linear-gradient(135deg, var(--accent-color), #0088cc);
+        border-radius: 50%; 
+        width: 80px; 
+        height: 80px; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        font-size: 2rem; 
+        color: white; 
+        margin: 0 auto 1rem; 
+    }
+
+    .drop-zone { 
+        border: 2px dashed var(--border-color); 
+        border-radius: 12px; 
+        padding: 3rem 2rem; 
+        text-align: center; 
+        cursor: pointer; 
+        transition: all 0.3s ease; 
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.05) 0%, rgba(0, 212, 255, 0.02) 100%);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .drop-zone::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(circle, var(--accent-color) 0%, transparent 70%);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        pointer-events: none;
+    }
+    
+    .drop-zone:hover::before, .drop-zone.dragover::before { 
+        opacity: 0.1;
+    }
+    
+    .drop-zone:hover, .drop-zone.dragover { 
+        border-color: var(--accent-color); 
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, rgba(0, 212, 255, 0.05) 100%);
+        transform: scale(1.01);
+        box-shadow: 0 10px 30px rgba(0, 212, 255, 0.2);
+    }
+    
+    .drop-zone.uploading { 
+        cursor: not-allowed; 
+        opacity: 0.7; 
+        animation: pulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0.4); }
+        70% { box-shadow: 0 0 0 20px rgba(0, 212, 255, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0); }
+    }
+
+    .file-input { display: none; }
+
+    .btn-admin {
+        background: linear-gradient(135deg, var(--accent-color), #0088cc);
+        border: none;
+        color: white;
+        padding: 12px 24px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        border-radius: 8px;
+        transition: all 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        text-decoration: none;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .btn-admin:hover {
+        background: linear-gradient(135deg, #00b8d4, #0066aa);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(0, 212, 255, 0.3);
+    }
+
+    .btn-admin.secondary {
+        background: var(--card-surface);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+    }
+
+    .btn-admin.secondary:hover {
+        background: var(--accent-color);
+        color: var(--primary-bg);
+    }
+
+    .upload-actions { 
+        display: flex; 
+        gap: 1rem; 
+        margin-top: 2rem; 
+        justify-content: center; 
+    }
+
+    .progress-section { 
+        margin-top: 2rem; 
+        display: none; 
+    }
+
+    .upload-stats {
+        background: rgba(0, 212, 255, 0.1);
+        border: 1px solid var(--accent-color);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 1rem;
+        display: none;
+    }
+
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+
+    .stat-item {
+        text-align: center;
+        padding: 0.5rem;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: var(--accent-color);
+    }
+
+    .stat-label {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+    }
+
+    .upload-success {
+        background: rgba(0, 255, 136, 0.1);
+        border: 1px solid var(--success-color);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 1rem;
+        display: none;
+        text-align: center;
+    }
+
+    .upload-success i {
+        font-size: 3rem;
+        color: var(--success-color);
+        margin-bottom: 1rem;
+    }
+
+    .meta-grid { 
+        display: grid; 
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+        gap: 1rem; 
+        margin-bottom: 2rem; 
+    }
+    
+    .meta-field { 
+        display: flex; 
+        flex-direction: column; 
+        gap: 6px; 
+    }
+    
+    .meta-label { 
+        color: var(--text-secondary); 
+        font-size: 0.9rem; 
+        font-weight: 500;
+    }
+    
+    .meta-input, .meta-select, .meta-textarea { 
+        background: var(--secondary-bg); 
+        border: 1px solid var(--border-color); 
+        color: var(--text-primary); 
+        border-radius: 8px; 
+        padding: 0.75rem; 
+        font-size: 14px;
+    }
+    
+    .meta-textarea { 
+        min-height: 80px; 
+        resize: vertical; 
+    }
+
+    .meta-input:focus, .meta-select:focus, .meta-textarea:focus {
+        outline: none;
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.2);
+    }
+
+    .admin-features {
+        background: rgba(0, 212, 255, 0.05);
+        border: 1px solid var(--accent-color);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 2rem;
+    }
+
+    .admin-features h4 {
+        color: var(--accent-color);
+        margin-bottom: 0.5rem;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .admin-features ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .admin-features li {
+        color: var(--text-secondary);
+        font-size: 12px;
+        margin-bottom: 0.25rem;
+        padding-left: 1rem;
+        position: relative;
+    }
+
+    .admin-features li::before {
+        content: '✓';
+        color: var(--success-color);
+        position: absolute;
+        left: 0;
+        font-weight: bold;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="upload-container">
+    <div class="upload-card">
+        <div class="admin-header">
+            <div class="admin-badge">
+                <i class="fas fa-shield-alt"></i> Administrator Access
+            </div>
+            <div class="upload-icon">
+                <i class="fas fa-cloud-upload-alt"></i>
+            </div>
+            <h2 class="text-light">Admin Upload Facilities</h2>
+            <p class="text-secondary">Administrator interface for uploading DICOM studies to any facility</p>
+        </div>
+
+        <div class="admin-features">
+            <h4><i class="fas fa-star"></i> Administrator Features</h4>
+            <ul>
+                <li>Upload DICOM studies to any facility</li>
+                <li>Assign studies to specific radiologists</li>
+                <li>Set priority levels and clinical information</li>
+                <li>Bulk upload support for large datasets</li>
+                <li>Advanced metadata extraction and validation</li>
+            </ul>
+        </div>
+
+        <form id="adminUploadForm" enctype="multipart/form-data">
+            {% csrf_token %}
+            
+            <!-- Enhanced admin metadata inputs -->
+            <div class="meta-grid">
+                <div class="meta-field">
+                    <label class="meta-label" for="priorityInput">
+                        <i class="fas fa-exclamation-triangle"></i> Priority Level
+                    </label>
+                    <select id="priorityInput" name="priority" class="meta-select">
+                        <option value="low">Low Priority</option>
+                        <option value="normal" selected>Normal Priority</option>
+                        <option value="high">High Priority</option>
+                        <option value="urgent">Urgent - STAT</option>
+                    </select>
+                </div>
+                
+                <div class="meta-field">
+                    <label class="meta-label" for="facilitySelect">
+                        <i class="fas fa-hospital"></i> Target Facility
+                    </label>
+                    <select id="facilitySelect" name="facility_id" class="meta-select" required>
+                        <option value="">Select Target Facility</option>
+                        {% for facility in facilities %}
+                        <option value="{{ facility.id }}">
+                            {{ facility.name }}{% if facility.ae_title %} ({{ facility.ae_title }}){% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="meta-field">
+                    <label class="meta-label">
+                        <input type="checkbox" id="assignToMe" name="assign_to_me" style="margin-right: 8px;">
+                        <i class="fas fa-user-md"></i> Assign to My Worklist
+                    </label>
+                </div>
+                
+                <div class="meta-field" style="grid-column: 1 / -1;">
+                    <label class="meta-label" for="clinicalInfoInput">
+                        <i class="fas fa-notes-medical"></i> Clinical Information / Indication
+                    </label>
+                    <textarea id="clinicalInfoInput" name="clinical_info" class="meta-textarea" 
+                              placeholder="Enter relevant clinical history, indication, and any special instructions..."></textarea>
+                </div>
+            </div>
+            
+            <div class="drop-zone" id="dropZone">
+                <i class="fas fa-file-medical text-accent" style="font-size: 3rem; margin-bottom: 1rem; color: var(--accent-color);"></i>
+                <h4 class="text-light mb-3">Drop DICOM files or folders here</h4>
+                <p class="text-secondary mb-3">
+                    Administrator upload with enhanced processing<br>
+                    Supports large CT/MRI studies with multiple series and automatic facility assignment
+                </p>
+                <button type="button" class="btn-admin" id="chooseFilesBtn">
+                    <i class="fas fa-folder-open"></i>
+                    Choose Files / Folder
+                </button>
+            </div>
+            
+            <input type="file" id="fileInput" name="dicom_files" class="file-input" multiple webkitdirectory directory>
+            
+            <div class="upload-stats" id="uploadStats">
+                <h5 class="text-light mb-2"><i class="fas fa-chart-bar"></i> Upload Summary</h5>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-value" id="totalFiles">0</div>
+                        <div class="stat-label">Total Files</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="dicomFiles">0</div>
+                        <div class="stat-label">DICOM Files</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="totalSize">0 MB</div>
+                        <div class="stat-label">Total Size</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="estimatedStudies">0</div>
+                        <div class="stat-label">Est. Studies</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="progress-section" id="progressSection">
+                <h5 class="text-light mb-3"><i class="fas fa-upload"></i> Upload Progress</h5>
+                <div class="progress mb-2" style="height: 12px; background: var(--secondary-bg); border-radius: 6px; overflow: hidden;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                         role="progressbar" 
+                         style="width: 0%; background: linear-gradient(135deg, var(--accent-color), #0088cc); transition: width 0.3s ease;" 
+                         id="progressBar">
+                        <span id="progressText" style="color: white; font-weight: bold; line-height: 12px;">0%</span>
+                    </div>
+                </div>
+                <div id="progressMeta" class="text-secondary mt-2" style="font-size: 0.9rem;"></div>
+                <div id="uploadDetails" class="text-secondary mt-1" style="font-size: 0.8rem;"></div>
+            </div>
+
+            <div class="upload-success" id="uploadSuccess">
+                <i class="fas fa-check-circle"></i>
+                <h4 class="text-light mb-2">Upload Successful!</h4>
+                <p class="text-secondary mb-3">Your DICOM studies have been uploaded successfully to the selected facility.</p>
+                <div id="uploadSummary" class="text-light mb-3"></div>
+                <div style="display: flex; gap: 1rem; justify-content: center;">
+                    <button type="button" class="btn-admin" onclick="redirectToWorklist()">
+                        <i class="fas fa-list"></i> View Worklist
+                    </button>
+                    <button type="button" class="btn-admin secondary" onclick="uploadAnother()">
+                        <i class="fas fa-plus"></i> Upload Another
+                    </button>
+                </div>
+            </div>
+            
+            <div class="upload-actions" id="uploadActions" style="display: none;">
+                <a href="{% url 'admin_panel:dashboard' %}" class="btn-admin secondary">
+                    <i class="fas fa-times"></i> Cancel
+                </a>
+                <button type="submit" class="btn-admin" id="uploadBtn" disabled>
+                    <i class="fas fa-upload"></i> Upload Studies
+                </button>
+            </div>
+            
+            <!-- Initial actions -->
+            <div class="upload-actions" id="initialActions">
+                <a href="{% url 'worklist:dashboard' %}" class="btn-admin secondary">
+                    <i class="fas fa-arrow-left"></i> Back to Worklist
+                </a>
+                <a href="{% url 'admin_panel:dashboard' %}" class="btn-admin secondary">
+                    <i class="fas fa-cog"></i> Admin Panel
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let selectedFiles = [];
+let isUploading = false;
+
+document.addEventListener('DOMContentLoaded', function() {
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const uploadForm = document.getElementById('adminUploadForm');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const chooseFilesBtn = document.getElementById('chooseFilesBtn');
+    const progressSection = document.getElementById('progressSection');
+    const uploadStats = document.getElementById('uploadStats');
+    const uploadSuccess = document.getElementById('uploadSuccess');
+    const uploadActions = document.getElementById('uploadActions');
+    const initialActions = document.getElementById('initialActions');
+
+    // Click to browse
+    chooseFilesBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isUploading) {
+            fileInput.click();
+        }
+    });
+
+    // Enhanced drag and drop handlers
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (!isUploading) {
+            dropZone.classList.add('dragover');
+        }
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        
+        if (isUploading) return;
+        
+        const items = e.dataTransfer.items;
+        if (items && items.length) {
+            const traverseEntry = async (entry) => {
+                if (entry.isFile) {
+                    return new Promise(resolve => entry.file(f => resolve([f])));
+                } else if (entry.isDirectory) {
+                    const reader = entry.createReader();
+                    const allEntries = [];
+                    async function readAll() {
+                        return new Promise(resolve => {
+                            reader.readEntries(async results => {
+                                if (!results.length) {
+                                    resolve(allEntries);
+                                } else {
+                                    allEntries.push(...results);
+                                    resolve(await readAll());
+                                }
+                            });
+                        });
+                    }
+                    const entries = await readAll();
+                    const nested = await Promise.all(entries.map(traverseEntry));
+                    return nested.flat();
+                }
+                return [];
+            };
+            const filesArrays = await Promise.all(Array.from(items).map(i => traverseEntry(i.webkitGetAsEntry())));
+            handleFiles(filesArrays.flat());
+        } else {
+            handleFiles(Array.from(e.dataTransfer.files));
+        }
+    });
+
+    // File input change
+    fileInput.addEventListener('change', (e) => {
+        if (!isUploading) {
+            const files = Array.from(e.target.files);
+            handleFiles(files);
+        }
+    });
+
+    // Form submission
+    uploadForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (selectedFiles.length > 0 && !isUploading) {
+            await uploadFiles();
+        }
+    });
+
+    function handleFiles(files) {
+        // Enhanced DICOM file filtering
+        const dicomFiles = files.filter(file => {
+            const name = file.name.toLowerCase();
+            if (name.endsWith('.dcm') || name.endsWith('.dicom') || file.type === 'application/dicom') return true;
+            return file.size > 132; // Basic size check for potential DICOM files
+        });
+
+        if (dicomFiles.length === 0) {
+            showNotification('Please select DICOM files or folders containing DICOM data.', 'error');
+            return;
+        }
+
+        selectedFiles = [...selectedFiles, ...dicomFiles];
+        updateUploadStats();
+        
+        // Show upload controls
+        initialActions.style.display = 'none';
+        uploadActions.style.display = 'flex';
+        uploadBtn.disabled = false;
+        
+        // Auto-start upload after validation
+        setTimeout(() => {
+            if (validateForm() && selectedFiles.length > 0 && !isUploading) {
+                uploadFiles();
+            }
+        }, 1000);
+    }
+
+    function validateForm() {
+        const facilitySelect = document.getElementById('facilitySelect');
+        if (!facilitySelect.value) {
+            showNotification('Please select a target facility before uploading.', 'error');
+            return false;
+        }
+        return true;
+    }
+
+    function updateUploadStats() {
+        if (selectedFiles.length === 0) {
+            uploadStats.style.display = 'none';
+            return;
+        }
+
+        const totalSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
+        const estimatedStudies = Math.ceil(selectedFiles.length / 100);
+
+        document.getElementById('totalFiles').textContent = selectedFiles.length;
+        document.getElementById('dicomFiles').textContent = selectedFiles.length;
+        document.getElementById('totalSize').textContent = formatFileSize(totalSize);
+        document.getElementById('estimatedStudies').textContent = estimatedStudies;
+
+        uploadStats.style.display = 'block';
+    }
+
+    async function uploadFiles() {
+        const facilitySelect = document.getElementById('facilitySelect');
+        const priorityInput = document.getElementById('priorityInput');
+        const clinicalInfoInput = document.getElementById('clinicalInfoInput');
+        const assignToMe = document.getElementById('assignToMe');
+
+        if (!facilitySelect.value) {
+            showNotification('Please select a target facility.', 'error');
+            return;
+        }
+
+        const url = '{% url "worklist:upload_study" %}';
+        const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        const CHUNK_SIZE = 50; // Smaller chunks for admin upload
+
+        const totalFiles = selectedFiles.length;
+        let uploadedCount = 0;
+        let errors = [];
+        let studiesCreated = 0;
+        let totalSeries = 0;
+
+        // Set uploading state
+        isUploading = true;
+        dropZone.classList.add('uploading');
+        uploadBtn.disabled = true;
+        uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+
+        // Build chunks
+        const chunks = [];
+        for (let i = 0; i < selectedFiles.length; i += CHUNK_SIZE) {
+            chunks.push(selectedFiles.slice(i, i + CHUNK_SIZE));
+        }
+
+        // Show progress
+        progressSection.style.display = 'block';
+        updateProgress(0, `0 / ${totalFiles} files`, 'Preparing admin upload...');
+
+        // Upload chunks sequentially for better error handling
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            
+            try {
+                const formData = new FormData();
+                chunk.forEach((file) => formData.append('dicom_files', file));
+                
+                // Add admin metadata
+                formData.append('priority', priorityInput.value || 'normal');
+                formData.append('clinical_info', clinicalInfoInput.value || '');
+                formData.append('facility_id', facilitySelect.value);
+                formData.append('assign_to_me', assignToMe.checked ? '1' : '0');
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-CSRFToken': token
+                    }
+                });
+                
+                if (!response.ok) {
+                    errors.push(`Upload failed with status ${response.status}`);
+                    continue;
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    const processed = data.processed_files || chunk.length;
+                    uploadedCount += processed;
+                    studiesCreated = data.studies_created || studiesCreated;
+                    totalSeries = data.total_series || totalSeries;
+                    
+                    const percent = ((i + 1) / chunks.length) * 100;
+                    updateProgress(
+                        percent, 
+                        `${uploadedCount} / ${totalFiles} files`, 
+                        `Created ${studiesCreated} studies with ${totalSeries} series`
+                    );
+                } else {
+                    errors.push(data.error || 'Unknown error');
+                }
+                
+            } catch (error) {
+                errors.push(`Network error: ${error.message}`);
+            }
+        }
+
+        if (errors.length === 0) {
+            // Show success
+            progressSection.style.display = 'none';
+            uploadActions.style.display = 'none';
+            uploadSuccess.style.display = 'block';
+            
+            const uploadSummary = document.getElementById('uploadSummary');
+            uploadSummary.innerHTML = `
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-value">${uploadedCount}</div>
+                        <div class="stat-label">Files Uploaded</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${studiesCreated}</div>
+                        <div class="stat-label">Studies Created</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${totalSeries}</div>
+                        <div class="stat-label">Series Processed</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${facilitySelect.options[facilitySelect.selectedIndex].text}</div>
+                        <div class="stat-label">Target Facility</div>
+                    </div>
+                </div>
+            `;
+            
+            showNotification(`Successfully uploaded ${uploadedCount} files to ${facilitySelect.options[facilitySelect.selectedIndex].text}!`, 'success');
+        } else {
+            showNotification(`Upload completed with errors. Processed ${uploadedCount} of ${totalFiles} files.`, 'warning');
+            resetUploadState();
+        }
+    }
+
+    function updateProgress(percent, meta = '', details = '') {
+        const bar = document.getElementById('progressBar');
+        const text = document.getElementById('progressText');
+        const progressMeta = document.getElementById('progressMeta');
+        const detailsEl = document.getElementById('uploadDetails');
+        
+        bar.style.width = percent + '%';
+        text.textContent = Math.round(percent) + '%';
+        if (meta) progressMeta.textContent = meta;
+        if (details) detailsEl.textContent = details;
+    }
+
+    function resetUploadState() {
+        isUploading = false;
+        uploadBtn.disabled = false;
+        uploadBtn.innerHTML = '<i class="fas fa-upload"></i> Upload Studies';
+        progressSection.style.display = 'none';
+        dropZone.classList.remove('uploading');
+        updateProgress(0);
+    }
+
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    function showNotification(message, type = 'info') {
+        const alertClass = type === 'error' ? 'danger' : type;
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${alertClass} alert-dismissible fade show`;
+        alert.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 300px; max-width: 500px;';
+        alert.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-triangle' : 'info-circle'}"></i>
+                ${message}
+            </div>
+            <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+        `;
+        document.body.appendChild(alert);
+        setTimeout(() => { if (alert.parentNode) { alert.remove(); } }, 7000);
+    }
+
+    window.redirectToWorklist = function() {
+        window.location.href = '/worklist/';
+    };
+
+    window.uploadAnother = function() {
+        selectedFiles = [];
+        updateUploadStats();
+        uploadSuccess.style.display = 'none';
+        initialActions.style.display = 'flex';
+        uploadActions.style.display = 'none';
+        document.getElementById('fileInput').value = '';
+    };
+});
+</script>
+{% endblock %}

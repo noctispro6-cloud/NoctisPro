@@ -1,0 +1,41 @@
+# Ubuntu Security System Requirements
+
+# Core dependencies
+asyncio
+sqlite3
+psutil>=5.8.0
+pathlib
+dataclasses
+configparser
+threading
+subprocess
+signal
+
+# Log filtering and analysis
+watchdog>=2.1.0
+aiofiles>=0.8.0
+geoip2>=4.5.0
+
+# DICOM processing and sanitization
+pydicom>=2.3.0
+cryptography>=3.4.0
+
+# Content analysis and sanitization
+bleach>=4.1.0
+textstat>=0.7.0
+langdetect>=1.0.9
+profanity-check>=1.0.3
+spacy>=3.4.0
+transformers>=4.20.0
+
+# Network and security
+requests>=2.27.0
+urllib3>=1.26.0
+
+# Optional ML models (comment out if not needed)
+# torch>=1.11.0
+# tensorflow>=2.8.0
+
+# Development and testing
+pytest>=7.0.0
+pytest-asyncio>=0.18.0

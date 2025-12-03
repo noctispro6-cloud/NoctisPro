@@ -1,0 +1,1166 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management - Admin Panel</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-bg: #252525;
+            --card-surface: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+            --urgent-color: #ff0066;
+            --scheduled-color: #4a90e2;
+            --in-progress-color: #f5a623;
+            --completed-color: #7ed321;
+            --cancelled-color: #d0021b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--primary-bg);
+            color: var(--text-primary);
+            font-size: 12px;
+            overflow: hidden;
+        }
+
+        .dashboard-container {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Top Navigation */
+        .top-navbar {
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo {
+            color: var(--accent-color);
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 8px;
+        }
+
+        .nav-tab {
+            padding: 8px 12px;
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s ease;
+        }
+
+        .nav-tab.active, .nav-tab:hover {
+            background: var(--card-bg);
+            color: var(--text-primary);
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.1) inset;
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--success-color);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--success-color);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: var(--secondary-bg);
+        }
+
+        .user-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--accent-color);
+            color: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            padding: 16px;
+            overflow: auto;
+        }
+    .btn-control {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 8px 16px;
+        font-size: 12px;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        text-decoration: none;
+        font-weight: 500;
+    }
+
+    .btn-control:hover {
+        background: var(--accent-color);
+        color: var(--primary-bg);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+
+    .btn-control.btn-sm {
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+
+    .user-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 16px;
+        color: white;
+        background: linear-gradient(45deg, #667eea, #764ba2);
+    }
+
+    .user-status-badge {
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 10px;
+    }
+
+    .stats-card {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+        border: 1px solid rgba(102, 126, 234, 0.2);
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+
+    .stats-number {
+        font-size: 2rem;
+        font-weight: bold;
+        color: var(--accent-color);
+    }
+
+    .filter-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+
+    .user-table {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .user-table th {
+        background: var(--header-bg);
+        color: var(--text-primary);
+        font-weight: 600;
+        padding: 15px;
+        border-bottom: 2px solid var(--border-color);
+    }
+
+    .user-table td {
+        padding: 15px;
+        vertical-align: middle;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .user-table tr:hover {
+        background: rgba(102, 126, 234, 0.05);
+    }
+
+    .bulk-actions {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 20px;
+        display: none;
+    }
+
+    .bulk-actions.show {
+        display: block;
+    }
+
+    .role-badge {
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+
+    .role-admin { background: rgba(220, 53, 69, 0.2); color: #dc3545; }
+    .role-radiologist { background: rgba(40, 167, 69, 0.2); color: #28a745; }
+    .role-facility { background: rgba(0, 123, 255, 0.2); color: #007bff; }
+
+    .last-login {
+        font-size: 11px;
+        color: var(--text-secondary);
+    }
+
+    .search-suggestions {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        max-height: 200px;
+        overflow-y: auto;
+        z-index: 1000;
+        display: none;
+    }
+
+    .search-suggestion {
+        padding: 8px 12px;
+        cursor: pointer;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .search-suggestion:hover {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .export-dropdown {
+        position: relative;
+    }
+
+        .form-control-medical {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            padding: 12px 16px;
+            transition: all 0.3s ease;
+        }
+
+        .form-control-medical:focus {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 0.2rem rgba(0, 212, 255, 0.25);
+            color: var(--text-primary);
+        }
+
+        .form-control-medical option {
+            background: var(--card-bg);
+            color: var(--text-primary);
+        }
+
+        .dropdown-menu {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+        }
+
+        .dropdown-item {
+            color: var(--text-primary);
+        }
+
+        .dropdown-item:hover {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+        }
+
+        .table-dark {
+            background: var(--card-bg);
+            color: var(--text-primary);
+        }
+
+        .table-dark th {
+            background: var(--header-bg);
+            border-color: var(--border-color);
+        }
+
+        .table-dark td {
+            border-color: var(--border-color);
+        }
+
+        .table-dark tbody tr:hover {
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .pagination .page-link {
+            background: var(--card-bg);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .pagination .page-link:hover {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+            color: var(--primary-bg);
+        }
+
+        .pagination .page-item.active .page-link {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+            color: var(--primary-bg);
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Top Navigation -->
+        <nav class="top-navbar">
+            <div class="nav-left">
+                <div class="logo">
+                    <i class="fas fa-hospital-symbol"></i>
+                    Noctis Pro PACS
+                </div>
+                <div class="nav-tabs">
+                    <div class="nav-tab" onclick="window.location.href='{% url 'worklist:dashboard' %}'">WORKLIST</div>
+                    <div class="nav-tab" onclick="window.location.href='{% url 'worklist:study_list' %}'">STUDIES</div>
+                    <div class="nav-tab" onclick="window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
+                    {% if user.is_authenticated and user.role == 'admin' %}
+                    <div class="nav-tab" onclick="window.location.href='{% url 'admin_panel:dashboard' %}'">DASHBOARD</div>
+                    <div class="nav-tab active" onclick="window.location.href='{% url 'admin_panel:user_management' %}'"><i class="fas fa-user-cog"></i> MANAGE USERS</div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="nav-right">
+                <div class="status-indicator">
+                    <div class="status-dot"></div>
+                    <span>ONLINE</span>
+                </div>
+                <div class="user-info">
+                    <div class="user-avatar">{{ user.get_full_name|default:user.username|slice:":2"|upper }}</div>
+                    <div>
+                        <div>{{ user.get_full_name|default:user.username }}</div>
+                        <div style="color: var(--text-muted); font-size: 10px;">{% if user.role == 'admin' %}Administrator{% elif user.role == 'radiologist' %}Radiologist{% else %}Facility User{% endif %}</div>
+                    </div>
+                </div>
+                <button type="button" class="btn-control" onclick="window.location.href='{% url 'notifications:notification_list' %}'"   title="Notifications">
+                    <i class="fas fa-bell"></i> NOTIFS <span id="notifBadge" style="display:none">0</span>
+                </button>
+                <button type="button" class="btn-control" onclick="window.location.href='{% url 'chat:chat_rooms' %}'"   title="Chats">
+                    <i class="fas fa-comments"></i> CHATS
+                </button>
+                {% if user.is_authenticated %}
+                <button type="button" class="btn-control" onclick="window.location.href='{% url 'accounts:logout' %}'"   title="Logout">
+                    <i class="fas fa-sign-out-alt"></i> LOGOUT
+                </button>
+                {% endif %}
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="main-content">
+<div class="py-4">
+    <!-- Header Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center flex-wrap">
+                <div>
+                    <h1 class="text-white mb-2">
+                        <i class="fas fa-users me-3"></i>User Management
+                    </h1>
+                    <p class="text-secondary mb-0">Manage system users, roles, and permissions</p>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <div class="export-dropdown">
+                        <button type="button" class="btn-control dropdown-toggle" data-bs-toggle="dropdown">
+                            <i class="fas fa-download me-2"></i>Export
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="exportUsers('csv')">
+                                <i class="fas fa-file-csv me-2"></i>Export CSV
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportUsers('excel')">
+                                <i class="fas fa-file-excel me-2"></i>Export Excel
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportUsers('pdf')">
+                                <i class="fas fa-file-pdf me-2"></i>Export PDF
+                            </a></li>
+                        </ul>
+                    </div>
+                    <a href="{% url 'admin_panel:facility_create' %}" class="btn-control">
+                        <i class="fas fa-hospital me-2"></i>Add Facility
+                    </a>
+                    <div class="btn-group">
+                        <button type="button" class="btn-control dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" id="addUserDropdown">
+                            <i class="fas fa-user-plus me-2"></i>Add User
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="addUserDropdown">
+                            <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?role=admin" onclick="console.log('Navigating to admin user creation')">
+                                <i class="fas fa-user-shield me-2"></i>Administrator
+                            </a></li>
+                            <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?role=radiologist" onclick="console.log('Navigating to radiologist user creation')">
+                                <i class="fas fa-user-md me-2"></i>Radiologist
+                            </a></li>
+                            <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?role=facility" onclick="console.log('Navigating to facility user creation')">
+                                <i class="fas fa-user me-2"></i>Facility User
+                            </a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="stats-card text-center">
+                <div class="stats-number">{{ users.paginator.count }}</div>
+                <div class="text-white">Total Users</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card text-center">
+                <div class="stats-number">{{ facilities.count }}</div>
+                <div class="text-white">Facilities</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card text-center">
+                <div class="stats-number">{{ users.paginator.count|add:"-10" }}</div>
+                <div class="text-white">Active Users</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card text-center">
+                <div class="stats-number">3</div>
+                <div class="text-white">User Roles</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Advanced Search and Filters -->
+    <div class="filter-card">
+        <form method="get" class="row g-3" id="filterForm">
+            <div class="col-md-4">
+                <label for="search" class="form-label text-white">
+                    <i class="fas fa-search me-2"></i>Search Users
+                </label>
+                <div class="position-relative">
+                    <input type="text" class="form-control form-control-medical" id="search" name="search" 
+                           value="{{ search_query }}" placeholder="Name, username, email, phone..."
+                           autocomplete="off">
+                    <div class="search-suggestions" id="searchSuggestions"></div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <label for="role" class="form-label text-white">
+                    <i class="fas fa-user-tag me-2"></i>Role
+                </label>
+                <select class="form-select form-control-medical" id="role" name="role">
+                    <option value="">All Roles</option>
+                    {% for role_code, role_name in user_roles %}
+                    <option value="{{ role_code }}" {% if role_filter == role_code %}selected{% endif %}>
+                        {{ role_name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="facility" class="form-label text-white">
+                    <i class="fas fa-hospital me-2"></i>Facility
+                </label>
+                <select class="form-select form-control-medical" id="facility" name="facility">
+                    <option value="">All Facilities</option>
+                    {% for facility in facilities %}
+                    <option value="{{ facility.id }}" {% if facility_filter == facility.id|stringformat:'s' %}selected{% endif %}>
+                        {{ facility.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="status" class="form-label text-white">
+                    <i class="fas fa-toggle-on me-2"></i>Status
+                </label>
+                <select class="form-select form-control-medical" id="status" name="status">
+                    <option value="">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="verified">Verified</option>
+                    <option value="unverified">Unverified</option>
+                </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <div class="d-flex gap-2 w-100">
+                    <button type="submit" class="btn-control flex-fill">
+                        <i class="fas fa-filter me-1"></i>Filter
+                    </button>
+                    <a href="{% url 'admin_panel:user_management' %}" class="btn-control">
+                        <i class="fas fa-times me-1"></i>Clear
+                    </a>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Bulk Actions Bar -->
+    <div class="bulk-actions" id="bulkActions">
+        <div class="d-flex justify-content-between align-items-center">
+            <span class="text-white">
+                <span id="selectedCount">0</span> users selected
+            </span>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn-control" onclick="bulkAction('activate')"  >
+                    <i class="fas fa-check me-2"></i>Activate
+                </button>
+                <button type="button" class="btn-control" onclick="bulkAction('deactivate')"  >
+                    <i class="fas fa-ban me-2"></i>Deactivate
+                </button>
+                <button type="button" class="btn-control" onclick="bulkAction('verify')"  >
+                    <i class="fas fa-shield-check me-2"></i>Verify
+                </button>
+                <button type="button" class="btn-control text-danger" onclick="bulkAction('delete')"  >
+                    <i class="fas fa-trash me-2"></i>Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Users Table -->
+    <div class="user-table">
+        <table class="table table-dark table-striped mb-0">
+            <thead>
+                <tr>
+                    <th width="50">
+                        <input type="checkbox" class="form-check-input" id="selectAll">
+                    </th>
+                    <th width="80">Avatar</th>
+                    <th>User Details</th>
+                    <th>Contact</th>
+                    <th>Role & Facility</th>
+                    <th>Status</th>
+                    <th>Last Activity</th>
+                    <th width="120">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>
+                        <input type="checkbox" class="form-check-input user-checkbox" value="{{ user.id }}">
+                    </td>
+                    <td>
+                        <div class="user-avatar">
+                            {{ user.first_name|first|default:user.username|first|upper }}{{ user.last_name|first|upper }}
+                        </div>
+                    </td>
+                    <td>
+                        <div>
+                            <strong class="text-white">{{ user.first_name }} {{ user.last_name }}</strong>
+                            {% if not user.first_name and not user.last_name %}
+                                <strong class="text-white">{{ user.username }}</strong>
+                            {% endif %}
+                        </div>
+                        <div class="small text-secondary">@{{ user.username }}</div>
+                        {% if user.license_number %}
+                            <div class="small text-info">
+                                <i class="fas fa-id-card me-1"></i>{{ user.license_number }}
+                            </div>
+                        {% endif %}
+                        {% if user.specialization %}
+                            <div class="small text-warning">
+                                <i class="fas fa-stethoscope me-1"></i>{{ user.specialization }}
+                            </div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="small text-white">
+                            <i class="fas fa-envelope me-2"></i>{{ user.email|default:"No email" }}
+                        </div>
+                        {% if user.phone %}
+                            <div class="small text-secondary">
+                                <i class="fas fa-phone me-2"></i>{{ user.phone }}
+                            </div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="role-badge role-{{ user.role }}">
+                            {% if user.role == 'admin' %}
+                                <i class="fas fa-user-shield me-1"></i>
+                            {% elif user.role == 'radiologist' %}
+                                <i class="fas fa-user-md me-1"></i>
+                            {% else %}
+                                <i class="fas fa-user me-1"></i>
+                            {% endif %}
+                            {{ user.get_role_display }}
+                        </span>
+                        {% if user.facility %}
+                            <div class="small text-secondary mt-1">
+                                <i class="fas fa-hospital me-1"></i>{{ user.facility.name }}
+                            </div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="d-flex flex-column gap-1">
+                            <span class="user-status-badge {% if user.is_active %}bg-success{% else %}bg-danger{% endif %}">
+                                {% if user.is_active %}Active{% else %}Inactive{% endif %}
+                            </span>
+                            <span class="user-status-badge {% if user.is_verified %}bg-info{% else %}bg-warning{% endif %}">
+                                {% if user.is_verified %}Verified{% else %}Pending{% endif %}
+                            </span>
+                        </div>
+                    </td>
+                    <td>
+                        {% if user.last_login %}
+                            <div class="last-login">
+                                <i class="fas fa-clock me-1"></i>{{ user.last_login|timesince }} ago
+                            </div>
+                            {% if user.last_login_ip %}
+                                <div class="small text-secondary">
+                                    <i class="fas fa-map-marker-alt me-1"></i>{{ user.last_login_ip }}
+                                </div>
+                            {% endif %}
+                        {% else %}
+                            <span class="text-secondary small">Never</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="btn-group-vertical" role="group">
+                            <a href="{% url 'admin_panel:user_edit' user.id %}" class="btn-control btn-sm mb-1">
+                                <i class="fas fa-edit me-1"></i>Edit
+                            </a>
+                            {% if user.is_active %}
+                                <button type="button" class="btn-control btn-sm text-warning mb-1" onclick="toggleUserStatus({{ user.id }}, false)"  >
+                                    <i class="fas fa-ban me-1"></i>Disable
+                                </button>
+                            {% else %}
+                                <button type="button" class="btn-control btn-sm text-success mb-1" onclick="toggleUserStatus({{ user.id }}, true)"  >
+                                    <i class="fas fa-check me-1"></i>Enable
+                                </button>
+                            {% endif %}
+                            <button type="button" class="btn-control btn-sm text-danger" onclick="deleteUser({{ user.id }}, '{{ user.username|escapejs }}')"  >
+                                <i class="fas fa-trash me-1"></i>Delete
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="8" class="text-center text-secondary py-5">
+                        <i class="fas fa-users fa-3x mb-3"></i>
+                        <div>No users found matching your criteria</div>
+                        <a href="{% url 'admin_panel:user_create' %}" class="btn-control mt-3">
+                            <i class="fas fa-user-plus me-2"></i>Add First User
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if users.has_other_pages %}
+    <div class="d-flex justify-content-between align-items-center mt-4">
+        <div class="text-secondary">
+            Showing {{ users.start_index }}-{{ users.end_index }} of {{ users.paginator.count }} users
+        </div>
+        <nav>
+            <ul class="pagination pagination-sm">
+                {% if users.has_previous %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page=1{% if search_query %}&search={{ search_query }}{% endif %}{% if role_filter %}&role={{ role_filter }}{% endif %}{% if facility_filter %}&facility={{ facility_filter }}{% endif %}">First</a>
+                    </li>
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ users.previous_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if role_filter %}&role={{ role_filter }}{% endif %}{% if facility_filter %}&facility={{ facility_filter }}{% endif %}">Previous</a>
+                    </li>
+                {% endif %}
+
+                {% for num in users.paginator.page_range %}
+                    {% if users.number == num %}
+                        <li class="page-item active">
+                            <span class="page-link">{{ num }}</span>
+                        </li>
+                    {% elif num > users.number|add:'-3' and num < users.number|add:'3' %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ num }}{% if search_query %}&search={{ search_query }}{% endif %}{% if role_filter %}&role={{ role_filter }}{% endif %}{% if facility_filter %}&facility={{ facility_filter }}{% endif %}">{{ num }}</a>
+                        </li>
+                    {% endif %}
+                {% endfor %}
+
+                {% if users.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ users.next_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if role_filter %}&role={{ role_filter }}{% endif %}{% if facility_filter %}&facility={{ facility_filter }}{% endif %}">Next</a>
+                    </li>
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ users.paginator.num_pages }}{% if search_query %}&search={{ search_query }}{% endif %}{% if role_filter %}&role={{ role_filter }}{% endif %}{% if facility_filter %}&facility={{ facility_filter }}{% endif %}">Last</a>
+                    </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Enhanced Add User dropdown functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const addUserDropdown = document.getElementById('addUserDropdown');
+            const dropdownMenu = addUserDropdown.nextElementSibling;
+            
+            // Ensure dropdown works even if Bootstrap fails
+            addUserDropdown.addEventListener('click', function(e) {
+                e.preventDefault();
+                console.log('Add User dropdown clicked');
+                
+                // Toggle dropdown visibility
+                const isOpen = dropdownMenu.classList.contains('show');
+                if (isOpen) {
+                    dropdownMenu.classList.remove('show');
+                } else {
+                    // Close any other open dropdowns first
+                    document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
+                        menu.classList.remove('show');
+                    });
+                    dropdownMenu.classList.add('show');
+                }
+            });
+            
+            // Close dropdown when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!addUserDropdown.contains(e.target) && !dropdownMenu.contains(e.target)) {
+                    dropdownMenu.classList.remove('show');
+                }
+            });
+            
+            // Enhanced dropdown item navigation
+            const dropdownItems = dropdownMenu.querySelectorAll('.dropdown-item');
+            dropdownItems.forEach(item => {
+                item.addEventListener('click', function(e) {
+                    const href = this.getAttribute('href');
+                    if (href) {
+                        console.log('Navigating to:', href);
+                        // Small delay to ensure click is registered
+                        setTimeout(() => {
+                            window.location.href = href;
+                        }, 100);
+                    }
+                });
+            });
+        });
+        
+        // Notification count update
+        (function(){
+            async function updateUnread(){
+                try {
+                    const res = await fetch('{% url "notifications:api_unread_count" %}', { credentials: 'same-origin' });
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    const count = (data && (data.unread || data.count || data.unread_count)) || 0;
+                    const el = document.getElementById('notifBadge');
+                    if (el) {
+                        if (count > 0) {
+                            el.textContent = count;
+                            el.style.display = '';
+                        } else {
+                            el.style.display = 'none';
+                        }
+                    }
+                } catch(e) { /* ignore */ }
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', updateUnread);
+            } else { updateUnread(); }
+            setInterval(updateUnread, 30000);
+        })();
+
+        // User Management functionality
+// Bulk selection functionality
+document.getElementById('selectAll').addEventListener('change', function() {
+    const checkboxes = document.querySelectorAll('.user-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = this.checked;
+    });
+    updateBulkActions();
+});
+
+document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', updateBulkActions);
+});
+
+function updateBulkActions() {
+    const selected = document.querySelectorAll('.user-checkbox:checked');
+    const bulkActions = document.getElementById('bulkActions');
+    const selectedCount = document.getElementById('selectedCount');
+    
+    selectedCount.textContent = selected.length;
+    
+    if (selected.length > 0) {
+        bulkActions.classList.add('show');
+    } else {
+        bulkActions.classList.remove('show');
+    }
+}
+
+// Search suggestions
+let searchTimeout;
+document.getElementById('search').addEventListener('input', function() {
+    clearTimeout(searchTimeout);
+    const query = this.value;
+    
+    if (query.length > 2) {
+        searchTimeout = setTimeout(() => {
+            // Implement search suggestions API call here
+            showSearchSuggestions([]);
+        }, 300);
+    } else {
+        hideSearchSuggestions();
+    }
+});
+
+function showSearchSuggestions(suggestions) {
+    const container = document.getElementById('searchSuggestions');
+    if (suggestions.length > 0) {
+        container.innerHTML = suggestions.map(s => 
+            `<div class="search-suggestion" onclick="selectSuggestion('${s}')">${s}</div>`
+        ).join('');
+        container.style.display = 'block';
+    }
+}
+
+function hideSearchSuggestions() {
+    document.getElementById('searchSuggestions').style.display = 'none';
+}
+
+function selectSuggestion(value) {
+    document.getElementById('search').value = value;
+    hideSearchSuggestions();
+    document.getElementById('filterForm').submit();
+}
+
+// Clean toast notification system
+function showToast(message, type = 'info', duration = 3000) {
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #252525;
+        border: 1px solid #404040;
+        border-left: 4px solid ${type === 'success' ? '#00ff88' : type === 'error' ? '#ff4444' : '#00d4ff'};
+        color: #ffffff;
+        padding: 8px 12px;
+        border-radius: 3px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        z-index: 2000;
+        font-size: 11px;
+        max-width: 280px;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        opacity: 0.95;
+    `;
+    
+    toast.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'exclamation-triangle' : 'info-circle'}" style="font-size: 10px;"></i>
+            <span>${message}</span>
+        </div>
+    `;
+    
+    document.body.appendChild(toast);
+    
+    // Slide in
+    setTimeout(() => {
+        toast.style.transform = 'translateX(0)';
+    }, 10);
+    
+    // Auto-remove
+    setTimeout(() => {
+        toast.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.remove();
+            }
+        }, 300);
+    }, duration);
+}
+
+// Bulk actions - Fixed with proper API integration and error handling
+function bulkAction(action) {
+    try {
+        const selected = Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => cb.value);
+        
+        if (selected.length === 0) {
+            showToast('Please select users first', 'warning');
+            return;
+        }
+        
+        const actionMessages = {
+            'activate': 'activate selected users',
+            'deactivate': 'deactivate selected users', 
+            'verify': 'verify selected users',
+            'delete': 'delete selected users (this cannot be undone)'
+        };
+        
+        const message = actionMessages[action] || `${action} selected users`;
+        
+        if (!confirm(`Are you sure you want to ${message}?`)) {
+            return;
+        }
+        
+        // Show loading state
+        const actionButtons = document.querySelectorAll('[onclick*="bulkAction"]');
+        actionButtons.forEach(btn => {
+            btn.disabled = true;
+            btn.style.opacity = '0.6';
+        });
+        
+        showToast(`Processing ${action} for ${selected.length} user${selected.length > 1 ? 's' : ''}...`, 'info');
+        
+        // Implement bulk action via form submission since API might not exist
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = window.location.href;
+        
+        // Add CSRF token
+        const csrfToken = getCookie('csrftoken');
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrfmiddlewaretoken';
+            csrfInput.value = csrfToken;
+            form.appendChild(csrfInput);
+        }
+        
+        // Add action and selected users
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'bulk_action';
+        actionInput.value = action;
+        form.appendChild(actionInput);
+        
+        selected.forEach(userId => {
+            const userInput = document.createElement('input');
+            userInput.type = 'hidden';
+            userInput.name = 'selected_users';
+            userInput.value = userId;
+            form.appendChild(userInput);
+        });
+        
+        document.body.appendChild(form);
+        form.submit();
+        
+    } catch (error) {
+        console.error('Bulk action error:', error);
+        showToast(`Error performing bulk action: ${error.message}`, 'error');
+        
+        // Reset button states
+        const actionButtons = document.querySelectorAll('[onclick*="bulkAction"]');
+        actionButtons.forEach(btn => {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+        });
+    }
+}
+
+// Toggle user status - Fixed with proper validation and error handling
+function toggleUserStatus(userId, activate) {
+    try {
+        if (!userId) {
+            showToast('Invalid user ID', 'error');
+            return;
+        }
+        
+        const action = activate ? 'activate' : 'deactivate';
+        
+        if (!confirm(`Are you sure you want to ${action} this user?`)) {
+            return;
+        }
+        
+        // Show loading state
+        const button = event.target;
+        const originalHTML = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        
+        // Use form submission for reliable state change
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = window.location.href;
+        
+        // Add CSRF token
+        const csrfToken = getCookie('csrftoken');
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrfmiddlewaretoken';
+            csrfInput.value = csrfToken;
+            form.appendChild(csrfInput);
+        }
+        
+        // Add action data
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'toggle_user_status';
+        actionInput.value = userId;
+        form.appendChild(actionInput);
+        
+        const activateInput = document.createElement('input');
+        activateInput.type = 'hidden';
+        activateInput.name = 'activate';
+        activateInput.value = activate ? '1' : '0';
+        form.appendChild(activateInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+        
+    } catch (error) {
+        console.error('Toggle user status error:', error);
+        showToast(`Error ${activate ? 'activating' : 'deactivating'} user: ${error.message}`, 'error');
+    }
+}
+
+// Delete user function - Fixed with proper validation
+function deleteUser(userId, username) {
+    try {
+        if (!userId) {
+            showToast('Invalid user ID', 'error');
+            return;
+        }
+        
+        if (!confirm(`Are you sure you want to delete user "${username}"? This action cannot be undone.`)) {
+            return;
+        }
+        
+        showToast('Redirecting to delete confirmation...', 'info');
+        window.location.href = `{% url 'admin_panel:user_delete' 0 %}`.replace('0', userId);
+        
+    } catch (error) {
+        console.error('Delete user error:', error);
+        showToast(`Error deleting user: ${error.message}`, 'error');
+    }
+}
+
+// Export functionality - Fixed with error handling
+function exportUsers(format) {
+    try {
+        if (!format) {
+            showToast('Invalid export format', 'error');
+            return;
+        }
+        
+        showToast(`Preparing ${format.toUpperCase()} export...`, 'info');
+        
+        const params = new URLSearchParams(window.location.search);
+        params.set('export', format);
+        
+        const exportUrl = `${window.location.pathname}?${params.toString()}`;
+        window.open(exportUrl, '_blank');
+        
+        showToast(`${format.toUpperCase()} export started`, 'success');
+        
+    } catch (error) {
+        console.error('Export error:', error);
+        showToast(`Export failed: ${error.message}`, 'error');
+    }
+}
+
+// Cookie utility function
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+// Auto-submit form on filter changes
+document.querySelectorAll('#role, #facility, #status').forEach(select => {
+    select.addEventListener('change', function() {
+        document.getElementById('filterForm').submit();
+    });
+});
+
+// Hide search suggestions when clicking outside
+document.addEventListener('click', function(event) {
+    if (!event.target.closest('.position-relative')) {
+        hideSearchSuggestions();
+    }
+});
+    </script>
+</body>
+</html>

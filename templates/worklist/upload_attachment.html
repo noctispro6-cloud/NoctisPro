@@ -1,0 +1,139 @@
+{% extends 'base.html' %}
+
+{% block title %}Attach Files - Noctis Pro PACS{% endblock %}
+
+{% block extra_css %}
+<style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-surface: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+        }
+
+	.attach-container { padding: 16px; }
+	.card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; max-width: 800px; margin: 0 auto; }
+	.card-header { padding: 16px; border-bottom: 1px solid var(--border-color); display:flex; justify-content: space-between; align-items:center; }
+	.card-body { padding: 16px; }
+	.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+	@media (max-width: 768px){ .form-row { grid-template-columns: 1fr; } }
+	.file-drop { border: 1px dashed var(--border-color); border-radius: 8px; padding: 20px; text-align:center; cursor:pointer; }
+	.btn-control {
+		background: var(--card-bg);
+		border: 1px solid var(--border-color);
+		color: var(--text-primary);
+		padding: 4px 12px;
+		font-size: 11px;
+		cursor: pointer;
+		border-radius: 2px;
+		transition: all 0.2s ease;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		text-decoration: none;
+	}
+
+	.btn-control:hover {
+		background: var(--accent-color);
+		color: var(--primary-bg);
+	}
+	.small-muted { color: var(--text-secondary); font-size: 12px; }
+	.chips { display:flex; gap:6px; flex-wrap:wrap; }
+	.chip { border: 1px solid var(--border-color); border-radius: 999px; padding: 4px 10px; font-size: 12px; color: var(--text-secondary); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="attach-container">
+	<div class="card">
+		<div class="card-header">
+			<div>
+				<div class="fw-bold">Attach files to {{ study.patient.full_name }} ({{ study.accession_number }})</div>
+				<div class="small-muted">Study date: {{ study.study_date|date:"Y-m-d H:i" }} • Modality: {{ study.modality.code }}</div>
+			</div>
+			<div class="d-flex gap-2">
+				<a href="{% url 'worklist:study_list' %}" class="btn-mini"><i class="fas fa-arrow-left"></i> Back</a>
+				<a href="{% url 'worklist:study_detail' study.id %}" class="btn-mini"><i class="fas fa-folder-open"></i> Open Study</a>
+			</div>
+		</div>
+		<div class="card-body">
+			<form id="attachForm" method="post" enctype="multipart/form-data" action="{% url 'worklist:upload_attachment' study.id %}">
+				{% csrf_token %}
+				<div class="form-row">
+					<div>
+						<label class="form-label small-muted">Attachment Type</label>
+						<select name="type" class="form-select form-control-medical">
+							<option value="auto" selected>Auto detect</option>
+							<option value="pdf_document">PDF Document</option>
+							<option value="word_document">Word Document</option>
+							<option value="image">Image</option>
+							<option value="dicom_study">DICOM Study</option>
+							<option value="document">Other Document</option>
+						</select>
+					</div>
+					<div>
+						<label class="form-label small-muted">Description</label>
+						<input type="text" name="description" class="form-control form-control-medical" placeholder="Optional note..."/>
+					</div>
+				</div>
+				<div class="file-drop" id="fileDrop">
+					<i class="fas fa-paperclip text-accent" style="font-size: 28px;"></i>
+					<div class="mt-2">Drop files here or</div>
+					<button type="button" class="btn-mini mt-2" onclick="document.getElementById('filesInput').click()"><i class="fas fa-folder-open"></i> Choose Files</button>
+					<div class="small-muted mt-2">Up to 100MB per file. Multiple files supported.</div>
+				</div>
+				<input type="file" id="filesInput" name="files" multiple class="d-none"/>
+				<div class="d-flex justify-content-end gap-2 mt-3">
+					<a class="btn-mini" href="{% url 'worklist:study_list' %}"><i class="fas fa-times"></i> Cancel</a>
+					<button type="submit" class="btn btn-medical"><i class="fas fa-paperclip me-2"></i>Attach</button>
+				</div>
+			</form>
+
+			<hr class="my-4"/>
+			<div>
+				<div class="fw-bold mb-2">Current Attachments</div>
+				<div class="chips">
+					{% for a in study.attachments.all %}
+						<a class="chip" href="{% url 'worklist:view_attachment' a.id %}">
+							{% if a.file_type == 'pdf_document' %}<i class="fas fa-file-pdf"></i>{% elif a.file_type == 'image' %}<i class="fas fa-image"></i>{% elif a.file_type == 'dicom_study' %}<i class="fas fa-cubes"></i>{% else %}<i class="fas fa-paperclip"></i>{% endif %}
+							&nbsp;{{ a.name|truncatechars:30 }}
+						</a>
+						<!-- Delete attachment - only for admin/radiologist or same facility users -->
+						{% if user.is_admin or user.is_radiologist or user.facility == study.facility %}
+						<form method="post" action="{% url 'worklist:delete_attachment' a.id %}" class="d-inline ms-1">
+							{% csrf_token %}
+							<button type="submit" class="btn-mini" title="Delete" 
+									onclick="return confirm('Are you sure you want to delete this attachment?')">
+								<i class="fas fa-trash"></i>
+							</button>
+						</form>
+						{% endif %}
+					{% empty %}
+						<span class="small-muted">No attachments yet.</span>
+					{% endfor %}
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+	const drop = document.getElementById('fileDrop');
+	const input = document.getElementById('filesInput');
+	drop.addEventListener('dragover', function(e){ e.preventDefault(); drop.classList.add('dragover'); });
+	drop.addEventListener('dragleave', function(){ drop.classList.remove('dragover'); });
+	drop.addEventListener('drop', function(e){ e.preventDefault(); drop.classList.remove('dragover'); input.files = e.dataTransfer.files; });
+})();
+</script>
+{% endblock %}

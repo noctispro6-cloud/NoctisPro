@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% load dicts %}
+
+{% block title %}Edit Permissions - {{ user_obj.username }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3">
+    <div class="card">
+        <div class="card-header d-flex justify-content-between">
+            <div>Edit Permissions: {{ user_obj.username }}</div>
+            <div>
+                <a class="btn-control" href="{% url 'admin_panel:permissions_dashboard' %}">Back</a>
+            </div>
+        </div>
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+                <div class="row">
+                    {% for k in cap_keys %}
+                    <div class="col-12 col-md-4 mb-2">
+                        <label class="form-check">
+                            <input type="checkbox" class="form-check-input" name="{{ k }}" {% if caps|get_item:k %}checked{% endif %}>
+                            <span class="ms-2">{{ k|upper }}</span>
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="mt-3">
+                    <button type="submit" class="btn-control">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

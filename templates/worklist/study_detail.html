@@ -1,0 +1,181 @@
+{% extends 'base.html' %}
+
+{% block title %}Study Details - Noctis Pro PACS{% endblock %}
+
+{% block extra_css %}
+<style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-surface: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+        }
+
+	.detail-container { padding: 16px; }
+	.card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; }
+	.card-header { padding: 16px; border-bottom: 1px solid var(--border-color); display:flex; justify-content: space-between; align-items:center; }
+	.card-body { padding: 16px; }
+	.grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+	.label { color: var(--text-secondary); font-size: 12px; }
+	.value { font-weight: 600; }
+	.section-title { font-weight: 600; margin-top: 12px; margin-bottom: 8px; }
+	.chips { display:flex; flex-wrap:wrap; gap:6px; }
+	.chip { border: 1px solid var(--border-color); border-radius: 999px; padding: 4px 10px; font-size: 12px; color: var(--text-secondary); }
+	.btn-control {
+		background: var(--card-bg);
+		border: 1px solid var(--border-color);
+		color: var(--text-primary);
+		padding: 4px 12px;
+		font-size: 11px;
+		cursor: pointer;
+		border-radius: 2px;
+		transition: all 0.2s ease;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		text-decoration: none;
+	}
+
+	.btn-control:hover {
+		background: var(--accent-color);
+		color: var(--primary-bg);
+	}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="detail-container">
+	<div class="card">
+		<div class="card-header">
+			<div>
+				<div class="value">{{ study.patient.full_name }} • {{ study.accession_number }}</div>
+				<div class="label">{{ study.study_date|date:"Y-m-d H:i" }} • {{ study.modality.code }} • {{ study.study_description }}</div>
+			</div>
+			<div class="d-flex gap-2">
+				<a href="{% url 'worklist:study_list' %}" class="btn-control"><i class="fas fa-arrow-left"></i> Back</a>
+				<a href="{% url 'worklist:upload_attachment' study.id %}" class="btn-control"><i class="fas fa-paperclip"></i> Attach</a>
+				<a href="{% url 'dicom_viewer:viewer' %}?study={{ study.id }}" class="btn-dicom-viewer"><i class="fas fa-eye"></i> DICOM Viewer</a>
+			</div>
+		</div>
+		<div class="card-body">
+			<div class="grid">
+				<div><div class="label">Patient ID</div><div class="value">{{ study.patient.patient_id }}</div></div>
+				<div><div class="label">Status</div><div class="value">{{ study.status|title }}</div></div>
+				<div><div class="label">Priority</div><div class="value">{{ study.priority|title }}</div></div>
+				<div><div class="label">Facility</div><div class="value">{{ study.facility.name }}</div></div>
+			</div>
+
+			<div class="section-title">Clinical Information</div>
+			<div class="d-flex align-items-start justify-content-between" style="gap:8px;">
+				<div id="clinicalInfoText" class="label" style="white-space: pre-wrap;">{{ study.clinical_info|default:"No clinical information yet." }}</div>
+				<button type="button" class="btn-control" data-bs-toggle="modal" data-bs-target="#clinicalInfoModal">
+					<i class="fas fa-notes-medical"></i>
+					{% if study.clinical_info %}Edit Clinical Info{% else %}Add Clinical Info{% endif %}
+				</button>
+			</div>
+
+			<div class="section-title">Attachments</div>
+			<div class="chips">
+				{% for a in attachments %}
+					<a class="chip" href="{% url 'worklist:view_attachment' a.id %}">
+						{% if a.file_type == 'pdf_document' %}<i class="fas fa-file-pdf"></i>{% elif a.file_type == 'image' %}<i class="fas fa-image"></i>{% elif a.file_type == 'dicom_study' %}<i class="fas fa-cubes"></i>{% else %}<i class="fas fa-paperclip"></i>{% endif %}
+						&nbsp;{{ a.name|truncatechars:30 }}
+					</a>
+					<!-- Delete attachment - only for admin/radiologist or same facility users -->
+					{% if user.is_admin or user.is_radiologist or user.facility == study.facility %}
+					<form method="post" action="{% url 'worklist:delete_attachment' a.id %}" class="d-inline ms-1">
+						{% csrf_token %}
+						<button type="submit" class="btn-control" title="Delete" 
+								onclick="return confirm('Are you sure you want to delete this attachment?')">
+							<i class="fas fa-trash"></i>
+						</button>
+					</form>
+					{% endif %}
+				{% empty %}
+					<span class="label">No attachments yet.</span>
+				{% endfor %}
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- Clinical Info Modal -->
+<div  role="dialog" aria-modal="true" id="clinicalInfoModal" tabindex="-1" aria-hidden="true">
+	<div  role="dialog" aria-modal="true">
+		<div  role="dialog" aria-modal="true" style="background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color);">
+			<div  role="dialog" aria-modal="true" style="border-bottom: 1px solid var(--border-color);">
+				<h5 class="modal-title"><i class="fas fa-notes-medical me-2"></i>Clinical Information</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+			</div>
+			<div  role="dialog" aria-modal="true">
+				<input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+				<label class="label mb-2">Enter clinical history / indication</label>
+				<textarea id="clinicalInfoInput" class="form-control" style="min-height: 140px;">{{ study.clinical_info }}</textarea>
+			</div>
+			<div  role="dialog" aria-modal="true" style="border-top: 1px solid var(--border-color);">
+				<button type="button" class="btn-control" data-bs-dismiss="modal">Cancel</button>
+				<button type="button" id="saveClinicalInfoBtn" class="btn-control primary"><i class="fas fa-save me-2"></i>Save</button>
+			</div>
+		</div>
+	</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+	function getCookie(name){
+		const value = `; ${document.cookie}`;
+		const parts = value.split(`; ${name}=`);
+		if (parts.length === 2) {
+			const token = parts.pop().split(';').shift();
+			return token && token.trim() ? token : null;
+		}
+		return null;
+	}
+	const saveBtn = document.getElementById('saveClinicalInfoBtn');
+	const inputEl = document.getElementById('clinicalInfoInput');
+	const textEl = document.getElementById('clinicalInfoText');
+	const modalEl = document.getElementById('clinicalInfoModal');
+	if (saveBtn && inputEl && textEl && modalEl) {
+		saveBtn.addEventListener('click', async function(){
+			const newText = inputEl.value || '';
+			saveBtn.disabled = true;
+			saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Saving...';
+			try {
+				const headers = { 'Content-Type': 'application/json' };
+				const csrfToken = getCookie('csrftoken');
+				if (csrfToken) {
+					headers['X-CSRFToken'] = csrfToken;
+				}
+				const res = await fetch('{% url "worklist:api_update_clinical_info" study.id %}', {
+					method: 'POST',
+					headers: headers,
+					credentials: 'same-origin',
+					body: JSON.stringify({ clinical_info: newText })
+				});
+				if (!res.ok) throw new Error('Request failed');
+				const data = await res.json();
+				if (!data.success) throw new Error(data.error || 'Failed to update');
+				textEl.textContent = (newText && newText.trim()) ? newText : 'No clinical information yet.';
+				// Close modal
+				try { bootstrap.Modal.getOrCreateInstance(modalEl).hide(); } catch(e) {}
+			} catch(e) {
+				alert('Failed to save clinical information: ' + (e && e.message ? e.message : e));
+			} finally {
+				saveBtn.disabled = false;
+				saveBtn.innerHTML = '<i class="fas fa-save me-2"></i>Save';
+			}
+		});
+	}
+})();
+</script>
+{% endblock %}

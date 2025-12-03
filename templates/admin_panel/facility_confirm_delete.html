@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Confirm Delete Facility - Admin Panel{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card bg-dark text-white border-danger">
+        <div class="card-header border-danger">
+          <h3 class="mb-0"><i class="fas fa-exclamation-triangle me-2 text-danger"></i>Confirm Facility Deletion</h3>
+        </div>
+        <div class="card-body">
+          <div class="alert alert-warning" role="alert">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <strong>Warning!</strong> This action cannot be undone. All data associated with this facility will be permanently deleted.
+          </div>
+          
+          <p class="lead">Are you sure you want to delete this facility?</p>
+          
+          <ul class="list-group list-group-flush mb-4">
+            <li class="list-group-item bg-dark text-white">
+              <strong>Facility Name:</strong> {{ facility.name }}
+            </li>
+            <li class="list-group-item bg-dark text-white">
+              <strong>Address:</strong> {{ facility.address }}
+            </li>
+            <li class="list-group-item bg-dark text-white">
+              <strong>Phone:</strong> {{ facility.phone }}
+            </li>
+            <li class="list-group-item bg-dark text-white">
+              <strong>Email:</strong> {{ facility.email }}
+            </li>
+            <li class="list-group-item bg-dark text-white">
+              <strong>License Number:</strong> {{ facility.license_number }}
+            </li>
+            {% if facility.ae_title %}
+            <li class="list-group-item bg-dark text-white">
+              <strong>AE Title:</strong> {{ facility.ae_title }}
+            </li>
+            {% endif %}
+            <li class="list-group-item bg-dark text-white">
+              <strong>Status:</strong> 
+              <span class="badge {% if facility.is_active %}bg-success{% else %}bg-secondary{% endif %}">
+                {% if facility.is_active %}Active{% else %}Inactive{% endif %}
+              </span>
+            </li>
+            <li class="list-group-item bg-dark text-white">
+              <strong>Associated Users:</strong> {{ facility.user_set.count }}
+            </li>
+            <li class="list-group-item bg-dark text-white">
+              <strong>Associated Studies:</strong> {{ facility.study_set.count|default:"0" }}
+            </li>
+          </ul>
+
+          {% if facility.user_set.exists %}
+          <div class="alert alert-danger" role="alert">
+            <i class="fas fa-users me-2"></i>
+            <strong>Cannot Delete:</strong> This facility has {{ facility.user_set.count }} associated user(s). 
+            Please reassign or delete these users before deleting the facility.
+            <div class="mt-2">
+              <small>Associated users:</small>
+              <ul class="mt-1 mb-0">
+                {% for user in facility.user_set.all %}
+                <li>{{ user.username }} ({{ user.get_role_display }})</li>
+                {% endfor %}
+              </ul>
+            </div>
+          </div>
+          {% endif %}
+
+          <div class="d-flex justify-content-between">
+            <a href="{% url 'admin_panel:facility_management' %}" class="btn-control">
+              <i class="fas fa-arrow-left me-2"></i>Cancel
+            </a>
+            {% if not facility.user_set.exists %}
+            <form method="post" class="d-inline">
+              {% csrf_token %}
+              <button type="submit" class="btn-control">
+                <i class="fas fa-trash me-2"></i>Delete Facility
+              </button>
+            </form>
+            {% else %}
+            <a href="{% url 'admin_panel:user_management' %}?facility={{ facility.id }}" class="btn-control">
+              <i class="fas fa-users me-2"></i>Manage Users First
+            </a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% load dicts %}
+
+{% block title %}Permissions - Admin Panel{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3">
+    <div class="card">
+        <div class="card-header">
+            <div>Permissions & Capabilities</div>
+            <div>
+                <a class="btn-control" href="{% url 'admin_panel:dashboard' %}">Back</a>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="card" style="margin-bottom:12px;">
+                <div class="card-header">Role-based AI Visibility</div>
+                <div class="card-body">
+                    <form method="post" action="{% url 'admin_panel:permissions_dashboard' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="_roles" value="1"/>
+                        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                            <label class="form-check">
+                                <input type="checkbox" class="form-check-input" name="role_admin_ai_visible" {% if role_toggles.admin.ai_visible %}checked{% endif %}> <span class="ms-2">Admin can view AI</span>
+                            </label>
+                            <label class="form-check">
+                                <input type="checkbox" class="form-check-input" name="role_radiologist_ai_visible" {% if role_toggles.radiologist.ai_visible %}checked{% endif %}> <span class="ms-2">Radiologist can view AI</span>
+                            </label>
+                            <label class="form-check">
+                                <input type="checkbox" class="form-check-input" name="role_facility_ai_visible" {% if role_toggles.facility.ai_visible %}checked{% endif %}> <span class="ms-2">Facility can view AI</span>
+                            </label>
+                        </div>
+                        <div class="mt-2"><button type="submit" class="btn-control">Save Role Toggles</button></div>
+                    </form>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-dark table-striped align-middle" style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            {% for k in cap_keys %}
+                            <th>{{ k|upper }}</th>
+                            {% endfor %}
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in users_table %}
+                        <tr>
+                            <td>{{ row.user.username }}</td>
+                            {% for k in cap_keys %}
+                            <td>{% if row.caps|get_item:k %}Yes{% else %}No{% endif %}</td>
+                            {% endfor %}
+                            <td><a class="btn-control" href="{% url 'admin_panel:edit_user_permissions' row.user.username %}">Edit</a></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

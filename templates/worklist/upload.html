@@ -1,0 +1,1327 @@
+{% extends 'base.html' %}
+
+{% block title %}Upload Study - Noctis Pro PACS{% endblock %}
+
+{% block extra_css %}
+<style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-bg: #252525;
+            --card-surface: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+            --urgent-color: #ff0066;
+            --scheduled-color: #4a90e2;
+            --in-progress-color: #f5a623;
+            --completed-color: #7ed321;
+            --cancelled-color: #d0021b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--primary-bg);
+            color: var(--text-primary);
+            font-size: 12px;
+        }
+
+        .upload-container {
+            background: var(--primary-bg);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Top Navigation - matching admin panel */
+        .top-navbar {
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 50px;
+        }
+
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .logo {
+            color: var(--accent-color);
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 2px;
+        }
+
+        .nav-tab {
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 6px 12px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+
+        .nav-tab.active {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            font-weight: bold;
+        }
+
+        .nav-tab:hover:not(.active) {
+            background: var(--card-bg);
+            color: var(--text-primary);
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-secondary);
+            font-size: 11px;
+        }
+
+        .user-avatar {
+            width: 24px;
+            height: 24px;
+            background: var(--accent-color);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+            color: var(--primary-bg);
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+
+        .upload-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 640px;
+            width: 100%;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-color) 0%, #00b8d4 50%, var(--success-color) 100%);
+            border-radius: 16px 16px 0 0;
+        }
+
+    .upload-header { 
+        text-align: center; 
+        margin-bottom: 1.5rem; 
+        position: relative;
+    }
+    
+    .upload-icon { 
+        background: var(--accent-color);
+        border-radius: 50%; 
+        width: 64px; 
+        height: 64px; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        font-size: 1.6rem; 
+        color: var(--primary-bg); 
+        margin: 0 auto 1rem; 
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+        position: relative;
+    }
+
+    /* compact helper text */
+    .helper-text { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem; }
+
+    .capability-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        font-weight: 500;
+    }
+
+    .capability-item i {
+        font-size: 1.1rem;
+    }
+
+    .text-accent {
+        color: var(--accent-color) !important;
+    }
+
+    @media (max-width: 768px) {
+        .upload-capabilities {
+            flex-direction: column;
+            gap: 0.5rem;
+            text-align: center;
+        }
+    }
+    
+    @keyframes iconGlow {
+        0% { 
+            box-shadow: 
+                0 8px 24px rgba(0, 212, 255, 0.3),
+                0 0 20px rgba(0, 212, 255, 0.2),
+                inset 0 2px 0 rgba(255, 255, 255, 0.2);
+        }
+        100% { 
+            box-shadow: 
+                0 12px 32px rgba(0, 212, 255, 0.4),
+                0 0 30px rgba(0, 212, 255, 0.3),
+                inset 0 2px 0 rgba(255, 255, 255, 0.3);
+        }
+    }
+
+    .drop-zone { 
+        border: 2px dashed var(--border-color); 
+        border-radius: 12px; 
+        padding: 2rem; 
+        text-align: center; 
+        cursor: pointer; 
+        transition: border-color 0.2s ease, background 0.2s ease; 
+        background: var(--secondary-bg);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .drop-zone::before { display: none; }
+    
+    @keyframes subtleRotate {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    .drop-zone:hover, .drop-zone.dragover { background: #151515; }
+    
+    .drop-zone:hover, .drop-zone.dragover { border-color: var(--accent-color); }
+    
+    .drop-zone.uploading { 
+        cursor: not-allowed; 
+        opacity: 0.7; 
+        animation: pulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0.4); }
+        70% { box-shadow: 0 0 0 20px rgba(0, 212, 255, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0); }
+    }
+
+    .file-input { display: none; }
+
+    .upload-actions { display: flex; gap: 1rem; margin-top: 2rem; justify-content: center; }
+
+    .btn-control {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 4px 12px;
+        font-size: 11px;
+        cursor: pointer;
+        border-radius: 2px;
+        transition: all 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        text-decoration: none;
+    }
+
+    .btn-control:hover {
+        background: var(--accent-color);
+        color: var(--primary-bg);
+    }
+
+    .btn-control:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .progress-section { margin-top: 2rem; display: none; }
+
+    .file-list { margin-top: 2rem; }
+    
+    .file-item { 
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.08) 0%, 
+            rgba(0, 212, 255, 0.05) 50%,
+            rgba(255, 255, 255, 0.08) 100%); 
+        border: 1px solid var(--border-color); 
+        border-radius: 12px; 
+        padding: 1.2rem; 
+        margin-bottom: 1rem; 
+        display: flex; 
+        align-items: center; 
+        justify-content: space-between;
+        animation: slideInEnhanced 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+        box-shadow: 
+            0 2px 8px rgba(0, 0, 0, 0.1),
+            inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+    
+    .file-item:hover {
+        background: linear-gradient(135deg, 
+            rgba(0, 212, 255, 0.12) 0%, 
+            rgba(0, 255, 136, 0.08) 50%,
+            rgba(0, 212, 255, 0.12) 100%);
+        border-color: var(--accent-color);
+        transform: translateX(8px) translateY(-2px);
+        box-shadow: 
+            0 6px 20px rgba(0, 212, 255, 0.2),
+            inset 3px 0 0 var(--accent-color),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    }
+    
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateX(-20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+    
+    @keyframes slideInEnhanced {
+        0% {
+            opacity: 0;
+            transform: translateX(-30px) translateY(10px) scale(0.95);
+        }
+        60% {
+            opacity: 0.8;
+            transform: translateX(5px) translateY(-2px) scale(1.02);
+        }
+        100% {
+            opacity: 1;
+            transform: translateX(0) translateY(0) scale(1);
+        }
+    }
+    
+    .file-info { display: flex; align-items: center; gap: 1rem; }
+    
+    .file-icon { 
+        color: var(--accent-color); 
+        font-size: 1.8rem;
+        animation: iconAppear 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        text-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+        position: relative;
+    }
+    
+    @keyframes iconAppear {
+        0% { 
+            opacity: 0; 
+            transform: scale(0.5) rotate(-180deg);
+            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+        }
+        70% { 
+            opacity: 0.8; 
+            transform: scale(1.1) rotate(10deg);
+            text-shadow: 0 0 15px rgba(0, 212, 255, 0.4);
+        }
+        100% { 
+            opacity: 1; 
+            transform: scale(1) rotate(0deg);
+            text-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+        }
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: scale(0.8); }
+        to { opacity: 1; transform: scale(1); }
+    }
+    
+    .file-details h6 { margin: 0; color: var(--text-primary); font-weight: 600; }
+    .file-size { color: var(--text-secondary); font-size: 0.9rem; }
+    
+    .remove-file { 
+        background: var(--danger-color); 
+        border: none; 
+        border-radius: 50%; 
+        width: 32px; 
+        height: 32px; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        color: white; 
+        cursor: pointer; 
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 8px rgba(255, 68, 68, 0.3);
+    }
+    
+    .remove-file:hover { 
+        background: #dc2626; 
+        transform: scale(1.1) rotate(90deg);
+        box-shadow: 0 4px 12px rgba(255, 68, 68, 0.5);
+    }
+
+    .upload-stats {
+        background: linear-gradient(135deg, 
+            rgba(0, 212, 255, 0.12) 0%, 
+            rgba(0, 255, 136, 0.08) 50%,
+            rgba(0, 212, 255, 0.12) 100%);
+        border: 2px solid var(--accent-color);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-top: 1.5rem;
+        display: none;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 
+            0 4px 16px rgba(0, 212, 255, 0.2),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(2px);
+    }
+    
+    .upload-stats::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(90deg, 
+            var(--accent-color) 0%, 
+            var(--success-color) 50%, 
+            var(--accent-color) 100%);
+    }
+
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 1.2rem;
+        margin-top: 1rem;
+    }
+
+    .stat-item {
+        text-align: center;
+        padding: 1rem;
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.08) 0%, 
+            rgba(0, 212, 255, 0.05) 100%);
+        border-radius: 10px;
+        border: 1px solid rgba(0, 212, 255, 0.4);
+        position: relative;
+        overflow: hidden;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 
+            0 2px 8px rgba(0, 0, 0, 0.1),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    }
+    
+    .stat-item:hover {
+        transform: translateY(-3px) scale(1.02);
+        box-shadow: 
+            0 6px 20px rgba(0, 212, 255, 0.2),
+            inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        border-color: var(--accent-color);
+    }
+
+    .stat-value {
+        font-size: 1.8rem;
+        font-weight: bold;
+        color: var(--accent-color);
+        font-family: 'Courier New', monospace;
+        text-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+        animation: countUp 0.8s ease-out;
+    }
+
+    .stat-label {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        margin-top: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        font-weight: 600;
+    }
+    
+    @keyframes countUp {
+        0% { 
+            opacity: 0; 
+            transform: scale(0.5) translateY(20px);
+        }
+        60% { 
+            opacity: 0.8; 
+            transform: scale(1.1) translateY(-5px);
+        }
+        100% { 
+            opacity: 1; 
+            transform: scale(1) translateY(0);
+        }
+    }
+
+    .folder-info {
+        background: rgba(255, 170, 0, 0.1);
+        border: 1px solid var(--warning-color);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 1rem;
+        display: none;
+    }
+
+    .series-preview {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 1rem;
+        max-height: 200px;
+        overflow-y: auto;
+        display: none;
+    }
+
+    .series-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .series-item:last-child {
+        border-bottom: none;
+    }
+
+    .upload-success {
+        background: rgba(0, 255, 136, 0.1);
+        border: 1px solid var(--success-color);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 1rem;
+        display: none;
+        text-align: center;
+    }
+
+    .upload-success i {
+        font-size: 3rem;
+        color: var(--success-color);
+        margin-bottom: 1rem;
+    }
+
+    /* Enhanced metadata form - Professional medical input styling */
+    .meta-grid { 
+        display: grid; 
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); 
+        gap: 1.5rem; 
+        margin-bottom: 1.5rem; 
+        padding: 1.5rem;
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.03) 0%, 
+            rgba(0, 212, 255, 0.02) 100%);
+        border-radius: 12px;
+        border: 1px solid rgba(64, 64, 64, 0.5);
+    }
+    
+    .meta-field { 
+        display: flex; 
+        flex-direction: column; 
+        gap: 8px; 
+        position: relative;
+    }
+    
+    .meta-label { 
+        color: var(--text-secondary); 
+        font-size: 0.95rem; 
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .meta-input, .meta-select, .meta-textarea { 
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.08) 0%, 
+            rgba(0, 212, 255, 0.03) 100%); 
+        border: 1px solid var(--border-color); 
+        color: var(--text-primary); 
+        border-radius: 8px; 
+        padding: 0.75rem 1rem; 
+        font-size: 12px;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .meta-input:focus, .meta-select:focus, .meta-textarea:focus {
+        outline: none;
+        border-color: var(--accent-color);
+        box-shadow: 
+            0 0 0 3px rgba(0, 212, 255, 0.2),
+            inset 0 1px 3px rgba(0, 0, 0, 0.1),
+            0 2px 8px rgba(0, 212, 255, 0.1);
+        background: var(--primary-bg);
+        transform: translateY(-1px);
+    }
+    
+    .meta-textarea { 
+        min-height: 100px; 
+        resize: vertical; 
+        font-family: 'Segoe UI', sans-serif;
+    }
+    
+    /* Enhanced Progress Bar Styling - Medical Grade */
+    .progress {
+        background: var(--secondary-bg);
+        border-radius: 8px;
+        height: 12px;
+        overflow: hidden;
+        box-shadow: 
+            inset 0 2px 4px rgba(0, 0, 0, 0.2),
+            0 1px 2px rgba(0, 0, 0, 0.1);
+        border: 1px solid var(--border-color);
+        position: relative;
+    }
+    
+    .progress-bar {
+        background: linear-gradient(90deg, 
+            var(--accent-color) 0%, 
+            #00b8d4 25%,
+            var(--success-color) 50%,
+            #00b8d4 75%,
+            var(--accent-color) 100%) !important;
+        border-radius: 8px;
+        transition: width 0.3s ease;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 
+            0 0 10px rgba(0, 212, 255, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+    
+    .progress-bar-animated {
+        background-size: 200% 100% !important;
+        animation: progressShimmer 2s linear infinite;
+    }
+    
+    @keyframes progressShimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+    
+    /* Enhanced Upload Button */
+    .btn-control.primary {
+        background: linear-gradient(135deg, var(--accent-color) 0%, #00b8d4 100%);
+        color: var(--primary-bg);
+        border: 1px solid var(--accent-color);
+        padding: 10px 18px;
+        font-size: 12px;
+        font-weight: bold;
+        border-radius: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .btn-control.primary::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, 
+            transparent, 
+            rgba(255, 255, 255, 0.3), 
+            transparent);
+        transition: left 0.6s ease;
+    }
+    
+    .btn-control.primary:hover::before {
+        left: 100%;
+    }
+    
+    .btn-control.primary:hover {
+        background: linear-gradient(135deg, #33e0ff 0%, #00d4ff 100%);
+        transform: translateY(-2px) scale(1.05);
+        box-shadow: 
+            0 8px 24px rgba(0, 212, 255, 0.4),
+            inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="upload-container">
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="upload-card">
+            <div class="upload-header">
+                <div class="upload-icon">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                </div>
+                <h3 class="text-light" style="margin-bottom: 0.25rem;">Upload DICOM Studies</h3>
+                <div class="helper-text">Drag and drop DICOM files or choose a folder. Max 5,000 images (5GB).</div>
+            </div>
+
+        <form id="uploadForm" enctype="multipart/form-data">
+            {% csrf_token %}
+            <!-- New: study metadata inputs -->
+            <div class="meta-grid">
+                <div class="meta-field">
+                    <label class="meta-label" for="priorityInput">Priority</label>
+                    <select id="priorityInput" class="meta-select">
+                        <option value="low">Low</option>
+                        <option value="normal" selected>Normal</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                    </select>
+                </div>
+                {% if facilities %}
+                <div class="meta-field">
+                    <label class="meta-label" for="facilitySelect">Target Facility</label>
+                    <select id="facilitySelect" class="meta-select">
+                        {% for fac in facilities %}
+                        <option value="{{ fac.id }}">{{ fac.name }}{% if fac.ae_title %} ({{ fac.ae_title }}){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="meta-field">
+                    <label class="meta-label" for="assignToMe"><input type="checkbox" id="assignToMe"/> Assign to my worklist</label>
+                </div>
+                {% endif %}
+                <div class="meta-field" style="grid-column: 1 / -1;">
+                    <label class="meta-label" for="clinicalInfoInput">Clinical Information / Indication</label>
+                    <textarea id="clinicalInfoInput" class="meta-textarea" placeholder="Enter relevant clinical history and indication (optional)"></textarea>
+                </div>
+            </div>
+            <!-- End metadata inputs -->
+            <div class="drop-zone" id="dropZone">
+                <div class="drop-zone-icon">
+                    <i class="fas fa-file-medical" style="font-size: 2.5rem; margin-bottom: 0.5rem; color: var(--accent-color);"></i>
+                </div>
+                <h4 class="text-light mb-2" style="font-size: 1.1rem; font-weight: 600;">Drop DICOM files or folders here</h4>
+                <p class="text-secondary mb-2" style="font-size: 0.95rem; line-height: 1.4;">Files upload automatically once selected.</p>
+                <button type="button" class="btn-control primary" id="chooseFilesBtn">
+                    <i class="fas fa-folder-open me-2"></i>
+                    Choose Files / Folder
+                </button>
+            </div>
+            
+            <style>
+            @keyframes floatIcon {
+                0% { 
+                    transform: translateY(0px) scale(1);
+                    text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+                }
+                100% { 
+                    transform: translateY(-8px) scale(1.05);
+                    text-shadow: 0 0 30px rgba(0, 212, 255, 0.7);
+                }
+            }
+            </style>
+            
+            <input type="file" id="fileInput" class="file-input" multiple webkitdirectory directory>
+            
+            <div class="upload-stats" id="uploadStats">
+                <h5 class="text-light mb-2">Upload Summary</h5>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-value" id="totalFiles">0</div>
+                        <div class="stat-label">Total Files</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="dicomFiles">0</div>
+                        <div class="stat-label">DICOM Files</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="totalSize">0 MB</div>
+                        <div class="stat-label">Total Size</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="estimatedStudies">0</div>
+                        <div class="stat-label">Est. Studies</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="folder-info" id="folderInfo">
+                <h6 class="text-warning mb-2"><i class="fas fa-folder-open me-2"></i>Folder Structure Detected</h6>
+                <p class="text-secondary mb-2">Large folder with multiple series detected. This may take several minutes to process.</p>
+                <div id="folderStructure"></div>
+            </div>
+            
+            <div class="series-preview" id="seriesPreview">
+                <h6 class="text-light mb-2"><i class="fas fa-layer-group me-2"></i>Series Preview</h6>
+                <div id="seriesList"></div>
+            </div>
+            
+            <div class="file-list" id="fileList" style="display: none;">
+                <h5 class="text-light mb-3">Selected Files</h5>
+                <div id="selectedFiles"></div>
+            </div>
+            
+            <div class="progress-section" id="progressSection">
+                <h5 class="text-light mb-2">Upload Progress</h5>
+                <div class="progress mb-2">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                         role="progressbar" 
+                         style="width: 0%" 
+                         id="progressBar">
+                        <span id="progressText">0%</span>
+                    </div>
+                </div>
+                <div id="progressMeta" class="text-secondary mt-2" style="font-size: 0.9rem;"></div>
+                <div id="uploadDetails" class="text-secondary mt-1" style="font-size: 0.8rem;"></div>
+            </div>
+
+            <div class="upload-success" id="uploadSuccess">
+                <i class="fas fa-check-circle"></i>
+                <h4 class="text-light mb-2">Upload Successful!</h4>
+                <p class="text-secondary mb-3">Your DICOM studies have been uploaded successfully.</p>
+                <div id="uploadSummary" class="text-light mb-3"></div>
+                <button type="button" class="btn-control primary" onclick="redirectToDashboard()">
+                    <i class="fas fa-arrow-left me-2"></i>Return to Worklist
+                </button>
+            </div>
+            
+            <div class="upload-actions" id="uploadActions" style="display: none;">
+                <a href="{% url 'worklist:dashboard' %}" class="btn-control">
+                    <i class="fas fa-arrow-left me-2"></i>Cancel
+                </a>
+                <button type="submit" class="btn-control primary" id="uploadBtn" disabled>
+                    <i class="fas fa-upload me-2"></i>Upload Studies
+                </button>
+            </div>
+            
+            <!-- Initial cancel button -->
+            <div class="upload-actions" id="initialActions">
+                <a href="{% url 'worklist:dashboard' %}" class="btn-control">
+                    <i class="fas fa-arrow-left me-2"></i>Back to Worklist
+                </a>
+            </div>
+        </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let selectedFiles = [];
+let isUploading = false;
+let createdStudyIds = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const uploadForm = document.getElementById('uploadForm');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const chooseFilesBtn = document.getElementById('chooseFilesBtn');
+    const fileList = document.getElementById('fileList');
+    const selectedFilesDiv = document.getElementById('selectedFiles');
+    const progressSection = document.getElementById('progressSection');
+    const progressMeta = document.getElementById('progressMeta');
+    const uploadStats = document.getElementById('uploadStats');
+    const folderInfo = document.getElementById('folderInfo');
+    const seriesPreview = document.getElementById('seriesPreview');
+    const seriesList = document.getElementById('seriesList');
+    const folderStructure = document.getElementById('folderStructure');
+    const uploadSuccess = document.getElementById('uploadSuccess');
+    const uploadActions = document.getElementById('uploadActions');
+    const totalFilesCount = document.getElementById('totalFiles');
+    const dicomFilesCount = document.getElementById('dicomFiles');
+    const totalSizeCount = document.getElementById('totalSize');
+    const estimatedStudiesCount = document.getElementById('estimatedStudies');
+    const priorityInput = document.getElementById('priorityInput');
+    const clinicalInfoInput = document.getElementById('clinicalInfoInput');
+    const facilitySelect = document.getElementById('facilitySelect');
+    const assignToMe = document.getElementById('assignToMe');
+
+    // Click to browse - prevent multiple triggers
+    chooseFilesBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isUploading) {
+            fileInput.click();
+        }
+    });
+
+    // Enhanced drag and drop handlers with better folder support
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (!isUploading) {
+            dropZone.classList.add('dragover');
+        }
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        
+        if (isUploading) return;
+        
+        const items = e.dataTransfer.items;
+        if (items && items.length) {
+            // If browser supports directory entries, traverse; otherwise, fallback to files list
+            const firstItem = items[0];
+            const supportsEntries = firstItem && typeof firstItem.webkitGetAsEntry === 'function';
+            if (supportsEntries) {
+                // Enhanced folder traversal for CT/MRI studies with multiple series
+                const traverseEntry = async (entry) => {
+                    if (!entry) return [];
+                    if (entry.isFile) {
+                        return new Promise(resolve => entry.file(f => resolve([f])));
+                    } else if (entry.isDirectory) {
+                        const reader = entry.createReader();
+                        const allEntries = [];
+                        async function readAll() {
+                            return new Promise(resolve => {
+                                reader.readEntries(async results => {
+                                    if (!results.length) {
+                                        resolve(allEntries);
+                                    } else {
+                                        allEntries.push(...results);
+                                        resolve(await readAll());
+                                    }
+                                });
+                            });
+                        }
+                        const entries = await readAll();
+                        const nested = await Promise.all(entries.map(traverseEntry));
+                        return nested.flat();
+                    }
+                    return [];
+                };
+                const filesArrays = await Promise
+                    .all(Array.from(items).map(i => traverseEntry(i.webkitGetAsEntry())));
+                handleFiles(filesArrays.flat());
+            } else {
+                // Fallback for browsers without webkitGetAsEntry (e.g., Firefox)
+                handleFiles(Array.from(e.dataTransfer.files || []));
+            }
+        } else {
+            handleFiles(Array.from(e.dataTransfer.files || []));
+        }
+    });
+
+    // File input change
+    fileInput.addEventListener('change', (e) => {
+        if (!isUploading) {
+            const files = Array.from(e.target.files);
+            handleFiles(files);
+        }
+    });
+
+    // Form submission
+    uploadForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (selectedFiles.length > 0 && !isUploading) {
+            await uploadFilesInChunks();
+        }
+    });
+
+    function handleFiles(files) {
+        // Enhanced DICOM file filtering with better detection
+        const dicomFiles = files.filter(file => {
+            const name = file.name.toLowerCase();
+            if (name.endsWith('.dcm') || name.endsWith('.dicom') || file.type === 'application/dicom' || name.includes('dicom')) return true;
+            // Heuristic: accept if size > 128 and header likely contains DICM when read later server-side
+            return file.size > 132; // don't over-restrict; backend will validate
+        });
+
+        // Check file count limit (5000 images max)
+        const maxFiles = 5000;
+        if (dicomFiles.length > maxFiles) {
+            showNotification(`Too many files selected. Maximum allowed: ${maxFiles} DICOM images. You selected ${dicomFiles.length} files.`, 'error');
+            return;
+        }
+
+        if (dicomFiles.length === 0) {
+            showNotification('Please select DICOM files or folders. Files without .dcm are allowed; they will be validated during upload.', 'error');
+            return;
+        }
+
+        // Check total size limit (5GB max)
+        const totalSize = dicomFiles.reduce((sum, file) => sum + file.size, 0);
+        const maxSize = 5 * 1024 * 1024 * 1024; // 5GB
+        if (totalSize > maxSize) {
+            showNotification(`Total file size too large. Maximum allowed: 5GB. Your files: ${formatFileSize(totalSize)}`, 'error');
+            return;
+        }
+
+        selectedFiles = [...selectedFiles, ...dicomFiles];
+        updateUploadStats();
+        // Skip showing file list and immediately start upload
+        analyzeFolderStructure();
+        
+        // Hide initial actions and show upload in progress
+        document.getElementById('initialActions').style.display = 'none';
+        
+        // Auto-start upload after a brief delay to show stats
+        setTimeout(() => {
+            if (selectedFiles.length > 0 && !isUploading) {
+                uploadFilesInChunks();
+            }
+        }, 1000);
+    }
+
+    function updateUploadStats() {
+        if (selectedFiles.length === 0) {
+            uploadStats.style.display = 'none';
+            return;
+        }
+
+        const totalSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
+        const estimatedStudies = Math.ceil(selectedFiles.length / 100); // Rough estimate
+
+        totalFilesCount.textContent = selectedFiles.length;
+        dicomFilesCount.textContent = selectedFiles.length;
+        totalSizeCount.textContent = formatFileSize(totalSize);
+        estimatedStudiesCount.textContent = estimatedStudies;
+
+        uploadStats.style.display = 'block';
+    }
+
+    function analyzeFolderStructure() {
+        if (selectedFiles.length < 50) {
+            folderInfo.style.display = 'none';
+            seriesPreview.style.display = 'none';
+            return;
+        }
+
+        // Analyze folder structure for large uploads
+        const folderStructureMap = {};
+        const seriesMap = {};
+
+        selectedFiles.forEach(file => {
+            const pathParts = file.webkitRelativePath ? file.webkitRelativePath.split('/') : [file.name];
+            const folder = pathParts[0];
+            const subfolder = pathParts[1] || 'root';
+            
+            folderStructureMap[folder] = folderStructureMap[folder] || {};
+            folderStructureMap[folder][subfolder] = (folderStructureMap[folder][subfolder] || 0) + 1;
+
+            // Try to extract series info from filename or path
+            const fileName = file.name.toLowerCase();
+            if (fileName.includes('series') || fileName.includes('ser')) {
+                const seriesMatch = fileName.match(/series[_-]?(\d+)/i) || fileName.match(/ser[_-]?(\d+)/i);
+                if (seriesMatch) {
+                    const seriesNum = seriesMatch[1];
+                    seriesMap[seriesNum] = (seriesMap[seriesNum] || 0) + 1;
+                }
+            }
+        });
+
+        // Display folder structure
+        if (Object.keys(folderStructureMap).length > 1) {
+            folderStructure.innerHTML = Object.entries(folderStructureMap).map(([folder, subfolders]) => 
+                `<div class="mb-2"><strong>${folder}</strong>: ${Object.entries(subfolders).map(([sub, count]) => 
+                    `${sub} (${count} files)`).join(', ')}</div>`
+            ).join('');
+            folderInfo.style.display = 'block';
+        }
+
+        // Display series preview
+        if (Object.keys(seriesMap).length > 0) {
+            seriesList.innerHTML = Object.entries(seriesMap).map(([series, count]) => 
+                `<div class="series-item">
+                    <span><i class="fas fa-layer-group me-2"></i>Series ${series}</span>
+                    <span class="text-secondary">${count} images</span>
+                </div>`
+            ).join('');
+            seriesPreview.style.display = 'block';
+        }
+    }
+
+    function updateFileList() {
+        // Hide file list since we're auto-uploading
+        fileList.style.display = 'none';
+        return;
+    }
+
+    function updateUploadButton() { 
+        uploadBtn.disabled = selectedFiles.length === 0 || isUploading; 
+    }
+
+    window.removeFile = function(index) { 
+        if (!isUploading) {
+            selectedFiles.splice(index, 1); 
+            updateUploadStats();
+            updateFileList(); 
+            updateUploadButton(); 
+            analyzeFolderStructure();
+        }
+    };
+
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    function updateProgress(percent, meta = '', details = '') {
+        const bar = document.getElementById('progressBar');
+        const text = document.getElementById('progressText');
+        const detailsEl = document.getElementById('uploadDetails');
+        
+        bar.style.width = percent + '%';
+        text.textContent = Math.round(percent) + '%';
+        if (meta) progressMeta.textContent = meta; else progressMeta.textContent = '';
+        if (details) detailsEl.textContent = details; else detailsEl.textContent = '';
+    }
+
+    function resetUploadState() {
+        isUploading = false;
+        uploadBtn.disabled = false;
+        uploadBtn.innerHTML = '<i class="fas fa-upload me-2"></i>Upload Studies';
+        progressSection.style.display = 'none';
+        dropZone.classList.remove('uploading');
+        updateProgress(0);
+    }
+
+    async function uploadFilesInChunks() {
+        const url = '{% url "worklist:upload_study" %}';
+        const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        const totalFiles = selectedFiles.length;
+        const totalBytes = selectedFiles.reduce((s, f) => s + (f.size || 0), 0);
+
+        // Build chunks by total bytes to respect reverse-proxy limits (e.g., 100MB)
+        const MAX_CHUNK_BYTES = 80 * 1024 * 1024; // 80MB safety margin
+        let chunks = [];
+        let currentChunk = [];
+        let currentBytes = 0;
+        for (const file of selectedFiles) {
+            const fsize = file.size || 0;
+            if (currentChunk.length && (currentBytes + fsize) > MAX_CHUNK_BYTES) {
+                chunks.push(currentChunk);
+                currentChunk = [];
+                currentBytes = 0;
+            }
+            currentChunk.push(file);
+            currentBytes += fsize;
+        }
+        if (currentChunk.length) chunks.push(currentChunk);
+
+        // Limit parallel uploads to reduce server pressure
+        let MAX_PARALLEL = chunks.length > 10 ? 2 : 2;
+
+        let uploadedCount = 0;
+        let uploadedBytes = 0;
+        let errors = [];
+        let studiesCreated = 0;
+        let totalSeries = 0;
+        let totalImagesUploaded = 0;
+
+        // Set uploading state
+        isUploading = true;
+        dropZone.classList.add('uploading');
+        uploadBtn.disabled = true;
+        uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Uploading...';
+
+        // UI state
+        progressSection.style.display = 'block';
+        updateProgress(0, `0 / ${totalFiles} files`, 'Preparing upload...');
+
+        // Track per-chunk progress to aggregate bytes across parallel requests
+        const chunkByteProgress = new Array(chunks.length).fill(0);
+
+        function uploadChunkXHR(chunkIdx, chunk) {
+            return new Promise((resolve) => {
+                const formData = new FormData();
+                chunk.forEach((file) => formData.append('dicom_files', file));
+                formData.append('priority', priorityInput.value || 'normal');
+                formData.append('clinical_info', clinicalInfoInput.value || '');
+                if (facilitySelect) { formData.append('facility_id', facilitySelect.value || ''); }
+                if (assignToMe) { formData.append('assign_to_me', assignToMe.checked ? '1' : '0'); }
+
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', url, true);
+                xhr.timeout = 300000; // 300s per chunk for large uploads
+                xhr.setRequestHeader('X-CSRFToken', token);
+                xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+
+                xhr.upload.onprogress = function (e) {
+                    if (!e.lengthComputable) return;
+                    const delta = Math.max(0, e.loaded - chunkByteProgress[chunkIdx]);
+                    chunkByteProgress[chunkIdx] = e.loaded;
+                    uploadedBytes += delta;
+                    const percentBytes = totalBytes > 0 ? (uploadedBytes / totalBytes) * 100 : (uploadedCount / totalFiles) * 100;
+                    updateProgress(percentBytes, `${uploadedCount} / ${totalFiles} files`, `Transferring ${formatFileSize(uploadedBytes)} / ${formatFileSize(totalBytes)}`);
+                };
+
+                const handleFailure = (reason) => {
+                    errors.push(reason || 'Upload failed');
+                    resolve({ ok: false });
+                };
+
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState === 4) {
+                        try {
+                            if (xhr.status >= 200 && xhr.status < 300) {
+                                const data = JSON.parse(xhr.responseText || '{}');
+                                if (data && data.success) {
+                                    const processed = typeof data.processed_files === 'number' ? data.processed_files : chunk.length;
+                                    uploadedCount += processed;
+                                    studiesCreated += (data.studies_created || 0);
+                                    totalSeries += (data.total_series || 0);
+                                    totalImagesUploaded += (data.total_images || 0);
+                                    if (Array.isArray(data.created_study_ids)) {
+                                        createdStudyIds.push(...data.created_study_ids);
+                                    }
+                                    const percentFiles = (uploadedCount / totalFiles) * 100;
+                                    updateProgress(Math.max(percentFiles, (uploadedBytes / Math.max(1, totalBytes)) * 100), `${uploadedCount} / ${totalFiles} files`, `Created ${studiesCreated} studies, ${totalSeries} series, ${totalImagesUploaded} images`);
+                                    resolve({ ok: true });
+                                } else {
+                                    handleFailure((data && data.error) || 'Unknown error');
+                                }
+                            } else {
+                                handleFailure(`HTTP ${xhr.status}: ${xhr.statusText || 'Request failed'}`);
+                            }
+                        } catch (e) {
+                            handleFailure(`Response parsing error: ${e.message}`);
+                        }
+                    }
+                };
+
+                xhr.ontimeout = function () { handleFailure('Request timeout'); };
+
+                xhr.onerror = function () { handleFailure('Network error during upload'); };
+
+                xhr.send(formData);
+            });
+        }
+
+        let currentIndex = 0;
+        const workers = Array.from({ length: Math.min(MAX_PARALLEL, chunks.length) }).map(async () => {
+            while (true) {
+                let idx;
+                if (currentIndex >= chunks.length) break;
+                idx = currentIndex++;
+                await uploadChunkXHR(idx, chunks[idx]);
+            }
+        });
+
+        await Promise.all(workers);
+
+        if (errors.length === 0) {
+            progressSection.style.display = 'none';
+            uploadActions.style.display = 'none';
+            uploadSuccess.style.display = 'block';
+
+            const uploadSummary = document.getElementById('uploadSummary');
+            uploadSummary.innerHTML = `
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-value">${uploadedCount}</div>
+                        <div class="stat-label">Files Uploaded</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${studiesCreated}</div>
+                        <div class="stat-label">Studies Created</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${totalSeries}</div>
+                        <div class="stat-label">Series Processed</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${totalImagesUploaded}</div>
+                        <div class="stat-label">Images Processed</div>
+                    </div>
+                </div>
+                <div class="background-processing-info" style="margin-top: 15px; padding: 10px; background: var(--card-bg); border-radius: 6px; border-left: 3px solid var(--accent-color);">
+                    <i class="fas fa-info-circle"></i> <strong>Background Processing:</strong> DICOM images are being processed in the background.
+                </div>
+            `;
+
+            showNotification(`Successfully uploaded ${uploadedCount} files creating ${studiesCreated} studies with ${totalSeries} series and ${totalImagesUploaded} images!`, 'success');
+            try {
+                if (createdStudyIds.length > 0) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn-control primary';
+                    btn.style.marginTop = '10px';
+                    btn.innerHTML = '<i class="fas fa-eye me-2"></i>Open in DICOM Viewer';
+                    btn.onclick = function(){ 
+                        // Add a small delay to ensure database consistency before opening viewer
+                        setTimeout(() => {
+                            window.location.href = '/dicom-viewer/?study=' + createdStudyIds[0];
+                        }, 1000);
+                    };
+                    document.getElementById('uploadSuccess').appendChild(btn);
+                }
+            } catch(_) {}
+        } else if (uploadedCount > 0) {
+            showNotification(`Upload completed with some errors. Processed ${uploadedCount} of ${totalFiles} files, created ${studiesCreated} studies.`, 'warning');
+            resetUploadState();
+        } else {
+            showNotification('Upload failed: ' + errors[0], 'error');
+            resetUploadState();
+        }
+    }
+
+    function showNotification(message, type = 'info') {
+        const alertClass = type === 'error' ? 'danger' : type;
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${alertClass} alert-dismissible fade show`;
+        alert.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+        alert.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        document.body.appendChild(alert);
+        setTimeout(() => { if (alert.parentNode) { alert.remove(); } }, 5000);
+    }
+
+    window.redirectToDashboard = function() {
+        // Add a small delay to ensure database consistency before redirecting
+        setTimeout(() => {
+            window.location.href = '{% url "worklist:dashboard" %}';
+        }, 1500);
+    };
+});
+</script>
+{% endblock %}

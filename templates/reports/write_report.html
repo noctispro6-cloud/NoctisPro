@@ -1,0 +1,527 @@
+{% extends 'base.html' %}
+
+{% block title %}Write Report - Noctis Pro PACS{% endblock %}
+
+{% block extra_css %}
+<style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-surface: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+        }
+
+    .report-editor-container {
+        background: var(--dark-bg);
+        min-height: 100vh;
+        padding: 2rem 0;
+    }
+
+    .study-info-panel {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .patient-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+
+    .patient-avatar {
+        background: var(--gradient-accent);
+        border-radius: 50%;
+        width: 60px;
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 1rem;
+        font-weight: 700;
+        font-size: 1.5rem;
+    }
+
+    .patient-details h3 {
+        color: var(--text-primary);
+        margin-bottom: 0.25rem;
+    }
+
+    .patient-details p {
+        color: var(--text-secondary);
+        margin-bottom: 0;
+    }
+
+    .study-metadata {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+
+    .metadata-item {
+        background: rgba(255, 255, 255, 0.05);
+        padding: 1rem;
+        border-radius: 8px;
+    }
+
+    .metadata-label {
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.5rem;
+    }
+
+    .metadata-value {
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+
+    .report-form-container {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        overflow: hidden;
+    }
+
+    .form-header {
+        background: var(--gradient-primary);
+        padding: 1.5rem;
+    }
+
+    .form-body {
+        padding: 2rem;
+    }
+
+    .form-section {
+        margin-bottom: 2rem;
+    }
+
+    .form-section h5 {
+        color: var(--text-primary);
+        margin-bottom: 1rem;
+        font-weight: 600;
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 0.5rem;
+    }
+
+    .form-textarea {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        color: var(--text-primary);
+        padding: 1rem;
+        min-height: 120px;
+        resize: vertical;
+        width: 100%;
+        font-family: 'Inter', sans-serif;
+        line-height: 1.6;
+    }
+
+    .form-textarea:focus {
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+        outline: none;
+    }
+
+    .macro-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .macro-btn {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 4px 12px;
+        font-size: 11px;
+        cursor: pointer;
+        border-radius: 2px;
+        transition: all 0.2s ease;
+    }
+
+    .macro-btn:hover {
+        background: var(--accent-color);
+        color: var(--primary-bg);
+    }
+
+    .ai-assist-panel {
+        background: linear-gradient(135deg, rgba(139, 69, 19, 0.1), rgba(160, 82, 45, 0.1));
+        border: 1px solid rgba(139, 69, 19, 0.3);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .ai-assist-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+
+    .ai-icon {
+        background: linear-gradient(135deg, #8b4513, #a0522d);
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 1rem;
+        color: white;
+    }
+
+    .status-controls {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        margin-bottom: 2rem;
+    }
+
+    .status-select {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        color: var(--text-primary);
+        padding: 0.75rem 1rem;
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 1rem;
+        justify-content: flex-end;
+        padding-top: 2rem;
+        border-top: 1px solid var(--border-color);
+    }
+
+    .btn-save {
+        background: var(--success-color);
+        border: none;
+        color: white;
+    }
+
+    .btn-save:hover {
+        background: #059669;
+        color: white;
+    }
+
+    .btn-preview {
+        background: var(--warning-color);
+        border: none;
+        color: white;
+    }
+
+    .btn-preview:hover {
+        background: #d97706;
+        color: white;
+    }
+
+    .image-viewer-panel {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        min-height: 400px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-secondary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="report-editor-container">
+    <div class="container-fluid">
+        <!-- Navigation -->
+        <div class="mb-4">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'worklist:dashboard' %}" class="text-accent">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'reports:report_list' %}" class="text-accent">Reports</a></li>
+                    <li class="breadcrumb-item active text-light">Write Report</li>
+                </ol>
+            </nav>
+        </div>
+
+        <div class="row">
+            <!-- Left Column - Study Info & Images -->
+            <div class="col-lg-4">
+                <!-- Study Information -->
+                <div class="study-info-panel">
+                    <div class="patient-header">
+                        <div class="patient-avatar">
+                            {{ study.patient.first_name|first }}{{ study.patient.last_name|first }}
+                        </div>
+                        <div class="patient-details">
+                            <h3>{{ study.patient.full_name|default:"Unknown Patient" }}</h3>
+                            <p>{{ study.patient.patient_id|default:"No ID" }} • {{ study.patient.date_of_birth|date:"M d, Y"|default:"DOB Unknown" }}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="study-metadata">
+                        <div class="metadata-item">
+                            <div class="metadata-label">Accession Number</div>
+                            <div class="metadata-value">{{ study.accession_number|default:"N/A" }}</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Study Date</div>
+                            <div class="metadata-value">{{ study.study_date|date:"M d, Y"|default:"N/A" }}</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Modality</div>
+                            <div class="metadata-value">{{ study.modality.name|default:"Unknown" }}</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Body Part</div>
+                            <div class="metadata-value">{{ study.body_part_examined|default:"Not specified" }}</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Referring Physician</div>
+                            <div class="metadata-value">{{ study.referring_physician|default:"Not specified" }}</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Study Description</div>
+                            <div class="metadata-value">{{ study.study_description|default:"Not specified" }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DICOM Image Viewer -->
+                <div class="image-viewer-panel">
+                    <div class="text-center">
+                        <i class="fas fa-image fa-3x mb-3"></i>
+                        <h5>DICOM Image Viewer</h5>
+                        <p>Click to open full DICOM viewer</p>
+                        <a href="{% url 'dicom_viewer:viewer' %}?study={{ study.id }}" class="btn-dicom-viewer">
+                            <i class="fas fa-external-link-alt"></i>Launch DICOM Viewer
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column - Report Form -->
+            <div class="col-lg-8">
+                <!-- AI Assistance Panel -->
+                <div class="ai-assist-panel">
+                    <div class="ai-assist-header">
+                        <div class="ai-icon">
+                            <i class="fas fa-brain"></i>
+                        </div>
+                        <div>
+                            <h5 class="text-light mb-0">AI Analysis Assistant</h5>
+                            <p class="text-muted mb-0">AI-powered preliminary findings and suggestions</p>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-medical" onclick="generateAIFindings()"  >
+                        <i class="fas fa-magic me-2"></i>Generate AI Findings
+                    </button>
+                </div>
+
+                <!-- Report Form -->
+                <div class="report-form-container">
+                    <div class="form-header">
+                        <h4 class="text-white mb-0">
+                            <i class="fas fa-file-medical me-2"></i>Radiology Report
+                        </h4>
+                        <div class="text-white-50 small mt-1">Status: {{ study.status|upper }}</div>
+                    </div>
+                    
+                    <div class="form-body">
+                        <form id="reportForm" method="post">
+                            {% csrf_token %}
+                            
+                            <!-- Status Control -->
+                            <div class="status-controls">
+                                <label for="reportStatus" class="form-label text-light">Report Status:</label>
+                                <select id="reportStatus" name="status" class="status-select">
+                                    <option value="draft" {% if report.status == 'draft' %}selected{% endif %}>Draft</option>
+                                    <option value="preliminary" {% if report.status == 'preliminary' %}selected{% endif %}>Preliminary</option>
+                                    <option value="final" {% if report.status == 'final' %}selected{% endif %}>Final</option>
+                                </select>
+                            </div>
+
+                            <!-- Clinical History -->
+                            <div class="form-section">
+                                <h5><i class="fas fa-history me-2"></i>Clinical History</h5>
+                                <div class="macro-buttons">
+                                    <button type="button" class="macro-btn" onclick="insertMacro('clinicalHistory', 'No significant clinical history.')" type="button"  >No History</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('clinicalHistory', 'Patient presents with...')" type="button"  >Presenting Complaint</button>
+                                </div>
+                                <textarea id="clinicalHistory" name="clinical_history" class="form-textarea" placeholder="Enter clinical history and indication for study...">{{ report.clinical_history|default:study.clinical_info }}</textarea>
+                            </div>
+
+                            <!-- Technique -->
+                            <div class="form-section">
+                                <h5><i class="fas fa-cogs me-2"></i>Technique</h5>
+                                <div class="macro-buttons">
+                                    <button type="button" class="macro-btn" onclick="insertMacro('technique', 'Standard protocol imaging performed.')" type="button"  >Standard Protocol</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('technique', 'Contrast-enhanced imaging performed.')" type="button"  >With Contrast</button>
+                                </div>
+                                <textarea id="technique" name="technique" class="form-textarea" placeholder="Describe imaging technique and protocols used...">{{ report.technique|default:"" }}</textarea>
+                            </div>
+
+                            <!-- Comparison -->
+                            <div class="form-section">
+                                <h5><i class="fas fa-exchange-alt me-2"></i>Comparison</h5>
+                                <div class="macro-buttons">
+                                    <button type="button" class="macro-btn" onclick="insertMacro('comparison', 'No prior studies available for comparison.')" type="button"  >No Priors</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('comparison', 'Compared to prior study dated...')" type="button"  >Prior Study</button>
+                                </div>
+                                <textarea id="comparison" name="comparison" class="form-textarea" placeholder="Comparison with prior studies...">{{ report.comparison|default:"" }}</textarea>
+                            </div>
+
+                            <!-- Findings -->
+                            <div class="form-section">
+                                <h5><i class="fas fa-search me-2"></i>Findings</h5>
+                                <div class="macro-buttons">
+                                    <button type="button" class="macro-btn" onclick="insertMacro('findings', 'Study is within normal limits.')" type="button"  >Normal Study</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('findings', 'No acute findings.')" type="button"  >No Acute Findings</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('findings', 'Findings consistent with...')" type="button"  >Abnormal Finding</button>
+                                </div>
+                                <textarea id="findings" name="findings" class="form-textarea" placeholder="Detailed description of findings..." rows="8">{{ report.findings|default:"" }}</textarea>
+                            </div>
+
+                            <!-- Impression -->
+                            <div class="form-section">
+                                <h5><i class="fas fa-bullseye me-2"></i>Impression</h5>
+                                <div class="macro-buttons">
+                                    <button type="button" class="macro-btn" onclick="insertMacro('impression', 'Normal study.')" type="button"  >Normal</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('impression', 'No significant abnormality.')" type="button"  >No Abnormality</button>
+                                </div>
+                                <textarea id="impression" name="impression" class="form-textarea" placeholder="Clinical impression and diagnosis...">{{ report.impression|default:"" }}</textarea>
+                            </div>
+
+                            <!-- Recommendations -->
+                            <div class="form-section">
+                                <h5><i class="fas fa-clipboard-list me-2"></i>Recommendations</h5>
+                                <div class="macro-buttons">
+                                    <button type="button" class="macro-btn" onclick="insertMacro('recommendations', 'No further imaging required.')" type="button"  >No Follow-up</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('recommendations', 'Follow-up imaging recommended.')" type="button"  >Follow-up</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('recommendations', 'Clinical correlation recommended.')" type="button"  >Clinical Correlation</button>
+                                </div>
+                                <textarea id="recommendations" name="recommendations" class="form-textarea" placeholder="Recommendations for follow-up or additional studies...">{{ report.recommendations|default:"" }}</textarea>
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div class="action-buttons">
+                                <button type="button" class="btn-control" onclick="previewReport()" type="button"  >
+                                    <i class="fas fa-eye me-2"></i>Preview
+                                </button>
+                                <button type="button" class="btn-control" onclick="exportDicomSR()" type="button"  >
+                                    <i class="fas fa-file-medical me-2"></i>Export DICOM SR
+                                </button>
+                                <a class="btn-control" href="{% url 'reports:print_report' study.id %}" target="_blank">
+                                    <i class="fas fa-print me-2"></i>Print/Letterhead View
+                                </a>
+                                <button type="button" class="btn-control" onclick="exportPDF()" type="button"  >
+                                    <i class="fas fa-file-pdf me-2"></i>Export PDF
+                                </button>
+                                <button type="button" class="btn-control" onclick="exportDOCX()" type="button"  >
+                                    <i class="fas fa-file-word me-2"></i>Export Word
+                                </button>
+                                <button type="submit" name="action" value="save" class="btn btn-save">
+                                    <i class="fas fa-save me-2"></i>Save Draft
+                                </button>
+                                <button type="submit" name="action" value="submit" onclick="document.getElementById('reportStatus').value='final'" class="btn btn-medical">
+                                    <i class="fas fa-paper-plane me-2"></i>Submit Final
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function insertMacro(fieldId, text) {
+    const textarea = document.getElementById(fieldId);
+    const currentText = textarea.value;
+    textarea.value = currentText + (currentText ? '\n\n' : '') + text;
+    textarea.focus();
+}
+
+function generateAIFindings() {
+	console.info('AI analysis feature is a stub.');
+}
+
+function previewReport() {
+	console.info('Report preview is a stub.');
+}
+
+async function exportDicomSR(){
+    try {
+        const studyId = {{ study.id }};
+        const r = await fetch(`/dicom-viewer/api/study/${studyId}/export-sr/`);
+        const j = await r.json();
+        if (j && j.success && j.download_url){
+            window.open(j.download_url, '_blank');
+        } else if (j && j.error){
+            alert('SR export failed: ' + j.error);
+        }
+    } catch(e){ alert('SR export failed'); }
+}
+
+function exportPDF(){ window.open(`/reports/export/pdf/{{ study.id }}/`, '_blank'); }
+function exportDOCX(){ window.open(`/reports/export/docx/{{ study.id }}/`, '_blank'); }
+
+// Auto-save functionality
+let autoSaveInterval;
+function startAutoSave() {
+    autoSaveInterval = setInterval(function() {
+        // Auto-save logic here
+        console.log('Auto-saving report...');
+    }, 30000); // Auto-save every 30 seconds
+}
+
+// Start auto-save when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    startAutoSave();
+});
+
+// Save before leaving page
+window.addEventListener('beforeunload', function(e) {
+    // Check if there are unsaved changes
+    const forms = document.querySelectorAll('textarea');
+    let hasChanges = false;
+    forms.forEach(function(textarea) {
+        if (textarea.value.trim() !== '') {
+            hasChanges = true;
+        }
+    });
+    
+    if (hasChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+    }
+});
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function generateAIFindings() {
+	console.info('AI analysis feature is a stub.');
+}
+function previewReport() {
+	console.info('Report preview is a stub.');
+}
+</script>
+{% endblock %}

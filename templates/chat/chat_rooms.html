@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Rooms - Noctis Pro PACS</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-bg: #252525;
+            --card-surface: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--primary-bg);
+            color: var(--text-primary);
+            font-size: 12px;
+            overflow: hidden;
+        }
+
+        .dashboard-container {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Top Navigation */
+        .top-navbar {
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 50px;
+        }
+
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .logo {
+            color: var(--accent-color);
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 2px;
+        }
+
+        .nav-tab {
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 6px 12px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+
+        .nav-tab.active {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            font-weight: bold;
+        }
+
+        .nav-tab:hover:not(.active) {
+            background: var(--card-bg);
+            color: var(--text-primary);
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-secondary);
+            font-size: 11px;
+        }
+
+        .user-avatar {
+            width: 24px;
+            height: 24px;
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 9px;
+        }
+
+        .worklist-btn {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 6px 12px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            text-decoration: none;
+        }
+
+        .worklist-btn:hover {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            border-color: var(--accent-color);
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: auto;
+            padding: 16px;
+        }
+
+        .content-header {
+            margin-bottom: 16px;
+        }
+
+        .page-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .page-subtitle {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .chat-rooms-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .chat-room-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .chat-room-card:hover {
+            border-color: var(--accent-color);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        .create-room-card {
+            background: var(--card-bg);
+            border: 2px dashed var(--border-color);
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .create-room-card:hover {
+            border-color: var(--accent-color);
+            background: rgba(0, 212, 255, 0.05);
+        }
+
+        .room-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .room-icon {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            font-size: 16px;
+        }
+
+        .room-info h5 {
+            color: var(--text-primary);
+            margin-bottom: 4px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .room-info p {
+            color: var(--text-secondary);
+            margin-bottom: 0;
+            font-size: 11px;
+        }
+
+        .room-stats {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .unread-badge {
+            background: var(--danger-color);
+            color: white;
+            border-radius: 12px;
+            padding: 2px 8px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .last-message {
+            color: var(--text-secondary);
+            font-size: 11px;
+            margin-top: 8px;
+        }
+
+        .room-type-direct .room-icon { background: var(--success-color); }
+        .room-type-facility .room-icon { background: var(--warning-color); }
+        .room-type-study .room-icon { background: var(--accent-color); }
+        .room-type-general .room-icon { background: var(--accent-color); }
+        .room-type-support .room-icon { background: var(--danger-color); }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state i {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+
+        .alert {
+            background: var(--card-bg);
+            border: 1px solid var(--warning-color);
+            border-left: 4px solid var(--warning-color);
+            border-radius: 4px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+        }
+
+        .btn-control {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 4px 8px;
+            font-size: 10px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .btn-control:hover {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            border-color: var(--accent-color);
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Top Navigation -->
+        <nav class="top-navbar">
+            <div class="nav-left">
+                <div class="logo">NOCTIS PRO</div>
+                <div class="nav-tabs">
+                    <a href="{% url 'worklist:dashboard' %}" class="nav-tab">WORKLIST</a>
+                    <a href="{% url 'reports:report_list' %}" class="nav-tab">REPORTS</a>
+                    <a href="{% url 'chat:chat_rooms' %}" class="nav-tab active">CHAT</a>
+                    {% if user.is_admin %}
+                    <a href="{% url 'admin_panel:dashboard' %}" class="nav-tab">ADMIN</a>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="nav-right">
+                <div class="user-info">
+                    <div class="user-avatar">{{ user.get_full_name|default:user.username|slice:":2"|upper }}</div>
+                    <div>
+                        <div>{{ user.get_full_name|default:user.username }}</div>
+                        <div style="color: var(--text-muted); font-size: 10px;">{{ user.role|title }}</div>
+                    </div>
+                </div>
+                <a href="{% url 'worklist:dashboard' %}" class="worklist-btn" title="Back to Dashboard">
+                    <i class="fas fa-arrow-left"></i> BACK
+                </a>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="content-header">
+                <div class="page-title">
+                    <i class="fas fa-comments"></i> Chat Rooms
+                </div>
+                <div class="page-subtitle">Communicate with your medical team</div>
+            </div>
+
+            <!-- Pending Invitations -->
+            {% if pending_invitations %}
+            <div class="alert">
+                <h6><i class="fas fa-envelope"></i> Pending Invitations</h6>
+                {% for invitation in pending_invitations %}
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span>{{ invitation.invited_by.get_full_name }} invited you to join "{{ invitation.room.name }}"</span>
+                    <div>
+                        <a href="{% url 'chat:join_room' invitation.room.id %}" class="btn-control" style="margin-right: 8px;">Accept</a>
+                        <button type="button" class="btn-control">Decline</button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Chat Rooms Grid -->
+            <div class="chat-rooms-grid">
+                <!-- Create New Room Card -->
+                <div class="create-room-card" onclick="createNewRoom()">
+                    <i class="fas fa-plus" style="font-size: 24px; color: var(--accent-color); margin-bottom: 12px;"></i>
+                    <h5 style="color: var(--accent-color); margin-bottom: 4px;">Create New Room</h5>
+                    <p style="color: var(--text-muted); font-size: 11px;">Start a new conversation</p>
+                </div>
+
+                <!-- User's Chat Rooms -->
+                {% for room in user_rooms %}
+                <div class="chat-room-card room-type-{{ room.room_type }}" onclick="joinRoom('{{ room.id }}')">
+                    <div class="room-header">
+                        <div class="room-icon">
+                            {% if room.room_type == 'direct' %}
+                                <i class="fas fa-user"></i>
+                            {% elif room.room_type == 'facility' %}
+                                <i class="fas fa-hospital"></i>
+                            {% elif room.room_type == 'study' %}
+                                <i class="fas fa-x-ray"></i>
+                            {% elif room.room_type == 'general' %}
+                                <i class="fas fa-users"></i>
+                            {% elif room.room_type == 'support' %}
+                                <i class="fas fa-tools"></i>
+                            {% else %}
+                                <i class="fas fa-comments"></i>
+                            {% endif %}
+                        </div>
+                        <div class="room-info">
+                            <h5>{{ room.name }}</h5>
+                            <p>{{ room.get_room_type_display }}{% if room.description %} • {{ room.description|truncatechars:50 }}{% endif %}</p>
+                        </div>
+                    </div>
+                    
+                    {% if room.latest_message %}
+                    <div class="last-message">
+                        <strong>{{ room.latest_message.sender.get_full_name|default:room.latest_message.sender.username }}:</strong> 
+                        {% if room.latest_message.message_type == 'text' %}
+                            {{ room.latest_message.content|truncatechars:60 }}
+                        {% elif room.latest_message.message_type == 'image' %}
+                            <i class="fas fa-image"></i> Image
+                        {% elif room.latest_message.message_type == 'file' %}
+                            <i class="fas fa-file"></i> {{ room.latest_message.attachment_name|default:"File" }}
+                        {% elif room.latest_message.message_type == 'study_link' %}
+                            <i class="fas fa-link"></i> Study Link
+                        {% else %}
+                            {{ room.latest_message.content|truncatechars:60 }}
+                        {% endif %}
+                    </div>
+                    {% endif %}
+
+                    <div class="room-stats">
+                        <span style="color: var(--text-muted); font-size: 10px;">
+                            {{ room.members.count }} member{{ room.members.count|pluralize }}
+                        </span>
+                        {% if room.unread_count %}
+                        <span class="unread-badge">{{ room.unread_count }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% empty %}
+                <div style="grid-column: 1 / -1;">
+                    <div class="empty-state">
+                        <i class="fas fa-comments"></i>
+                        <div style="font-size: 14px; margin-bottom: 8px;">No Chat Rooms</div>
+                        <div style="font-size: 12px;">Create your first chat room to get started</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Available Public Rooms -->
+            {% if available_rooms %}
+            <div style="margin-top: 24px;">
+                <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+                    <h6 style="color: var(--text-primary); margin-bottom: 4px;">
+                        <i class="fas fa-globe"></i> Available Public Rooms
+                    </h6>
+                    <p style="color: var(--text-muted); font-size: 11px; margin: 0;">Join these public rooms to connect with other users</p>
+                </div>
+
+                <div class="chat-rooms-grid">
+                    {% for room in available_rooms %}
+                    <div class="chat-room-card" onclick="joinRoom('{{ room.id }}')">
+                        <div class="room-header">
+                            <div class="room-icon">
+                                <i class="fas fa-globe"></i>
+                            </div>
+                            <div class="room-info">
+                                <h5>{{ room.name }}</h5>
+                                <p>{{ room.description|default:"Public room" }}</p>
+                            </div>
+                        </div>
+                        <div class="room-stats">
+                            <span style="color: var(--text-muted); font-size: 10px;">
+                                {{ room.members.count }} member{{ room.members.count|pluralize }}
+                            </span>
+                            <button type="button" class="btn-control" onclick="event.stopPropagation(); joinRoom('{{ room.id }}')"  >
+                                <i class="fas fa-sign-in-alt"></i> Join
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        function createNewRoom() {
+            // Redirect to create room page or show modal
+            window.location.href = "{% url 'chat:create_room' %}";
+        }
+
+        function joinRoom(roomId) {
+            window.location.href = `/chat/room/${roomId}/`;
+        }
+    </script>
+</body>
+</html>

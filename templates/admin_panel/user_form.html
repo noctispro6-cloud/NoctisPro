@@ -1,0 +1,875 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if edit_mode %}Edit User{% else %}Create User{% endif %} - Admin Panel{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+  <div class="row mb-4">
+    <div class="col-12 d-flex justify-content-between align-items-center">
+      <h1 class="text-white mb-0">
+        {% if edit_mode %}
+          <i class="fas fa-user-edit me-3"></i>Edit User: {{ user_obj.username }}
+        {% else %}
+          <i class="fas fa-user-plus me-3"></i>Create User
+        {% endif %}
+      </h1>
+      <a href="{% url 'admin_panel:user_management' %}" class="btn-control">
+        <i class="fas fa-arrow-left me-2"></i>Back to Users
+      </a>
+    </div>
+  </div>
+
+  <div class="card-medical p-4">
+    <!-- Progress indicator -->
+    <div class="progress-indicator mb-4">
+      <div class="step-indicator">
+        <div class="step active" data-step="1">
+          <div class="step-number">1</div>
+          <div class="step-label">Basic Info</div>
+        </div>
+        <div class="step" data-step="2">
+          <div class="step-number">2</div>
+          <div class="step-label">Role & Access</div>
+        </div>
+        <div class="step" data-step="3">
+          <div class="step-number">3</div>
+          <div class="step-label">Professional Details</div>
+        </div>
+      </div>
+    </div>
+
+    <form method="post" class="multi-step-form">
+      {% csrf_token %}
+      
+      <!-- Step 1: Basic Information -->
+      <div class="form-step active" data-step="1">
+        <h3 class="text-white mb-4"><i class="fas fa-user me-2"></i>Basic Information</h3>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label text-white" for="id_username">
+              <i class="fas fa-user-tag me-2"></i>Username <span class="text-danger">*</span>
+            </label>
+            {{ form.username }}
+            {% if form.username.help_text %}
+            <div class="form-text text-muted">{{ form.username.help_text }}</div>
+            {% else %}
+            <div class="form-text text-muted">Username must be unique and will be used for login</div>
+            {% endif %}
+            {% if form.username.errors %}
+              {% for error in form.username.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          <div class="col-md-6">
+            <label class="form-label text-white" for="id_email">
+              <i class="fas fa-envelope me-2"></i>Email Address
+            </label>
+            {{ form.email }}
+            {% if form.email.help_text %}
+            <div class="form-text text-muted">{{ form.email.help_text }}</div>
+            {% else %}
+            <div class="form-text text-muted">Used for notifications and password recovery</div>
+            {% endif %}
+            {% if form.email.errors %}
+              {% for error in form.email.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          <div class="col-md-6">
+            <label class="form-label text-white" for="id_first_name">
+              <i class="fas fa-id-card me-2"></i>First Name
+            </label>
+            {{ form.first_name }}
+            {% if form.first_name.errors %}
+              {% for error in form.first_name.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          <div class="col-md-6">
+            <label class="form-label text-white" for="id_last_name">
+              <i class="fas fa-id-card me-2"></i>Last Name
+            </label>
+            {{ form.last_name }}
+            {% if form.last_name.errors %}
+              {% for error in form.last_name.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2: Role & Access -->
+      <div class="form-step" data-step="2">
+        <h3 class="text-white mb-4"><i class="fas fa-key me-2"></i>Role & Access</h3>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label text-white" for="id_role">
+              <i class="fas fa-user-shield me-2"></i>User Role <span class="text-danger">*</span>
+            </label>
+            {{ form.role }}
+            {% if form.role.errors %}
+              {% for error in form.role.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+            <div class="form-text text-muted">
+              <div class="role-descriptions mt-2">
+                <div class="role-desc" data-role="admin">
+                  <strong>Administrator:</strong> Full system access, user management, system configuration
+                </div>
+                <div class="role-desc" data-role="radiologist">
+                  <strong>Radiologist:</strong> DICOM viewing, reporting, measurements. Can work independently or with facilities
+                </div>
+                <div class="role-desc" data-role="facility">
+                  <strong>Facility User:</strong> Access limited to assigned facility's studies and data
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label text-white" for="id_facility">
+              <i class="fas fa-hospital me-2"></i>Facility Assignment
+              <button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="refreshFacilities" title="Refresh facility list">
+                <i class="fas fa-sync-alt"></i>
+              </button>
+            </label>
+            <div class="input-group">
+              {{ form.facility }}
+              <button type="button" class="btn-control" onclick="window.open('{% url 'admin_panel:facility_create' %}', '_blank')" type="button" title="Add new facility">
+                <i class="fas fa-plus"></i>
+              </button>
+            </div>
+            {% if form.facility.errors %}
+              {% for error in form.facility.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+            <!-- Facility status info -->
+            {% if facilities_count %}
+            <div class="form-text text-info mt-1">
+              <small><i class="fas fa-info-circle me-1"></i>{{ facilities_count }} active facilit{{ facilities_count|pluralize:"y,ies" }} available</small>
+            </div>
+            {% else %}
+            <div class="form-text text-warning mt-1">
+              <small><i class="fas fa-exclamation-triangle me-1"></i>No active facilities found. Please <a href="{% url 'admin_panel:facility_create' %}" class="text-warning">add facilities first</a>.</small>
+            </div>
+            {% endif %}
+            <div class="form-text text-muted">
+              <small id="facilityHelp">
+                <span class="facility-required" style="display: none;">
+                  <i class="fas fa-exclamation-triangle text-warning me-1"></i>Facility assignment is required for Facility Users
+                </span>
+                <span class="facility-optional">
+                  <i class="fas fa-info-circle text-info me-1"></i>Optional for Radiologists, required for Facility Users
+                </span>
+              </small>
+            </div>
+          </div>
+          {% if edit_mode %}
+          <div class="col-md-6">
+            <label class="form-label text-white" for="id_password">
+              <i class="fas fa-lock me-2"></i>New Password
+            </label>
+            {{ form.password }}
+            {% if form.password.help_text %}
+            <div class="form-text text-muted">{{ form.password.help_text }}</div>
+            {% endif %}
+            {% if form.password.errors %}
+              {% for error in form.password.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          <div class="col-md-6">
+            <label class="form-label text-white" for="id_confirm_password">
+              <i class="fas fa-lock me-2"></i>Confirm New Password
+            </label>
+            {{ form.confirm_password }}
+            {% if form.confirm_password.errors %}
+              {% for error in form.confirm_password.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          {% else %}
+          <div class="col-md-6">
+            <label class="form-label text-white" for="id_password1">
+              <i class="fas fa-lock me-2"></i>Password <span class="text-danger">*</span>
+            </label>
+            {{ form.password1 }}
+            {% if form.password1.help_text %}
+            <div class="form-text text-muted">{{ form.password1.help_text }}</div>
+            {% else %}
+            <div class="form-text text-muted">Password must be at least 8 characters long</div>
+            {% endif %}
+            {% if form.password1.errors %}
+              {% for error in form.password1.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          <div class="col-md-6">
+            <label class="form-label text-white" for="id_password2">
+              <i class="fas fa-lock me-2"></i>Confirm Password <span class="text-danger">*</span>
+            </label>
+            {{ form.password2 }}
+            {% if form.password2.errors %}
+              {% for error in form.password2.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Step 3: Professional Details -->
+      <div class="form-step" data-step="3">
+        <h3 class="text-white mb-4"><i class="fas fa-stethoscope me-2"></i>Professional Details</h3>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label text-white" for="id_phone">
+              <i class="fas fa-phone me-2"></i>Phone Number
+            </label>
+            {{ form.phone }}
+            {% if form.phone.help_text %}
+            <div class="form-text text-muted">{{ form.phone.help_text }}</div>
+            {% else %}
+            <div class="form-text text-muted">Contact number for professional communication</div>
+            {% endif %}
+            {% if form.phone.errors %}
+              {% for error in form.phone.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          <div class="col-md-6">
+            <label class="form-label text-white" for="id_license_number">
+              <i class="fas fa-certificate me-2"></i>License Number
+            </label>
+            {{ form.license_number }}
+            {% if form.license_number.help_text %}
+            <div class="form-text text-muted">{{ form.license_number.help_text }}</div>
+            {% else %}
+            <div class="form-text text-muted">Medical or professional license identifier</div>
+            {% endif %}
+            {% if form.license_number.errors %}
+              {% for error in form.license_number.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          <div class="col-md-12">
+            <label class="form-label text-white" for="id_specialization">
+              <i class="fas fa-user-md me-2"></i>Specialization
+            </label>
+            {{ form.specialization }}
+            {% if form.specialization.help_text %}
+            <div class="form-text text-muted">{{ form.specialization.help_text }}</div>
+            {% else %}
+            <div class="form-text text-muted">Area of medical specialization or expertise</div>
+            {% endif %}
+            {% if form.specialization.errors %}
+              {% for error in form.specialization.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          
+          {% if edit_mode %}
+          <!-- User Status Controls (Edit Mode Only) -->
+          <div class="col-md-12 mt-4">
+            <h5 class="text-white mb-3"><i class="fas fa-toggle-on me-2"></i>User Status</h5>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <div class="form-check form-switch">
+                  {{ form.is_active }}
+                  <label class="form-check-label text-white" for="id_is_active">
+                    <i class="fas fa-user-check me-2"></i>Active User
+                  </label>
+                  <div class="form-text text-muted">User can log in and access the system</div>
+                  {% if form.is_active.errors %}
+                    {% for error in form.is_active.errors %}
+                      <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
+                  {% endif %}
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-check form-switch">
+                  {{ form.is_verified }}
+                  <label class="form-check-label text-white" for="id_is_verified">
+                    <i class="fas fa-user-shield me-2"></i>Verified User
+                  </label>
+                  <div class="form-text text-muted">User has been verified by an administrator</div>
+                  {% if form.is_verified.errors %}
+                    {% for error in form.is_verified.errors %}
+                      <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Form Navigation -->
+      <div class="form-navigation mt-4">
+        <div class="d-flex justify-content-between">
+          <button type="button" class="btn-control" id="prevBtn" style="display: none;">
+            <i class="fas fa-arrow-left me-2"></i>Previous
+          </button>
+          <button type="button" class="btn-control" id="nextBtn">
+            Next <i class="fas fa-arrow-right ms-2"></i>
+          </button>
+          <button type="submit" class="btn-control primary" id="submitBtn" style="display: none;">
+            <i class="fas fa-save me-2"></i>{% if edit_mode %}Update User{% else %}Create User{% endif %}
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-surface: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+        }
+
+    .navbar-medical {
+        background: var(--gradient-primary);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    .btn-control {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 8px 16px;
+        font-size: 14px;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        text-decoration: none;
+    }
+
+    /* Multi-step form styles */
+    .progress-indicator {
+        margin-bottom: 2rem;
+    }
+
+    .step-indicator {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 2rem;
+        position: relative;
+    }
+
+    .step-indicator::before {
+        content: '';
+        position: absolute;
+        top: 20px;
+        left: 20%;
+        right: 20%;
+        height: 2px;
+        background: var(--border-color);
+        z-index: 1;
+    }
+
+    .step {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+        position: relative;
+        z-index: 2;
+    }
+
+    .step-number {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: var(--card-bg);
+        border: 2px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        color: var(--text-secondary);
+        transition: all 0.3s ease;
+    }
+
+    .step-label {
+        font-size: 12px;
+        color: var(--text-secondary);
+        text-align: center;
+        transition: all 0.3s ease;
+    }
+
+    .step.active .step-number {
+        background: var(--accent-color);
+        border-color: var(--accent-color);
+        color: var(--primary-bg);
+    }
+
+    .step.active .step-label {
+        color: var(--accent-color);
+        font-weight: bold;
+    }
+
+    .step.completed .step-number {
+        background: var(--success-color, #28a745);
+        border-color: var(--success-color, #28a745);
+        color: white;
+    }
+
+    .step.completed .step-label {
+        color: var(--success-color, #28a745);
+    }
+
+    /* Form step styles */
+    .form-step {
+        display: none;
+        animation: fadeIn 0.3s ease-in;
+    }
+
+    .form-step.active {
+        display: block;
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateX(20px); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+
+    /* Role descriptions */
+    .role-descriptions {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+        padding: 0.75rem;
+        margin-top: 0.5rem;
+        min-height: 60px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .role-desc {
+        display: none;
+        color: var(--text-secondary);
+        font-size: 13px;
+        line-height: 1.4;
+        animation: fadeIn 0.3s ease-in;
+    }
+
+    .role-desc.active {
+        display: block;
+    }
+    
+    .role-descriptions:empty::after {
+        content: "Select a role to see description";
+        color: var(--text-muted);
+        font-style: italic;
+        font-size: 12px;
+    }
+
+    /* Form enhancements */
+    .form-control-medical:focus {
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+    }
+
+    .form-text.text-muted {
+        color: var(--text-secondary) !important;
+        font-size: 12px;
+    }
+
+    .text-danger {
+        color: #dc3545 !important;
+    }
+
+    .text-warning {
+        color: #ffc107 !important;
+    }
+
+    .text-info {
+        color: #17a2b8 !important;
+    }
+
+    .btn-control:hover {
+        background: var(--accent-color);
+        color: var(--primary-bg);
+    }
+    
+    .btn-outline-secondary {
+        border-color: var(--border-color);
+        color: var(--text-secondary);
+    }
+    
+    .btn-outline-secondary:hover {
+        background-color: var(--accent-color);
+        border-color: var(--accent-color);
+        color: var(--primary-bg);
+    }
+    
+    .input-group .btn {
+        border-radius: 0 4px 4px 0;
+    }
+    
+    .input-group .form-select {
+        border-radius: 4px 0 0 4px;
+    }
+
+    .form-select {
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m1 6 7 7 7-7'/%3e%3c/svg%3e");
+    }
+
+    .form-check-input:checked {
+        background-color: var(--accent-color);
+        border-color: var(--accent-color);
+    }
+
+    .form-check-input:focus {
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 0.25rem rgba(14, 165, 233, 0.25);
+    }
+
+    .form-text {
+        margin-top: 0.25rem;
+    }
+
+    hr {
+        opacity: 0.3;
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const roleSelect = document.getElementById('id_role') || document.getElementById('role');
+    const facilitySelect = document.getElementById('id_facility') || document.getElementById('facility');
+    const facilityHelp = document.getElementById('facilityHelp');
+    const password = document.getElementById('id_password1') || document.getElementById('password');
+    const passwordConfirm = document.getElementById('id_password2') || document.getElementById('password_confirm');
+    const refreshFacilitiesBtn = document.getElementById('refreshFacilities');
+    
+    // Multi-step form elements
+    const nextBtn = document.getElementById('nextBtn');
+    const prevBtn = document.getElementById('prevBtn');
+    const submitBtn = document.getElementById('submitBtn');
+    const formSteps = document.querySelectorAll('.form-step');
+    const stepIndicators = document.querySelectorAll('.step');
+    
+    let currentStep = 1;
+    const totalSteps = formSteps.length;
+
+    function updateFacilityRequirement() {
+      const selectedRole = roleSelect.value;
+      const required = selectedRole === 'facility';
+      facilitySelect.required = required;
+      facilityHelp.innerText = required ? 'Facility is required for Facility Users' : 'Assign user to a specific facility (required for Facility Users)';
+      
+      // Show/hide role descriptions
+      const roleDescriptions = document.querySelectorAll('.role-desc');
+      roleDescriptions.forEach(desc => {
+        desc.classList.remove('active');
+      });
+      
+      if (selectedRole) {
+        const activeDesc = document.querySelector(`.role-desc[data-role="${selectedRole}"]`);
+        if (activeDesc) {
+          activeDesc.classList.add('active');
+        }
+      }
+    }
+
+    function validatePasswordMatch() {
+      if (password.value !== passwordConfirm.value) {
+        passwordConfirm.setCustomValidity("Passwords don't match");
+      } else {
+        passwordConfirm.setCustomValidity('');
+      }
+    }
+
+    function showStep(step) {
+      // Hide all steps
+      formSteps.forEach(formStep => {
+        formStep.classList.remove('active');
+      });
+      
+      // Show current step
+      const currentFormStep = document.querySelector(`.form-step[data-step="${step}"]`);
+      if (currentFormStep) {
+        currentFormStep.classList.add('active');
+      }
+      
+      // Update step indicators
+      stepIndicators.forEach((indicator, index) => {
+        indicator.classList.remove('active', 'completed');
+        if (index + 1 < step) {
+          indicator.classList.add('completed');
+        } else if (index + 1 === step) {
+          indicator.classList.add('active');
+        }
+      });
+      
+      // Update navigation buttons
+      prevBtn.style.display = step > 1 ? 'block' : 'none';
+      nextBtn.style.display = step < totalSteps ? 'block' : 'none';
+      submitBtn.style.display = step === totalSteps ? 'block' : 'none';
+    }
+
+    function validateCurrentStep() {
+      console.log('Validating step:', currentStep);
+      const currentFormStep = document.querySelector(`.form-step[data-step="${currentStep}"]`);
+      
+      if (!currentFormStep) {
+        console.error('Current form step not found:', currentStep);
+        // Try to find any visible form step as fallback
+        const visibleStep = document.querySelector('.form-step.active, .form-step:not([style*="display: none"])');
+        if (visibleStep) {
+          console.log('Using visible step as fallback');
+          // Fix: assign to the variable, not redeclare it
+          return validateStepFields(visibleStep);
+        } else {
+          return false;
+        }
+      }
+      
+      return validateStepFields(currentFormStep);
+    }
+    
+    function validateStepFields(currentFormStep) {
+      
+      const requiredFields = currentFormStep.querySelectorAll('[required]');
+      console.log('Required fields in step:', requiredFields.length);
+      
+      let isValid = true;
+      let firstInvalidField = null;
+      
+      // Clear existing error messages
+      currentFormStep.querySelectorAll('.validation-error').forEach(error => error.remove());
+      
+      for (let field of requiredFields) {
+        // Skip hidden fields
+        if (field.type === 'hidden' || field.offsetParent === null) {
+          continue;
+        }
+        
+        let fieldValue = field.value ? field.value.trim() : '';
+        if (!fieldValue) {
+          console.log('Required field missing value:', field.name || field.id);
+          
+          // Show visual feedback
+          field.style.borderColor = '#ff4444';
+          field.style.boxShadow = '0 0 5px rgba(255, 68, 68, 0.3)';
+          
+          if (!firstInvalidField) {
+            firstInvalidField = field;
+          }
+          
+          // Add temporary error message
+          let errorMsg = document.createElement('div');
+          errorMsg.className = 'validation-error';
+          errorMsg.style.cssText = 'color: #ff4444; font-size: 11px; margin-top: 4px; animation: fadeIn 0.3s ease;';
+          errorMsg.textContent = 'This field is required';
+          
+          // Insert after the field
+          field.parentNode.insertBefore(errorMsg, field.nextSibling);
+          
+          // Remove error styling on input
+          field.addEventListener('input', function() {
+            field.style.borderColor = '';
+            field.style.boxShadow = '';
+            const errorMsg = field.parentNode.querySelector('.validation-error');
+            if (errorMsg) errorMsg.remove();
+          }, { once: true });
+          
+          isValid = false;
+        }
+      }
+      
+      // Focus on first invalid field
+      if (firstInvalidField) {
+        setTimeout(() => {
+          firstInvalidField.focus();
+          firstInvalidField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 200);
+      }
+      
+      if (!isValid) {
+        return false;
+      }
+      
+      // Additional validation for step 2 (passwords)
+      if (currentStep === 2) {
+        if (password && passwordConfirm && password.value !== passwordConfirm.value) {
+          console.log('Passwords do not match');
+          passwordConfirm.style.borderColor = '#ff4444';
+          passwordConfirm.focus();
+          
+          let errorMsg = passwordConfirm.parentNode.querySelector('.validation-error');
+          if (!errorMsg) {
+            errorMsg = document.createElement('div');
+            errorMsg.className = 'validation-error';
+            errorMsg.style.cssText = 'color: #ff4444; font-size: 11px; margin-top: 4px;';
+            passwordConfirm.parentNode.appendChild(errorMsg);
+          }
+          errorMsg.textContent = 'Passwords do not match';
+          
+          return false;
+        }
+        
+        if (roleSelect && facilitySelect && roleSelect.value === 'facility' && !facilitySelect.value) {
+          console.log('Facility required for facility user');
+          facilitySelect.style.borderColor = '#ff4444';
+          facilitySelect.focus();
+          
+          let errorMsg = facilitySelect.parentNode.querySelector('.validation-error');
+          if (!errorMsg) {
+            errorMsg = document.createElement('div');
+            errorMsg.className = 'validation-error';
+            errorMsg.style.cssText = 'color: #ff4444; font-size: 11px; margin-top: 4px;';
+            facilitySelect.parentNode.appendChild(errorMsg);
+          }
+          errorMsg.textContent = 'Facility is required for facility users';
+          
+          return false;
+        }
+      }
+      
+      console.log('Step validation passed');
+      return true;
+    }
+
+    // Refresh facilities function
+    function refreshFacilities() {
+      refreshFacilitiesBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      refreshFacilitiesBtn.disabled = true;
+      
+      fetch(window.location.href)
+        .then(response => response.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(html, 'text/html');
+          const newFacilitySelect = doc.getElementById('facility');
+          
+          if (newFacilitySelect) {
+            const currentValue = facilitySelect.value;
+            facilitySelect.innerHTML = newFacilitySelect.innerHTML;
+            facilitySelect.value = currentValue; // Restore selection if it still exists
+          }
+          
+          refreshFacilitiesBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+          refreshFacilitiesBtn.disabled = false;
+        })
+        .catch(error => {
+          console.error('Error refreshing facilities:', error);
+          refreshFacilitiesBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+          refreshFacilitiesBtn.disabled = false;
+        });
+    }
+
+    // Event listeners
+    if (roleSelect) roleSelect.addEventListener('change', updateFacilityRequirement);
+    if (password) password.addEventListener('input', validatePasswordMatch);
+    if (passwordConfirm) passwordConfirm.addEventListener('input', validatePasswordMatch);
+    refreshFacilitiesBtn.addEventListener('click', refreshFacilities);
+
+    nextBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      console.log('Next button clicked, current step:', currentStep);
+      
+      // Add visual feedback
+      nextBtn.disabled = true;
+      nextBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Validating...';
+      
+      // Use setTimeout to allow UI to update
+      setTimeout(() => {
+        try {
+          if (validateCurrentStep()) {
+            console.log('Validation passed, moving to next step');
+            currentStep++;
+            showStep(currentStep);
+            
+            // Show success feedback
+            const currentStepElement = document.querySelector(`.form-step[data-step="${currentStep-1}"]`);
+            if (currentStepElement) {
+              currentStepElement.style.borderLeft = '4px solid #00ff88';
+              setTimeout(() => {
+                currentStepElement.style.borderLeft = '';
+              }, 2000);
+            }
+          } else {
+            console.log('Validation failed for step:', currentStep);
+            
+            // Show error feedback
+            const currentStepElement = document.querySelector(`.form-step[data-step="${currentStep}"]`);
+            if (currentStepElement) {
+              currentStepElement.style.borderLeft = '4px solid #ff4444';
+              setTimeout(() => {
+                currentStepElement.style.borderLeft = '';
+              }, 3000);
+            }
+          }
+        } catch (error) {
+          console.error('Error in next button handler:', error);
+          alert('An error occurred while validating the form. Please check the console for details.');
+        } finally {
+          // Reset button state
+          nextBtn.disabled = false;
+          nextBtn.innerHTML = 'Next <i class="fas fa-arrow-right ms-2"></i>';
+        }
+      }, 100);
+    });
+
+    prevBtn.addEventListener('click', function() {
+      if (currentStep > 1) {
+        currentStep--;
+        showStep(currentStep);
+      }
+    });
+
+    // Initialize
+    if (roleSelect && facilitySelect) updateFacilityRequirement();
+    showStep(currentStep);
+    
+    // Show default role description if a role is pre-selected
+    if (roleSelect && roleSelect.value) {
+      const activeDesc = document.querySelector(`.role-desc[data-role="${roleSelect.value}"]`);
+      if (activeDesc) {
+        activeDesc.classList.add('active');
+      }
+    }
+    
+    // Debug facility count for troubleshooting
+    console.log('Facility dropdown options:', facilitySelect.options.length);
+    for (let i = 0; i < facilitySelect.options.length; i++) {
+      console.log(`  Option ${i}: value="${facilitySelect.options[i].value}", text="${facilitySelect.options[i].text}"`);
+    }
+  })
+</script>
+{% endblock %}

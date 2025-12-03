@@ -1,0 +1,388 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Print Settings - DICOM Viewer{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">
+                        <i class="fas fa-print"></i> DICOM Image Print Settings
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Configure default settings for printing DICOM images on glossy photo paper.</p>
+                    
+                    {% if messages %}
+                        {% for message in messages %}
+                            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+
+                    <form method="post">
+                        {% csrf_token %}
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="default_printer" class="form-label">
+                                        <i class="fas fa-printer"></i> Default Printer
+                                    </label>
+                                    <select class="form-select" id="default_printer" name="default_printer">
+                                        <option value="">Loading printers...</option>
+                                    </select>
+                                    <div class="form-text">Select the default printer for DICOM images</div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="default_paper_size" class="form-label">
+                                        <i class="fas fa-file"></i> Paper Size
+                                    </label>
+                                    <select class="form-select" id="default_paper_size" name="default_paper_size">
+                                        <option value="A4" {% if current_settings.default_paper_size == 'A4' %}selected{% endif %}>A4 (210 × 297 mm)</option>
+                                        <option value="Letter" {% if current_settings.default_paper_size == 'Letter' %}selected{% endif %}>Letter (8.5 × 11 in)</option>
+                                    </select>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="default_paper_type" class="form-label">
+                                        <i class="fas fa-image"></i> Paper Type
+                                    </label>
+                                    <select class="form-select" id="default_paper_type" name="default_paper_type">
+                                        <option value="glossy" {% if current_settings.default_paper_type == 'glossy' %}selected{% endif %}>
+                                            🌟 Glossy Photo Paper (Recommended for Medical Images)
+                                        </option>
+                                        <option value="matte" {% if current_settings.default_paper_type == 'matte' %}selected{% endif %}>Matte Paper</option>
+                                        <option value="plain" {% if current_settings.default_paper_type == 'plain' %}selected{% endif %}>Plain Paper</option>
+                                    </select>
+                                    <div class="form-text text-info">
+                                        <i class="fas fa-info-circle"></i> Glossy photo paper provides the best quality for medical images
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="default_quality" class="form-label">
+                                        <i class="fas fa-star"></i> Print Quality
+                                    </label>
+                                    <select class="form-select" id="default_quality" name="default_quality">
+                                        <option value="high" {% if current_settings.default_quality == 'high' %}selected{% endif %}>
+                                            🎯 High Quality (1200 DPI) - Recommended
+                                        </option>
+                                        <option value="normal" {% if current_settings.default_quality == 'normal' %}selected{% endif %}>Normal Quality (600 DPI)</option>
+                                        <option value="draft" {% if current_settings.default_quality == 'draft' %}selected{% endif %}>Draft Quality (300 DPI)</option>
+                                    </select>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label">
+                                        <i class="fas fa-check-circle"></i> Print Quality Guidelines
+                                    </label>
+                                    <div class="card bg-light">
+                                        <div class="card-body p-3">
+                                            <ul class="mb-0 small">
+                                                <li><strong>High Quality (1200 DPI):</strong> Best for diagnostic images</li>
+                                                <li><strong>Glossy Paper:</strong> Superior contrast and detail</li>
+                                                <li><strong>Color Mode:</strong> RGB for accurate representation</li>
+                                                <li><strong>Resolution:</strong> Maximum available for clarity</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <button type="button" id="testPrinter" class="btn btn-outline-primary">
+                                        <i class="fas fa-print"></i> Test Printer
+                                    </button>
+                                    <button type="button" id="refreshPrinters" class="btn btn-outline-secondary">
+                                        <i class="fas fa-sync"></i> Refresh Printers
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <hr>
+
+                        <div class="row">
+                            <div class="col-md-12">
+                                <h5><i class="fas fa-cog"></i> Advanced Settings</h5>
+                                
+                                <div class="alert alert-info">
+                                    <i class="fas fa-lightbulb"></i> 
+                                    <strong>Tip:</strong> For best results with medical images, use glossy photo paper 
+                                    with 200-300 GSM weight and ensure your printer supports high-resolution printing.
+                                </div>
+
+                                <div class="mb-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="include_patient_info" checked>
+                                        <label class="form-check-label" for="include_patient_info">
+                                            Include patient information on printouts
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="include_timestamp" checked>
+                                        <label class="form-check-label" for="include_timestamp">
+                                            Include print timestamp
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="include_facility_info" checked>
+                                        <label class="form-check-label" for="include_facility_info">
+                                            Include facility information
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-between">
+                            <a href="{% url 'dicom_viewer:viewer' %}" class="btn btn-secondary">
+                                <i class="fas fa-arrow-left"></i> Back to Viewer
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save"></i> Save Settings
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Printer Status Panel -->
+            <div class="card shadow mt-4">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-printer"></i> Printer Status
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="printerStatus">
+                        <div class="text-center">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Checking printer status...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Clean toast notification system
+function showToast(message, type = 'info', duration = 3000) {
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #252525;
+        border: 1px solid #404040;
+        border-left: 4px solid ${type === 'success' ? '#00ff88' : type === 'error' ? '#ff4444' : '#00d4ff'};
+        color: #ffffff;
+        padding: 8px 12px;
+        border-radius: 3px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        z-index: 2000;
+        font-size: 11px;
+        max-width: 280px;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        opacity: 0.95;
+    `;
+    
+    toast.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'exclamation-triangle' : 'info-circle'}" style="font-size: 10px;"></i>
+            <span>${message}</span>
+        </div>
+    `;
+    
+    document.body.appendChild(toast);
+    
+    // Slide in
+    setTimeout(() => {
+        toast.style.transform = 'translateX(0)';
+    }, 10);
+    
+    // Auto-remove
+    setTimeout(() => {
+        toast.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.remove();
+            }
+        }, 300);
+    }, duration);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const printerSelect = document.getElementById('default_printer');
+    const refreshBtn = document.getElementById('refreshPrinters');
+    const testBtn = document.getElementById('testPrinter');
+    const statusDiv = document.getElementById('printerStatus');
+
+    // Load available printers
+    async function loadPrinters() {
+        try {
+            const response = await fetch('/dicom-viewer/print/printers/');
+            const data = await response.json();
+            
+            printerSelect.innerHTML = '';
+            
+            if (data.success && data.printers.length > 0) {
+                data.printers.forEach(printer => {
+                    const option = document.createElement('option');
+                    option.value = printer.name;
+                    option.textContent = `${printer.name} - ${printer.description}`;
+                    
+                    // Select current default
+                    if (printer.name === '{{ current_settings.default_printer }}') {
+                        option.selected = true;
+                    }
+                    
+                    printerSelect.appendChild(option);
+                });
+            } else {
+                printerSelect.innerHTML = '<option value="">No printers available</option>';
+            }
+
+            // Update status display
+            updatePrinterStatus(data.printers);
+            
+        } catch (error) {
+            console.error('Error loading printers:', error);
+            printerSelect.innerHTML = '<option value="">Error loading printers</option>';
+        }
+    }
+
+    // Update printer status display
+    function updatePrinterStatus(printers) {
+        if (!printers || printers.length === 0) {
+            statusDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>No Printers Found</strong><br>
+                    Please ensure CUPS is running and printers are configured.
+                    <br><br>
+                    <strong>Quick Setup:</strong><br>
+                    1. Connect your printer<br>
+                    2. Open <a href="http://localhost:631" target="_blank">CUPS Admin (localhost:631)</a><br>
+                    3. Add your printer through the web interface<br>
+                    4. Refresh this page
+                </div>
+            `;
+            return;
+        }
+
+        let statusHtml = '<div class="row">';
+        printers.forEach(printer => {
+            const statusClass = printer.accepts_jobs ? 'success' : 'warning';
+            const statusIcon = printer.accepts_jobs ? 'check-circle' : 'exclamation-triangle';
+            
+            statusHtml += `
+                <div class="col-md-6 mb-3">
+                    <div class="card border-${statusClass}">
+                        <div class="card-body">
+                            <h6 class="card-title">
+                                <i class="fas fa-${statusIcon} text-${statusClass}"></i>
+                                ${printer.name}
+                            </h6>
+                            <p class="card-text small">
+                                <strong>Description:</strong> ${printer.description}<br>
+                                <strong>Location:</strong> ${printer.location || 'Not specified'}<br>
+                                <strong>Status:</strong> ${printer.state}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        statusHtml += '</div>';
+        
+        statusDiv.innerHTML = statusHtml;
+    }
+
+    // Test printer functionality
+    testBtn.addEventListener('click', async function() {
+        const selectedPrinter = printerSelect.value;
+        if (!selectedPrinter) {
+            alert('Please select a printer first');
+            return;
+        }
+
+        testBtn.disabled = true;
+        testBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+
+        try {
+            // Create test print data
+            const canvas = document.createElement('canvas');
+            canvas.width = 800;
+            canvas.height = 600;
+            const ctx = canvas.getContext('2d');
+            
+            // Create test image
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, 800, 600);
+            ctx.fillStyle = '#000000';
+            ctx.font = '24px Arial';
+            ctx.fillText('NoctisPro Print Test', 50, 100);
+            ctx.fillText('Printer: ' + selectedPrinter, 50, 150);
+            ctx.fillText('Date: ' + new Date().toLocaleString(), 50, 200);
+            ctx.fillText('Quality: High (Glossy Paper)', 50, 250);
+            
+            const imageData = canvas.toDataURL('image/png', 1.0);
+            
+            // Submit test print
+            const formData = new FormData();
+            formData.append('image_data', imageData);
+            formData.append('printer_name', selectedPrinter);
+            formData.append('paper_type', 'glossy');
+            formData.append('print_quality', 'high');
+            formData.append('copies', '1');
+            formData.append('patient_name', 'Test Patient');
+            formData.append('study_date', new Date().toISOString().split('T')[0]);
+            formData.append('modality', 'TEST');
+            formData.append('series_description', 'Print Test');
+            formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+            
+            const response = await fetch('/dicom-viewer/print/image/', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                console.log('✅ Test print sent successfully:', result.message);
+                showToast('Test print sent successfully', 'success');
+            } else {
+                console.error('❌ Test print failed:', result.error);
+                showToast('Test print failed', 'error');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error testing printer:', error.message);
+            showToast('Printer test error', 'error');
+        } finally {
+            testBtn.disabled = false;
+            testBtn.innerHTML = '<i class="fas fa-print"></i> Test Printer';
+        }
+    });
+
+    // Refresh printers
+    refreshBtn.addEventListener('click', loadPrinters);
+
+    // Initial load
+    loadPrinters();
+});
+</script>
+{% endblock %}

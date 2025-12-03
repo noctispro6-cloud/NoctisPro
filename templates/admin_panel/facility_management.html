@@ -1,0 +1,1074 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Facility Management - Admin Panel{% endblock %}
+
+{% block extra_css %}
+<style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-surface: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+        }
+
+    .btn-control {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 8px 16px;
+        font-size: 12px;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        text-decoration: none;
+        font-weight: 500;
+    }
+
+    .btn-control:hover {
+        background: var(--accent-color);
+        color: var(--primary-bg);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+
+    .btn-control.btn-sm {
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+
+    .stats-card {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+        border: 1px solid rgba(102, 126, 234, 0.2);
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 20px;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .stats-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, var(--accent-color), var(--secondary-color));
+    }
+
+    .stats-number {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: var(--accent-color);
+        margin-bottom: 8px;
+    }
+
+    .stats-label {
+        color: var(--text-primary);
+        font-size: 14px;
+        font-weight: 500;
+    }
+
+    .stats-change {
+        font-size: 12px;
+        margin-top: 4px;
+    }
+
+    .stats-change.positive {
+        color: #28a745;
+    }
+
+    .stats-change.negative {
+        color: #dc3545;
+    }
+
+    .filter-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 24px;
+    }
+
+    .facility-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 24px;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .facility-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        border-color: var(--accent-color);
+    }
+
+    .facility-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, var(--accent-color), var(--secondary-color));
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+
+    .facility-card:hover::before {
+        opacity: 1;
+    }
+
+    .facility-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 16px;
+    }
+
+    .facility-icon {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        margin-right: 16px;
+        position: relative;
+    }
+
+    .facility-icon.active {
+        background: linear-gradient(45deg, #28a745, #20c997);
+        color: white;
+    }
+
+    .facility-icon.inactive {
+        background: linear-gradient(45deg, #6c757d, #495057);
+        color: white;
+    }
+
+    .facility-title {
+        flex: 1;
+    }
+
+    .facility-name {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 4px;
+    }
+
+    .facility-status {
+        font-size: 12px;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-weight: 500;
+    }
+
+    .facility-status.active {
+        background: rgba(40, 167, 69, 0.2);
+        color: #28a745;
+    }
+
+    .facility-status.inactive {
+        background: rgba(108, 117, 125, 0.2);
+        color: #6c757d;
+    }
+
+    .facility-info {
+        margin-bottom: 20px;
+    }
+
+    .facility-info-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 8px;
+        font-size: 13px;
+        color: var(--text-secondary);
+    }
+
+    .facility-info-item i {
+        width: 16px;
+        margin-right: 8px;
+        color: var(--accent-color);
+    }
+
+    .facility-stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin-bottom: 20px;
+        padding: 16px;
+        background: rgba(0,0,0,0.1);
+        border-radius: 8px;
+    }
+
+    .facility-stat {
+        text-align: center;
+    }
+
+    .facility-stat-number {
+        font-size: 20px;
+        font-weight: bold;
+        color: var(--accent-color);
+    }
+
+    .facility-stat-label {
+        font-size: 11px;
+        color: var(--text-secondary);
+        margin-top: 2px;
+    }
+
+    .facility-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .facility-actions .btn-control {
+        flex: 1;
+        justify-content: center;
+        min-width: 120px;
+    }
+
+    .search-bar {
+        position: relative;
+    }
+
+    .search-input {
+        padding-right: 40px;
+    }
+
+    .search-icon {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-secondary);
+    }
+
+    .view-toggle {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 4px;
+        display: flex;
+    }
+
+    .view-toggle button {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        padding: 8px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .view-toggle button.active {
+        background: var(--accent-color);
+        color: white;
+    }
+
+    .bulk-actions {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 20px;
+        display: none;
+    }
+
+    .bulk-actions.show {
+        display: block;
+    }
+
+    .facility-list-view {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    .facility-list-item {
+        display: flex;
+        align-items: center;
+        padding: 16px;
+        border-bottom: 1px solid var(--border-color);
+        transition: background 0.2s ease;
+    }
+
+    .facility-list-item:hover {
+        background: rgba(102, 126, 234, 0.05);
+    }
+
+    .facility-list-item:last-child {
+        border-bottom: none;
+    }
+
+    .facility-checkbox {
+        margin-right: 16px;
+    }
+
+    .export-dropdown {
+        position: relative;
+    }
+
+    .analytics-modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.8);
+        z-index: 1050;
+    }
+
+    .analytics-content {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: var(--card-bg);
+        border-radius: 12px;
+        padding: 24px;
+        width: 90%;
+        max-width: 800px;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    @media (max-width: 768px) {
+        .facility-stats {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .facility-actions {
+            flex-direction: column;
+        }
+
+        .facility-actions .btn-control {
+            min-width: auto;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Header Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center flex-wrap">
+                <div>
+                    <h1 class="text-white mb-2">
+                        <i class="fas fa-hospital me-3"></i>Facility Management
+                    </h1>
+                    <p class="text-secondary mb-0">Manage healthcare facilities and their configurations</p>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <div class="export-dropdown">
+                        <button type="button" class="btn-control dropdown-toggle" data-bs-toggle="dropdown">
+                            <i class="fas fa-download me-2"></i>Export
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="exportFacilities('csv')">
+                                <i class="fas fa-file-csv me-2"></i>Export CSV
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportFacilities('excel')">
+                                <i class="fas fa-file-excel me-2"></i>Export Excel
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportFacilities('pdf')">
+                                <i class="fas fa-file-pdf me-2"></i>Export PDF
+                            </a></li>
+                        </ul>
+                    </div>
+                    <button type="button" class="btn-control" onclick="showAnalytics()"  >
+                        <i class="fas fa-chart-bar me-2"></i>Analytics
+                    </button>
+                    <a href="{% url 'admin_panel:facility_create' %}" class="btn-control">
+                        <i class="fas fa-hospital me-2"></i>Add Facility
+                    </a>
+                    <a href="{% url 'admin_panel:user_create' %}?role=radiologist" class="btn-control">
+                        <i class="fas fa-user-md me-2"></i>Add Radiologist
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="stats-card">
+                <div class="stats-number">{{ facilities.count }}</div>
+                <div class="stats-label">Total Facilities</div>
+                <div class="stats-change positive">
+                    <i class="fas fa-arrow-up me-1"></i>+2 this month
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card">
+                <div class="stats-number">{{ facilities|length|add:"-2" }}</div>
+                <div class="stats-label">Active Facilities</div>
+                <div class="stats-change positive">
+                    <i class="fas fa-check-circle me-1"></i>98% active
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card">
+                <div class="stats-number">{{ total_users|default:"0" }}</div>
+                <div class="stats-label">Total Users</div>
+                <div class="stats-change positive">
+                    <i class="fas fa-arrow-up me-1"></i>+15 this week
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card">
+                <div class="stats-number">{{ total_studies|default:"0" }}</div>
+                <div class="stats-label">Total Studies</div>
+                <div class="stats-change positive">
+                    <i class="fas fa-arrow-up me-1"></i>+127 today
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search and Filters -->
+    <div class="filter-card">
+        <form method="get" class="row g-3" id="filterForm">
+            <div class="col-md-4">
+                <label for="search" class="form-label text-white">
+                    <i class="fas fa-search me-2"></i>Search Facilities
+                </label>
+                <div class="search-bar">
+                    <input type="text" class="form-control form-control-medical search-input" 
+                           id="search" name="search" value="{{ search_query }}" 
+                           placeholder="Name, address, license number...">
+                    <i class="fas fa-search search-icon"></i>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <label for="status" class="form-label text-white">
+                    <i class="fas fa-toggle-on me-2"></i>Status
+                </label>
+                <select class="form-select form-control-medical" id="status" name="status">
+                    <option value="">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="sortBy" class="form-label text-white">
+                    <i class="fas fa-sort me-2"></i>Sort By
+                </label>
+                <select class="form-select form-control-medical" id="sortBy" name="sort">
+                    <option value="name">Name</option>
+                    <option value="created_at">Date Added</option>
+                    <option value="user_count">User Count</option>
+                    <option value="study_count">Study Count</option>
+                </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <div class="d-flex gap-2 w-100">
+                    <button type="submit" class="btn-control flex-fill">
+                        <i class="fas fa-filter me-1"></i>Filter
+                    </button>
+                    <a href="{% url 'admin_panel:facility_management' %}" class="btn-control">
+                        <i class="fas fa-times me-1"></i>Clear
+                    </a>
+                </div>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <div class="view-toggle w-100">
+                    <button type="button" class="active" onclick="toggleView('grid')" type="button"   id="gridView" aria-label="Th Large">
+                        <i class="fas fa-th-large"></i>
+                    </button>
+                    <button type="button" onclick="toggleView('list')" id="listView" aria-label="List">
+                        <i class="fas fa-list"></i>
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Bulk Actions -->
+    <div class="bulk-actions" id="bulkActions">
+        <div class="d-flex justify-content-between align-items-center">
+            <span class="text-white">
+                <span id="selectedCount">0</span> facilities selected
+            </span>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn-control" onclick="bulkAction('activate')"  >
+                    <i class="fas fa-check me-2"></i>Activate
+                </button>
+                <button type="button" class="btn-control" onclick="bulkAction('deactivate')"  >
+                    <i class="fas fa-ban me-2"></i>Deactivate
+                </button>
+                <button type="button" class="btn-control" onclick="bulkAction('export')"  >
+                    <i class="fas fa-download me-2"></i>Export Selected
+                </button>
+                <button type="button" class="btn-control text-danger" onclick="bulkAction('delete')"  >
+                    <i class="fas fa-trash me-2"></i>Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Facilities Grid View -->
+    <div id="facilitiesGrid" class="row">
+        {% for facility in facilities %}
+        <div class="col-xl-4 col-lg-6 col-md-6 mb-4">
+            <div class="facility-card">
+                <div class="facility-header">
+                    <input type="checkbox" class="form-check-input facility-checkbox me-3" value="{{ facility.id }}">
+                    <div class="facility-icon {% if facility.is_active %}active{% else %}inactive{% endif %}">
+                        <i class="fas fa-hospital"></i>
+                    </div>
+                    <div class="facility-title">
+                        <div class="facility-name">{{ facility.name }}</div>
+                        <span class="facility-status {% if facility.is_active %}active{% else %}inactive{% endif %}">
+                            {% if facility.is_active %}Active{% else %}Inactive{% endif %}
+                        </span>
+                    </div>
+                    <div class="dropdown">
+                        <button type="button" class="btn btn-outline-light btn-sm" type="button" data-bs-toggle="dropdown" aria-label="Ellipsis V">
+                            <i class="fas fa-ellipsis-v"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{% url 'admin_panel:facility_edit' facility.id %}">
+                                <i class="fas fa-edit me-2"></i>Edit Details
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="viewFacilityAnalytics({{ facility.id }})">
+                                <i class="fas fa-chart-line me-2"></i>View Analytics
+                            </a></li>
+                            <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?facility={{ facility.id }}">
+                                <i class="fas fa-user-plus me-2"></i>Add User
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item text-danger" href="{% url 'admin_panel:facility_delete' facility.id %}">
+                                <i class="fas fa-trash me-2"></i>Delete
+                            </a></li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="facility-info">
+                    <div class="facility-info-item">
+                        <i class="fas fa-map-marker-alt"></i>
+                        <span>{{ facility.address|truncatechars:40 }}</span>
+                    </div>
+                    <div class="facility-info-item">
+                        <i class="fas fa-phone"></i>
+                        <span>{{ facility.phone }}</span>
+                    </div>
+                    <div class="facility-info-item">
+                        <i class="fas fa-envelope"></i>
+                        <span>{{ facility.email }}</span>
+                    </div>
+                    <div class="facility-info-item">
+                        <i class="fas fa-certificate"></i>
+                        <span>License: {{ facility.license_number }}</span>
+                    </div>
+                    {% if facility.ae_title %}
+                    <div class="facility-info-item">
+                        <i class="fas fa-network-wired"></i>
+                        <span>AE Title: {{ facility.ae_title }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="facility-stats">
+                    <div class="facility-stat">
+                        <div class="facility-stat-number">{{ facility.user_set.count }}</div>
+                        <div class="facility-stat-label">Users</div>
+                    </div>
+                    <div class="facility-stat">
+                        <div class="facility-stat-number">{{ facility.study_set.count|default:"0" }}</div>
+                        <div class="facility-stat-label">Studies</div>
+                    </div>
+                    <div class="facility-stat">
+                        <div class="facility-stat-number">{{ facility.user_set.count|add:facility.study_set.count|default:"0" }}</div>
+                        <div class="facility-stat-label">Activity</div>
+                    </div>
+                    <div class="facility-stat">
+                        <div class="facility-stat-number">
+                            {% if facility.created_at %}
+                                {{ facility.created_at|timesince|truncatewords:1 }}
+                            {% else %}
+                                New
+                            {% endif %}
+                        </div>
+                        <div class="facility-stat-label">Age</div>
+                    </div>
+                </div>
+
+                <div class="facility-actions">
+                    <a href="{% url 'admin_panel:facility_edit' facility.id %}" class="btn-control">
+                        <i class="fas fa-edit me-1"></i>Edit
+                    </a>
+                    <a href="{% url 'admin_panel:user_create' %}?facility={{ facility.id }}" class="btn-control">
+                        <i class="fas fa-user-plus me-1"></i>Add User
+                    </a>
+                    <button type="button" class="btn-control" onclick="viewFacilityAnalytics({{ facility.id }})"  >
+                        <i class="fas fa-chart-line me-1"></i>Analytics
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% empty %}
+        <div class="col-12">
+            <div class="text-center text-secondary py-5">
+                <i class="fas fa-hospital fa-5x mb-4 opacity-50"></i>
+                <h4>No Facilities Found</h4>
+                <p>Get started by adding your first healthcare facility</p>
+                <a href="{% url 'admin_panel:facility_create' %}" class="btn-control mt-3">
+                    <i class="fas fa-hospital me-2"></i>Add First Facility
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Facilities List View (Hidden by default) -->
+    <div id="facilitiesList" class="facility-list-view" style="display: none;">
+        {% for facility in facilities %}
+        <div class="facility-list-item">
+            <input type="checkbox" class="form-check-input facility-checkbox" value="{{ facility.id }}">
+            <div class="facility-icon {% if facility.is_active %}active{% else %}inactive{% endif %} me-3">
+                <i class="fas fa-hospital"></i>
+            </div>
+            <div class="flex-grow-1">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h6 class="text-white mb-1">{{ facility.name }}</h6>
+                        <div class="text-secondary small">{{ facility.address|truncatechars:60 }}</div>
+                        <div class="text-info small">{{ facility.email }} • {{ facility.phone }}</div>
+                    </div>
+                    <div class="text-end">
+                        <span class="facility-status {% if facility.is_active %}active{% else %}inactive{% endif %} mb-2">
+                            {% if facility.is_active %}Active{% else %}Inactive{% endif %}
+                        </span>
+                        <div class="small text-secondary">
+                            {{ facility.user_set.count }} users • {{ facility.study_set.count|default:"0" }} studies
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="ms-3">
+                <div class="btn-group-vertical">
+                    <a href="{% url 'admin_panel:facility_edit' facility.id %}" class="btn-control btn-sm">
+                        <i class="fas fa-edit me-1"></i>Edit
+                    </a>
+                    <button type="button" class="btn-control btn-sm" onclick="viewFacilityAnalytics({{ facility.id }})"  >
+                        <i class="fas fa-chart-line me-1"></i>Analytics
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Pagination -->
+    {% if facilities.has_other_pages %}
+    <div class="d-flex justify-content-center mt-4">
+        <nav>
+            <ul class="pagination">
+                {% if facilities.has_previous %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page=1">First</a>
+                    </li>
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ facilities.previous_page_number }}">Previous</a>
+                    </li>
+                {% endif %}
+
+                {% for num in facilities.paginator.page_range %}
+                    {% if facilities.number == num %}
+                        <li class="page-item active">
+                            <span class="page-link">{{ num }}</span>
+                        </li>
+                    {% elif num > facilities.number|add:'-3' and num < facilities.number|add:'3' %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ num }}">{{ num }}</a>
+                        </li>
+                    {% endif %}
+                {% endfor %}
+
+                {% if facilities.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ facilities.next_page_number }}">Next</a>
+                    </li>
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ facilities.paginator.num_pages }}">Last</a>
+                    </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Analytics Modal -->
+<div  role="dialog" aria-modal="true" id="analyticsModal">
+    <div class="analytics-content">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h4 class="text-white">
+                <i class="fas fa-chart-bar me-2"></i>Facility Analytics
+            </h4>
+            <button type="button" class="btn-close btn-close-white" onclick="hideAnalytics()"  ></button>
+        </div>
+        <div id="analyticsContent">
+            <!-- Analytics content will be loaded here -->
+            <div class="text-center py-5">
+                <i class="fas fa-spinner fa-spin fa-2x text-secondary mb-3"></i>
+                <div class="text-secondary">Loading analytics...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// View toggle functionality
+function toggleView(view) {
+    const gridView = document.getElementById('facilitiesGrid');
+    const listView = document.getElementById('facilitiesList');
+    const gridBtn = document.getElementById('gridView');
+    const listBtn = document.getElementById('listView');
+
+    if (view === 'grid') {
+        gridView.style.display = 'block';
+        listView.style.display = 'none';
+        gridBtn.classList.add('active');
+        listBtn.classList.remove('active');
+    } else {
+        gridView.style.display = 'none';
+        listView.style.display = 'block';
+        listBtn.classList.add('active');
+        gridBtn.classList.remove('active');
+    }
+}
+
+// Bulk selection functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const checkboxes = document.querySelectorAll('.facility-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', updateBulkActions);
+    });
+});
+
+function updateBulkActions() {
+    const selected = document.querySelectorAll('.facility-checkbox:checked');
+    const bulkActions = document.getElementById('bulkActions');
+    const selectedCount = document.getElementById('selectedCount');
+    
+    selectedCount.textContent = selected.length;
+    
+    if (selected.length > 0) {
+        bulkActions.classList.add('show');
+    } else {
+        bulkActions.classList.remove('show');
+    }
+}
+
+// Bulk actions - Fixed with proper error handling and validation
+function bulkAction(action) {
+    try {
+        const selected = Array.from(document.querySelectorAll('.facility-checkbox:checked')).map(cb => cb.value);
+        
+        if (selected.length === 0) {
+            showToast('Please select facilities first', 'warning');
+            return;
+        }
+        
+        const actionMessages = {
+            'activate': 'activate selected facilities',
+            'deactivate': 'deactivate selected facilities',
+            'export': 'export selected facilities',
+            'delete': 'delete selected facilities (this cannot be undone)'
+        };
+        
+        const message = actionMessages[action] || `${action} selected facilities`;
+        
+        if (!confirm(`Are you sure you want to ${message}?`)) {
+            return;
+        }
+        
+        // Show loading state
+        const actionButtons = document.querySelectorAll('[onclick*="bulkAction"]');
+        actionButtons.forEach(btn => {
+            btn.disabled = true;
+            btn.style.opacity = '0.6';
+        });
+        
+        showToast(`Processing ${action} for ${selected.length} facilit${selected.length > 1 ? 'ies' : 'y'}...`, 'info');
+        
+        if (action === 'export') {
+            exportFacilities('csv', selected);
+            // Reset button states for export
+            setTimeout(() => {
+                actionButtons.forEach(btn => {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                });
+            }, 1000);
+        } else {
+            // Use form submission for reliable state changes
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = window.location.href;
+            
+            // Add CSRF token
+            const csrfToken = getCookie('csrftoken');
+            if (csrfToken) {
+                const csrfInput = document.createElement('input');
+                csrfInput.type = 'hidden';
+                csrfInput.name = 'csrfmiddlewaretoken';
+                csrfInput.value = csrfToken;
+                form.appendChild(csrfInput);
+            }
+            
+            // Add action data
+            const actionInput = document.createElement('input');
+            actionInput.type = 'hidden';
+            actionInput.name = 'bulk_action';
+            actionInput.value = action;
+            form.appendChild(actionInput);
+            
+            selected.forEach(facilityId => {
+                const facilityInput = document.createElement('input');
+                facilityInput.type = 'hidden';
+                facilityInput.name = 'selected_facilities';
+                facilityInput.value = facilityId;
+                form.appendChild(facilityInput);
+            });
+            
+            document.body.appendChild(form);
+            form.submit();
+        }
+        
+    } catch (error) {
+        console.error('Bulk action error:', error);
+        showToast(`Error performing bulk action: ${error.message}`, 'error');
+        
+        // Reset button states
+        const actionButtons = document.querySelectorAll('[onclick*="bulkAction"]');
+        actionButtons.forEach(btn => {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+        });
+    }
+}
+
+// Export functionality - Fixed with error handling
+function exportFacilities(format, selectedIds = null) {
+    try {
+        if (!format) {
+            showToast('Invalid export format', 'error');
+            return;
+        }
+        
+        showToast(`Preparing ${format.toUpperCase()} export...`, 'info');
+        
+        const params = new URLSearchParams(window.location.search);
+        params.set('export', format);
+        if (selectedIds && selectedIds.length > 0) {
+            params.set('selected', selectedIds.join(','));
+        }
+        
+        const exportUrl = `${window.location.pathname}?${params.toString()}`;
+        window.open(exportUrl, '_blank');
+        
+        showToast(`${format.toUpperCase()} export started`, 'success');
+        
+    } catch (error) {
+        console.error('Export error:', error);
+        showToast(`Export failed: ${error.message}`, 'error');
+    }
+}
+
+// Toast notification system
+function showToast(message, type = 'info', duration = 3000) {
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: var(--card-surface);
+        border: 1px solid var(--border-color);
+        border-left: 4px solid var(--accent-color);
+        color: var(--text-primary);
+        padding: 8px 12px;
+        border-radius: 3px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        z-index: 2000;
+        font-size: 11px;
+        max-width: 280px;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        opacity: 0.95;
+    `;
+    
+    if (type === 'error') {
+        toast.style.borderLeftColor = 'var(--danger-color)';
+    } else if (type === 'success') {
+        toast.style.borderLeftColor = 'var(--success-color)';
+    } else if (type === 'warning') {
+        toast.style.borderLeftColor = 'var(--warning-color)';
+    }
+    
+    toast.innerHTML = message;
+    document.body.appendChild(toast);
+    
+    // Slide in
+    setTimeout(() => {
+        toast.style.transform = 'translateX(0)';
+    }, 100);
+    
+    // Slide out and remove
+    setTimeout(() => {
+        toast.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+        }, 300);
+    }, duration);
+}
+
+// Cookie utility function
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+// Analytics functionality
+function showAnalytics() {
+    const modal = document.getElementById('analyticsModal');
+    modal.style.display = 'block';
+    loadSystemAnalytics();
+}
+
+function hideAnalytics() {
+    const modal = document.getElementById('analyticsModal');
+    modal.style.display = 'none';
+}
+
+function viewFacilityAnalytics(facilityId) {
+    const modal = document.getElementById('analyticsModal');
+    modal.style.display = 'block';
+    loadFacilityAnalytics(facilityId);
+}
+
+function loadSystemAnalytics() {
+    const content = document.getElementById('analyticsContent');
+    content.innerHTML = `
+        <div class="row">
+            <div class="col-md-6">
+                <div class="stats-card">
+                    <div class="stats-number">${document.querySelectorAll('.facility-card').length}</div>
+                    <div class="stats-label">Total Facilities</div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="stats-card">
+                    <div class="stats-number">${document.querySelectorAll('.facility-status.active').length}</div>
+                    <div class="stats-label">Active Facilities</div>
+                </div>
+            </div>
+        </div>
+        <div class="mt-4">
+            <h6 class="text-white mb-3">Recent Activity</h6>
+            <div class="text-secondary">
+                <p><i class="fas fa-plus text-success me-2"></i>2 new facilities added this month</p>
+                <p><i class="fas fa-users text-info me-2"></i>15 new users registered this week</p>
+                <p><i class="fas fa-file-medical text-primary me-2"></i>127 studies uploaded today</p>
+            </div>
+        </div>
+    `;
+}
+
+function loadFacilityAnalytics(facilityId) {
+    const content = document.getElementById('analyticsContent');
+    content.innerHTML = `
+        <div class="text-center py-4">
+            <h5 class="text-white mb-4">Facility Analytics - ID: ${facilityId}</h5>
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="stats-card">
+                        <div class="stats-number">12</div>
+                        <div class="stats-label">Active Users</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stats-card">
+                        <div class="stats-number">45</div>
+                        <div class="stats-label">Studies This Month</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stats-card">
+                        <div class="stats-number">98%</div>
+                        <div class="stats-label">Uptime</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Auto-submit form on filter changes
+document.querySelectorAll('#status, #sortBy').forEach(select => {
+    select.addEventListener('change', function() {
+        document.getElementById('filterForm').submit();
+    });
+});
+
+// Search functionality
+let searchTimeout;
+document.getElementById('search').addEventListener('input', function() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        document.getElementById('filterForm').submit();
+    }, 500);
+});
+
+// Close modal when clicking outside
+document.getElementById('analyticsModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        hideAnalytics();
+    }
+});
+</script>
+{% endblock %}

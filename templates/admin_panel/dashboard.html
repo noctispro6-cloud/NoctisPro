@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+{% block title %}Admin Panel - Noctis Pro PACS{% endblock %}
+
+{% block content %}
+    <div class="container-fluid">
+        <div class="card card-medical">
+            <div class="card-header">
+                <div><i class="fas fa-shield-alt"></i> Administrator Dashboard</div>
+                <div>
+                    <a href="{% url 'worklist:dashboard' %}" class="btn-control">Back to Worklist</a>
+                </div>
+            </div>
+            <div class="card-body">
+        
+        <div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
+            <div class="stat-card card" style="text-align:center;padding:16px;">
+                <h3 style="color:var(--accent-color);font-size:1.6rem;margin:0 0 6px 0;">{{ total_users|default:"0" }}</h3>
+                <div>Total Users</div>
+            </div>
+            <div class="stat-card card" style="text-align:center;padding:16px;">
+                <h3 style="color:var(--accent-color);font-size:1.6rem;margin:0 0 6px 0;">{{ total_facilities|default:"0" }}</h3>
+                <div>Facilities</div>
+            </div>
+            <div class="stat-card card" style="text-align:center;padding:16px;">
+                <h3 style="color:var(--accent-color);font-size:1.6rem;margin:0 0 6px 0;">{{ total_studies|default:"0" }}</h3>
+                <div>Studies</div>
+            </div>
+            <div class="stat-card card" style="text-align:center;padding:16px;">
+                <h3 style="color:var(--accent-color);font-size:1.6rem;margin:0 0 6px 0;">{{ active_users_today|default:"0" }}</h3>
+                <div>Active Today</div>
+            </div>
+        </div>
+        
+        <div style="text-align:center;margin-top:16px;">
+            <div style="margin-bottom:8px;font-weight:600;">Administrative Functions</div>
+            <a href="{% url 'admin_panel:user_management' %}" class="btn-control"><i class="fas fa-users"></i> User Management</a>
+            <a href="{% url 'admin_panel:facility_management' %}" class="btn-control"><i class="fas fa-building"></i> Facility Management</a>
+            <a href="{% url 'admin_panel:settings' %}" class="btn-control"><i class="fas fa-cog"></i> System Settings</a>
+            <a href="{% url 'admin_panel:permissions_dashboard' %}" class="btn-control"><i class="fas fa-user-shield"></i> Permissions</a>
+        </div>
+
+        {% if recent_studies %}
+        <div class="card" style="margin-top:16px;">
+            <div class="card-header">Recent Activities</div>
+            <div class="card-body">
+                {% for study in recent_studies %}
+                <div style="padding:6px 0;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;">
+                    <span>Study: {{ study.patient.name }} - {{ study.modality.name }}</span>
+                    <span class="timestamp">{{ study.upload_date|date:"M d, H:i" }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+            </div>
+        </div>
+    </div>
+{% endblock %}

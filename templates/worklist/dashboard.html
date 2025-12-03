@@ -1,0 +1,1425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noctis Pro PACS - Worklist Dashboard</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    {% load static %}
+    {% load dicts %}
+    <link rel="icon" href="{% static 'favicon.ico' %}" type="image/x-icon">
+    <link href="{% static 'css/dicom-viewer-buttons.css' %}" rel="stylesheet">
+    <script src="{% static 'js/worklist-button-handlers.js' %}" defer></script>
+    <script src="{% static 'js/unified-button-handlers.js' %}" defer></script>
+    <style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-bg: #252525;
+            --header-bg: #333333;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-muted: #666666;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+            --urgent-color: #ff0066;
+            --scheduled-color: #4a90e2;
+            --in-progress-color: #f5a623;
+            --completed-color: #7ed321;
+            --cancelled-color: #d0021b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--primary-bg);
+            color: var(--text-primary);
+            font-size: 12px;
+            overflow: hidden;
+        }
+
+        .dashboard-container {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Top Navigation */
+        .top-navbar {
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 50px;
+        }
+
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .logo {
+            color: var(--accent-color);
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 2px;
+        }
+
+        .nav-tab {
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 6px 12px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .nav-tab.active {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            font-weight: bold;
+        }
+
+        .nav-tab:hover:not(.active) {
+            background: var(--card-bg);
+            color: var(--text-primary);
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            font-size: 11px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .user-avatar {
+            background: var(--accent-color);
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: var(--primary-bg);
+            font-size: 10px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success-color);
+        }
+
+        .admin-btn {
+            background: var(--danger-color);
+            border: none;
+            color: var(--text-primary);
+            padding: 4px 8px;
+            font-size: 9px;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: bold;
+        }
+
+        .admin-btn:hover {
+            background: #cc3333;
+            transform: scale(1.05);
+        }
+
+        /* Controls Bar */
+        .controls-bar {
+            background: var(--secondary-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            height: 40px;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .control-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .control-input, .control-select {
+            background: var(--primary-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 4px 8px;
+            font-size: 11px;
+            border-radius: 2px;
+            min-width: 100px;
+        }
+
+        .control-input:focus, .control-select:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 1px var(--accent-color);
+        }
+
+        .control-input::placeholder {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        .btn-control {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 4px 12px;
+            font-size: 11px;
+            cursor: pointer;
+            border-radius: 2px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-control:hover {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+        }
+
+        .btn-control.reset {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Data Table */
+        .data-table-container {
+            flex: 1;
+            overflow: auto;
+            background: var(--primary-bg);
+            scroll-behavior: auto; /* consistent immediate scroll */
+            will-change: scroll-position;
+            contain: content;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 11px;
+        }
+
+        .data-table th {
+            background: var(--header-bg);
+            color: var(--text-primary);
+            padding: 8px 12px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border-color);
+            border-right: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            white-space: nowrap;
+        }
+
+        .data-table th:last-child {
+            border-right: none;
+        }
+
+        .data-table th.sortable {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .data-table th.sortable:hover {
+            background: var(--card-bg);
+        }
+
+        .data-table td {
+            padding: 4px 12px;
+            border-bottom: 1px solid rgba(64, 64, 64, 0.3);
+            border-right: 1px solid rgba(64, 64, 64, 0.3);
+            color: var(--text-secondary);
+            white-space: nowrap;
+            vertical-align: middle;
+            font-size: 11px;
+        }
+
+        .data-table td:last-child {
+            border-right: none;
+        }
+
+        .data-table tbody tr {
+            transition: background-color 0.1s ease;
+            cursor: pointer;
+        }
+
+        .data-table tbody tr:hover {
+            background: rgba(0, 212, 255, 0.08);
+            /* reduce layout work on hover */
+            will-change: background-color;
+        }
+
+        .data-table tbody tr:nth-child(even) {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .data-table tbody tr:nth-child(even):hover {
+            background: rgba(0, 212, 255, 0.08);
+        }
+
+        .data-table tbody tr.recent-upload {
+            background: rgba(0, 255, 136, 0.1);
+            border-left: 3px solid var(--success-color);
+        }
+
+        .data-table tbody tr.recent-upload:hover {
+            background: rgba(0, 255, 136, 0.15);
+        }
+
+        .data-table tbody tr.recent-upload:nth-child(even) {
+            background: rgba(0, 255, 136, 0.12);
+        }
+
+        .data-table tbody tr.recent-upload:nth-child(even):hover {
+            background: rgba(0, 255, 136, 0.18);
+        }
+
+        /* Data Styling */
+        .patient-id, .study-id, .accession {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: var(--accent-color);
+        }
+
+        .patient-name {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .timestamp {
+            font-family: 'Courier New', monospace;
+            color: var(--text-muted);
+            font-size: 10px;
+        }
+
+        .study-count {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 9px;
+            font-weight: bold;
+            display: inline-block;
+            min-width: 20px;
+            text-align: center;
+        }
+
+        /* Status Badges */
+        .status-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 9px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .status-scheduled {
+            background: rgba(74, 144, 226, 0.2);
+            color: var(--scheduled-color);
+            border: 1px solid var(--scheduled-color);
+        }
+
+        .status-urgent {
+            background: rgba(255, 0, 102, 0.2);
+            color: var(--urgent-color);
+            border: 1px solid var(--urgent-color);
+            animation: pulse 2s infinite;
+        }
+
+        .status-in-progress {
+            background: rgba(245, 166, 35, 0.2);
+            color: var(--in-progress-color);
+            border: 1px solid var(--in-progress-color);
+        }
+
+        .status-completed {
+            background: rgba(126, 211, 33, 0.2);
+            color: var(--completed-color);
+            border: 1px solid var(--completed-color);
+        }
+
+        .status-cancelled {
+            background: rgba(208, 2, 27, 0.2);
+            color: var(--cancelled-color);
+            border: 1px solid var(--cancelled-color);
+        }
+
+        .status-pending {
+            background: rgba(255, 170, 0, 0.2);
+            color: var(--warning-color);
+            border: 1px solid var(--warning-color);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        /* Priority Indicators */
+        .priority-urgent { 
+            color: var(--urgent-color); 
+            font-weight: bold;
+        }
+        .priority-high { 
+            color: var(--warning-color); 
+            font-weight: bold;
+        }
+        .priority-normal { 
+            color: var(--success-color);
+        }
+        .priority-low { 
+            color: var(--text-muted);
+        }
+
+        /* Modality Badges */
+        .modality-badge {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: bold;
+        }
+
+        .modality-ct { border-color: #4a90e2; color: #4a90e2; }
+        .modality-mri { border-color: #7b68ee; color: #7b68ee; }
+        .modality-xr { border-color: #50c878; color: #50c878; }
+        .modality-us { border-color: #ffa500; color: #ffa500; }
+        .modality-nm { border-color: #ff6347; color: #ff6347; }
+
+        /* Footer Status Bar */
+        .footer-status {
+            background: var(--secondary-bg);
+            border-top: 1px solid var(--border-color);
+            padding: 6px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 10px;
+            color: var(--text-muted);
+            height: 30px;
+        }
+
+        .status-left {
+            display: flex;
+            gap: 20px;
+        }
+
+        .status-right {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .connection-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success-color);
+        }
+
+        /* DICOM Viewer Buttons */
+        .viewer-buttons {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .btn-viewer {
+            background: var(--accent-color);
+            border: none;
+            color: var(--primary-bg);
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-viewer:hover {
+            background: #00b8d4;
+            /* remove scale to avoid reflow/throttle on many buttons */
+            /* transform: scale(1.05); */
+        }
+
+        .btn-viewer.viewer-only {
+            background: var(--card-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-viewer.viewer-only:hover {
+            background: var(--text-secondary);
+            color: var(--primary-bg);
+        }
+
+        .upload-area {
+            text-align: center;
+            padding: 60px 20px;
+            background: var(--secondary-bg);
+            border: 2px dashed var(--border-color);
+            border-radius: 8px;
+            margin: 20px;
+        }
+
+        .upload-area i {
+            font-size: 48px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+            display: block;
+        }
+
+        .upload-title {
+            color: var(--text-primary);
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .upload-subtitle {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .btn-upload {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-upload:hover {
+            background: #00b8d4;
+            /* transform: translateY(-2px); */
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 1200px) {
+            .data-table th,
+            .data-table td {
+                padding: 4px 8px;
+                font-size: 10px;
+            }
+            
+            .controls-bar {
+                flex-wrap: wrap;
+                height: auto;
+                min-height: 40px;
+            }
+
+            .viewer-buttons {
+                flex-direction: column;
+                gap: 2px;
+            }
+
+            .btn-viewer {
+                font-size: 8px;
+                padding: 3px 6px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Top Navigation -->
+        <nav class="top-navbar">
+            <div class="nav-left">
+                <div class="logo">
+                    <i class="fas fa-hospital-symbol"></i> Noctis Pro PACS
+                </div>
+                <div class="nav-tabs">
+                <div class="nav-tab active">WORKLIST</div>
+                <div class="nav-tab" onclick="window.location.href='{% url 'worklist:study_list' %}'">STUDIES</div>
+                <div class="nav-tab" onclick="window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
+                {% user_caps as caps %}
+                {% if user.is_admin or user.is_radiologist %}
+                {% if caps.ai_visible %}
+                <div class="nav-tab" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI</div>
+                {% endif %}
+                {% endif %}
+                {% if user.is_admin %}
+                <div class="nav-tab" onclick="window.location.href='{% url 'admin_panel:dashboard' %}'"><i class="fas fa-user-cog"></i> ADMIN PANEL</div>
+                {% endif %}
+            </div>
+            </div>
+            <div class="nav-right">
+                <div class="status-indicator">
+                    <div class="status-dot"></div>
+                    <span>ONLINE</span>
+                </div>
+                {% user_caps as caps %}
+                {% if user.is_admin or user.is_radiologist %}
+                <span style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,212,255,0.12);border:1px solid var(--accent-color);color:var(--accent-color);padding:2px 6px;border-radius:10px;font-size:10px;">
+                    <i class="fas fa-robot"></i> AI
+                </span>
+                {% elif caps.ai_visible %}
+                <span style="display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.06);border:1px solid var(--border-color);color:var(--text-secondary);padding:2px 6px;border-radius:10px;font-size:10px;">
+                    <i class="fas fa-robot"></i> AI
+                </span>
+                {% endif %}
+                <div class="user-info">
+                    <div class="user-avatar">{{ user.get_full_name|default:user.username|slice:":2"|upper }}</div>
+                    <div>
+                        <div>{{ user.get_full_name|default:user.username }}</div>
+                        <div style="color: var(--text-muted); font-size: 10px;">{% if user.is_admin %}Administrator{% elif user.is_radiologist %}Radiologist{% else %}Facility User{% endif %}</div>
+                    </div>
+                </div>
+                {% if user.is_authenticated %}
+                {% user_caps as caps %}
+                {% if user.is_admin or caps.manage_settings %}
+                <button type="button" class="admin-btn" onclick="window.location.href='{% url 'admin_panel:dashboard' %}'" title="Administrator Dashboard">
+                    <i class="fas fa-shield-alt"></i> ADMIN PANEL
+                </button>
+                {% endif %}
+                {% if user.is_admin or caps.manage_users %}
+                <button type="button" class="btn-control" onclick="window.location.href='{% url 'admin_panel:user_create' %}'" title="Create New User">
+                    <i class="fas fa-user-plus"></i>
+                </button>
+                {% endif %}
+                {% if user.is_admin or caps.manage_facilities %}
+                <button type="button" class="btn-control" onclick="window.location.href='{% url 'admin_panel:facility_create' %}'" title="Create New Facility">
+                    <i class="fas fa-hospital"></i>
+                </button>
+                {% endif %}
+                {% if user.is_admin or caps.manage_users %}
+                <button type="button" class="btn-control" onclick="window.location.href='{% url 'admin_panel:user_management' %}'" title="Manage All Users">
+                    <i class="fas fa-users-cog"></i>
+                </button>
+                {% endif %}
+                {% endif %}
+                <button type="button" class="btn-control" onclick="window.location.href='{% url 'notifications:notification_list' %}'" title="Notifications">
+                    <i class="fas fa-bell"></i><span id="notifBadge" class="study-count" style="display:none">0</span>
+                </button>
+                <button type="button" class="btn-control" onclick="window.location.href='{% url 'chat:chat_rooms' %}'" title="Chats">
+                    <i class="fas fa-comments"></i>
+                </button>
+                {% if user.is_authenticated %}
+                <button type="button" class="btn-control" onclick="window.location.href='{% url 'accounts:logout' %}'" title="Logout">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+                {% endif %}
+            </div>
+        </nav>
+
+        <!-- Controls Bar -->
+        <div class="controls-bar">
+            <div class="control-group">
+                <label class="control-label">Date:</label>
+                <input type="date" class="control-input" id="dateFilter" value="">
+            </div>
+            <div class="control-group">
+                <label class="control-label">Search:</label>
+                <input type="text" class="control-input" id="searchFilter" placeholder="Patient, ID, Accession...">
+            </div>
+            <div class="control-group">
+                <label class="control-label">Status:</label>
+                <select class="control-select" id="statusFilter">
+                    <option value="">All Status</option>
+                    <option value="scheduled">Scheduled</option>
+                    <option value="urgent">Urgent</option>
+                    <option value="in-progress">In Progress</option>
+                    <option value="completed">Completed</option>
+                    <option value="pending">Pending</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label class="control-label">Modality:</label>
+                <select class="control-select" id="modalityFilter">
+                    <option value="">All Modalities</option>
+                    <option value="CT">CT</option>
+                    <option value="MRI">MRI</option>
+                    <option value="XR">X-Ray</option>
+                    <option value="US">Ultrasound</option>
+                    <option value="NM">Nuclear Medicine</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label class="control-label">Priority:</label>
+                <select class="control-select" id="priorityFilter">
+                    <option value="">All Priorities</option>
+                    <option value="urgent">Urgent</option>
+                    <option value="high">High</option>
+                    <option value="normal">Normal</option>
+                    <option value="low">Low</option>
+                </select>
+            </div>
+            <button type="button" class="btn-control reset" onclick="refreshData()" title="Refresh">
+                <i class="fas fa-sync-alt"></i>
+            </button>
+            <button type="button" class="btn-control" onclick="resetFilters()" title="Reset Filters">
+                <i class="fas fa-filter-circle-xmark"></i>
+            </button>
+            <button type="button" class="btn-dicom-viewer" onclick="launchDicomViewer()" title="Masterpiece DICOM Viewer" style="background: linear-gradient(135deg, #6b46c1, #553c9a); color: white; font-weight: bold;">
+                <i class="fas fa-cube"></i> DICOM VIEWER
+            </button>
+            <button type="button" class="btn-control" onclick="uploadStudies()" title="Upload DICOM Studies (up to 5000 images)" style="background: linear-gradient(135deg, #059669, #047857); color: white; font-weight: bold;">
+                <i class="fas fa-upload"></i> UPLOAD DICOM
+            </button>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="data-table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th class="sortable">TIME</th>
+                            <th class="sortable">PATIENT ID</th>
+                            <th class="sortable">NAME</th>
+                            <th class="sortable">ACCESSION</th>
+                            <th class="sortable">MODALITY</th>
+                            <th class="sortable">STATUS</th>
+                            <th class="sortable">PRIORITY</th>
+                            <th class="sortable">SCHEDULED</th>
+                            <th class="sortable">IMAGES</th>
+                            <th class="sortable">FACILITY</th>
+                            <th class="sortable">ROOM</th>
+                            <th>DICOM VIEWER</th>
+                        </tr>
+                    </thead>
+                    <tbody id="studiesTableBody">
+                        <!-- Studies will be dynamically loaded here -->
+                        <tr id="noDataRow">
+                            <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                                <i class="fas fa-folder-open" style="font-size: 48px; opacity: 0.3; margin-bottom: 16px; display: block;"></i>
+                                <div style="font-size: 14px; margin-bottom: 8px;">No studies found</div>
+                                <div style="font-size: 12px;">Upload DICOM studies or check your filter settings</div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Footer Status Bar -->
+        <div class="footer-status">
+            <div class="status-left">
+                <span>Total Studies: <strong>{{ total_studies|default:0 }}</strong></span>
+                <span>Urgent: <strong style="color: var(--urgent-color);">{{ urgent_studies|default:0 }}</strong></span>
+                <span>In Progress: <strong style="color: var(--in-progress-color);">{{ in_progress_studies|default:0 }}</strong></span>
+                <span>Completed: <strong style="color: var(--completed-color);">{{ completed_studies|default:0 }}</strong></span>
+            </div>
+            <div class="status-right">
+                <div class="connection-status">
+                    <div class="connection-dot"></div>
+                    <span>DICOM Server Connected</span>
+                </div>
+                <span>Last Update: <strong>14:32:15</strong></span>
+                <span>Auto-refresh: <strong>ON</strong></span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // CSRF token from Django template context
+        const csrf_token = '{{ csrf_token }}';
+        
+        // Data loading and management
+        let studiesData = [];
+        let filteredData = [];
+
+        // Enhanced studies loading with better support for uploaded studies
+        async function loadStudiesData() {
+            try {
+                // Show loading state
+                const tbody = document.getElementById('studiesTableBody');
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                            <i class="fas fa-spinner fa-spin" style="font-size: 48px; opacity: 0.3; margin-bottom: 16px; display: block;"></i>
+                            <div style="font-size: 14px; margin-bottom: 8px;">Loading studies...</div>
+                            <div style="font-size: 12px;">Please wait while we fetch the latest data</div>
+                        </td>
+                    </tr>
+                `;
+                
+                // Fetch studies from the enhanced API
+                const response = await fetch('{% url "worklist:api_studies" %}', {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    studiesData = data.studies || [];
+                    filteredData = [...studiesData];
+                    
+                    if (studiesData.length === 0) {
+                        showNoDataMessage();
+                        showToast('No studies found. Upload DICOM files to get started.', 'info', 5000);
+                    } else {
+                        renderStudiesTable();
+                        updateStatusCounts();
+                        showToast(`Loaded ${studiesData.length} studies`, 'success', 2000);
+                    }
+                    
+                    // Show upload stats if available
+                    await loadUploadStats();
+                } else {
+                    console.error('API returned error:', data.error);
+                    showToast(data.message || 'Failed to load studies', 'error');
+                    showNoDataMessage();
+                }
+                
+            } catch (error) {
+                console.error('Error loading studies data:', error);
+                showToast(`Connection error: ${error.message}`, 'error');
+                showNoDataMessage();
+            }
+        }
+
+        // Load upload statistics
+        async function loadUploadStats() {
+            try {
+                const response = await fetch('{% url "worklist:api_get_upload_stats" %}');
+                
+                if (!response.ok) {
+                    console.error('Failed to fetch upload stats:', response.status, response.statusText);
+                    return;
+                }
+                
+                let data;
+                try {
+                    data = await response.json();
+                } catch (jsonErr) {
+                    console.error('JSON parsing error in upload stats:', jsonErr.message);
+                    return;
+                }
+                
+                if (data.success) {
+                    const stats = data.stats;
+                    // Update stats display if elements exist
+                    const statsElements = document.querySelectorAll('.upload-stats .stat-value');
+                    if (statsElements.length >= 3) {
+                        statsElements[0].textContent = stats.total_studies;
+                        statsElements[1].textContent = stats.total_series;
+                        statsElements[2].textContent = stats.total_images;
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading upload stats:', error);
+            }
+        }
+
+        // Render studies table
+        function openReport(studyId){ window.location.href = `/reports/write/${studyId}/`; }
+        function printStudy(studyId){ window.open(`/reports/print/${studyId}/`, '_blank'); }
+
+        // Inject quick print button for facility users
+        document.addEventListener('DOMContentLoaded', function(){
+            {% if user.is_facility_user %}
+            const navTabs = document.querySelector('.nav-tabs');
+            if (navTabs && !document.getElementById('quickPrintBtn')){
+                const btn = document.createElement('div');
+                btn.id = 'quickPrintBtn';
+                btn.className = 'nav-tab';
+                btn.innerHTML = '<i class="fas fa-print"></i> PRINT SELECTED';
+                btn.addEventListener('click', function(){
+                    const sel = document.querySelector('.data-table tbody tr[style*="rgba(0, 212, 255, 0.15)"]');
+                    if (sel){ const id = sel.getAttribute('data-study-id'); if (id){ window.open(`/reports/print/${id}/`, '_blank'); } }
+                });
+                navTabs.appendChild(btn);
+            }
+            {% endif %}
+        });
+
+        function renderStudiesTable() {
+            const tbody = document.getElementById('studiesTableBody');
+            const noDataRow = document.getElementById('noDataRow');
+            
+            if (filteredData.length === 0) {
+                tbody.innerHTML = '';
+                tbody.appendChild(noDataRow);
+                return;
+            }
+            
+            // Remove no data row if it exists
+            if (noDataRow) {
+                noDataRow.remove();
+            }
+            
+            tbody.innerHTML = filteredData.map(study => {
+                // Enhanced study display with upload information
+                const uploadTime = study.upload_date ? formatTime(study.upload_date) : '-';
+                const seriesCount = study.series_count || 0;
+                const imageCount = Number(study.image_count) || 0;
+                const studyTime = formatTime(study.study_time);
+                const scheduledTime = formatTime(study.scheduled_time);
+                
+                // Determine if this is a recently uploaded study (within last 10 minutes)
+                const isRecentUpload = study.upload_date && 
+                    (new Date() - new Date(study.upload_date)) < 600000; // 10 minutes
+                
+                return `
+                    <tr onclick="selectStudy(this)" data-study-id="${study.id}" ${isRecentUpload ? 'class="recent-upload"' : ''}>
+                        <td class="timestamp">${studyTime}</td>
+                        <td class="patient-id">${study.patient_id}</td>
+                        <td class="patient-name">${study.patient_name}</td>
+                        <td class="accession">${study.accession_number}</td>
+                        <td><span class="modality-badge modality-${study.modality.toLowerCase()}">${study.modality}</span></td>
+                        <td><span class="status-badge status-${study.status}">
+                            ${getStatusIcon(study.status)}${study.status.toUpperCase().replace('_', ' ')}
+                        </span></td>
+                        <td class="priority-${study.priority}" title="${(study.clinical_info||'').toString().replace(/"/g,'&quot;')}">${(study.priority||'normal').toString().toUpperCase()}</td>
+                        <td class="timestamp">${scheduledTime}</td>
+                        <td title="${seriesCount} series, ${imageCount} images">
+                            ${imageCount} <small style="color: var(--text-secondary);">(${seriesCount}s)</small>
+                        </td>
+                        <td>${study.facility || '-'}</td>
+                        <td title="Uploaded: ${uploadTime} by ${study.uploaded_by || 'Unknown'}">${study.uploaded_by || '-'}</td>
+                        <td>
+                            <div class="viewer-buttons">
+                                <button type="button" class="btn-dicom-viewer btn-sm" onclick="openStudyInViewer('${study.id}', event); event.stopPropagation();" title="Open study in DICOM viewer">
+                                    <i class="fas fa-eye"></i> VIEW
+                                </button>
+                                {% if user.is_admin or user.is_radiologist %}<button type="button" class="btn-viewer" style="margin-left:6px" onclick="openReport('${study.id}'); event.stopPropagation();" title="Write/Edit report"><i class="fas fa-file-signature"></i> REPORT</button>{% endif %}
+                                {% if user.is_facility_user %}<button type="button" class="btn-viewer" style="margin-left:6px" onclick="printStudy('${study.id}'); event.stopPropagation();" title="Print"><i class="fas fa-print"></i> PRINT</button>{% endif %}
+                                <button type="button" class="btn-viewer" style="margin-left:6px" onclick="window.location.href='/worklist/study/${study.id}/upload/'; event.stopPropagation();" title="Attach files"><i class="fas fa-paperclip"></i> ATTACH</button>
+                                <button type="button" class="btn-viewer" style="margin-left:6px" onclick="window.location.href='/worklist/study/${study.id}/'; event.stopPropagation();" title="View study details"><i class="fas fa-folder-open"></i> DETAILS</button>
+                                {% if user.is_admin or user.is_radiologist %}<button type="button" class="btn-viewer" style="margin-left:6px;background:var(--danger-color)" onclick="deleteStudy('${study.id}','${study.accession_number}'); event.stopPropagation();" title="Delete study (admin/radiologist only)"><i class="fas fa-trash"></i> DELETE</button>{% endif %}
+                                ${isRecentUpload ? '<span style="color: var(--success-color); font-size: 10px; margin-left: 4px;">NEW</span>' : ''}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Utility functions
+        function formatTime(timeString) {
+            if (!timeString) return '-';
+            const date = new Date(timeString);
+            return date.toLocaleTimeString('en-US', { hour12: false, timeStyle: 'short' });
+        }
+
+        function getStatusIcon(status) {
+            const icons = {
+                'urgent': '<i class="fas fa-exclamation-triangle"></i>',
+                'scheduled': '<i class="fas fa-clock"></i>',
+                'in-progress': '<i class="fas fa-play"></i>',
+                'completed': '<i class="fas fa-check"></i>',
+                'cancelled': '<i class="fas fa-times"></i>',
+                'pending': '<i class="fas fa-hourglass-half"></i>'
+            };
+            return icons[status] || '<i class="fas fa-circle"></i>';
+        }
+
+        // CSRF helper - improved to check multiple sources
+        function getCSRFToken(){
+            // First try to get from template context (most reliable)
+            if (typeof csrf_token !== 'undefined' && csrf_token) {
+                return csrf_token;
+            }
+            
+            // Try to get from cookie
+            const name = 'csrftoken=';
+            const cookies = document.cookie.split(';');
+            for (let c of cookies){
+                c = c.trim();
+                if (c.startsWith(name)) {
+                    const token = c.substring(name.length);
+                    if (token && token.trim()) return token;
+                }
+            }
+            
+            // Fallback: try to get from meta tag
+            const metaTag = document.querySelector('meta[name="csrf-token"]');
+            if (metaTag) {
+                const token = metaTag.getAttribute('content');
+                if (token && token.trim()) return token;
+            }
+            
+            // Fallback: try to get from hidden input
+            const hiddenInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+            if (hiddenInput) {
+                const token = hiddenInput.value;
+                if (token && token.trim()) return token;
+            }
+            
+            return null; // Return null instead of empty string to make falsy check work properly
+        }
+
+        async function deleteStudy(studyId, accession){
+            // Confirm deletion
+            if (!confirm(`Are you sure you want to delete study ${accession}?\n\nThis action cannot be undone and will permanently remove all associated data including:\n• DICOM images\n• Series data\n• Reports\n• Measurements\n• Annotations`)) {
+                return;
+            }
+            
+            try{
+                // Get CSRF token (required for delete operations)
+                const csrfToken = getCSRFToken();
+                if (!csrfToken) {
+                    showToast('Security token missing. Please refresh the page.', 'error');
+                    return;
+                }
+                
+                // Show loading state
+                const deleteButton = document.querySelector(`button[onclick*="deleteStudy('${studyId}'"]`);
+                if (deleteButton) {
+                    deleteButton.disabled = true;
+                    deleteButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> DELETING...';
+                }
+                
+                // Prepare headers with CSRF token
+                const headers = {
+                    'X-CSRFToken': csrfToken,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                };
+                
+                const resp = await fetch(`/worklist/api/study/${studyId}/delete/`, {
+                    method: 'DELETE',
+                    headers: headers,
+                    credentials: 'same-origin'
+                });
+                
+                let data;
+                try {
+                    data = await resp.json();
+                } catch (e) {
+                    throw new Error(`JSON parsing error: ${e.message}. HTTP ${resp.status}`);
+                }
+                
+                if(!resp.ok) {
+                    if (resp.status === 403) {
+                        throw new Error('Permission denied. Only administrators can delete studies.');
+                    } else if (resp.status === 404) {
+                        throw new Error('Study not found. It may have already been deleted.');
+                    } else {
+                        throw new Error(data.error || `HTTP ${resp.status}: Failed to delete study`);
+                    }
+                }
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Success - remove from table and local arrays
+                studiesData = studiesData.filter(s => String(s.id) !== String(studyId));
+                filteredData = filteredData.filter(s => String(s.id) !== String(studyId));
+                renderStudiesTable();
+                updateStatusCounts();
+                
+                // Show success toast
+                showToast(`Study ${accession} deleted successfully`, 'success');
+                
+            }catch(err){
+                console.error('Delete failed:', err);
+                
+                // Show error toast with specific message
+                showToast(`Failed to delete study: ${err.message}`, 'error', 5000);
+                
+                // Reset button state
+                const deleteButton = document.querySelector(`button[onclick*="deleteStudy('${studyId}'"]`);
+                if (deleteButton) {
+                    deleteButton.disabled = false;
+                    deleteButton.innerHTML = '<i class="fas fa-trash"></i> DELETE';
+                }
+            }
+        }
+        
+        // Right-click context quick delete for admin
+        (function(){
+            const tbody = document.getElementById('studiesTableBody');
+            if (!tbody) return;
+            tbody.addEventListener('contextmenu', function(e){
+                const row = e.target.closest('tr[data-study-id]');
+                if (!row) return;
+                e.preventDefault();
+                {% if user.role == 'admin' %}
+                const id = row.getAttribute('data-study-id');
+                const acc = (row.querySelector('.accession')||{}).textContent || '';
+                deleteStudy(id, acc);
+                {% endif %}
+            });
+        })();
+
+        function updateStatusCounts() {
+            const counts = studiesData.reduce((acc, study) => {
+                acc.total++;
+                acc[study.status] = (acc[study.status] || 0) + 1;
+                return acc;
+            }, { total: 0, urgent: 0, 'in-progress': 0, completed: 0 });
+            
+            // Update footer status
+            const statusElements = document.querySelectorAll('.status-left span strong');
+            if (statusElements.length >= 4) {
+                statusElements[0].textContent = counts.total;
+                statusElements[1].textContent = counts.urgent || 0;
+                statusElements[2].textContent = counts['in-progress'] || 0;
+                statusElements[3].textContent = counts.completed || 0;
+            }
+        }
+
+        function showNoDataMessage() {
+            const tbody = document.getElementById('studiesTableBody');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="12" class="upload-area">
+                        <i class="fas fa-folder-open"></i>
+                        <div class="upload-title">No DICOM Studies Found</div>
+                        <div class="upload-subtitle">Upload DICOM folders to populate the worklist</div>
+                        <button type="button" class="btn-upload" onclick="uploadStudies()">
+                            <i class="fas fa-upload"></i> Upload DICOM Studies
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }
+
+        // DICOM Viewer Functions
+        async function openStudyInViewer(studyId) {
+            try {
+                // First check if study exists and user has permission
+                const checkResponse = await fetch(`/worklist/api/study/${studyId}/`);
+                if (!checkResponse.ok) {
+                    showToast('Study not found or access denied', 'error');
+                    return;
+                }
+                
+                // Open in same tab - MASTERPIECE VIEWER IS THE MAIN VIEWER
+                const url = `/dicom-viewer/?study=${studyId}`;
+                window.location.href = url;
+                
+                showToast('Loading Masterpiece DICOM viewer...', 'success', 2000);
+            } catch (error) {
+                console.error('Error opening DICOM viewer:', error);
+                showToast('Failed to open DICOM viewer', 'error');
+            }
+        }
+
+        async function launchDicomViewer() {
+            try {
+                // MASTERPIECE VIEWER IS THE MAIN VIEWER
+                window.location.href = '/dicom-viewer/';
+                showToast('Launching Masterpiece DICOM viewer...', 'success', 2000);
+            } catch (error) {
+                console.error('Error launching DICOM viewer:', error);
+                showToast('Failed to launch DICOM viewer', 'error');
+            }
+        }
+
+        function uploadStudies() {
+            window.location.href = '{% url 'worklist:upload_study' %}';
+        }
+
+        // Removed loadFromDirectory - consolidated with uploadStudies
+
+        // Clean toast notification system
+        function showToast(message, type = 'info', duration = 3000) {
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: var(--card-bg);
+                border: 1px solid var(--border-color);
+                border-left: 4px solid var(--accent-color);
+                color: var(--text-primary);
+                padding: 8px 12px;
+                border-radius: 3px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                z-index: 2000;
+                font-size: 11px;
+                max-width: 280px;
+                transform: translateX(100%);
+                transition: transform 0.3s ease;
+                opacity: 0.95;
+            `;
+            
+            if (type === 'error') {
+                toast.style.borderLeftColor = 'var(--danger-color)';
+            } else if (type === 'success') {
+                toast.style.borderLeftColor = 'var(--success-color)';
+            } else if (type === 'warning') {
+                toast.style.borderLeftColor = 'var(--warning-color)';
+            }
+            
+            toast.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'exclamation-triangle' : 'info-circle'}" style="font-size: 10px;"></i>
+                    <span>${message}</span>
+                </div>
+            `;
+            
+            document.body.appendChild(toast);
+            
+            // Slide in
+            setTimeout(() => {
+                toast.style.transform = 'translateX(0)';
+            }, 10);
+            
+            // Auto-remove
+            setTimeout(() => {
+                toast.style.transform = 'translateX(100%)';
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.remove();
+                    }
+                }, 300);
+            }, duration);
+        }
+        
+        function selectStudy(row) {
+            // Remove previous selection
+            document.querySelectorAll('.data-table tbody tr').forEach(r => {
+                r.style.background = '';
+            });
+            
+            // Highlight selected row
+            row.style.background = 'rgba(0, 212, 255, 0.15)';
+            
+            // Open the study in viewer when row is clicked
+            const studyId = row.getAttribute('data-study-id');
+            if (studyId) {
+                openStudyInViewer(studyId);
+            }
+        }
+
+        function resetFilters() {
+            // Reset to current date
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('dateFilter').value = today;
+            document.getElementById('statusFilter').value = '';
+            document.getElementById('modalityFilter').value = '';
+            document.getElementById('priorityFilter').value = '';
+            document.getElementById('searchFilter').value = '';
+            
+            // Reset filtered data to show all studies
+            filteredData = [...studiesData];
+            renderStudiesTable();
+        }
+
+        // Enhanced refresh function with better error handling
+        function refreshData() {
+            const btn = event.target.closest('.btn-control');
+            const icon = btn.querySelector('i');
+            
+            // Show loading state
+            icon.classList.add('fa-spin');
+            btn.disabled = true;
+            
+            // Reload studies data with enhanced API
+            Promise.all([
+                loadStudiesData(),
+                loadUploadStats()
+            ]).then(() => {
+                icon.classList.remove('fa-spin');
+                btn.disabled = false;
+                
+                // Update last update time
+                const now = new Date();
+                const timeElement = document.querySelector('.footer-status .status-right span:nth-last-child(2) strong');
+                if (timeElement) {
+                    timeElement.textContent = now.toLocaleTimeString('en-US', { hour12: false });
+                }
+                
+                showToast('Worklist refreshed', 'success', 2000);
+            }).catch(error => {
+                icon.classList.remove('fa-spin');
+                btn.disabled = false;
+                showToast('Refresh failed', 'error');
+                console.error('Error refreshing data:', error.message);
+            });
+        }
+
+        // Enhanced initialization with better auto-refresh and upload detection
+        document.addEventListener('DOMContentLoaded', function() {
+            // Set current date in date filter
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('dateFilter').value = today;
+            
+            // Load initial data
+            loadStudiesData();
+            
+            // Set up enhanced auto-refresh with upload detection
+            let lastStudyCount = 0;
+            let lastUploadTime = null;
+            
+            // Increase inactivity timeout refresh to 20 minutes (1200000ms)
+            setInterval(async () => {
+                try {
+                    // Check for new studies
+                    const response = await fetch('{% url "worklist:api_refresh_worklist" %}');
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        const currentStudyCount = data.total_recent;
+                        const currentUploadTime = data.refresh_time;
+                        
+                        // If new studies were uploaded, refresh and notify
+                        if (currentStudyCount > lastStudyCount && lastStudyCount > 0) {
+                            const newStudies = currentStudyCount - lastStudyCount;
+                            showToast(`${newStudies} new study${newStudies > 1 ? 'ies' : ''} uploaded`, 'success');
+                            // Full refresh
+                            await loadStudiesData();
+                        } else if (lastUploadTime && currentUploadTime !== lastUploadTime) {
+                            // Check if there are any new uploads by comparing refresh times
+                            await loadStudiesData();
+                        } else {
+                            // Regular refresh
+                            loadStudiesData();
+                        }
+                        
+                        lastStudyCount = currentStudyCount;
+                        lastUploadTime = currentUploadTime;
+                    }
+                    
+                    // Update last update time
+                    const now = new Date();
+                    const timeElement = document.querySelector('.footer-status .status-right span:nth-last-child(2) strong');
+                    if (timeElement) {
+                        timeElement.textContent = now.toLocaleTimeString('en-US', { hour12: false });
+                    }
+                } catch (error) {
+                    console.error('Auto-refresh error:', error);
+                }
+            }, 1200000); // Refresh every 20 minutes
+
+            // Notifications unread count badge
+            fetch('/notifications/api/unread-count/')
+                .then(r => r.json())
+                .then(d => {
+                    const badge = document.getElementById('notifBadge');
+                    if (badge && d && typeof d.unread_count === 'number') {
+                        if (d.unread_count > 0) {
+                            badge.textContent = d.unread_count;
+                            badge.style.display = 'inline-block';
+                        } else {
+                            badge.style.display = 'none';
+                        }
+                    }
+                })
+                .catch(() => {});
+        });
+
+        // Filter functionality
+        document.getElementById('statusFilter').addEventListener('change', applyFilters);
+        document.getElementById('modalityFilter').addEventListener('change', applyFilters);
+        document.getElementById('priorityFilter').addEventListener('change', applyFilters);
+        document.getElementById('dateFilter').addEventListener('change', applyFilters);
+        document.getElementById('searchFilter').addEventListener('input', applyFilters); // Add search filter
+
+        function applyFilters() {
+            const statusFilter = document.getElementById('statusFilter').value.toLowerCase();
+            const modalityFilter = document.getElementById('modalityFilter').value.toLowerCase();
+            const priorityFilter = document.getElementById('priorityFilter').value.toLowerCase();
+            const dateFilter = document.getElementById('dateFilter').value;
+            const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
+            
+            filteredData = studiesData.filter(study => {
+                const matchesStatus = !statusFilter || study.status.toLowerCase().includes(statusFilter);
+                const matchesModality = !modalityFilter || study.modality.toLowerCase().includes(modalityFilter);
+                const matchesPriority = !priorityFilter || study.priority.toLowerCase().includes(priorityFilter);
+                
+                let matchesDate = true;
+                if (dateFilter) {
+                    const studyDate = new Date(study.study_date).toDateString();
+                    const filterDate = new Date(dateFilter).toDateString();
+                    matchesDate = studyDate === filterDate;
+                }
+
+                const matchesSearch = 
+                    !searchFilter || 
+                    (study.patient_id && study.patient_id.toLowerCase().includes(searchFilter)) ||
+                    (study.patient_name && study.patient_name.toLowerCase().includes(searchFilter)) ||
+                    (study.accession_number && study.accession_number.toLowerCase().includes(searchFilter)) ||
+                    (study.study_description && study.study_description.toLowerCase().includes(searchFilter));
+                
+                return matchesStatus && matchesModality && matchesPriority && matchesDate && matchesSearch;
+            });
+            
+            renderStudiesTable();
+        }
+    </script>
+    
+    <!-- Enhanced Delete Button Fix -->
+    <script src="{% static 'js/delete-button-fix.js' %}"></script>
+</body>
+</html>

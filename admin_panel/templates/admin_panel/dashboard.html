@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Noctis Pro PACS</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-bg: #252525;
+            --border-color: #404040;
+            --accent-color: #ff4444;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--primary-bg);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: var(--secondary-bg);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            border: 1px solid var(--border-color);
+        }
+
+        .header h1 {
+            color: var(--accent-color);
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            padding: 25px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        .stat-card i {
+            font-size: 3rem;
+            color: var(--accent-color);
+            margin-bottom: 15px;
+        }
+
+        .stat-card h3 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: var(--text-primary);
+        }
+
+        .stat-card p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        .admin-actions {
+            background: var(--secondary-bg);
+            padding: 30px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+        }
+
+        .admin-actions h2 {
+            color: var(--accent-color);
+            margin-bottom: 20px;
+            font-size: 1.8rem;
+        }
+
+        .actions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .action-item {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            text-decoration: none;
+            color: var(--text-primary);
+            transition: all 0.3s ease;
+        }
+
+        .action-item:hover {
+            background: var(--border-color);
+            transform: translateY(-2px);
+        }
+
+        .action-item i {
+            color: var(--accent-color);
+            font-size: 1.5rem;
+            margin-bottom: 10px;
+        }
+
+        .action-item h4 {
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .action-item p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .btn {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+            margin: 10px 5px;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            background: #cc3333;
+            transform: translateY(-2px);
+        }
+
+        .back-btn {
+            background: var(--secondary-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .back-btn:hover {
+            background: var(--card-bg);
+        }
+
+        .recent-activities {
+            background: var(--secondary-bg);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+        }
+
+        .recent-activities h3 {
+            color: var(--accent-color);
+            margin-bottom: 15px;
+        }
+
+        .activity-item {
+            padding: 10px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-shield-alt"></i> Administrator Dashboard</h1>
+            <p>System Administration & Management Console</p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <i class="fas fa-users"></i>
+                <h3>{{ total_users|default:"0" }}</h3>
+                <p>Total Users</p>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-hospital"></i>
+                <h3>{{ total_facilities|default:"0" }}</h3>
+                <p>Facilities</p>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-images"></i>
+                <h3>{{ total_studies|default:"0" }}</h3>
+                <p>Studies</p>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-user-check"></i>
+                <h3>{{ active_users_today|default:"0" }}</h3>
+                <p>Active Today</p>
+            </div>
+        </div>
+
+        <div class="admin-actions">
+            <h2><i class="fas fa-cogs"></i> Administrative Actions</h2>
+            <div class="actions-grid">
+                <a href="#" class="action-item" onclick="alert('User management interface - Create, edit, and manage user accounts')">
+                    <i class="fas fa-user-plus"></i>
+                    <h4>User Management</h4>
+                    <p>Create, edit, and manage user accounts</p>
+                </a>
+                <a href="#" class="action-item" onclick="alert('Facility management interface - Manage healthcare facilities')">
+                    <i class="fas fa-building"></i>
+                    <h4>Facility Management</h4>
+                    <p>Manage healthcare facilities and settings</p>
+                </a>
+                <a href="#" class="action-item" onclick="alert('System configuration interface - Configure system settings')">
+                    <i class="fas fa-cog"></i>
+                    <h4>System Configuration</h4>
+                    <p>Configure system settings and preferences</p>
+                </a>
+                <a href="#" class="action-item" onclick="alert('Audit logs interface - View system activity logs')">
+                    <i class="fas fa-file-alt"></i>
+                    <h4>Audit Logs</h4>
+                    <p>View system activity and audit logs</p>
+                </a>
+                <a href="#" class="action-item" onclick="alert('Backup management interface - Manage system backups')">
+                    <i class="fas fa-database"></i>
+                    <h4>Backup Management</h4>
+                    <p>Manage system backups and data recovery</p>
+                </a>
+                <a href="#" class="action-item" onclick="alert('Security settings interface - Configure security policies')">
+                    <i class="fas fa-lock"></i>
+                    <h4>Security Settings</h4>
+                    <p>Configure security policies and access controls</p>
+                </a>
+            </div>
+        </div>
+
+        <div class="recent-activities">
+            <h3><i class="fas fa-clock"></i> Recent Activities</h3>
+            {% if recent_studies %}
+                {% for study in recent_studies %}
+                <div class="activity-item">
+                    <i class="fas fa-upload"></i> 
+                    Study uploaded: {{ study.patient.name }} - {{ study.modality.name }} 
+                    <span style="float: right;">{{ study.upload_date|date:"M d, H:i" }}</span>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="activity-item">
+                    <i class="fas fa-info-circle"></i> No recent activities
+                </div>
+            {% endif %}
+        </div>
+
+        <div style="text-align: center; margin-top: 30px;">
+            <a href="/worklist/" class="btn back-btn">
+                <i class="fas fa-arrow-left"></i> Back to Dashboard
+            </a>
+            <a href="#" class="btn" onclick="alert('System maintenance tools coming soon')">
+                <i class="fas fa-tools"></i> System Maintenance
+            </a>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Animate stat cards
+            const statCards = document.querySelectorAll('.stat-card');
+            statCards.forEach((card, index) => {
+                setTimeout(() => {
+                    card.style.opacity = '0';
+                    card.style.transform = 'translateY(20px)';
+                    card.style.transition = 'all 0.5s ease';
+                    setTimeout(() => {
+                        card.style.opacity = '1';
+                        card.style.transform = 'translateY(0)';
+                    }, 100);
+                }, index * 100);
+            });
+        });
+    </script>
+</body>
+</html>

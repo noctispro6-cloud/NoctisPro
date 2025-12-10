@@ -39,6 +39,8 @@ ALLOWED_HOSTS.extend([
     '127.0.0.1',
     '0.0.0.0',
     'noctispro',
+    'noctis-pro.com',
+    'www.noctis-pro.com',
     'noctispro2.duckdns.org',
     '*.duckdns.org',
     '*.ngrok.io',
@@ -221,6 +223,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:8000",
     "https://localhost:8000",
     "https://127.0.0.1:8000",
+    "https://noctis-pro.com",
+    "https://www.noctis-pro.com",
 ]
 
 # Add specific ngrok URL to CORS if provided
@@ -239,6 +243,10 @@ CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = [
     "http://noctispro",
     "https://noctispro", 
+    "https://noctis-pro.com",
+    "https://www.noctis-pro.com",
+    "http://noctis-pro.com",
+    "http://www.noctis-pro.com",
     "https://*.ngrok.io",
     "https://*.ngrok-free.app",
     "https://*.ngrok.app",

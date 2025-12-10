@@ -898,7 +898,7 @@ def api_medical_references(request):
                 for m in re.finditer(r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, re.I | re.S):
                     url = m.group(1)
                     title_raw = re.sub('<[^<]+?>', '', m.group(2))
-                    title = re.sub('\s+', ' ', title_raw).strip()
+                    title = re.sub(r'\s+', ' ', title_raw).strip()
                     if url and title:
                         results.append({'title': title, 'url': url})
                     if len(results) >= 8:

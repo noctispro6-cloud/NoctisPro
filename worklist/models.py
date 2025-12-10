@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, connection, reset_queries
 from django.utils import timezone
 from accounts.models import User, Facility
 import os
@@ -86,11 +86,16 @@ class Study(models.Model):
         return Series.objects.filter(study=self).count()
 
     def get_image_count(self, force_refresh=False):
-        # Avoid N+1 queries and ensure correctness
+        """Return a fresh count of all DICOM images for this study."""
         if force_refresh:
-            # Force a fresh query by clearing any potential caches
-            from django.db import connection
-            connection.queries_log.clear()
+            # Clear Django's query log (if enabled) and refresh the DB connection
+            try:
+                reset_queries()
+            except Exception:
+                # reset_queries is a no-op unless DEBUG is enabled; ignore failures
+                pass
+            connection.close_if_unusable_or_obsolete()
+            connection.ensure_connection()
         return DicomImage.objects.filter(series__study=self).count()
 
 class Series(models.Model):

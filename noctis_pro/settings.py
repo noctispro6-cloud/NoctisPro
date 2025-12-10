@@ -27,38 +27,20 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-7x!8k@m$z9h#4p&x3w2v6
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 
-# Ngrok detection for automatic configuration
-NGROK_URL = os.environ.get('NGROK_URL', '')
-IS_NGROK = bool(NGROK_URL) or any('ngrok' in host for host in os.environ.get('ALLOWED_HOSTS', '').split(','))
-
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',')
-
-# Add ngrok and deployment specific hosts
-ALLOWED_HOSTS.extend([
+_default_hosts = {
     'localhost',
     '127.0.0.1',
     '0.0.0.0',
     'noctispro',
     'noctis-pro.com',
     'www.noctis-pro.com',
-    'noctispro2.duckdns.org',
-    '*.duckdns.org',
-    '*.ngrok.io',
-    '*.ngrok-free.app',
-    '*.ngrok.app',
-    '3.222.223.4',
-    '172.30.0.2',
-])
-
-# Add specific ngrok URL if provided
-if NGROK_URL:
-    # Extract domain from full URL
-    import re
-    ngrok_domain = re.sub(r'^https?://', '', NGROK_URL.strip('/'))
-    ALLOWED_HOSTS.append(ngrok_domain)
-
-# Remove duplicates and empty strings
-ALLOWED_HOSTS = list(filter(None, list(set(ALLOWED_HOSTS))))
+    'api.noctis-pro.com',
+    '*.noctis-pro.com',
+}
+env_hosts = {
+    host.strip() for host in os.environ.get('ALLOWED_HOSTS', '').split(',') if host.strip()
+}
+ALLOWED_HOSTS = sorted(env_hosts.union(_default_hosts))
 
 
 # Application definition
@@ -225,17 +207,10 @@ CORS_ALLOWED_ORIGINS = [
     "https://127.0.0.1:8000",
     "https://noctis-pro.com",
     "https://www.noctis-pro.com",
+    "https://api.noctis-pro.com",
 ]
 
-# Add specific ngrok URL to CORS if provided
-if NGROK_URL:
-    CORS_ALLOWED_ORIGINS.extend([
-        NGROK_URL,
-        NGROK_URL.replace('https://', 'http://') if NGROK_URL.startswith('https://') else NGROK_URL.replace('http://', 'https://')
-    ])
-
-# Add ngrok support dynamically
-CORS_ALLOW_ALL_ORIGINS = DEBUG or IS_NGROK  # Allow all origins in debug mode or when using ngrok
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Allow all origins only during local development
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -245,14 +220,10 @@ CSRF_TRUSTED_ORIGINS = [
     "https://noctispro", 
     "https://noctis-pro.com",
     "https://www.noctis-pro.com",
+    "https://api.noctis-pro.com",
     "http://noctis-pro.com",
     "http://www.noctis-pro.com",
-    "https://*.ngrok.io",
-    "https://*.ngrok-free.app",
-    "https://*.ngrok.app",
-    "http://*.ngrok.io",
-    "http://*.ngrok-free.app", 
-    "http://*.ngrok.app",
+    "http://api.noctis-pro.com",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
     "http://localhost:80",
@@ -261,16 +232,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1",
     "https://localhost:8000",
     "https://127.0.0.1:8000",
-    "https://*.duckdns.org",
-    "http://*.duckdns.org",
 ]
-
-# Add specific ngrok URL to CSRF trusted origins if provided
-if NGROK_URL:
-    CSRF_TRUSTED_ORIGINS.extend([
-        NGROK_URL,
-        NGROK_URL.replace('https://', 'http://') if NGROK_URL.startswith('https://') else NGROK_URL.replace('http://', 'https://')
-    ])
 
 # Custom user model
 AUTH_USER_MODEL = 'accounts.User'
@@ -297,22 +259,10 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = 15000  # Support for up to 5000 images with meta
 # Security settings
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
-X_FRAME_OPTIONS = 'SAMEORIGIN' if DEBUG or IS_NGROK else 'DENY'  # Allow embedding for ngrok
+X_FRAME_OPTIONS = 'SAMEORIGIN' if DEBUG else 'DENY'
 
-# Ngrok-specific security adjustments
-if IS_NGROK:
-    # Disable some security features that interfere with ngrok
-    SECURE_SSL_REDIRECT = False
-    SESSION_COOKIE_SECURE = False
-    CSRF_COOKIE_SECURE = False
-    # But keep others for security
-    SESSION_COOKIE_HTTPONLY = True
-    CSRF_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = 'Lax'
-    CSRF_COOKIE_SAMESITE = 'Lax'
-
-# Production security enhancements (only if not using ngrok)
-if not DEBUG and not IS_NGROK:
+# Production security enhancements
+if not DEBUG:
     SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
     SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '31536000'))
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
@@ -412,16 +362,8 @@ if not DEBUG:
     # Cache static file serving
     STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage'
 
-# Ngrok-specific settings for better performance
-if IS_NGROK:
-    # Already set above for all environments
-    # Disable some checks that can cause issues with ngrok
-    USE_TZ = True
-    
 print(f"🚀 Noctis Pro PACS Settings Loaded:")
 print(f"   • Debug Mode: {DEBUG}")
-print(f"   • Ngrok Mode: {IS_NGROK}")
-print(f"   • Ngrok URL: {NGROK_URL or 'Not set'}")
 print(f"   • Allowed Hosts: {len(ALLOWED_HOSTS)} configured")
 print(f"   • Database: {DATABASES['default']['ENGINE'].split('.')[-1]}")
 print(f"   • Security: {'Development' if DEBUG else 'Production'} profile")

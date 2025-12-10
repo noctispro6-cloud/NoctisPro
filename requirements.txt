@@ -72,3 +72,8 @@ django-extensions
 reportlab
 # pycups - commented out due to installation issues on some systems
 # python-escpos - commented out due to dependency on pycups
+
+# FastAPI gateway
+fastapi
+uvicorn[standard]
+pydantic

@@ -1,0 +1,19 @@
+[package]
+name = "noctis_dicom_core"
+version = "0.1.0"
+edition = "2021"
+description = "Shared DICOM utilities for Noctis Pro"
+license = "Proprietary"
+
+[lib]
+name = "noctis_dicom_core"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+dicom-object = "0.8"
+dicom-transfer-syntax-registry = "0.8"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+pyo3 = { version = "0.21", features = ["extension-module"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"

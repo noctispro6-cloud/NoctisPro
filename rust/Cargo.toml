@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "noctis_dicom_core",
+    "noctis_dicom_receiver",
+    "noctis_viewer_wasm"
+]
+resolver = "2"

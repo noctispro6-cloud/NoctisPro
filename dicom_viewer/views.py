@@ -30,6 +30,8 @@ from pydicom.pixel_data_handlers.util import apply_voi_lut
 import scipy.ndimage as ndimage
 import logging
 import subprocess
+import requests
+from urllib.parse import urljoin
 
 from .models import ViewerSession, Measurement, Annotation, ReconstructionJob
 from .dicom_utils import DicomProcessor, safe_dicom_str
@@ -841,6 +843,37 @@ def api_dicom_image_display(request, image_id):
         window_width_param = request.GET.get('window_width')
         window_level_param = request.GET.get('window_level')
         inverted = request.GET.get('inverted', 'false').lower() == 'true'
+
+        # If configured, delegate rendering to external DICOM processor service.
+        # This keeps Django responsible for permissions/auth while offloading pixel decoding/windowing.
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/render')
+                params = {
+                    'rel_path': str(image.file_path),
+                    'image_id': int(image.id),
+                    'instance_number': getattr(image, 'instance_number', None),
+                    'slice_location': getattr(image, 'slice_location', None),
+                }
+                if window_width_param is not None:
+                    params['window_width'] = window_width_param
+                if window_level_param is not None:
+                    params['window_level'] = window_level_param
+                # Only send inverted if explicitly provided; otherwise let service apply modality default (e.g. MONOCHROME1).
+                if request.GET.get('inverted') is not None:
+                    params['inverted'] = 'true' if inverted else 'false'
+
+                resp = requests.get(endpoint, params=params, timeout=(2, 25))
+                if resp.ok:
+                    try:
+                        return JsonResponse(resp.json())
+                    except Exception as parse_err:
+                        warnings['processor_parse_error'] = str(parse_err)
+                else:
+                    warnings['processor_http_error'] = f"{resp.status_code}"
+            except Exception as svc_err:
+                warnings['processor_error'] = str(svc_err)
 
         # Read DICOM file (best-effort)
         ds = None

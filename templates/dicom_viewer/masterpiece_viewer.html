@@ -1090,6 +1090,62 @@
         let cineMode = false;
         let cineInterval = null;
 
+        // Pixel cache + render throttling (for instant WW/WL + fast scrolling)
+        const pixelCache = new Map(); // imageId -> { buf:ArrayBuffer, rows, cols, defaultWW, defaultWL, defaultInv, bytes }
+        let pixelCacheBytes = 0;
+        const MAX_PIXEL_CACHE_BYTES = 256 * 1024 * 1024; // ~256MB cap
+
+        let renderPending = false;
+        function scheduleRender() {
+            if (renderPending) return;
+            renderPending = true;
+            requestAnimationFrame(() => {
+                renderPending = false;
+                redrawCurrentImage();
+            });
+        }
+
+        function cachePut(imageId, entry) {
+            // LRU: delete+set to refresh order
+            if (pixelCache.has(imageId)) {
+                const old = pixelCache.get(imageId);
+                pixelCacheBytes -= (old?.bytes || 0);
+                pixelCache.delete(imageId);
+            }
+            pixelCache.set(imageId, entry);
+            pixelCacheBytes += entry.bytes;
+            // Evict oldest
+            while (pixelCacheBytes > MAX_PIXEL_CACHE_BYTES && pixelCache.size > 1) {
+                const oldestKey = pixelCache.keys().next().value;
+                const oldest = pixelCache.get(oldestKey);
+                pixelCache.delete(oldestKey);
+                pixelCacheBytes -= (oldest?.bytes || 0);
+            }
+        }
+
+        function cacheGet(imageId) {
+            const entry = pixelCache.get(imageId);
+            if (!entry) return null;
+            // refresh LRU order
+            pixelCache.delete(imageId);
+            pixelCache.set(imageId, entry);
+            return entry;
+        }
+
+        async function prefetchNeighborPixels() {
+            if (!imageData || imageData.length < 2) return;
+            const ids = [];
+            const next = currentImageIndex + 1;
+            const prev = currentImageIndex - 1;
+            if (next >= 0 && next < imageData.length) ids.push(imageData[next].id);
+            if (prev >= 0 && prev < imageData.length) ids.push(imageData[prev].id);
+            for (const id of ids) {
+                if (cacheGet(id)) continue;
+                // Fire-and-forget; don't block UI
+                tryLoadPixels(id, { prefetch: true });
+            }
+        }
+
         // 3D Bone Reconstruction variables
         let boneThreshold = 200;
         let boneOpacity = 0.8;
@@ -1475,7 +1531,7 @@
             }
         }
 
-        let currentPixels = null; // Float32Array
+        let currentPixels = null; // Float32Array (view into cached ArrayBuffer when possible)
         let currentPixelRows = 0;
         let currentPixelCols = 0;
         let useClientWindowing = false;
@@ -1496,11 +1552,30 @@
                 } catch (e) {}
 
                 // Prefer raw pixels for instant WW/WL in browser; fallback to PNG render.
+                // Use cache if available immediately
+                const cached = cacheGet(imageId);
+                if (cached) {
+                    currentPixels = new Float32Array(cached.buf);
+                    currentPixelRows = cached.rows;
+                    currentPixelCols = cached.cols;
+                    if (cached.defaultWW && cached.defaultWL) {
+                        if (!windowWidth) windowWidth = cached.defaultWW;
+                        if (!windowLevel) windowLevel = cached.defaultWL;
+                    }
+                    if (!inverted && cached.defaultInv) inverted = true;
+                    useClientWindowing = true;
+                    updateSliders();
+                    renderFromPixels();
+                    prefetchNeighborPixels();
+                    return;
+                }
+
                 const pixelsOk = await tryLoadPixels(imageId);
                 if (pixelsOk) {
                     useClientWindowing = true;
                     updateSliders();
                     renderFromPixels();
+                    prefetchNeighborPixels();
                 } else {
                     useClientWindowing = false;
                     await renderFromServerPng(imageId);
@@ -1568,7 +1643,7 @@
             updateOverlayLabels();
         }
 
-        async function tryLoadPixels(imageId) {
+        async function tryLoadPixels(imageId, opts = {}) {
             try {
                 const resp = await fetch(`/dicom-viewer/api/image/${imageId}/pixels/`);
                 if (!resp.ok) return false;
@@ -1578,13 +1653,28 @@
                 if (!rows || !cols || dtype !== 'float32') return false;
 
                 // defaults
-                if (!windowWidth) windowWidth = parseFloat(resp.headers.get('X-Default-WW') || '0') || windowWidth;
-                if (!windowLevel) windowLevel = parseFloat(resp.headers.get('X-Default-WL') || '0') || windowLevel;
+                const buf = await resp.arrayBuffer();
+                const defaultWW = parseFloat(resp.headers.get('X-Default-WW') || '0') || 400;
+                const defaultWL = parseFloat(resp.headers.get('X-Default-WL') || '0') || 40;
                 const defaultInv = (resp.headers.get('X-Default-Inverted') || 'false') === 'true';
-                // If user hasn't explicitly toggled invert yet, adopt default inversion.
+
+                // Cache it
+                cachePut(imageId, {
+                    buf,
+                    rows,
+                    cols,
+                    defaultWW,
+                    defaultWL,
+                    defaultInv,
+                    bytes: buf.byteLength || (rows * cols * 4)
+                });
+
+                if (opts.prefetch) return true;
+
+                if (!windowWidth) windowWidth = defaultWW;
+                if (!windowLevel) windowLevel = defaultWL;
                 if (!inverted && defaultInv) inverted = true;
 
-                const buf = await resp.arrayBuffer();
                 currentPixels = new Float32Array(buf);
                 currentPixelRows = rows;
                 currentPixelCols = cols;
@@ -1756,18 +1846,21 @@
                     windowWidth = Math.max(1, windowWidth + deltaX * 2);
                     windowLevel = Math.max(-1000, Math.min(1000, windowLevel + deltaY * 2));
                     updateSliders();
-                    redrawCurrentImage();
+                    if (useClientWindowing) scheduleRender();
+                    else redrawCurrentImage();
                     break;
                 case 'zoom':
                     const zoomDelta = 1 + (deltaY * 0.01);
                     zoom = Math.max(0.1, Math.min(5.0, zoom * zoomDelta));
                     updateZoomSlider();
-                    redrawCurrentImage();
+                    if (useClientWindowing) scheduleRender();
+                    else redrawCurrentImage();
                     break;
                 case 'pan':
                     panX += deltaX / zoom;
                     panY += deltaY / zoom;
-                    redrawCurrentImage();
+                    if (useClientWindowing) scheduleRender();
+                    else redrawCurrentImage();
                     break;
                 case 'measure':
                 case 'angle':
@@ -1849,14 +1942,16 @@
             windowWidth = parseInt(value);
             document.getElementById('wwValue').textContent = windowWidth;
             document.getElementById('windowWidth').textContent = windowWidth;
-            redrawCurrentImage();
+            if (useClientWindowing) scheduleRender();
+            else redrawCurrentImage();
         }
 
         function updateWindowLevel(value) {
             windowLevel = parseInt(value);
             document.getElementById('wlValue').textContent = windowLevel;
             document.getElementById('windowLevel').textContent = windowLevel;
-            redrawCurrentImage();
+            if (useClientWindowing) scheduleRender();
+            else redrawCurrentImage();
         }
 
         function updateSlice(value) {
@@ -1870,7 +1965,8 @@
             zoom = parseFloat(value) / 100;
             document.getElementById('zoomValue').textContent = value + '%';
             document.getElementById('zoomLevel').textContent = value + '%';
-            redrawCurrentImage();
+            if (useClientWindowing) scheduleRender();
+            else redrawCurrentImage();
         }
 
         function updateBoneThreshold(value) {

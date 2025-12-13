@@ -37,8 +37,19 @@ def _auto_start_ai_for_study(study: Study) -> None:
 	This is best-effort: failures won't break uploads.
 	"""
 	import os as _os
-	if (_os.environ.get('AI_AUTO_ANALYSIS_ON_UPLOAD', 'true') or '').lower() != 'true':
-		return
+	enabled = (_os.environ.get('AI_AUTO_ANALYSIS_ON_UPLOAD', '') or '').strip().lower()
+	if enabled:
+		if enabled != 'true':
+			return
+	else:
+		# Fall back to DB system configuration toggle (default: true).
+		try:
+			from admin_panel.models import SystemConfiguration
+			row = SystemConfiguration.objects.filter(key='ai_auto_analysis_on_upload').first()
+			if row and (row.value or '').strip().lower() in ('false', '0', 'no', 'off'):
+				return
+		except Exception:
+			pass
 
 	try:
 		from ai_analysis.models import AIModel, AIAnalysis

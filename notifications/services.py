@@ -19,11 +19,28 @@ from typing import Optional
 import requests
 
 
+def _get_system_config(key: str) -> Optional[str]:
+    """
+    Best-effort read of admin_panel.SystemConfiguration without hard dependency.
+    Returns None if DB/model isn't available yet.
+    """
+    try:
+        from admin_panel.models import SystemConfiguration
+        row = SystemConfiguration.objects.filter(key=key).first()
+        if not row:
+            return None
+        val = (row.value or "").strip()
+        return val or None
+    except Exception:
+        return None
+
+
 def _twilio_config() -> tuple[Optional[str], Optional[str], Optional[str]]:
-    sid = (os.environ.get("TWILIO_ACCOUNT_SID") or "").strip() or None
-    token = (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip() or None
-    from_number = (os.environ.get("TWILIO_FROM_NUMBER") or "").strip() or None
-    return sid, token, from_number
+    # Environment variables override DB configuration.
+    sid = (os.environ.get("TWILIO_ACCOUNT_SID") or "").strip() or _get_system_config("twilio_account_sid")
+    token = (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip() or _get_system_config("twilio_auth_token")
+    from_number = (os.environ.get("TWILIO_FROM_NUMBER") or "").strip() or _get_system_config("twilio_from_number")
+    return sid or None, token or None, from_number or None
 
 
 def can_deliver_out_of_band() -> bool:

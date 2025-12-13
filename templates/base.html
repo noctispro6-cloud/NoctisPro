@@ -681,7 +681,8 @@
             </div>
             {% if user.is_authenticated %}
             {% user_caps as caps %}
-            {% if user.role == 'admin' or caps.manage_settings %}
+            {# Show Admin Panel entry if the user has any admin capability toggled on #}
+            {% if user.role == 'admin' or caps.manage_settings or caps.manage_permissions or caps.manage_users or caps.manage_facilities or caps.view_logs %}
             <button type="button" class="admin-btn" onclick="window.location.href='{% url 'admin_panel:dashboard' %}'" title="Administrator Dashboard"><i class="fas fa-shield-alt"></i> ADMIN PANEL</button>
             {% endif %}
             {% if user.role == 'admin' or caps.manage_users %}

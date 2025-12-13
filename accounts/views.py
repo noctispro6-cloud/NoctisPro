@@ -88,6 +88,14 @@ def logout_view(request):
 def profile_view(request):
     """User profile view and update"""
     user = request.user
+
+    # Ensure notification preferences exist
+    pref = None
+    try:
+        from notifications.models import NotificationPreference
+        pref, _ = NotificationPreference.objects.get_or_create(user=user)
+    except Exception:
+        pref = None
     
     if request.method == 'POST':
         # Update profile information
@@ -97,12 +105,24 @@ def profile_view(request):
         user.phone = request.POST.get('phone', user.phone)
         user.specialization = request.POST.get('specialization', user.specialization)
         user.save()
+
+        # Update notification preference delivery method
+        try:
+            if pref:
+                method = (request.POST.get('preferred_method') or pref.preferred_method or 'web').strip()
+                valid = {c[0] for c in pref.DELIVERY_METHODS}
+                if method in valid:
+                    pref.preferred_method = method
+                    pref.save(update_fields=['preferred_method', 'updated_at'])
+        except Exception:
+            pass
         
         messages.success(request, 'Profile updated successfully.')
         return redirect('accounts:profile')
     
     context = {
         'user': user,
+        'notification_pref': pref,
         'recent_sessions': UserSession.objects.filter(user=user).order_by('-login_time')[:10]
     }
     return render(request, 'accounts/profile.html', context)

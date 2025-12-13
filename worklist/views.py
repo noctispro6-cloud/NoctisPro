@@ -13,6 +13,7 @@ import os
 import mimetypes
 import json
 from pathlib import Path
+import threading
 import pydicom
 from PIL import Image
 from io import BytesIO
@@ -28,6 +29,72 @@ from reports.models import Report
 
 # Module logger for robust error reporting
 logger = logging.getLogger('noctis_pro.worklist')
+
+
+def _auto_start_ai_for_study(study: Study) -> None:
+	"""
+	Automatically kick off preliminary AI analysis in the background for a study.
+	This is best-effort: failures won't break uploads.
+	"""
+	import os as _os
+	if (_os.environ.get('AI_AUTO_ANALYSIS_ON_UPLOAD', 'true') or '').lower() != 'true':
+		return
+
+	try:
+		from ai_analysis.models import AIModel, AIAnalysis
+		# Ensure baseline placeholder models exist (so demo environments work).
+		if AIModel.objects.count() == 0:
+			try:
+				from ai_analysis.management.commands.setup_ai_models import BASELINE_MODELS
+				for m in BASELINE_MODELS:
+					AIModel.objects.get_or_create(
+						name=m['name'],
+						version=m['version'],
+						defaults={
+							'model_type': m['model_type'],
+							'modality': m['modality'],
+							'body_part': m['body_part'],
+							'description': m['description'],
+							'training_data_info': m['training_data_info'],
+							'accuracy_metrics': m['accuracy_metrics'],
+							'model_file_path': m['model_file_path'],
+							'config_file_path': m['config_file_path'],
+							'preprocessing_config': m['preprocessing_config'],
+							'is_active': True,
+							'is_trained': False,
+						},
+					)
+			except Exception:
+				pass
+
+		modality_code = getattr(study.modality, 'code', None)
+		candidates = AIModel.objects.filter(is_active=True).filter(Q(modality=modality_code) | Q(modality='ALL'))
+		# Prefer classification/detection first for triage signal.
+		order = {'classification': 0, 'detection': 1, 'segmentation': 2, 'quality_assessment': 3, 'report_generation': 4, 'reconstruction': 5}
+		models = sorted(list(candidates), key=lambda x: order.get(getattr(x, 'model_type', ''), 99))[:3]
+		if not models:
+			return
+
+		analyses = []
+		for model in models:
+			if AIAnalysis.objects.filter(study=study, ai_model=model, status__in=['pending', 'processing', 'completed']).exists():
+				continue
+			analyses.append(
+				AIAnalysis.objects.create(
+					study=study,
+					ai_model=model,
+					priority=study.priority or 'normal',
+					status='pending',
+				)
+			)
+		if not analyses:
+			return
+
+		# Run in background (same worker used elsewhere).
+		from ai_analysis.views import process_ai_analyses
+		threading.Thread(target=process_ai_analyses, args=(analyses,), daemon=True).start()
+	except Exception:
+		return
 
 @login_required
 def dashboard(request):
@@ -446,6 +513,13 @@ def upload_study(request):
 						'study_comments': f'Professional upload by {request.user.get_full_name()} on {timezone.now().strftime("%Y-%m-%d %H:%M:%S")}',
 					}
 				)
+
+				# Automatically start preliminary AI analysis for newly created studies
+				if study_created:
+					try:
+						_auto_start_ai_for_study(study)
+					except Exception:
+						pass
 				
 				if study_created:
 					upload_stats['created_studies'] += 1

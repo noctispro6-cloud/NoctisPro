@@ -680,6 +680,11 @@
                 </div>
             </div>
             {% if user.is_authenticated %}
+            <button type="button" class="btn-control" onclick="window.location.href='{% url 'accounts:profile' %}'" title="Profile">
+                <i class="fas fa-user"></i> PROFILE
+            </button>
+            {% endif %}
+            {% if user.is_authenticated %}
             {% user_caps as caps %}
             {# Show Admin Panel entry if the user has any admin capability toggled on #}
             {% if user.role == 'admin' or caps.manage_settings or caps.manage_permissions or caps.manage_users or caps.manage_facilities or caps.view_logs %}

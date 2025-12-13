@@ -806,14 +806,24 @@ def _compute_ai_triage(abnormalities, confidence: float) -> dict:
     labels = [(_normalize_abnormality_label(a) or '').lower() for a in (abnormalities or [])]
     labels = [l for l in labels if l]
 
+    # "Urgent" keywords: conditions where expedited review is typically warranted.
     urgent_keywords = (
         'intracranial hemorrhage', 'hemorrhage', 'ich', 'stroke', 'infarct',
         'pneumothorax', 'tension pneumothorax', 'pulmonary embolism', 'embolism',
         'aortic dissection', 'free air', 'perforation'
     )
+    # "High" keywords: important findings that should be prioritized but may be less immediately time-critical.
     high_keywords = (
         'fracture', 'consolidation', 'pneumonia', 'large effusion', 'mass', 'tumor',
         'significant stenosis'
+    )
+    # Trauma heuristics: treat explicit trauma mechanisms/contexts as higher urgency.
+    trauma_context_keywords = (
+        'trauma', 'mvc', 'rt a', 'rta', 'fall', 'assault', 'gunshot', 'stab', 'blunt', 'polytrauma'
+    )
+    trauma_finding_keywords = (
+        'fracture', 'dislocation', 'hemorrhage', 'bleed', 'laceration',
+        'pneumothorax', 'hemothorax', 'contusion', 'solid organ injury', 'free fluid'
     )
 
     max_hint = 'normal'
@@ -821,6 +831,12 @@ def _compute_ai_triage(abnormalities, confidence: float) -> dict:
     if any(any(k in l for k in urgent_keywords) for l in labels):
         max_hint = 'urgent'
         reason = 'urgent_keyword'
+    elif any(any(k in l for k in trauma_finding_keywords) for l in labels) and (
+        any(any(k in l for k in trauma_context_keywords) for l in labels)
+    ):
+        # If a model explicitly emits trauma context + trauma finding, treat as urgent.
+        max_hint = 'urgent'
+        reason = 'trauma_keyword'
     elif any(any(k in l for k in high_keywords) for l in labels):
         max_hint = 'high'
         reason = 'high_keyword'
@@ -896,6 +912,21 @@ def _notify_ai_triage(analysis: AIAnalysis, triage: dict) -> None:
             f"AI triage level: {triage_level.upper()} (score {triage_score}). "
             f"Please review the study promptly. Findings: {analysis.findings[:200]}"
         )
+        # If masses/tumors/lesions are detected, include practical reference suggestions for radiologists.
+        try:
+            labels = [(_normalize_abnormality_label(a) or '').lower() for a in (analysis.abnormalities_detected or [])]
+            labels = [l for l in labels if l]
+            if any(k in l for l in labels for k in ('mass', 'tumor', 'lesion', 'neoplasm')):
+                refs = [
+                    "Brant & Helms – Fundamentals of Diagnostic Radiology (mass workup frameworks)",
+                    "Dähnert – Radiology Review Manual (differentials & imaging patterns)",
+                    "Grainger & Allison’s Diagnostic Radiology (systematic interpretation)",
+                    "Osborn’s Brain / Head & Neck Imaging (if CNS/head-neck mass)",
+                    "Diagnostic Imaging series (e.g., Brain/Chest/Abdomen) for pattern-based mass differentials",
+                ]
+                msg += "  | Suggested references for mass evaluation: " + "; ".join(refs)
+        except Exception:
+            pass
 
         action_url = f"/worklist/study/{study.id}/"
         # Dedupe key prevents duplicate alerts per recipient/triage level.
@@ -971,6 +1002,20 @@ def _apply_ai_triage(analysis: AIAnalysis) -> None:
             'triage_flagged': triage.get('flagged'),
             'triage_reason': triage.get('reason'),
         })
+        # Persist reference suggestions for mass-type abnormalities (for UI display/consumption).
+        try:
+            labels = [(_normalize_abnormality_label(a) or '').lower() for a in (analysis.abnormalities_detected or [])]
+            labels = [l for l in labels if l]
+            if any(k in l for l in labels for k in ('mass', 'tumor', 'lesion', 'neoplasm')):
+                measurements['reference_suggestions'] = [
+                    "Brant & Helms – Fundamentals of Diagnostic Radiology",
+                    "Dähnert – Radiology Review Manual",
+                    "Grainger & Allison’s Diagnostic Radiology",
+                    "Osborn’s Brain / Head & Neck Imaging (if applicable)",
+                    "Diagnostic Imaging (Amirsys) series for pattern-based differentials",
+                ]
+        except Exception:
+            pass
         analysis.measurements = measurements
         analysis.save(update_fields=['measurements'])
     except Exception:
@@ -1012,12 +1057,18 @@ def simulate_ai_analysis(analysis):
     if modality == 'CT':
         findings = "No acute intracranial abnormality. Brain parenchyma appears normal."
         abnormalities = []
-        if 'stroke' in clin or (h % 20 == 1):
+        if 'trauma' in clin or 'fall' in clin or 'mvc' in clin or (h % 20 == 4):
+            abnormalities = [{'label': 'Trauma context', 'severity_hint': 'urgent'}, {'label': 'Skull fracture suspicion', 'severity_hint': 'urgent'}]
+            findings = "Trauma context with possible skull fracture; urgent review recommended."
+        elif 'stroke' in clin or (h % 20 == 1):
             abnormalities = [{'label': 'Ischemic stroke suspicion', 'severity_hint': 'urgent'}]
             findings = "Findings suspicious for acute ischemic stroke; urgent clinical correlation recommended."
         elif 'hemorrhage' in clin or (h % 20 == 0):
             abnormalities = [{'label': 'Intracranial hemorrhage suspicion', 'severity_hint': 'urgent'}]
             findings = "Possible intracranial hemorrhage; urgent review recommended."
+        elif 'mass' in clin or 'tumor' in clin or (h % 20 == 5):
+            abnormalities = [{'label': 'Intracranial mass/lesion suspicion', 'severity_hint': 'high'}]
+            findings = "Possible intracranial mass/lesion; recommend expedited review and correlation."
         elif (h % 20 == 2):
             abnormalities = [{'label': 'Mass effect / edema suspicion', 'severity_hint': 'high'}]
             findings = "Possible mass effect/edema; recommend expedited review."

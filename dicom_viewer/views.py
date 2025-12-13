@@ -4150,6 +4150,17 @@ def ai_3d_print_api(request, series_id):
         quality = data.get('quality', 'high')
         format_type = data.get('format', 'stl')
         ai_enhanced = data.get('ai_enhanced', True)
+
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/ai/3d-print')
+                resp = requests.post(endpoint, params={'series_id': int(series_id)}, json=data, timeout=(2, 180))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor ai_3d_print failed: {e}")
         
         # Get DICOM images for the series
         images = DicomImage.objects.filter(series=series).order_by('instance_number')
@@ -4159,18 +4170,13 @@ def ai_3d_print_api(request, series_id):
                 'error': 'No DICOM images found for this series'
             })
         
-        # Create reconstruction job
-        job = ReconstructionJob.objects.create(
-            series=series,
-            user=request.user,
-            reconstruction_type='ai_3d_print',
-            parameters={
-                'quality': quality,
-                'format': format_type,
-                'ai_enhanced': ai_enhanced
-            },
-            status='processing'
-        )
+        # Create reconstruction job (persist status/provenance)
+        job = ReconstructionJob.objects.create(series=series, user=request.user, job_type='bone_3d', status='processing')
+        try:
+            job.set_parameters({'quality': quality, 'format': format_type, 'ai_enhanced': ai_enhanced, 'job': 'ai_3d_print'})
+        except Exception:
+            pass
+        job.save()
         
         # For demo purposes, simulate AI 3D print generation
         # In a real implementation, this would call an AI service
@@ -4211,6 +4217,7 @@ endsolid AI_Enhanced_Model_{series_id}
             # Update job status
             job.status = 'completed'
             job.result_path = model_path
+            job.completed_at = timezone.now()
             job.save()
             
             download_url = f"/media/ai_3d_models/{model_filename}"
@@ -4226,6 +4233,7 @@ endsolid AI_Enhanced_Model_{series_id}
         except Exception as e:
             job.status = 'failed'
             job.error_message = str(e)
+            job.completed_at = timezone.now()
             job.save()
             raise e
             
@@ -4268,79 +4276,83 @@ def advanced_reconstruction_api(request, series_id):
                 'error': 'No DICOM images found for this series'
             })
         
-        # Create reconstruction job
-        job = ReconstructionJob.objects.create(
-            series=series,
-            user=request.user,
-            reconstruction_type='advanced_ai',
-            parameters={
+        # Create reconstruction job (track request + allow polling if extended later)
+        job = ReconstructionJob.objects.create(series=series, user=request.user, job_type='mpr', status='processing')
+        try:
+            job.set_parameters({
                 'reconstruction_type': reconstruction_type,
                 'include_mpr': include_mpr,
                 'include_mip': include_mip,
-                'include_volume_rendering': include_volume_rendering
-            },
-            status='processing'
-        )
-        
-        # For demo purposes, simulate advanced reconstruction
-        # In a real implementation, this would call advanced AI reconstruction services
-        try:
-            # Simulate processing time
-            import time
-            time.sleep(3)
-            
-            # Generate mock reconstruction results
-            reconstructions = []
-            
-            if include_mpr:
-                # Generate mock MPR views
-                for view in ['axial', 'sagittal', 'coronal']:
-                    mock_url = f"/dicom-viewer/api/mock-reconstruction/{series_id}/{view}/"
-                    reconstructions.append({
-                        'type': 'mpr',
-                        'view': view,
-                        'url': mock_url,
-                        'description': f'AI-Enhanced {view.title()} MPR'
-                    })
-            
-            if include_mip:
-                # Generate mock MIP views
-                mock_url = f"/dicom-viewer/api/mock-reconstruction/{series_id}/mip/"
-                reconstructions.append({
-                    'type': 'mip',
-                    'view': 'composite',
-                    'url': mock_url,
-                    'description': 'AI-Enhanced Maximum Intensity Projection'
-                })
-            
-            if include_volume_rendering:
-                # Generate mock volume rendering
-                mock_url = f"/dicom-viewer/api/mock-reconstruction/{series_id}/volume/"
-                reconstructions.append({
-                    'type': 'volume',
-                    'view': '3d',
-                    'url': mock_url,
-                    'description': 'AI-Enhanced Volume Rendering'
-                })
-            
-            # Update job status
-            job.status = 'completed'
-            job.result_data = {'reconstructions': reconstructions}
-            job.save()
-            
-            return JsonResponse({
-                'success': True,
-                'message': 'Advanced reconstruction completed successfully',
-                'reconstructions': [r['url'] for r in reconstructions],
-                'details': reconstructions,
-                'job_id': job.id
+                'include_volume_rendering': include_volume_rendering,
+                'job': 'advanced_reconstruction',
             })
-            
-        except Exception as e:
-            job.status = 'failed'
-            job.error_message = str(e)
-            job.save()
-            raise e
+        except Exception:
+            pass
+        job.save()
+
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/reconstruction/advanced')
+                resp = requests.post(endpoint, params={'series_id': int(series_id)}, json=data, timeout=(2, 180))
+                resp.raise_for_status()
+                result = resp.json()
+
+                # Persist result payload for audit/debug (optional)
+                try:
+                    out_dir = os.path.join(settings.MEDIA_ROOT, 'advanced_reconstruction')
+                    os.makedirs(out_dir, exist_ok=True)
+                    out_path = os.path.join(out_dir, f'advanced_reconstruction_{job.id}.json')
+                    with open(out_path, 'w') as f:
+                        json.dump(result, f)
+                    job.result_path = out_path
+                except Exception:
+                    pass
+
+                job.status = 'completed'
+                job.completed_at = timezone.now()
+                job.save()
+                result['job_id'] = job.id
+                return JsonResponse(result)
+            except Exception as e:
+                job.status = 'failed'
+                job.error_message = str(e)
+                job.completed_at = timezone.now()
+                job.save()
+                return JsonResponse({'success': False, 'error': f'Advanced reconstruction failed: {str(e)}', 'job_id': job.id}, status=500)
+
+        # Fallback (no external processor): return real, existing endpoints (not placeholders)
+        reconstructions = []
+        if include_mpr:
+            reconstructions.append({
+                'type': 'mpr',
+                'url': f"/dicom-viewer/api/series/{series_id}/mpr/",
+                'description': 'MPR reconstruction (JSON with base64 previews)'
+            })
+        if include_mip:
+            reconstructions.append({
+                'type': 'mip',
+                'url': f"/dicom-viewer/api/series/{series_id}/mip/",
+                'description': 'MIP reconstruction (JSON with base64 previews)'
+            })
+        if include_volume_rendering:
+            reconstructions.append({
+                'type': 'volume',
+                'url': f"/dicom-viewer/api/series/{series_id}/volume/?max_dim=256",
+                'description': 'Downsampled uint8 volume for VR'
+            })
+
+        job.status = 'completed'
+        job.completed_at = timezone.now()
+        job.save()
+
+        return JsonResponse({
+            'success': True,
+            'message': 'Advanced reconstruction ready',
+            'details': reconstructions,
+            'job_id': job.id
+        })
             
     except Exception as e:
         logger.error(f"Advanced reconstruction error for series {series_id}: {str(e)}")
@@ -4365,6 +4377,17 @@ def fast_reconstruction_api(request, series_id):
         quality = data.get('quality', 'high')
         optimize_for_speed = data.get('optimize_for_speed', True)
         enable_gpu = data.get('enable_gpu', True)
+
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/reconstruction/fast')
+                resp = requests.post(endpoint, params={'series_id': int(series_id)}, json=data, timeout=(2, 120))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor fast reconstruction failed: {e}")
         
         # Get DICOM images for the series
         images = DicomImage.objects.filter(series=series).order_by('instance_number')
@@ -4381,9 +4404,10 @@ def fast_reconstruction_api(request, series_id):
                 'success': True,
                 'type': 'mpr',
                 'views': {
-                    'axial': f'/dicom-viewer/api/mpr-fast/{series_id}/axial/',
-                    'sagittal': f'/dicom-viewer/api/mpr-fast/{series_id}/sagittal/',
-                    'coronal': f'/dicom-viewer/api/mpr-fast/{series_id}/coronal/'
+                    # Existing working endpoint (JSON with base64 previews)
+                    'axial': f'/dicom-viewer/api/series/{series_id}/mpr/?plane=axial',
+                    'sagittal': f'/dicom-viewer/api/series/{series_id}/mpr/?plane=sagittal',
+                    'coronal': f'/dicom-viewer/api/series/{series_id}/mpr/?plane=coronal'
                 },
                 'slice_counts': {
                     'axial': images.count(),
@@ -4398,9 +4422,8 @@ def fast_reconstruction_api(request, series_id):
                 'success': True,
                 'type': 'mip',
                 'images': [
-                    f'/dicom-viewer/api/mip-fast/{series_id}/axial/',
-                    f'/dicom-viewer/api/mip-fast/{series_id}/sagittal/',
-                    f'/dicom-viewer/api/mip-fast/{series_id}/coronal/'
+                    # Existing working endpoint (JSON with base64 previews)
+                    f'/dicom-viewer/api/series/{series_id}/mip/'
                 ]
             }
             
@@ -4410,17 +4433,14 @@ def fast_reconstruction_api(request, series_id):
             result = {
                 'success': True,
                 'type': 'bone',
-                'images': [f'/dicom-viewer/api/bone-fast/{series_id}/?threshold={threshold}'],
+                # Existing working endpoint (JSON with base64 previews, optional mesh)
+                'images': [f'/dicom-viewer/api/series/{series_id}/bone/?threshold={threshold}'],
                 'threshold': threshold
             }
             
         else:
             # Generic fast reconstruction
-            result = {
-                'success': True,
-                'type': recon_type,
-                'images': [f'/dicom-viewer/api/recon-fast/{series_id}/{recon_type}/']
-            }
+            return JsonResponse({'success': False, 'error': f'Unsupported reconstruction type: {recon_type}'}, status=400)
         
         return JsonResponse(result)
         

@@ -163,6 +163,7 @@ class NotificationPreference(models.Model):
         ('web', 'Web Notification'),
         ('email', 'Email'),
         ('sms', 'SMS'),
+        ('call', 'Phone Call'),
         ('push', 'Push Notification'),
     ]
 

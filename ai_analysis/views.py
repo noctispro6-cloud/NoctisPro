@@ -868,6 +868,8 @@ def _notify_ai_triage(analysis: AIAnalysis, triage: dict) -> None:
     """Create a notification for radiologists/admins when AI upgrades triage."""
     try:
         from notifications.models import Notification, NotificationType
+        from notifications.models import NotificationPreference
+        from notifications import services as notify_services
 
         study = analysis.study
         facility = getattr(study, 'facility', None)
@@ -896,8 +898,18 @@ def _notify_ai_triage(analysis: AIAnalysis, triage: dict) -> None:
         )
 
         action_url = f"/worklist/study/{study.id}/"
+        # Dedupe key prevents duplicate alerts per recipient/triage level.
+        dedupe_key = f"ai_triage:{study.id}:{analysis.id}:{triage_level}"
         for recipient in recipients:
-            Notification.objects.create(
+            # Avoid duplicating the same alert repeatedly.
+            if Notification.objects.filter(
+                recipient=recipient,
+                notification_type=notif_type,
+                data__dedupe_key=dedupe_key,
+            ).exists():
+                continue
+
+            notif = Notification.objects.create(
                 notification_type=notif_type,
                 recipient=recipient,
                 sender=None,
@@ -911,8 +923,31 @@ def _notify_ai_triage(analysis: AIAnalysis, triage: dict) -> None:
                     'study_id': study.id,
                     'analysis_id': analysis.id,
                     'triage': triage,
+                    'dedupe_key': dedupe_key,
                 },
             )
+
+            # For CRITICAL (urgent) cases: attempt out-of-band alerts (SMS/Call) based on user preference.
+            if triage_level == 'urgent':
+                try:
+                    pref = NotificationPreference.objects.filter(user=recipient).first()
+                    method = (getattr(pref, 'preferred_method', None) or 'web').lower()
+                    to_number = (getattr(recipient, 'phone', None) or '').strip()
+                    if not to_number:
+                        continue
+                    if method == 'sms':
+                        notify_services.send_sms(
+                            to_number,
+                            f"[CRITICAL] {title}. Open: {action_url}",
+                        )
+                    elif method == 'call':
+                        notify_services.place_call(
+                            to_number,
+                            f"Critical AI alert. {title}. Please log in to review immediately.",
+                        )
+                except Exception:
+                    # Best-effort only: web notification remains
+                    pass
     except Exception:
         # Best-effort only
         return

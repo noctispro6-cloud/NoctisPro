@@ -340,6 +340,21 @@ def api_mpr_reconstruction(request, series_id):
         return JsonResponse({'error': 'Permission denied'}, status=403)
 
     try:
+        # Delegate to external processor if configured (keeps Django auth/permissions)
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/mpr')
+                params = {'series_id': int(series_id)}
+                for k in ('plane', 'slice', 'window_width', 'window_level', 'inverted'):
+                    if request.GET.get(k) is not None:
+                        params[k] = request.GET.get(k)
+                resp = requests.get(endpoint, params=params, timeout=(2, 30))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor MPR failed: {e}")
+
         # Load isotropically-resampled volume from cache or build once
         volume, _spacing = _get_mpr_volume_and_spacing(series)
         
@@ -1251,6 +1266,17 @@ def api_auto_window(request, image_id):
             # Check permissions
             if user.is_facility_user() and getattr(user, 'facility', None) and image.series.study.facility != user.facility:
                 return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+
+            # Delegate to external processor if configured
+            processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+            if processor_url:
+                try:
+                    endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/auto-window')
+                    resp = requests.get(endpoint, params={'image_id': int(image_id)}, timeout=(2, 20))
+                    if resp.ok:
+                        return JsonResponse(resp.json())
+                except Exception as e:
+                    logger.warning(f"External processor auto-window failed: {e}")
             
             # Load DICOM file and analyze
             dicom_path = os.path.join(settings.MEDIA_ROOT, str(image.file_path))
@@ -2754,6 +2780,18 @@ def api_hu_value(request):
     mode = (request.GET.get('mode') or '').lower()
 
     try:
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/hu')
+                params = dict(request.GET.items())
+                resp = requests.get(endpoint, params=params, timeout=(2, 25))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor HU failed: {e}")
+
         if mode == 'series':
             image_id = int(request.GET.get('image_id'))
             x = int(float(request.GET.get('x')))
@@ -3206,6 +3244,23 @@ def api_series_volume_uint8(request, series_id):
     if hasattr(request.user, 'is_facility_user') and request.user.is_facility_user() and getattr(request.user, 'facility', None) and series.study.facility != request.user.facility:
         return JsonResponse({'error': 'Permission denied'}, status=403)
     try:
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/series/volume_uint8')
+                params = {
+                    'series_id': int(series_id),
+                    'ww': request.GET.get('ww', 400),
+                    'wl': request.GET.get('wl', 40),
+                    'max_dim': request.GET.get('max_dim', 256),
+                }
+                resp = requests.get(endpoint, params=params, timeout=(2, 45))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor volume_uint8 failed: {e}")
+
         volume, spacing = _get_mpr_volume_and_spacing(series)
         ww = float(request.GET.get('ww', 400))
         wl = float(request.GET.get('wl', 40))
@@ -4347,6 +4402,25 @@ def mpr_slice_api(request, series_id, plane, slice_index):
     """
     try:
         series = get_object_or_404(Series, id=series_id)
+
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/mpr/slice.png')
+                params = {
+                    'series_id': int(series_id),
+                    'plane': str(plane).lower(),
+                    'slice': int(slice_index),
+                    'ww': float(request.GET.get('ww', 400)),
+                    'wl': float(request.GET.get('wl', 40)),
+                    'inverted': (request.GET.get('inverted', 'false').lower() == 'true'),
+                }
+                resp = requests.get(endpoint, params=params, timeout=(2, 30))
+                if resp.ok and resp.headers.get('content-type', '').startswith('image/'):
+                    return HttpResponse(resp.content, content_type=resp.headers.get('content-type', 'image/png'))
+            except Exception as e:
+                logger.warning(f"External processor mpr_slice_png failed: {e}")
         
         # Get the MPR slice using existing optimized function
         slice_index = int(slice_index)

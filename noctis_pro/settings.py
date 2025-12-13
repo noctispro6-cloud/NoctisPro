@@ -198,6 +198,11 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # DICOM files storage
 DICOM_ROOT = os.path.join(MEDIA_ROOT, 'dicom')
 
+# Optional external DICOM processor (FastAPI/Rust service) URL.
+# If set, Django DICOM rendering endpoints will delegate pixel decoding/windowing to it.
+# Example: http://127.0.0.1:8010
+DICOM_PROCESSOR_URL = os.environ.get('DICOM_PROCESSOR_URL', '').strip()
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

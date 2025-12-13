@@ -26,6 +26,10 @@ channels
 channels-redis
 daphne
 
+# High-performance DICOM processing service (optional)
+fastapi
+uvicorn[standard]
+
 # DICOM processing
 pydicom
 pynetdicom

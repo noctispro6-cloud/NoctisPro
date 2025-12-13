@@ -1090,6 +1090,62 @@
         let cineMode = false;
         let cineInterval = null;
 
+        // Pixel cache + render throttling (for instant WW/WL + fast scrolling)
+        const pixelCache = new Map(); // imageId -> { buf:ArrayBuffer, rows, cols, defaultWW, defaultWL, defaultInv, bytes }
+        let pixelCacheBytes = 0;
+        const MAX_PIXEL_CACHE_BYTES = 256 * 1024 * 1024; // ~256MB cap
+
+        let renderPending = false;
+        function scheduleRender() {
+            if (renderPending) return;
+            renderPending = true;
+            requestAnimationFrame(() => {
+                renderPending = false;
+                redrawCurrentImage();
+            });
+        }
+
+        function cachePut(imageId, entry) {
+            // LRU: delete+set to refresh order
+            if (pixelCache.has(imageId)) {
+                const old = pixelCache.get(imageId);
+                pixelCacheBytes -= (old?.bytes || 0);
+                pixelCache.delete(imageId);
+            }
+            pixelCache.set(imageId, entry);
+            pixelCacheBytes += entry.bytes;
+            // Evict oldest
+            while (pixelCacheBytes > MAX_PIXEL_CACHE_BYTES && pixelCache.size > 1) {
+                const oldestKey = pixelCache.keys().next().value;
+                const oldest = pixelCache.get(oldestKey);
+                pixelCache.delete(oldestKey);
+                pixelCacheBytes -= (oldest?.bytes || 0);
+            }
+        }
+
+        function cacheGet(imageId) {
+            const entry = pixelCache.get(imageId);
+            if (!entry) return null;
+            // refresh LRU order
+            pixelCache.delete(imageId);
+            pixelCache.set(imageId, entry);
+            return entry;
+        }
+
+        async function prefetchNeighborPixels() {
+            if (!imageData || imageData.length < 2) return;
+            const ids = [];
+            const next = currentImageIndex + 1;
+            const prev = currentImageIndex - 1;
+            if (next >= 0 && next < imageData.length) ids.push(imageData[next].id);
+            if (prev >= 0 && prev < imageData.length) ids.push(imageData[prev].id);
+            for (const id of ids) {
+                if (cacheGet(id)) continue;
+                // Fire-and-forget; don't block UI
+                tryLoadPixels(id, { prefetch: true });
+            }
+        }
+
         // 3D Bone Reconstruction variables
         let boneThreshold = 200;
         let boneOpacity = 0.8;
@@ -1475,20 +1531,55 @@
             }
         }
 
+        let currentPixels = null; // Float32Array (view into cached ArrayBuffer when possible)
+        let currentPixelRows = 0;
+        let currentPixelCols = 0;
+        let useClientWindowing = false;
+        let lastOverlayImageId = null;
+
         async function loadCurrentImage() {
             if (!imageData[currentImageIndex]) return;
             
             try {
                 const imageId = imageData[currentImageIndex].id;
-                const response = await fetch(`/dicom-viewer/api/image/${imageId}/data/`);
-                const data = await response.json();
                 
-                // Update window/level from DICOM data - SAME AS YOUR ORIGINAL
-                windowWidth = data.window_width || windowWidth;
-                windowLevel = data.window_center || windowLevel;
-                
-                updateSliders();
-                renderDicomImage(data);
+                // Load persisted overlays for this image (best-effort)
+                try {
+                    if (lastOverlayImageId !== imageId) {
+                        await loadOverlaysForImage(imageId);
+                        lastOverlayImageId = imageId;
+                    }
+                } catch (e) {}
+
+                // Prefer raw pixels for instant WW/WL in browser; fallback to PNG render.
+                // Use cache if available immediately
+                const cached = cacheGet(imageId);
+                if (cached) {
+                    currentPixels = new Float32Array(cached.buf);
+                    currentPixelRows = cached.rows;
+                    currentPixelCols = cached.cols;
+                    if (cached.defaultWW && cached.defaultWL) {
+                        if (!windowWidth) windowWidth = cached.defaultWW;
+                        if (!windowLevel) windowLevel = cached.defaultWL;
+                    }
+                    if (!inverted && cached.defaultInv) inverted = true;
+                    useClientWindowing = true;
+                    updateSliders();
+                    renderFromPixels();
+                    prefetchNeighborPixels();
+                    return;
+                }
+
+                const pixelsOk = await tryLoadPixels(imageId);
+                if (pixelsOk) {
+                    useClientWindowing = true;
+                    updateSliders();
+                    renderFromPixels();
+                    prefetchNeighborPixels();
+                } else {
+                    useClientWindowing = false;
+                    await renderFromServerPng(imageId);
+                }
                 
             } catch (error) {
                 console.error('Error loading image:', error);
@@ -1496,59 +1587,178 @@
             }
         }
 
-        function renderDicomImage(imageData) {
-            if (!imageData.pixel_data) return;
-            
-            // Create ImageData from pixel array - SAME AS YOUR ORIGINAL
-            const pixels = new Uint8ClampedArray(imageData.pixel_data.length * 4);
-            
-            for (let i = 0; i < imageData.pixel_data.length; i++) {
-                let value = imageData.pixel_data[i];
-                
-                // Apply window/level - SAME AS YOUR ORIGINAL
-                value = applyWindowing(value, windowWidth, windowLevel);
-                
-                // Apply inversion if needed - SAME AS YOUR ORIGINAL
-                if (inverted) value = 255 - value;
-                
-                pixels[i * 4] = value;     // R
-                pixels[i * 4 + 1] = value; // G  
-                pixels[i * 4 + 2] = value; // B
-                pixels[i * 4 + 3] = 255;   // A
-            }
-            
-            const imgData = new ImageData(pixels, imageData.columns, imageData.rows);
-            
-            // Clear and draw - YOUR ORIGINAL METHOD WITH OPTIONAL ENHANCEMENTS
+        async function renderFromServerPng(imageId) {
+            const params = new URLSearchParams();
+            if (windowWidth) params.set('window_width', windowWidth);
+            if (windowLevel) params.set('window_level', windowLevel);
+            params.set('inverted', inverted ? 'true' : 'false');
+            const response = await fetch(`/dicom-viewer/api/image/${imageId}/display/?${params.toString()}`);
+            const payload = await response.json();
+
+            if (!windowWidth && payload?.image_info?.default_window_width) windowWidth = payload.image_info.default_window_width;
+            if (!windowLevel && payload?.image_info?.default_window_level) windowLevel = payload.image_info.default_window_level;
+            if (payload?.windowing?.window_width) windowWidth = payload.windowing.window_width;
+            if (payload?.windowing?.window_level) windowLevel = payload.windowing.window_level;
+
+            updateSliders();
+            await renderPngPayload(payload);
+        }
+
+        async function renderPngPayload(payload) {
+            const dataUrl = payload?.image_data;
+            if (!dataUrl) return;
+
+            const img = new Image();
+            img.src = dataUrl;
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+            });
+
+            // Ensure canvas matches image pixels for crisp overlays
+            canvas.width = img.naturalWidth || canvas.width;
+            canvas.height = img.naturalHeight || canvas.height;
+
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // If any transformations are active, use enhanced rendering
+
+            // Apply view transforms around image center
             if (zoom !== 1.0 || panX !== 0 || panY !== 0 || rotation !== 0 || flipH || flipV) {
-                // Enhanced rendering with transformations (for new tools)
                 ctx.save();
                 ctx.translate(canvas.width / 2, canvas.height / 2);
                 ctx.scale(zoom, zoom);
                 ctx.translate(panX, panY);
-                
                 if (rotation !== 0) ctx.rotate(rotation * Math.PI / 180);
                 if (flipH || flipV) ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
-                
-                ctx.translate(-imgData.width / 2, -imgData.height / 2);
+                ctx.translate(-canvas.width / 2, -canvas.height / 2);
+                ctx.drawImage(img, 0, 0);
+                ctx.restore();
+            } else {
+                ctx.drawImage(img, 0, 0);
+            }
+
+            // Always draw overlays after rendering
+            drawMeasurements();
+            drawAnnotations();
+            if (crosshair) drawCrosshair();
+            updateOverlayLabels();
+        }
+
+        async function tryLoadPixels(imageId, opts = {}) {
+            try {
+                const resp = await fetch(`/dicom-viewer/api/image/${imageId}/pixels/`);
+                if (!resp.ok) return false;
+                const rows = parseInt(resp.headers.get('X-Rows') || '0', 10);
+                const cols = parseInt(resp.headers.get('X-Cols') || '0', 10);
+                const dtype = (resp.headers.get('X-Dtype') || '').toLowerCase();
+                if (!rows || !cols || dtype !== 'float32') return false;
+
+                // defaults
+                const buf = await resp.arrayBuffer();
+                const defaultWW = parseFloat(resp.headers.get('X-Default-WW') || '0') || 400;
+                const defaultWL = parseFloat(resp.headers.get('X-Default-WL') || '0') || 40;
+                const defaultInv = (resp.headers.get('X-Default-Inverted') || 'false') === 'true';
+
+                // Cache it
+                cachePut(imageId, {
+                    buf,
+                    rows,
+                    cols,
+                    defaultWW,
+                    defaultWL,
+                    defaultInv,
+                    bytes: buf.byteLength || (rows * cols * 4)
+                });
+
+                if (opts.prefetch) return true;
+
+                if (!windowWidth) windowWidth = defaultWW;
+                if (!windowLevel) windowLevel = defaultWL;
+                if (!inverted && defaultInv) inverted = true;
+
+                currentPixels = new Float32Array(buf);
+                currentPixelRows = rows;
+                currentPixelCols = cols;
+                return currentPixels.length === rows * cols;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function renderFromPixels() {
+            if (!currentPixels || !currentPixelRows || !currentPixelCols) return;
+
+            canvas.width = currentPixelCols;
+            canvas.height = currentPixelRows;
+
+            const pixels = new Uint8ClampedArray(currentPixelRows * currentPixelCols * 4);
+
+            const ww = Math.max(1, windowWidth || 400);
+            const wl = (windowLevel || 40);
+            const minVal = wl - ww / 2;
+            const maxVal = wl + ww / 2;
+            const denom = (maxVal - minVal) || 1;
+
+            for (let i = 0; i < currentPixels.length; i++) {
+                let v = currentPixels[i];
+                let g;
+                if (v <= minVal) g = 0;
+                else if (v >= maxVal) g = 255;
+                else g = Math.round(((v - minVal) / denom) * 255);
+                if (inverted) g = 255 - g;
+                const j = i * 4;
+                pixels[j] = g;
+                pixels[j + 1] = g;
+                pixels[j + 2] = g;
+                pixels[j + 3] = 255;
+            }
+
+            const imgData = new ImageData(pixels, currentPixelCols, currentPixelRows);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (zoom !== 1.0 || panX !== 0 || panY !== 0 || rotation !== 0 || flipH || flipV) {
+                ctx.save();
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                ctx.scale(zoom, zoom);
+                ctx.translate(panX, panY);
+                if (rotation !== 0) ctx.rotate(rotation * Math.PI / 180);
+                if (flipH || flipV) ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+                ctx.translate(-canvas.width / 2, -canvas.height / 2);
                 ctx.putImageData(imgData, 0, 0);
                 ctx.restore();
             } else {
-                // YOUR ORIGINAL SIMPLE METHOD (default)
                 ctx.putImageData(imgData, 0, 0);
             }
-            
-            // Always draw measurements and annotations after rendering the image
+
             drawMeasurements();
             drawAnnotations();
-            if (crosshair) {
-                drawCrosshair();
-            }
-            
+            if (crosshair) drawCrosshair();
             updateOverlayLabels();
+        }
+
+        async function loadOverlaysForImage(imageId) {
+            // Measurements
+            try {
+                const mRes = await fetch(`/dicom-viewer/measurements/${imageId}/`);
+                if (mRes.ok) {
+                    const mJson = await mRes.json();
+                    const ms = (mJson.measurements || []).map(m => (m.points || m));
+                    measurements = ms;
+                    updateMeasurementsList();
+                }
+            } catch (e) {}
+            // Annotations
+            try {
+                const aRes = await fetch(`/dicom-viewer/annotations/${imageId}/`);
+                if (aRes.ok) {
+                    const aJson = await aRes.json();
+                    annotations = (aJson.annotations || []).map(a => ({
+                        x: a.position_x,
+                        y: a.position_y,
+                        text: a.text,
+                        color: a.color || '#ffff00'
+                    }));
+                }
+            } catch (e) {}
         }
 
         function applyWindowing(pixelValue, ww, wl) {
@@ -1636,18 +1846,21 @@
                     windowWidth = Math.max(1, windowWidth + deltaX * 2);
                     windowLevel = Math.max(-1000, Math.min(1000, windowLevel + deltaY * 2));
                     updateSliders();
-                    redrawCurrentImage();
+                    if (useClientWindowing) scheduleRender();
+                    else redrawCurrentImage();
                     break;
                 case 'zoom':
                     const zoomDelta = 1 + (deltaY * 0.01);
                     zoom = Math.max(0.1, Math.min(5.0, zoom * zoomDelta));
                     updateZoomSlider();
-                    redrawCurrentImage();
+                    if (useClientWindowing) scheduleRender();
+                    else redrawCurrentImage();
                     break;
                 case 'pan':
                     panX += deltaX / zoom;
                     panY += deltaY / zoom;
-                    redrawCurrentImage();
+                    if (useClientWindowing) scheduleRender();
+                    else redrawCurrentImage();
                     break;
                 case 'measure':
                 case 'angle':
@@ -1729,14 +1942,16 @@
             windowWidth = parseInt(value);
             document.getElementById('wwValue').textContent = windowWidth;
             document.getElementById('windowWidth').textContent = windowWidth;
-            redrawCurrentImage();
+            if (useClientWindowing) scheduleRender();
+            else redrawCurrentImage();
         }
 
         function updateWindowLevel(value) {
             windowLevel = parseInt(value);
             document.getElementById('wlValue').textContent = windowLevel;
             document.getElementById('windowLevel').textContent = windowLevel;
-            redrawCurrentImage();
+            if (useClientWindowing) scheduleRender();
+            else redrawCurrentImage();
         }
 
         function updateSlice(value) {
@@ -1750,7 +1965,8 @@
             zoom = parseFloat(value) / 100;
             document.getElementById('zoomValue').textContent = value + '%';
             document.getElementById('zoomLevel').textContent = value + '%';
-            redrawCurrentImage();
+            if (useClientWindowing) scheduleRender();
+            else redrawCurrentImage();
         }
 
         function updateBoneThreshold(value) {
@@ -1817,12 +2033,16 @@
 
         function redrawCurrentImage() {
             if (currentImageIndex >= 0 && currentImageIndex < imageData.length) {
-                loadCurrentImage().then(() => {
-                    // Redraw measurements and annotations after image is loaded
-                    drawMeasurements();
-                    drawAnnotations();
+                if (useClientWindowing) {
+                    renderFromPixels();
                     drawCurrentMeasurement();
-                });
+                } else {
+                    loadCurrentImage().then(() => {
+                        drawMeasurements();
+                        drawAnnotations();
+                        drawCurrentMeasurement();
+                    });
+                }
             }
         }
 
@@ -2068,8 +2288,8 @@
                     },
                     body: JSON.stringify({
                         image_id: imageData[currentImageIndex].id,
-                        measurement_type: measurement.type,
-                        points: JSON.stringify(measurement),
+                        type: measurement.type,
+                        points: measurement,
                         value: measurement.type === 'distance' ? calculateDistance(measurement).real : null,
                         unit: currentSeries.pixel_spacing ? 'mm' : 'px'
                     })

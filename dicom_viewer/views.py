@@ -30,6 +30,8 @@ from pydicom.pixel_data_handlers.util import apply_voi_lut
 import scipy.ndimage as ndimage
 import logging
 import subprocess
+import requests
+from urllib.parse import urljoin
 
 from .models import ViewerSession, Measurement, Annotation, ReconstructionJob
 from .dicom_utils import DicomProcessor, safe_dicom_str
@@ -338,6 +340,21 @@ def api_mpr_reconstruction(request, series_id):
         return JsonResponse({'error': 'Permission denied'}, status=403)
 
     try:
+        # Delegate to external processor if configured (keeps Django auth/permissions)
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/mpr')
+                params = {'series_id': int(series_id)}
+                for k in ('plane', 'slice', 'window_width', 'window_level', 'inverted'):
+                    if request.GET.get(k) is not None:
+                        params[k] = request.GET.get(k)
+                resp = requests.get(endpoint, params=params, timeout=(2, 30))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor MPR failed: {e}")
+
         # Load isotropically-resampled volume from cache or build once
         volume, _spacing = _get_mpr_volume_and_spacing(series)
         
@@ -455,6 +472,23 @@ def api_mip_reconstruction(request, series_id):
         return JsonResponse({'error': 'Permission denied'}, status=403)
     
     try:
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/mip')
+                params = {
+                    'series_id': int(series_id),
+                    'window_width': request.GET.get('window_width', 400),
+                    'window_level': request.GET.get('window_level', 40),
+                    'inverted': request.GET.get('inverted', 'false'),
+                }
+                resp = requests.get(endpoint, params=params, timeout=(2, 45))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor MIP failed: {e}")
+
         # Prefer isotropic volume for higher-quality MIP
         try:
             volume, _spacing = _get_mpr_volume_and_spacing(series)
@@ -539,6 +573,26 @@ def api_bone_reconstruction(request, series_id):
         return JsonResponse({'error': 'Permission denied'}, status=403)
     
     try:
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/bone')
+                params = {
+                    'series_id': int(series_id),
+                    'threshold': request.GET.get('threshold', 300),
+                    'window_width': request.GET.get('window_width', 2000),
+                    'window_level': request.GET.get('window_level', 300),
+                    'inverted': request.GET.get('inverted', 'false'),
+                    'mesh': request.GET.get('mesh', 'false'),
+                    'quality': request.GET.get('quality', ''),
+                }
+                resp = requests.get(endpoint, params=params, timeout=(2, 90))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor bone reconstruction failed: {e}")
+
         # Parameters
         threshold = int(request.GET.get('threshold', 300))
         want_mesh = (request.GET.get('mesh','false').lower() == 'true')
@@ -842,6 +896,37 @@ def api_dicom_image_display(request, image_id):
         window_level_param = request.GET.get('window_level')
         inverted = request.GET.get('inverted', 'false').lower() == 'true'
 
+        # If configured, delegate rendering to external DICOM processor service.
+        # This keeps Django responsible for permissions/auth while offloading pixel decoding/windowing.
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/render')
+                params = {
+                    'rel_path': str(image.file_path),
+                    'image_id': int(image.id),
+                    'instance_number': getattr(image, 'instance_number', None),
+                    'slice_location': getattr(image, 'slice_location', None),
+                }
+                if window_width_param is not None:
+                    params['window_width'] = window_width_param
+                if window_level_param is not None:
+                    params['window_level'] = window_level_param
+                # Only send inverted if explicitly provided; otherwise let service apply modality default (e.g. MONOCHROME1).
+                if request.GET.get('inverted') is not None:
+                    params['inverted'] = 'true' if inverted else 'false'
+
+                resp = requests.get(endpoint, params=params, timeout=(2, 25))
+                if resp.ok:
+                    try:
+                        return JsonResponse(resp.json())
+                    except Exception as parse_err:
+                        warnings['processor_parse_error'] = str(parse_err)
+                else:
+                    warnings['processor_http_error'] = f"{resp.status_code}"
+            except Exception as svc_err:
+                warnings['processor_error'] = str(svc_err)
+
         # Read DICOM file (best-effort)
         ds = None
         try:
@@ -1048,6 +1133,95 @@ def api_dicom_image_display(request, image_id):
         }
         return JsonResponse(minimal)  # 200 OK to avoid frontend failure
 
+
+@login_required
+@csrf_exempt
+def api_image_pixels(request, image_id):
+    """Return raw float32 pixel buffer for client-side windowing (fast UI).
+
+    Delegates to external processor if configured, otherwise decodes via pydicom/SimpleITK.
+    """
+    image = get_object_or_404(DicomImage, id=image_id)
+    user = request.user
+
+    if user.is_facility_user() and getattr(user, 'facility', None) and image.series.study.facility != user.facility:
+        return HttpResponse(status=403)
+
+    processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+    if processor_url:
+        try:
+            endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/pixels')
+            params = {'rel_path': str(image.file_path)}
+            resp = requests.get(endpoint, params=params, timeout=(2, 30))
+            if resp.ok:
+                out = HttpResponse(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
+                # Forward metadata headers used by the frontend
+                for h in ('X-Rows', 'X-Cols', 'X-Dtype', 'X-Default-WW', 'X-Default-WL', 'X-Default-Inverted'):
+                    if h in resp.headers:
+                        out[h] = resp.headers[h]
+                out['Cache-Control'] = 'max-age=3600'
+                return out
+        except Exception as e:
+            logger.warning(f"External processor pixels failed: {e}")
+
+    # Fallback: decode locally
+    try:
+        dicom_path = os.path.join(settings.MEDIA_ROOT, str(image.file_path))
+        ds = pydicom.dcmread(dicom_path, stop_before_pixels=False)
+        try:
+            arr = ds.pixel_array
+        except Exception:
+            try:
+                import SimpleITK as sitk
+
+                sitk_image = sitk.ReadImage(dicom_path)
+                arr = sitk.GetArrayFromImage(sitk_image)
+                if arr.ndim == 3 and arr.shape[0] == 1:
+                    arr = arr[0]
+            except Exception:
+                return HttpResponse(status=500)
+
+        if arr.ndim == 3 and arr.shape[0] == 1:
+            arr = arr[0]
+        if arr.ndim != 2:
+            return HttpResponse(status=400)
+
+        arr = arr.astype(np.float32)
+        if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
+            try:
+                arr = arr * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+            except Exception:
+                pass
+
+        modality = str(getattr(ds, 'Modality', '')).upper()
+        photo = str(getattr(ds, 'PhotometricInterpretation', '')).upper()
+        default_inverted = 'true' if (modality in ['DX', 'CR', 'XA', 'RF'] and photo == 'MONOCHROME1') else 'false'
+
+        default_ww = getattr(ds, 'WindowWidth', None)
+        default_wl = getattr(ds, 'WindowCenter', None)
+        if hasattr(default_ww, '__iter__') and not isinstance(default_ww, str):
+            default_ww = default_ww[0]
+        if hasattr(default_wl, '__iter__') and not isinstance(default_wl, str):
+            default_wl = default_wl[0]
+        if default_ww is None or default_wl is None:
+            processor = DicomProcessor()
+            dw, dl = processor.auto_window_from_data(arr, percentile_range=(2, 98), modality=modality or 'CT')
+            default_ww = default_ww or dw
+            default_wl = default_wl or dl
+
+        out = HttpResponse(arr.tobytes(), content_type='application/octet-stream')
+        out['X-Rows'] = str(int(arr.shape[0]))
+        out['X-Cols'] = str(int(arr.shape[1]))
+        out['X-Dtype'] = 'float32'
+        out['X-Default-WW'] = str(float(default_ww or 400.0))
+        out['X-Default-WL'] = str(float(default_wl or 40.0))
+        out['X-Default-Inverted'] = default_inverted
+        out['Cache-Control'] = 'max-age=3600'
+        return out
+    except Exception as e:
+        logger.error(f"api_image_pixels failed for image {image_id}: {e}")
+        return HttpResponse(status=500)
+
 @login_required
 @csrf_exempt
 def api_measurements(request, study_id=None):
@@ -1218,6 +1392,17 @@ def api_auto_window(request, image_id):
             # Check permissions
             if user.is_facility_user() and getattr(user, 'facility', None) and image.series.study.facility != user.facility:
                 return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+
+            # Delegate to external processor if configured
+            processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+            if processor_url:
+                try:
+                    endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/auto-window')
+                    resp = requests.get(endpoint, params={'image_id': int(image_id)}, timeout=(2, 20))
+                    if resp.ok:
+                        return JsonResponse(resp.json())
+                except Exception as e:
+                    logger.warning(f"External processor auto-window failed: {e}")
             
             # Load DICOM file and analyze
             dicom_path = os.path.join(settings.MEDIA_ROOT, str(image.file_path))
@@ -2456,7 +2641,8 @@ def web_save_measurement(request):
     try:
         data = json.loads(request.body)
         image_id = data.get('image_id')
-        measurement_type = data.get('type')
+        # Accept both legacy keys from different frontends
+        measurement_type = data.get('type') or data.get('measurement_type')
         points = data.get('points')
         value = data.get('value')
         unit = data.get('unit', 'mm')
@@ -2464,6 +2650,19 @@ def web_save_measurement(request):
         image = get_object_or_404(DicomImage, id=image_id)
         if hasattr(request.user, 'is_facility_user') and request.user.is_facility_user() and image.series.study.facility != request.user.facility:
             return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+
+        # Normalize common tool names to model-friendly values
+        if measurement_type == 'distance':
+            measurement_type = 'length'
+
+        # Points may arrive as JSON-encoded string; normalize to python object
+        if isinstance(points, str):
+            try:
+                points = json.loads(points)
+            except Exception:
+                # keep raw string if it's not valid JSON
+                pass
+
         measurement = Measurement.objects.create(
             user=request.user,
             image=image,
@@ -2472,7 +2671,8 @@ def web_save_measurement(request):
             unit=unit,
             notes=notes,
         )
-        measurement.set_points(points or [])
+        # Store whatever structure we received (list/dict) for maximum compatibility
+        measurement.set_points(points if points is not None else [])
         measurement.save()
         return JsonResponse({'success': True, 'id': measurement.id})
     except Exception as e:
@@ -2721,6 +2921,18 @@ def api_hu_value(request):
     mode = (request.GET.get('mode') or '').lower()
 
     try:
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/hu')
+                params = dict(request.GET.items())
+                resp = requests.get(endpoint, params=params, timeout=(2, 25))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor HU failed: {e}")
+
         if mode == 'series':
             image_id = int(request.GET.get('image_id'))
             x = int(float(request.GET.get('x')))
@@ -3173,6 +3385,23 @@ def api_series_volume_uint8(request, series_id):
     if hasattr(request.user, 'is_facility_user') and request.user.is_facility_user() and getattr(request.user, 'facility', None) and series.study.facility != request.user.facility:
         return JsonResponse({'error': 'Permission denied'}, status=403)
     try:
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/series/volume_uint8')
+                params = {
+                    'series_id': int(series_id),
+                    'ww': request.GET.get('ww', 400),
+                    'wl': request.GET.get('wl', 40),
+                    'max_dim': request.GET.get('max_dim', 256),
+                }
+                resp = requests.get(endpoint, params=params, timeout=(2, 45))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor volume_uint8 failed: {e}")
+
         volume, spacing = _get_mpr_volume_and_spacing(series)
         ww = float(request.GET.get('ww', 400))
         wl = float(request.GET.get('wl', 40))
@@ -4025,6 +4254,17 @@ def ai_3d_print_api(request, series_id):
         quality = data.get('quality', 'high')
         format_type = data.get('format', 'stl')
         ai_enhanced = data.get('ai_enhanced', True)
+
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/ai/3d-print')
+                resp = requests.post(endpoint, params={'series_id': int(series_id)}, json=data, timeout=(2, 180))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor ai_3d_print failed: {e}")
         
         # Get DICOM images for the series
         images = DicomImage.objects.filter(series=series).order_by('instance_number')
@@ -4034,18 +4274,13 @@ def ai_3d_print_api(request, series_id):
                 'error': 'No DICOM images found for this series'
             })
         
-        # Create reconstruction job
-        job = ReconstructionJob.objects.create(
-            series=series,
-            user=request.user,
-            reconstruction_type='ai_3d_print',
-            parameters={
-                'quality': quality,
-                'format': format_type,
-                'ai_enhanced': ai_enhanced
-            },
-            status='processing'
-        )
+        # Create reconstruction job (persist status/provenance)
+        job = ReconstructionJob.objects.create(series=series, user=request.user, job_type='bone_3d', status='processing')
+        try:
+            job.set_parameters({'quality': quality, 'format': format_type, 'ai_enhanced': ai_enhanced, 'job': 'ai_3d_print'})
+        except Exception:
+            pass
+        job.save()
         
         # For demo purposes, simulate AI 3D print generation
         # In a real implementation, this would call an AI service
@@ -4086,6 +4321,7 @@ endsolid AI_Enhanced_Model_{series_id}
             # Update job status
             job.status = 'completed'
             job.result_path = model_path
+            job.completed_at = timezone.now()
             job.save()
             
             download_url = f"/media/ai_3d_models/{model_filename}"
@@ -4101,6 +4337,7 @@ endsolid AI_Enhanced_Model_{series_id}
         except Exception as e:
             job.status = 'failed'
             job.error_message = str(e)
+            job.completed_at = timezone.now()
             job.save()
             raise e
             
@@ -4143,79 +4380,83 @@ def advanced_reconstruction_api(request, series_id):
                 'error': 'No DICOM images found for this series'
             })
         
-        # Create reconstruction job
-        job = ReconstructionJob.objects.create(
-            series=series,
-            user=request.user,
-            reconstruction_type='advanced_ai',
-            parameters={
+        # Create reconstruction job (track request + allow polling if extended later)
+        job = ReconstructionJob.objects.create(series=series, user=request.user, job_type='mpr', status='processing')
+        try:
+            job.set_parameters({
                 'reconstruction_type': reconstruction_type,
                 'include_mpr': include_mpr,
                 'include_mip': include_mip,
-                'include_volume_rendering': include_volume_rendering
-            },
-            status='processing'
-        )
-        
-        # For demo purposes, simulate advanced reconstruction
-        # In a real implementation, this would call advanced AI reconstruction services
-        try:
-            # Simulate processing time
-            import time
-            time.sleep(3)
-            
-            # Generate mock reconstruction results
-            reconstructions = []
-            
-            if include_mpr:
-                # Generate mock MPR views
-                for view in ['axial', 'sagittal', 'coronal']:
-                    mock_url = f"/dicom-viewer/api/mock-reconstruction/{series_id}/{view}/"
-                    reconstructions.append({
-                        'type': 'mpr',
-                        'view': view,
-                        'url': mock_url,
-                        'description': f'AI-Enhanced {view.title()} MPR'
-                    })
-            
-            if include_mip:
-                # Generate mock MIP views
-                mock_url = f"/dicom-viewer/api/mock-reconstruction/{series_id}/mip/"
-                reconstructions.append({
-                    'type': 'mip',
-                    'view': 'composite',
-                    'url': mock_url,
-                    'description': 'AI-Enhanced Maximum Intensity Projection'
-                })
-            
-            if include_volume_rendering:
-                # Generate mock volume rendering
-                mock_url = f"/dicom-viewer/api/mock-reconstruction/{series_id}/volume/"
-                reconstructions.append({
-                    'type': 'volume',
-                    'view': '3d',
-                    'url': mock_url,
-                    'description': 'AI-Enhanced Volume Rendering'
-                })
-            
-            # Update job status
-            job.status = 'completed'
-            job.result_data = {'reconstructions': reconstructions}
-            job.save()
-            
-            return JsonResponse({
-                'success': True,
-                'message': 'Advanced reconstruction completed successfully',
-                'reconstructions': [r['url'] for r in reconstructions],
-                'details': reconstructions,
-                'job_id': job.id
+                'include_volume_rendering': include_volume_rendering,
+                'job': 'advanced_reconstruction',
             })
-            
-        except Exception as e:
-            job.status = 'failed'
-            job.error_message = str(e)
-            job.save()
-            raise e
+        except Exception:
+            pass
+        job.save()
+
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/reconstruction/advanced')
+                resp = requests.post(endpoint, params={'series_id': int(series_id)}, json=data, timeout=(2, 180))
+                resp.raise_for_status()
+                result = resp.json()
+
+                # Persist result payload for audit/debug (optional)
+                try:
+                    out_dir = os.path.join(settings.MEDIA_ROOT, 'advanced_reconstruction')
+                    os.makedirs(out_dir, exist_ok=True)
+                    out_path = os.path.join(out_dir, f'advanced_reconstruction_{job.id}.json')
+                    with open(out_path, 'w') as f:
+                        json.dump(result, f)
+                    job.result_path = out_path
+                except Exception:
+                    pass
+
+                job.status = 'completed'
+                job.completed_at = timezone.now()
+                job.save()
+                result['job_id'] = job.id
+                return JsonResponse(result)
+            except Exception as e:
+                job.status = 'failed'
+                job.error_message = str(e)
+                job.completed_at = timezone.now()
+                job.save()
+                return JsonResponse({'success': False, 'error': f'Advanced reconstruction failed: {str(e)}', 'job_id': job.id}, status=500)
+
+        # Fallback (no external processor): return real, existing endpoints (not placeholders)
+        reconstructions = []
+        if include_mpr:
+            reconstructions.append({
+                'type': 'mpr',
+                'url': f"/dicom-viewer/api/series/{series_id}/mpr/",
+                'description': 'MPR reconstruction (JSON with base64 previews)'
+            })
+        if include_mip:
+            reconstructions.append({
+                'type': 'mip',
+                'url': f"/dicom-viewer/api/series/{series_id}/mip/",
+                'description': 'MIP reconstruction (JSON with base64 previews)'
+            })
+        if include_volume_rendering:
+            reconstructions.append({
+                'type': 'volume',
+                'url': f"/dicom-viewer/api/series/{series_id}/volume/?max_dim=256",
+                'description': 'Downsampled uint8 volume for VR'
+            })
+
+        job.status = 'completed'
+        job.completed_at = timezone.now()
+        job.save()
+
+        return JsonResponse({
+            'success': True,
+            'message': 'Advanced reconstruction ready',
+            'details': reconstructions,
+            'job_id': job.id
+        })
             
     except Exception as e:
         logger.error(f"Advanced reconstruction error for series {series_id}: {str(e)}")
@@ -4240,6 +4481,17 @@ def fast_reconstruction_api(request, series_id):
         quality = data.get('quality', 'high')
         optimize_for_speed = data.get('optimize_for_speed', True)
         enable_gpu = data.get('enable_gpu', True)
+
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/reconstruction/fast')
+                resp = requests.post(endpoint, params={'series_id': int(series_id)}, json=data, timeout=(2, 120))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor fast reconstruction failed: {e}")
         
         # Get DICOM images for the series
         images = DicomImage.objects.filter(series=series).order_by('instance_number')
@@ -4256,9 +4508,10 @@ def fast_reconstruction_api(request, series_id):
                 'success': True,
                 'type': 'mpr',
                 'views': {
-                    'axial': f'/dicom-viewer/api/mpr-fast/{series_id}/axial/',
-                    'sagittal': f'/dicom-viewer/api/mpr-fast/{series_id}/sagittal/',
-                    'coronal': f'/dicom-viewer/api/mpr-fast/{series_id}/coronal/'
+                    # Existing working endpoint (JSON with base64 previews)
+                    'axial': f'/dicom-viewer/api/series/{series_id}/mpr/?plane=axial',
+                    'sagittal': f'/dicom-viewer/api/series/{series_id}/mpr/?plane=sagittal',
+                    'coronal': f'/dicom-viewer/api/series/{series_id}/mpr/?plane=coronal'
                 },
                 'slice_counts': {
                     'axial': images.count(),
@@ -4273,9 +4526,8 @@ def fast_reconstruction_api(request, series_id):
                 'success': True,
                 'type': 'mip',
                 'images': [
-                    f'/dicom-viewer/api/mip-fast/{series_id}/axial/',
-                    f'/dicom-viewer/api/mip-fast/{series_id}/sagittal/',
-                    f'/dicom-viewer/api/mip-fast/{series_id}/coronal/'
+                    # Existing working endpoint (JSON with base64 previews)
+                    f'/dicom-viewer/api/series/{series_id}/mip/'
                 ]
             }
             
@@ -4285,17 +4537,14 @@ def fast_reconstruction_api(request, series_id):
             result = {
                 'success': True,
                 'type': 'bone',
-                'images': [f'/dicom-viewer/api/bone-fast/{series_id}/?threshold={threshold}'],
+                # Existing working endpoint (JSON with base64 previews, optional mesh)
+                'images': [f'/dicom-viewer/api/series/{series_id}/bone/?threshold={threshold}'],
                 'threshold': threshold
             }
             
         else:
             # Generic fast reconstruction
-            result = {
-                'success': True,
-                'type': recon_type,
-                'images': [f'/dicom-viewer/api/recon-fast/{series_id}/{recon_type}/']
-            }
+            return JsonResponse({'success': False, 'error': f'Unsupported reconstruction type: {recon_type}'}, status=400)
         
         return JsonResponse(result)
         
@@ -4314,6 +4563,25 @@ def mpr_slice_api(request, series_id, plane, slice_index):
     """
     try:
         series = get_object_or_404(Series, id=series_id)
+
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/mpr/slice.png')
+                params = {
+                    'series_id': int(series_id),
+                    'plane': str(plane).lower(),
+                    'slice': int(slice_index),
+                    'ww': float(request.GET.get('ww', 400)),
+                    'wl': float(request.GET.get('wl', 40)),
+                    'inverted': (request.GET.get('inverted', 'false').lower() == 'true'),
+                }
+                resp = requests.get(endpoint, params=params, timeout=(2, 30))
+                if resp.ok and resp.headers.get('content-type', '').startswith('image/'):
+                    return HttpResponse(resp.content, content_type=resp.headers.get('content-type', 'image/png'))
+            except Exception as e:
+                logger.warning(f"External processor mpr_slice_png failed: {e}")
         
         # Get the MPR slice using existing optimized function
         slice_index = int(slice_index)

@@ -2552,7 +2552,8 @@ def web_save_measurement(request):
     try:
         data = json.loads(request.body)
         image_id = data.get('image_id')
-        measurement_type = data.get('type')
+        # Accept both legacy keys from different frontends
+        measurement_type = data.get('type') or data.get('measurement_type')
         points = data.get('points')
         value = data.get('value')
         unit = data.get('unit', 'mm')
@@ -2560,6 +2561,19 @@ def web_save_measurement(request):
         image = get_object_or_404(DicomImage, id=image_id)
         if hasattr(request.user, 'is_facility_user') and request.user.is_facility_user() and image.series.study.facility != request.user.facility:
             return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+
+        # Normalize common tool names to model-friendly values
+        if measurement_type == 'distance':
+            measurement_type = 'length'
+
+        # Points may arrive as JSON-encoded string; normalize to python object
+        if isinstance(points, str):
+            try:
+                points = json.loads(points)
+            except Exception:
+                # keep raw string if it's not valid JSON
+                pass
+
         measurement = Measurement.objects.create(
             user=request.user,
             image=image,
@@ -2568,7 +2582,8 @@ def web_save_measurement(request):
             unit=unit,
             notes=notes,
         )
-        measurement.set_points(points or [])
+        # Store whatever structure we received (list/dict) for maximum compatibility
+        measurement.set_points(points if points is not None else [])
         measurement.save()
         return JsonResponse({'success': True, 'id': measurement.id})
     except Exception as e:

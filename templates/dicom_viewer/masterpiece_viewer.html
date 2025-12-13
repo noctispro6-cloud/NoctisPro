@@ -1480,15 +1480,31 @@
             
             try {
                 const imageId = imageData[currentImageIndex].id;
-                const response = await fetch(`/dicom-viewer/api/image/${imageId}/data/`);
-                const data = await response.json();
                 
-                // Update window/level from DICOM data - SAME AS YOUR ORIGINAL
-                windowWidth = data.window_width || windowWidth;
-                windowLevel = data.window_center || windowLevel;
-                
+                // Load persisted overlays for this image (best-effort)
+                try {
+                    await loadOverlaysForImage(imageId);
+                } catch (e) {}
+
+                // Ask server/processor to render the image with current WW/WL
+                const params = new URLSearchParams();
+                if (windowWidth) params.set('window_width', windowWidth);
+                if (windowLevel) params.set('window_level', windowLevel);
+                params.set('inverted', inverted ? 'true' : 'false');
+
+                const response = await fetch(`/dicom-viewer/api/image/${imageId}/display/?${params.toString()}`);
+                const payload = await response.json();
+
+                // Update window/level defaults if not set yet
+                if (!windowWidth && payload?.image_info?.default_window_width) windowWidth = payload.image_info.default_window_width;
+                if (!windowLevel && payload?.image_info?.default_window_level) windowLevel = payload.image_info.default_window_level;
+
+                // Some backends also return current windowing in payload.windowing
+                if (payload?.windowing?.window_width) windowWidth = payload.windowing.window_width;
+                if (payload?.windowing?.window_level) windowLevel = payload.windowing.window_level;
+
                 updateSliders();
-                renderDicomImage(data);
+                await renderDicomImage(payload);
                 
             } catch (error) {
                 console.error('Error loading image:', error);
@@ -1496,59 +1512,69 @@
             }
         }
 
-        function renderDicomImage(imageData) {
-            if (!imageData.pixel_data) return;
-            
-            // Create ImageData from pixel array - SAME AS YOUR ORIGINAL
-            const pixels = new Uint8ClampedArray(imageData.pixel_data.length * 4);
-            
-            for (let i = 0; i < imageData.pixel_data.length; i++) {
-                let value = imageData.pixel_data[i];
-                
-                // Apply window/level - SAME AS YOUR ORIGINAL
-                value = applyWindowing(value, windowWidth, windowLevel);
-                
-                // Apply inversion if needed - SAME AS YOUR ORIGINAL
-                if (inverted) value = 255 - value;
-                
-                pixels[i * 4] = value;     // R
-                pixels[i * 4 + 1] = value; // G  
-                pixels[i * 4 + 2] = value; // B
-                pixels[i * 4 + 3] = 255;   // A
-            }
-            
-            const imgData = new ImageData(pixels, imageData.columns, imageData.rows);
-            
-            // Clear and draw - YOUR ORIGINAL METHOD WITH OPTIONAL ENHANCEMENTS
+        async function renderDicomImage(payload) {
+            const dataUrl = payload?.image_data;
+            if (!dataUrl) return;
+
+            const img = new Image();
+            img.src = dataUrl;
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+            });
+
+            // Ensure canvas matches image pixels for crisp overlays
+            canvas.width = img.naturalWidth || canvas.width;
+            canvas.height = img.naturalHeight || canvas.height;
+
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // If any transformations are active, use enhanced rendering
+
+            // Apply view transforms around image center
             if (zoom !== 1.0 || panX !== 0 || panY !== 0 || rotation !== 0 || flipH || flipV) {
-                // Enhanced rendering with transformations (for new tools)
                 ctx.save();
                 ctx.translate(canvas.width / 2, canvas.height / 2);
                 ctx.scale(zoom, zoom);
                 ctx.translate(panX, panY);
-                
                 if (rotation !== 0) ctx.rotate(rotation * Math.PI / 180);
                 if (flipH || flipV) ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
-                
-                ctx.translate(-imgData.width / 2, -imgData.height / 2);
-                ctx.putImageData(imgData, 0, 0);
+                ctx.translate(-canvas.width / 2, -canvas.height / 2);
+                ctx.drawImage(img, 0, 0);
                 ctx.restore();
             } else {
-                // YOUR ORIGINAL SIMPLE METHOD (default)
-                ctx.putImageData(imgData, 0, 0);
+                ctx.drawImage(img, 0, 0);
             }
-            
-            // Always draw measurements and annotations after rendering the image
+
+            // Always draw overlays after rendering
             drawMeasurements();
             drawAnnotations();
-            if (crosshair) {
-                drawCrosshair();
-            }
-            
+            if (crosshair) drawCrosshair();
             updateOverlayLabels();
+        }
+
+        async function loadOverlaysForImage(imageId) {
+            // Measurements
+            try {
+                const mRes = await fetch(`/dicom-viewer/measurements/${imageId}/`);
+                if (mRes.ok) {
+                    const mJson = await mRes.json();
+                    const ms = (mJson.measurements || []).map(m => (m.points || m));
+                    measurements = ms;
+                    updateMeasurementsList();
+                }
+            } catch (e) {}
+            // Annotations
+            try {
+                const aRes = await fetch(`/dicom-viewer/annotations/${imageId}/`);
+                if (aRes.ok) {
+                    const aJson = await aRes.json();
+                    annotations = (aJson.annotations || []).map(a => ({
+                        x: a.position_x,
+                        y: a.position_y,
+                        text: a.text,
+                        color: a.color || '#ffff00'
+                    }));
+                }
+            } catch (e) {}
         }
 
         function applyWindowing(pixelValue, ww, wl) {
@@ -2068,8 +2094,8 @@
                     },
                     body: JSON.stringify({
                         image_id: imageData[currentImageIndex].id,
-                        measurement_type: measurement.type,
-                        points: JSON.stringify(measurement),
+                        type: measurement.type,
+                        points: measurement,
                         value: measurement.type === 'distance' ? calculateDistance(measurement).real : null,
                         unit: currentSeries.pixel_spacing ? 'mm' : 'px'
                     })

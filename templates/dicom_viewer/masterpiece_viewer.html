@@ -1475,6 +1475,12 @@
             }
         }
 
+        let currentPixels = null; // Float32Array
+        let currentPixelRows = 0;
+        let currentPixelCols = 0;
+        let useClientWindowing = false;
+        let lastOverlayImageId = null;
+
         async function loadCurrentImage() {
             if (!imageData[currentImageIndex]) return;
             
@@ -1483,28 +1489,22 @@
                 
                 // Load persisted overlays for this image (best-effort)
                 try {
-                    await loadOverlaysForImage(imageId);
+                    if (lastOverlayImageId !== imageId) {
+                        await loadOverlaysForImage(imageId);
+                        lastOverlayImageId = imageId;
+                    }
                 } catch (e) {}
 
-                // Ask server/processor to render the image with current WW/WL
-                const params = new URLSearchParams();
-                if (windowWidth) params.set('window_width', windowWidth);
-                if (windowLevel) params.set('window_level', windowLevel);
-                params.set('inverted', inverted ? 'true' : 'false');
-
-                const response = await fetch(`/dicom-viewer/api/image/${imageId}/display/?${params.toString()}`);
-                const payload = await response.json();
-
-                // Update window/level defaults if not set yet
-                if (!windowWidth && payload?.image_info?.default_window_width) windowWidth = payload.image_info.default_window_width;
-                if (!windowLevel && payload?.image_info?.default_window_level) windowLevel = payload.image_info.default_window_level;
-
-                // Some backends also return current windowing in payload.windowing
-                if (payload?.windowing?.window_width) windowWidth = payload.windowing.window_width;
-                if (payload?.windowing?.window_level) windowLevel = payload.windowing.window_level;
-
-                updateSliders();
-                await renderDicomImage(payload);
+                // Prefer raw pixels for instant WW/WL in browser; fallback to PNG render.
+                const pixelsOk = await tryLoadPixels(imageId);
+                if (pixelsOk) {
+                    useClientWindowing = true;
+                    updateSliders();
+                    renderFromPixels();
+                } else {
+                    useClientWindowing = false;
+                    await renderFromServerPng(imageId);
+                }
                 
             } catch (error) {
                 console.error('Error loading image:', error);
@@ -1512,7 +1512,24 @@
             }
         }
 
-        async function renderDicomImage(payload) {
+        async function renderFromServerPng(imageId) {
+            const params = new URLSearchParams();
+            if (windowWidth) params.set('window_width', windowWidth);
+            if (windowLevel) params.set('window_level', windowLevel);
+            params.set('inverted', inverted ? 'true' : 'false');
+            const response = await fetch(`/dicom-viewer/api/image/${imageId}/display/?${params.toString()}`);
+            const payload = await response.json();
+
+            if (!windowWidth && payload?.image_info?.default_window_width) windowWidth = payload.image_info.default_window_width;
+            if (!windowLevel && payload?.image_info?.default_window_level) windowLevel = payload.image_info.default_window_level;
+            if (payload?.windowing?.window_width) windowWidth = payload.windowing.window_width;
+            if (payload?.windowing?.window_level) windowLevel = payload.windowing.window_level;
+
+            updateSliders();
+            await renderPngPayload(payload);
+        }
+
+        async function renderPngPayload(payload) {
             const dataUrl = payload?.image_data;
             if (!dataUrl) return;
 
@@ -1545,6 +1562,83 @@
             }
 
             // Always draw overlays after rendering
+            drawMeasurements();
+            drawAnnotations();
+            if (crosshair) drawCrosshair();
+            updateOverlayLabels();
+        }
+
+        async function tryLoadPixels(imageId) {
+            try {
+                const resp = await fetch(`/dicom-viewer/api/image/${imageId}/pixels/`);
+                if (!resp.ok) return false;
+                const rows = parseInt(resp.headers.get('X-Rows') || '0', 10);
+                const cols = parseInt(resp.headers.get('X-Cols') || '0', 10);
+                const dtype = (resp.headers.get('X-Dtype') || '').toLowerCase();
+                if (!rows || !cols || dtype !== 'float32') return false;
+
+                // defaults
+                if (!windowWidth) windowWidth = parseFloat(resp.headers.get('X-Default-WW') || '0') || windowWidth;
+                if (!windowLevel) windowLevel = parseFloat(resp.headers.get('X-Default-WL') || '0') || windowLevel;
+                const defaultInv = (resp.headers.get('X-Default-Inverted') || 'false') === 'true';
+                // If user hasn't explicitly toggled invert yet, adopt default inversion.
+                if (!inverted && defaultInv) inverted = true;
+
+                const buf = await resp.arrayBuffer();
+                currentPixels = new Float32Array(buf);
+                currentPixelRows = rows;
+                currentPixelCols = cols;
+                return currentPixels.length === rows * cols;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function renderFromPixels() {
+            if (!currentPixels || !currentPixelRows || !currentPixelCols) return;
+
+            canvas.width = currentPixelCols;
+            canvas.height = currentPixelRows;
+
+            const pixels = new Uint8ClampedArray(currentPixelRows * currentPixelCols * 4);
+
+            const ww = Math.max(1, windowWidth || 400);
+            const wl = (windowLevel || 40);
+            const minVal = wl - ww / 2;
+            const maxVal = wl + ww / 2;
+            const denom = (maxVal - minVal) || 1;
+
+            for (let i = 0; i < currentPixels.length; i++) {
+                let v = currentPixels[i];
+                let g;
+                if (v <= minVal) g = 0;
+                else if (v >= maxVal) g = 255;
+                else g = Math.round(((v - minVal) / denom) * 255);
+                if (inverted) g = 255 - g;
+                const j = i * 4;
+                pixels[j] = g;
+                pixels[j + 1] = g;
+                pixels[j + 2] = g;
+                pixels[j + 3] = 255;
+            }
+
+            const imgData = new ImageData(pixels, currentPixelCols, currentPixelRows);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (zoom !== 1.0 || panX !== 0 || panY !== 0 || rotation !== 0 || flipH || flipV) {
+                ctx.save();
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                ctx.scale(zoom, zoom);
+                ctx.translate(panX, panY);
+                if (rotation !== 0) ctx.rotate(rotation * Math.PI / 180);
+                if (flipH || flipV) ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+                ctx.translate(-canvas.width / 2, -canvas.height / 2);
+                ctx.putImageData(imgData, 0, 0);
+                ctx.restore();
+            } else {
+                ctx.putImageData(imgData, 0, 0);
+            }
+
             drawMeasurements();
             drawAnnotations();
             if (crosshair) drawCrosshair();
@@ -1843,12 +1937,16 @@
 
         function redrawCurrentImage() {
             if (currentImageIndex >= 0 && currentImageIndex < imageData.length) {
-                loadCurrentImage().then(() => {
-                    // Redraw measurements and annotations after image is loaded
-                    drawMeasurements();
-                    drawAnnotations();
+                if (useClientWindowing) {
+                    renderFromPixels();
                     drawCurrentMeasurement();
-                });
+                } else {
+                    loadCurrentImage().then(() => {
+                        drawMeasurements();
+                        drawAnnotations();
+                        drawCurrentMeasurement();
+                    });
+                }
             }
         }
 

@@ -1133,6 +1133,95 @@ def api_dicom_image_display(request, image_id):
         }
         return JsonResponse(minimal)  # 200 OK to avoid frontend failure
 
+
+@login_required
+@csrf_exempt
+def api_image_pixels(request, image_id):
+    """Return raw float32 pixel buffer for client-side windowing (fast UI).
+
+    Delegates to external processor if configured, otherwise decodes via pydicom/SimpleITK.
+    """
+    image = get_object_or_404(DicomImage, id=image_id)
+    user = request.user
+
+    if user.is_facility_user() and getattr(user, 'facility', None) and image.series.study.facility != user.facility:
+        return HttpResponse(status=403)
+
+    processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+    if processor_url:
+        try:
+            endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/pixels')
+            params = {'rel_path': str(image.file_path)}
+            resp = requests.get(endpoint, params=params, timeout=(2, 30))
+            if resp.ok:
+                out = HttpResponse(resp.content, content_type=resp.headers.get('content-type', 'application/octet-stream'))
+                # Forward metadata headers used by the frontend
+                for h in ('X-Rows', 'X-Cols', 'X-Dtype', 'X-Default-WW', 'X-Default-WL', 'X-Default-Inverted'):
+                    if h in resp.headers:
+                        out[h] = resp.headers[h]
+                out['Cache-Control'] = 'max-age=3600'
+                return out
+        except Exception as e:
+            logger.warning(f"External processor pixels failed: {e}")
+
+    # Fallback: decode locally
+    try:
+        dicom_path = os.path.join(settings.MEDIA_ROOT, str(image.file_path))
+        ds = pydicom.dcmread(dicom_path, stop_before_pixels=False)
+        try:
+            arr = ds.pixel_array
+        except Exception:
+            try:
+                import SimpleITK as sitk
+
+                sitk_image = sitk.ReadImage(dicom_path)
+                arr = sitk.GetArrayFromImage(sitk_image)
+                if arr.ndim == 3 and arr.shape[0] == 1:
+                    arr = arr[0]
+            except Exception:
+                return HttpResponse(status=500)
+
+        if arr.ndim == 3 and arr.shape[0] == 1:
+            arr = arr[0]
+        if arr.ndim != 2:
+            return HttpResponse(status=400)
+
+        arr = arr.astype(np.float32)
+        if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
+            try:
+                arr = arr * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+            except Exception:
+                pass
+
+        modality = str(getattr(ds, 'Modality', '')).upper()
+        photo = str(getattr(ds, 'PhotometricInterpretation', '')).upper()
+        default_inverted = 'true' if (modality in ['DX', 'CR', 'XA', 'RF'] and photo == 'MONOCHROME1') else 'false'
+
+        default_ww = getattr(ds, 'WindowWidth', None)
+        default_wl = getattr(ds, 'WindowCenter', None)
+        if hasattr(default_ww, '__iter__') and not isinstance(default_ww, str):
+            default_ww = default_ww[0]
+        if hasattr(default_wl, '__iter__') and not isinstance(default_wl, str):
+            default_wl = default_wl[0]
+        if default_ww is None or default_wl is None:
+            processor = DicomProcessor()
+            dw, dl = processor.auto_window_from_data(arr, percentile_range=(2, 98), modality=modality or 'CT')
+            default_ww = default_ww or dw
+            default_wl = default_wl or dl
+
+        out = HttpResponse(arr.tobytes(), content_type='application/octet-stream')
+        out['X-Rows'] = str(int(arr.shape[0]))
+        out['X-Cols'] = str(int(arr.shape[1]))
+        out['X-Dtype'] = 'float32'
+        out['X-Default-WW'] = str(float(default_ww or 400.0))
+        out['X-Default-WL'] = str(float(default_wl or 40.0))
+        out['X-Default-Inverted'] = default_inverted
+        out['Cache-Control'] = 'max-age=3600'
+        return out
+    except Exception as e:
+        logger.error(f"api_image_pixels failed for image {image_id}: {e}")
+        return HttpResponse(status=500)
+
 @login_required
 @csrf_exempt
 def api_measurements(request, study_id=None):

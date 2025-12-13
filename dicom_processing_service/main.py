@@ -438,6 +438,56 @@ def render_dicom(
     return payload
 
 
+@app.get("/v1/pixels")
+def pixels(
+    rel_path: str,
+) -> Response:
+    """Return raw float32 pixel buffer (HU-like) for client-side windowing.
+
+    Response:
+    - Content-Type: application/octet-stream
+    - Body: float32 little-endian, row-major, length = rows*cols
+    - Headers: X-Rows, X-Cols, X-Dtype=float32, X-Default-WW, X-Default-WL, X-Default-Inverted
+    """
+    dicom_path = _resolve_media_path(rel_path)
+    arr, ds, warnings = _decode_dicom_to_float32(dicom_path)
+    if arr is None or ds is None:
+        raise HTTPException(status_code=400, detail={"error": "Could not read pixel data", "warnings": warnings})
+
+    if arr.ndim == 3 and arr.shape[0] == 1:
+        arr = arr[0]
+    if arr.ndim != 2:
+        raise HTTPException(status_code=400, detail=f"Unsupported pixel array shape: {getattr(arr, 'shape', None)}")
+
+    rows, cols = int(arr.shape[0]), int(arr.shape[1])
+
+    modality = str(getattr(ds, "Modality", "")).upper()
+    photo = str(getattr(ds, "PhotometricInterpretation", "")).upper()
+    default_inverted = "true" if (modality in {"DX", "CR", "XA", "RF"} and photo == "MONOCHROME1") else "false"
+
+    default_ww = getattr(ds, "WindowWidth", None)
+    default_wl = getattr(ds, "WindowCenter", None)
+    if hasattr(default_ww, "__iter__") and not isinstance(default_ww, str):
+        default_ww = default_ww[0]
+    if hasattr(default_wl, "__iter__") and not isinstance(default_wl, str):
+        default_wl = default_wl[0]
+    if default_ww is None or default_wl is None:
+        ww, wl = _derive_window(arr, modality or "CT")
+        default_ww = default_ww or ww
+        default_wl = default_wl or wl
+
+    buf = arr.astype(np.float32).tobytes(order="C")
+    headers = {
+        "X-Rows": str(rows),
+        "X-Cols": str(cols),
+        "X-Dtype": "float32",
+        "X-Default-WW": str(float(default_ww or 400.0)),
+        "X-Default-WL": str(float(default_wl or 40.0)),
+        "X-Default-Inverted": default_inverted,
+    }
+    return Response(content=buf, media_type="application/octet-stream", headers=headers)
+
+
 @app.get("/v1/auto-window")
 def auto_window(image_id: int) -> dict[str, Any]:
     """Compute optimal WW/WL (and CT suggested preset) for an image."""

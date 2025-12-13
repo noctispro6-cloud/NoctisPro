@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Profile - Noctis Pro PACS{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3">
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <div><i class="fas fa-user"></i> Profile</div>
+      <div>
+        <a class="btn-control" href="{% url 'worklist:dashboard' %}">Back</a>
+      </div>
+    </div>
+    <div class="card-body">
+      <form method="post">
+        {% csrf_token %}
+        <div class="row">
+          <div class="col-12 col-md-6 mb-3">
+            <label class="form-label" for="first_name">First name</label>
+            <input class="form-control form-control-medical" id="first_name" name="first_name" value="{{ user.first_name }}">
+          </div>
+          <div class="col-12 col-md-6 mb-3">
+            <label class="form-label" for="last_name">Last name</label>
+            <input class="form-control form-control-medical" id="last_name" name="last_name" value="{{ user.last_name }}">
+          </div>
+          <div class="col-12 col-md-6 mb-3">
+            <label class="form-label" for="email">Email</label>
+            <input class="form-control form-control-medical" id="email" name="email" type="email" value="{{ user.email }}">
+          </div>
+          <div class="col-12 col-md-6 mb-3">
+            <label class="form-label" for="phone">Phone (for critical AI alerts)</label>
+            <input class="form-control form-control-medical" id="phone" name="phone" placeholder="+15551234567" value="{{ user.phone }}">
+            <div class="form-text text-secondary">Use E.164 format. Required for SMS/Call critical alerts.</div>
+          </div>
+          <div class="col-12 col-md-6 mb-3">
+            <label class="form-label" for="specialization">Specialization</label>
+            <input class="form-control form-control-medical" id="specialization" name="specialization" value="{{ user.specialization }}">
+          </div>
+
+          <div class="col-12 col-md-6 mb-3">
+            <label class="form-label" for="preferred_method">Critical alert delivery</label>
+            <select class="form-select form-control-medical" id="preferred_method" name="preferred_method">
+              {% with cur=notification_pref.preferred_method|default:"web" %}
+              <option value="web" {% if cur == "web" %}selected{% endif %}>Web notification (in-app)</option>
+              <option value="sms" {% if cur == "sms" %}selected{% endif %}>SMS</option>
+              <option value="call" {% if cur == "call" %}selected{% endif %}>Phone call</option>
+              {% endwith %}
+            </select>
+            <div class="form-text text-secondary">
+              For urgent AI triage, the system will attempt SMS/call if configured; otherwise it falls back to web.
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-2">
+          <button class="btn-control" type="submit"><i class="fas fa-save"></i> Save</button>
+        </div>
+      </form>
+
+      <hr style="opacity:0.3;">
+
+      <div>
+        <div style="font-weight:600;margin-bottom:6px;">Recent sessions</div>
+        {% if recent_sessions %}
+          <div class="table-responsive">
+            <table class="table table-dark table-striped align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Login time</th>
+                  <th>IP</th>
+                  <th>Active</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for s in recent_sessions %}
+                <tr>
+                  <td>{{ s.login_time|date:"Y-m-d H:i" }}</td>
+                  <td>{{ s.ip_address }}</td>
+                  <td>{% if s.is_active %}Yes{% else %}No{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="text-secondary">No recent sessions.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+

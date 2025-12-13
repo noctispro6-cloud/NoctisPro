@@ -228,6 +228,22 @@
             color: var(--text-secondary);
         }
 
+        .priority-pill {
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .priority-urgent { border-color: var(--urgent-color); color: var(--urgent-color); }
+        .priority-high { border-color: var(--warning-color); color: var(--warning-color); }
+        .priority-normal { border-color: var(--accent-color); color: var(--accent-color); }
+        .priority-low { border-color: var(--text-muted); color: var(--text-muted); }
+        .ai-flag { border-color: var(--accent-color); color: var(--accent-color); }
+
         .attachments, .prev-reports {
             display: flex;
             gap: 6px;
@@ -384,6 +400,7 @@
 					<th>Study Date</th>
 					<th>Mod</th>
 					<th>Status</th>
+					<th>Priority / AI</th>
 					<th>Attachments</th>
 					<th>Previous Reports</th>
 					<th>Actions</th>
@@ -405,6 +422,18 @@
 				<td>{{ s.study_date|date:"M d, Y H:i" }}</td>
 				<td><span class="badge-mod">{{ s.modality.code }}</span></td>
 				<td><span class="status-pill">{{ s.status|title }}</span></td>
+				<td>
+					<span class="priority-pill priority-{{ s.priority|default:'normal' }}">
+						<i class="fas fa-flag"></i> {{ s.priority|default:'normal'|title }}
+					</span>
+					{% with t=ai_triage_map|get_item:s.id %}
+						{% if t and t|get_item:'flagged' %}
+							<span class="priority-pill ai-flag" title="AI flagged this study (triage {{ t|get_item:'triage_level' }} score {{ t|get_item:'triage_score' }})" style="margin-left:6px;">
+								<i class="fas fa-robot"></i> AI {{ t|get_item:'triage_level'|default:'high'|upper }}
+							</span>
+						{% endif %}
+					{% endwith %}
+				</td>
 				<td>
 					<div class="attachments">
 						{% for a in attachments_map|get_item:s.id %}
@@ -453,7 +482,7 @@
 				</td>
 			</tr>
 			{% empty %}
-			<tr><td colspan="8" class="empty">No studies</td></tr>
+			<tr><td colspan="9" class="empty">No studies</td></tr>
 			{% endfor %}
 			</tbody>
 		</table>

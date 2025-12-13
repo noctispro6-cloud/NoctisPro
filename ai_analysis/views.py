@@ -8,6 +8,7 @@ from django.core.paginator import Paginator
 from django.utils import timezone
 from datetime import datetime, timedelta
 import json
+import hashlib
 import numpy as np
 import pydicom
 import os
@@ -753,6 +754,13 @@ def process_ai_analyses(analyses):
             
             # Complete the analysis
             analysis.complete_analysis(results)
+
+            # Apply AI triage/flagging to the parent study (severity → study.priority)
+            try:
+                _apply_ai_triage(analysis)
+            except Exception:
+                # Never fail the background worker due to triage/notification issues
+                pass
             
             # Update model statistics
             model = analysis.ai_model
@@ -771,6 +779,173 @@ def process_ai_analyses(analyses):
             analysis.status = 'failed'
             analysis.error_message = str(e)
             analysis.save()
+
+_PRIORITY_RANK = {'low': 0, 'normal': 1, 'high': 2, 'urgent': 3}
+
+
+def _normalize_abnormality_label(item) -> str:
+    """Best-effort normalization for abnormality entries (dicts/strings)."""
+    try:
+        if isinstance(item, dict):
+            for key in ('label', 'type', 'name', 'finding'):
+                val = item.get(key)
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+            return json.dumps(item, sort_keys=True)
+        return str(item).strip()
+    except Exception:
+        return ''
+
+
+def _compute_ai_triage(abnormalities, confidence: float) -> dict:
+    """
+    Compute a triage level + score from AI outputs.
+    This is intentionally conservative: it upgrades but never auto-downgrades a study.
+    """
+    conf = float(confidence or 0.0)
+    labels = [(_normalize_abnormality_label(a) or '').lower() for a in (abnormalities or [])]
+    labels = [l for l in labels if l]
+
+    urgent_keywords = (
+        'intracranial hemorrhage', 'hemorrhage', 'ich', 'stroke', 'infarct',
+        'pneumothorax', 'tension pneumothorax', 'pulmonary embolism', 'embolism',
+        'aortic dissection', 'free air', 'perforation'
+    )
+    high_keywords = (
+        'fracture', 'consolidation', 'pneumonia', 'large effusion', 'mass', 'tumor',
+        'significant stenosis'
+    )
+
+    max_hint = 'normal'
+    reason = 'no_abnormalities'
+    if any(any(k in l for k in urgent_keywords) for l in labels):
+        max_hint = 'urgent'
+        reason = 'urgent_keyword'
+    elif any(any(k in l for k in high_keywords) for l in labels):
+        max_hint = 'high'
+        reason = 'high_keyword'
+    elif labels:
+        max_hint = 'normal'
+        reason = 'abnormality_present'
+
+    base = {'low': 0.15, 'normal': 0.35, 'high': 0.70, 'urgent': 1.0}.get(max_hint, 0.35)
+    score = min(1.0, (base * 0.6) + (conf * 0.4))
+
+    if max_hint == 'urgent' or score >= 0.85:
+        level = 'urgent'
+    elif max_hint == 'high' or score >= 0.65:
+        level = 'high'
+    elif score <= 0.25 and not labels:
+        level = 'low'
+    else:
+        level = 'normal'
+
+    flagged = level in ('high', 'urgent') and conf >= 0.55
+    return {
+        'triage_level': level,
+        'triage_score': round(score, 3),
+        'flagged': bool(flagged),
+        'reason': reason,
+        'abnormalities_count': len(labels),
+    }
+
+
+def _upgrade_study_priority(study: Study, new_priority: str) -> bool:
+    """Upgrade the study priority if the new priority is more severe."""
+    try:
+        cur = (study.priority or 'normal').lower()
+        nxt = (new_priority or 'normal').lower()
+        if _PRIORITY_RANK.get(nxt, 1) > _PRIORITY_RANK.get(cur, 1):
+            study.priority = nxt
+            study.save(update_fields=['priority', 'last_updated'])
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def _notify_ai_triage(analysis: AIAnalysis, triage: dict) -> None:
+    """Create a notification for radiologists/admins when AI upgrades triage."""
+    try:
+        from notifications.models import Notification, NotificationType
+
+        study = analysis.study
+        facility = getattr(study, 'facility', None)
+        triage_level = triage.get('triage_level', 'normal')
+        triage_score = triage.get('triage_score', 0)
+
+        notif_type, _ = NotificationType.objects.get_or_create(
+            code='ai_triage',
+            defaults={
+                'name': 'AI Triage Flag',
+                'description': 'AI flagged a study for priority review',
+                'is_system': True,
+                'default_priority': 'high',
+            },
+        )
+
+        # Radiologists at the same facility, plus all admins (facility optional).
+        recipients = User.objects.filter(Q(role='radiologist') | Q(role='admin'))
+        if facility:
+            recipients = recipients.filter(Q(role='admin') | Q(facility=facility))
+
+        title = f"AI flagged study {study.accession_number} ({triage_level.upper()})"
+        msg = (
+            f"AI triage level: {triage_level.upper()} (score {triage_score}). "
+            f"Please review the study promptly. Findings: {analysis.findings[:200]}"
+        )
+
+        action_url = f"/worklist/study/{study.id}/"
+        for recipient in recipients:
+            Notification.objects.create(
+                notification_type=notif_type,
+                recipient=recipient,
+                sender=None,
+                title=title,
+                message=msg,
+                priority=triage_level if triage_level in _PRIORITY_RANK else 'high',
+                study=study,
+                facility=facility,
+                action_url=action_url,
+                data={
+                    'study_id': study.id,
+                    'analysis_id': analysis.id,
+                    'triage': triage,
+                },
+            )
+    except Exception:
+        # Best-effort only
+        return
+
+
+def _apply_ai_triage(analysis: AIAnalysis) -> None:
+    """
+    Persist triage info to the analysis, upgrade Study.priority if needed,
+    and notify radiologists/admins on upgrade.
+    """
+    triage = _compute_ai_triage(analysis.abnormalities_detected, analysis.confidence_score or 0.0)
+
+    # Persist triage metadata on the analysis (no schema changes required).
+    try:
+        measurements = analysis.measurements or {}
+        if not isinstance(measurements, dict):
+            measurements = {}
+        measurements.update({
+            'triage_level': triage.get('triage_level'),
+            'triage_score': triage.get('triage_score'),
+            'triage_flagged': triage.get('flagged'),
+            'triage_reason': triage.get('reason'),
+        })
+        analysis.measurements = measurements
+        analysis.save(update_fields=['measurements'])
+    except Exception:
+        pass
+
+    # Upgrade study priority and notify if we actually upgraded.
+    upgraded = _upgrade_study_priority(analysis.study, triage.get('triage_level', 'normal'))
+    if upgraded and triage.get('flagged'):
+        _notify_ai_triage(analysis, triage)
+
 
 def simulate_ai_analysis(analysis):
     """Heavier inference if available; otherwise safe simulation."""
@@ -792,22 +967,54 @@ def simulate_ai_analysis(analysis):
             confidence = 0.88
     # Optional ONNX path could go here for imaging if an .onnx exists; skip unless file provided
     time.sleep(2)
+
+    # Deterministic “demo triage” abnormalities for smoke/demo environments.
+    # Real deployments should replace this with actual model inference outputs.
+    acc = (getattr(analysis.study, 'accession_number', '') or '').encode('utf-8')
+    h = int(hashlib.md5(acc or b'0').hexdigest(), 16)
+    clin = (getattr(analysis.study, 'clinical_info', '') or '').lower()
+
     if modality == 'CT':
         findings = "No acute intracranial abnormality. Brain parenchyma appears normal."
         abnormalities = []
+        if 'stroke' in clin or (h % 20 == 1):
+            abnormalities = [{'label': 'Ischemic stroke suspicion', 'severity_hint': 'urgent'}]
+            findings = "Findings suspicious for acute ischemic stroke; urgent clinical correlation recommended."
+        elif 'hemorrhage' in clin or (h % 20 == 0):
+            abnormalities = [{'label': 'Intracranial hemorrhage suspicion', 'severity_hint': 'urgent'}]
+            findings = "Possible intracranial hemorrhage; urgent review recommended."
+        elif (h % 20 == 2):
+            abnormalities = [{'label': 'Mass effect / edema suspicion', 'severity_hint': 'high'}]
+            findings = "Possible mass effect/edema; recommend expedited review."
         measurements = {"brain_volume": "1450 mL", "ventricle_size": "normal"}
     elif modality == 'MR':
         findings = "Normal brain MRI. No evidence of acute infarction or hemorrhage."
         abnormalities = []
+        if 'ms' in clin or (h % 25 == 3):
+            abnormalities = [{'label': 'Demyelinating lesions suspicion', 'severity_hint': 'high'}]
+            findings = "Possible demyelinating lesions; correlate clinically and review sequences."
         measurements = {"lesion_count": 0, "white_matter": "normal"}
     elif modality == 'XR':
         findings = "Chest X-ray shows clear lungs. Heart size is normal."
         abnormalities = []
+        if 'pneumothorax' in clin or (h % 15 == 0):
+            abnormalities = [{'label': 'Pneumothorax suspicion', 'severity_hint': 'urgent'}]
+            findings = "Possible pneumothorax; urgent review recommended."
+        elif 'pneumonia' in clin or (h % 15 == 1):
+            abnormalities = [{'label': 'Pneumonia / consolidation suspicion', 'severity_hint': 'high'}]
+            findings = "Possible consolidation/pneumonia; recommend review."
         measurements = {"heart_size": "normal", "lung_fields": "clear"}
     else:
         findings = "Study reviewed by AI. No acute abnormalities detected."
         abnormalities = []
         measurements = {}
+
+    # Calibrate confidence for demo cases.
+    if abnormalities:
+        confidence = 0.75 + ((h % 23) / 100.0)  # ~0.75-0.98
+    else:
+        confidence = min(confidence, 0.9)
+
     return {
         'findings': findings,
         'abnormalities': abnormalities,

@@ -3,7 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponse, FileResponse
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Case, When, Value, IntegerField
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
@@ -72,8 +72,22 @@ def study_list(request):
 			Q(study_description__icontains=search_query)
 		)
 	
-	# Sort by study date (most recent first) and prefetch attachments for display
-	studies = studies.select_related('patient', 'facility', 'modality', 'radiologist').prefetch_related('attachments').order_by('-study_date')
+	# Sort by priority (urgent→low) then most recent first; prefetch attachments for display
+	priority_rank = Case(
+		When(priority='urgent', then=Value(3)),
+		When(priority='high', then=Value(2)),
+		When(priority='normal', then=Value(1)),
+		When(priority='low', then=Value(0)),
+		default=Value(1),
+		output_field=IntegerField(),
+	)
+	studies = (
+		studies
+		.select_related('patient', 'facility', 'modality', 'radiologist')
+		.prefetch_related('attachments')
+		.annotate(_priority_rank=priority_rank)
+		.order_by('-_priority_rank', '-study_date')
+	)
 	
 	# Pagination
 	paginator = Paginator(studies, 25)
@@ -103,6 +117,30 @@ def study_list(request):
 	attachments_map = {}
 	for a in atts:
 		attachments_map.setdefault(a.study_id, []).append(a)
+
+	# AI triage map (latest completed AI analysis per study)
+	ai_triage_map = {}
+	try:
+		from ai_analysis.models import AIAnalysis
+		analyses = (
+			AIAnalysis.objects
+			.filter(study_id__in=study_ids, status='completed')
+			.select_related('study')
+			.order_by('-completed_at', '-requested_at')
+		)
+		for a in analyses:
+			if a.study_id in ai_triage_map:
+				continue
+			m = a.measurements or {}
+			if not isinstance(m, dict):
+				m = {}
+			ai_triage_map[a.study_id] = {
+				'triage_level': m.get('triage_level'),
+				'triage_score': m.get('triage_score'),
+				'flagged': bool(m.get('triage_flagged')),
+			}
+	except Exception:
+		ai_triage_map = {}
 	
 	context = {
 		'studies': studies_page,
@@ -114,6 +152,7 @@ def study_list(request):
 		'user': user,
 		'previous_reports_map': previous_reports_map,
 		'attachments_map': attachments_map,
+		'ai_triage_map': ai_triage_map,
 	}
 	
 	return render(request, 'worklist/study_list.html', context)

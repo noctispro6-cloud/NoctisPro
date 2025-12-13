@@ -472,6 +472,23 @@ def api_mip_reconstruction(request, series_id):
         return JsonResponse({'error': 'Permission denied'}, status=403)
     
     try:
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/mip')
+                params = {
+                    'series_id': int(series_id),
+                    'window_width': request.GET.get('window_width', 400),
+                    'window_level': request.GET.get('window_level', 40),
+                    'inverted': request.GET.get('inverted', 'false'),
+                }
+                resp = requests.get(endpoint, params=params, timeout=(2, 45))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor MIP failed: {e}")
+
         # Prefer isotropic volume for higher-quality MIP
         try:
             volume, _spacing = _get_mpr_volume_and_spacing(series)
@@ -556,6 +573,26 @@ def api_bone_reconstruction(request, series_id):
         return JsonResponse({'error': 'Permission denied'}, status=403)
     
     try:
+        # Delegate to external processor if configured
+        processor_url = getattr(settings, 'DICOM_PROCESSOR_URL', '').strip()
+        if processor_url:
+            try:
+                endpoint = urljoin(processor_url.rstrip('/') + '/', 'v1/bone')
+                params = {
+                    'series_id': int(series_id),
+                    'threshold': request.GET.get('threshold', 300),
+                    'window_width': request.GET.get('window_width', 2000),
+                    'window_level': request.GET.get('window_level', 300),
+                    'inverted': request.GET.get('inverted', 'false'),
+                    'mesh': request.GET.get('mesh', 'false'),
+                    'quality': request.GET.get('quality', ''),
+                }
+                resp = requests.get(endpoint, params=params, timeout=(2, 90))
+                if resp.ok:
+                    return JsonResponse(resp.json())
+            except Exception as e:
+                logger.warning(f"External processor bone reconstruction failed: {e}")
+
         # Parameters
         threshold = int(request.GET.get('threshold', 300))
         want_mesh = (request.GET.get('mesh','false').lower() == 'true')

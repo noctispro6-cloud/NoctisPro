@@ -645,3 +645,122 @@ def series_volume_uint8(series_id: int, ww: float = 400.0, wl: float = 40.0, max
         "spacing": [float(spacing[0]), float(spacing[1]), float(spacing[2])],
         "data": b64,
     }
+
+
+def _maybe_interpolate_thin_stack(volume: np.ndarray, min_slices: int = 32) -> np.ndarray:
+    """Upsample along Z for thin stacks to improve MIP/bone quality (best-effort)."""
+    try:
+        z = int(volume.shape[0])
+        if z >= min_slices:
+            return volume
+        target_slices = max(min_slices, z * 3)
+        factor = float(target_slices) / float(max(1, z))
+        from scipy import ndimage  # type: ignore
+
+        return ndimage.zoom(volume, (factor, 1, 1), order=3, prefilter=True)
+    except Exception:
+        return volume
+
+
+@app.get("/v1/mip")
+def mip_reconstruction(
+    series_id: int,
+    window_width: float = 400.0,
+    window_level: float = 40.0,
+    inverted: bool = False,
+) -> dict[str, Any]:
+    """Maximum Intensity Projection (MIP) compatible with Django `api_mip_reconstruction`."""
+    vol, _spacing = _get_series_volume(series_id)
+    vol = _maybe_interpolate_thin_stack(vol, min_slices=32)
+
+    mip_axial = np.max(vol, axis=0)
+    mip_sagittal = np.max(vol, axis=1)
+    mip_coronal = np.max(vol, axis=2)
+
+    views = {
+        "axial": _png_data_url(_apply_windowing(mip_axial, float(window_width), float(window_level), invert=inverted)),
+        "sagittal": _png_data_url(_apply_windowing(mip_sagittal, float(window_width), float(window_level), invert=inverted)),
+        "coronal": _png_data_url(_apply_windowing(mip_coronal, float(window_width), float(window_level), invert=inverted)),
+    }
+
+    series_info = {"id": series_id, "description": "", "modality": ""}
+    try:
+        _require_orm()
+        s = Series.objects.get(id=series_id)  # type: ignore[attr-defined]
+        series_info = {
+            "id": int(getattr(s, "id", series_id)),
+            "description": str(getattr(s, "series_description", "")),
+            "modality": str(getattr(s, "modality", "")),
+        }
+    except Exception:
+        pass
+
+    return {
+        "mip_views": views,
+        "volume_shape": [int(x) for x in vol.shape],
+        "counts": {"axial": int(vol.shape[0]), "sagittal": int(vol.shape[2]), "coronal": int(vol.shape[1])},
+        "series_info": series_info,
+    }
+
+
+@app.get("/v1/bone")
+def bone_reconstruction(
+    series_id: int,
+    threshold: int = 300,
+    window_width: float = 2000.0,
+    window_level: float = 300.0,
+    inverted: bool = False,
+    mesh: bool = False,
+    quality: str = "",
+) -> dict[str, Any]:
+    """Bone reconstruction compatible with Django `api_bone_reconstruction`."""
+    vol, _spacing = _get_series_volume(series_id)
+    vol = _maybe_interpolate_thin_stack(vol, min_slices=32)
+
+    bone_mask = vol >= int(threshold)
+    bone_vol = vol * bone_mask
+
+    axial_idx = int(bone_vol.shape[0] // 2)
+    sag_idx = int(bone_vol.shape[2] // 2)
+    cor_idx = int(bone_vol.shape[1] // 2)
+
+    bone_views = {
+        "axial": _png_data_url(_apply_windowing(bone_vol[axial_idx], float(window_width), float(window_level), invert=inverted)),
+        "sagittal": _png_data_url(_apply_windowing(bone_vol[:, :, sag_idx], float(window_width), float(window_level), invert=inverted)),
+        "coronal": _png_data_url(_apply_windowing(bone_vol[:, cor_idx, :], float(window_width), float(window_level), invert=inverted)),
+    }
+
+    mesh_payload = None
+    if mesh:
+        try:
+            from skimage import measure as _measure  # type: ignore
+
+            if str(quality).lower() == "high":
+                vol_for_mesh = (bone_vol > 0).astype(np.float32)
+            else:
+                ds_factor = max(1, int(np.ceil(max(1, bone_vol.shape[0]) / 128)))
+                vol_for_mesh = (bone_vol[::ds_factor, ::2, ::2] > 0).astype(np.float32)
+            verts, faces, _normals, _values = _measure.marching_cubes(vol_for_mesh, level=0.5)
+            mesh_payload = {"vertices": verts.tolist(), "faces": faces.tolist()}
+        except Exception:
+            mesh_payload = None
+
+    series_info = {"id": series_id, "description": "", "modality": ""}
+    try:
+        _require_orm()
+        s = Series.objects.get(id=series_id)  # type: ignore[attr-defined]
+        series_info = {
+            "id": int(getattr(s, "id", series_id)),
+            "description": str(getattr(s, "series_description", "")),
+            "modality": str(getattr(s, "modality", "")),
+        }
+    except Exception:
+        pass
+
+    return {
+        "bone_views": bone_views,
+        "volume_shape": [int(x) for x in bone_vol.shape],
+        "counts": {"axial": int(bone_vol.shape[0]), "sagittal": int(bone_vol.shape[2]), "coronal": int(bone_vol.shape[1])},
+        "series_info": series_info,
+        "mesh": mesh_payload,
+    }

@@ -1,0 +1,19 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Keep it simple for a laptop "run it now" deployment
+      DEBUG: "True"
+      ALLOWED_HOSTS: "*"
+      SECRET_KEY: "change-me-in-real-deployments"
+
+      # Persist sqlite DB into a mounted directory
+      DB_ENGINE: "django.db.backends.sqlite3"
+      DB_NAME: "/app/data/db.sqlite3"
+    volumes:
+      - ./data:/app/data
+      - ./media:/app/media
+      - ./logs:/app/logs
+

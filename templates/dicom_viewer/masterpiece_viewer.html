@@ -1083,6 +1083,13 @@
         let zoom = 1.0;
         let panX = 0, panY = 0;
         let inverted = false;
+        // Pixel spacing for real-world measurements (mm). Prefer per-image DICOM tag; fallback to Series field.
+        let currentPixelSpacing = null; // { row: number, col: number } | null
+        // Rendering pipeline uses an offscreen canvas because putImageData() ignores transforms.
+        let _frameCanvas = null;
+        let _frameCtx = null;
+        let _frameCacheKey = null;
+        let _lastRenderMeta = null; // { imgW, imgH, baseScale, rotDeg }
         let crosshair = false;
         let rotation = 0;
         let flipH = false;
@@ -1109,6 +1116,93 @@
             soft: { ww: 400, wl: 40 },
             brain: { ww: 100, wl: 50 }
         };
+
+        function _normalizePixelSpacing(ps) {
+            if (!ps) return null;
+            try {
+                if (Array.isArray(ps)) {
+                    const row = parseFloat(ps[0]);
+                    const col = parseFloat(ps.length >= 2 ? ps[1] : ps[0]);
+                    if (!isFinite(row) || !isFinite(col) || row <= 0 || col <= 0) return null;
+                    return { row, col };
+                }
+                const s = String(ps);
+                const parts = s.includes('\\') ? s.split('\\') : (s.includes(',') ? s.split(',') : s.split('x'));
+                const row = parseFloat(parts[0]);
+                const col = parseFloat(parts.length >= 2 ? parts[1] : parts[0]);
+                if (!isFinite(row) || !isFinite(col) || row <= 0 || col <= 0) return null;
+                return { row, col };
+            } catch {
+                return null;
+            }
+        }
+
+        function getPixelSpacing() {
+            // Prefer current slice PixelSpacing (more reliable), then Series field.
+            return currentPixelSpacing || _normalizePixelSpacing(currentSeries && currentSeries.pixel_spacing);
+        }
+
+        function _currentRenderMeta() {
+            return _lastRenderMeta;
+        }
+
+        function canvasPointToImagePx(x, y) {
+            const m = _currentRenderMeta();
+            if (!m) return null;
+            const { imgW, imgH, baseScale, rotDeg } = m;
+            const rot = ((rotDeg % 360) + 360) % 360;
+            const a = rot * Math.PI / 180;
+            const cos = Math.cos(a), sin = Math.sin(a);
+            const sx = (baseScale * zoom) * (flipH ? -1 : 1);
+            const sy = (baseScale * zoom) * (flipV ? -1 : 1);
+            if (!sx || !sy) return null;
+
+            // Translate into view space centered at origin (and undo pan)
+            let vx = x - (canvas.width / 2 + panX);
+            let vy = y - (canvas.height / 2 + panY);
+
+            // Undo rotation: rotate by -a
+            const rx = vx * cos + vy * sin;
+            const ry = -vx * sin + vy * cos;
+
+            // Undo scale/flip
+            const ix0 = rx / sx;
+            const iy0 = ry / sy;
+
+            // Back to image pixel coords
+            const ix = ix0 + imgW / 2;
+            const iy = iy0 + imgH / 2;
+            return { x: ix, y: iy };
+        }
+
+        function imagePxToCanvasPoint(pt) {
+            const m = _currentRenderMeta();
+            if (!m || !pt) return null;
+            const { imgW, imgH, baseScale, rotDeg } = m;
+            const rot = ((rotDeg % 360) + 360) % 360;
+            const a = rot * Math.PI / 180;
+            const cos = Math.cos(a), sin = Math.sin(a);
+
+            // Image center at origin
+            let x = pt.x - imgW / 2;
+            let y = pt.y - imgH / 2;
+
+            // Apply scale/flip
+            const sx = (baseScale * zoom) * (flipH ? -1 : 1);
+            const sy = (baseScale * zoom) * (flipV ? -1 : 1);
+            x *= sx;
+            y *= sy;
+
+            // Apply rotation
+            const rx = x * cos - y * sin;
+            const ry = x * sin + y * cos;
+
+            // Translate to canvas space (+ pan)
+            return {
+                x: rx + (canvas.width / 2 + panX),
+                y: ry + (canvas.height / 2 + panY),
+            };
+        }
 
         async function fetchReferences(customQuery) {
             try {
@@ -1546,6 +1640,13 @@
                 // Update window/level from DICOM data - SAME AS YOUR ORIGINAL
                 windowWidth = data.window_width || windowWidth;
                 windowLevel = data.window_center || windowLevel;
+                // Capture per-image PixelSpacing if present (MultiValue -> array). Fallback to Series field.
+                currentPixelSpacing = _normalizePixelSpacing(data.pixel_spacing) || _normalizePixelSpacing(currentSeries && currentSeries.pixel_spacing);
+                // If Series pixel spacing is missing but the image has it, promote it for UI/measurements.
+                if (currentSeries && !currentSeries.pixel_spacing && currentPixelSpacing) {
+                    currentSeries.pixel_spacing = `${currentPixelSpacing.row}\\${currentPixelSpacing.col}`;
+                    updateImageInfo(currentSeries);
+                }
                 
                 updateSliders();
                 lastLoadedImagePayload = data;
@@ -1559,59 +1660,78 @@
         }
 
         function renderDicomImage(imageData) {
-            if (!imageData.pixel_data) return;
-            
-            // Create ImageData from pixel array - SAME AS YOUR ORIGINAL
-            const pixels = new Uint8ClampedArray(imageData.pixel_data.length * 4);
-            
-            for (let i = 0; i < imageData.pixel_data.length; i++) {
-                let value = imageData.pixel_data[i];
-                
-                // Apply window/level - SAME AS YOUR ORIGINAL
-                value = applyWindowing(value, windowWidth, windowLevel);
-                
-                // Apply inversion if needed - SAME AS YOUR ORIGINAL
-                if (inverted) value = 255 - value;
-                
-                pixels[i * 4] = value;     // R
-                pixels[i * 4 + 1] = value; // G  
-                pixels[i * 4 + 2] = value; // B
-                pixels[i * 4 + 3] = 255;   // A
+            if (!imageData || !imageData.pixel_data || !imageData.columns || !imageData.rows) return;
+
+            const imgW = imageData.columns;
+            const imgH = imageData.rows;
+            const photometric = (imageData.photometric_interpretation || '').toString().toUpperCase();
+            const mono1 = photometric === 'MONOCHROME1';
+
+            // Determine final inversion: MONOCHROME1 is "inverted" by definition.
+            const shouldInvert = (!!inverted) !== (!!mono1);
+
+            // Fit-to-viewport base scale (avoid default "too big" / clipped display).
+            const rot = ((rotation % 360) + 360) % 360;
+            const rotated = (rot === 90 || rot === 270);
+            const fitW = rotated ? imgH : imgW;
+            const fitH = rotated ? imgW : imgH;
+            // Do not upscale above 1.0 by default; downscale if needed to fit.
+            const baseScale = Math.min(1, Math.min(canvas.width / fitW, canvas.height / fitH));
+            _lastRenderMeta = { imgW, imgH, baseScale, rotDeg: rotation };
+
+            // Build / reuse offscreen grayscale frame for current ww/wl/invert state.
+            const imgId = imageData.id != null ? String(imageData.id) : String(lastLoadedImageId || '');
+            const cacheKey = `${imgId}|ww:${Math.round(windowWidth)}|wl:${Math.round(windowLevel)}|inv:${shouldInvert ? 1 : 0}`;
+
+            if (!_frameCanvas) {
+                _frameCanvas = document.createElement('canvas');
+                _frameCtx = _frameCanvas.getContext('2d', { willReadFrequently: false });
             }
-            
-            const imgData = new ImageData(pixels, imageData.columns, imageData.rows);
-            
-            // Clear and draw - YOUR ORIGINAL METHOD WITH OPTIONAL ENHANCEMENTS
+            if (_frameCanvas.width !== imgW || _frameCanvas.height !== imgH) {
+                _frameCanvas.width = imgW;
+                _frameCanvas.height = imgH;
+                _frameCacheKey = null;
+            }
+
+            if (_frameCacheKey !== cacheKey) {
+                const pixels = new Uint8ClampedArray(imageData.pixel_data.length * 4);
+                for (let i = 0; i < imageData.pixel_data.length; i++) {
+                    let value = imageData.pixel_data[i];
+                    value = applyWindowing(value, windowWidth, windowLevel);
+                    if (shouldInvert) value = 255 - value;
+                    const j = i * 4;
+                    pixels[j] = value;
+                    pixels[j + 1] = value;
+                    pixels[j + 2] = value;
+                    pixels[j + 3] = 255;
+                }
+                const imgData = new ImageData(pixels, imgW, imgH);
+                _frameCtx.putImageData(imgData, 0, 0);
+                _frameCacheKey = cacheKey;
+            }
+
+            // Clear and draw with transform-aware pipeline (drawImage respects transforms).
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // If any transformations are active, use enhanced rendering
-            if (zoom !== 1.0 || panX !== 0 || panY !== 0 || rotation !== 0 || flipH || flipV) {
-                // Enhanced rendering with transformations (for new tools)
-                ctx.save();
-                ctx.translate(canvas.width / 2, canvas.height / 2);
-                ctx.scale(zoom, zoom);
-                ctx.translate(panX, panY);
-                
-                if (rotation !== 0) ctx.rotate(rotation * Math.PI / 180);
-                if (flipH || flipV) ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
-                
-                ctx.translate(-imgData.width / 2, -imgData.height / 2);
-                ctx.putImageData(imgData, 0, 0);
-                ctx.restore();
-            } else {
-                // YOUR ORIGINAL SIMPLE METHOD (default)
-                ctx.putImageData(imgData, 0, 0);
-            }
-            
-            // Always draw measurements and annotations after rendering the image
+            ctx.save();
+
+            // View transform: center, then pan in screen pixels, then rotate, flip, and scale.
+            ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
+            if (rotation) ctx.rotate((rotation * Math.PI) / 180);
+            const sx = (flipH ? -1 : 1) * (baseScale * zoom);
+            const sy = (flipV ? -1 : 1) * (baseScale * zoom);
+            ctx.scale(sx, sy);
+
+            // Draw centered
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(_frameCanvas, -imgW / 2, -imgH / 2);
+            ctx.restore();
+
+            // Overlays (measurements/annotations/crosshair) are drawn in screen space, but points are stored in image pixels.
             drawMeasurements();
             drawAnnotations();
-            if (crosshair) {
-                drawCrosshair();
-            }
-            // Draw in-progress measurement last (on top)
+            if (crosshair) drawCrosshair();
             drawCurrentMeasurement();
-            
+
             updateOverlayLabels();
         }
 
@@ -1719,8 +1839,9 @@
                     redrawCurrentImage();
                     break;
                 case 'pan':
-                    panX += deltaX / zoom;
-                    panY += deltaY / zoom;
+                    // Pan in screen pixels (independent of zoom/baseScale)
+                    panX += deltaX;
+                    panY += deltaY;
                     redrawCurrentImage();
                     break;
                 case 'measure':
@@ -1946,41 +2067,49 @@
 
         // Measurement Functions
         function startMeasurement(x, y) {
+            const p = canvasPointToImagePx(x, y);
+            if (!p) return;
             currentMeasurement = {
                 type: 'distance',
-                startX: x,
-                startY: y,
-                endX: x,
-                endY: y
+                startX: p.x,
+                startY: p.y,
+                endX: p.x,
+                endY: p.y
             };
         }
 
         function startAngleMeasurement(x, y) {
+            const p = canvasPointToImagePx(x, y);
+            if (!p) return;
             currentMeasurement = {
                 type: 'angle',
-                points: [{x, y}]
+                points: [{ x: p.x, y: p.y }]
             };
         }
 
         function startAreaMeasurement(x, y) {
+            const p = canvasPointToImagePx(x, y);
+            if (!p) return;
             currentMeasurement = {
                 type: 'area',
-                points: [{x, y}]
+                points: [{ x: p.x, y: p.y }]
             };
         }
 
         function updateMeasurement(x, y) {
             if (!currentMeasurement) return;
+            const p = canvasPointToImagePx(x, y);
+            if (!p) return;
             
             if (currentMeasurement.type === 'distance') {
-                currentMeasurement.endX = x;
-                currentMeasurement.endY = y;
+                currentMeasurement.endX = p.x;
+                currentMeasurement.endY = p.y;
             } else if (currentMeasurement.type === 'angle' || currentMeasurement.type === 'area') {
                 // Add point or update last point
                 if (currentMeasurement.points.length < 3) {
-                    currentMeasurement.points.push({x, y});
+                    currentMeasurement.points.push({ x: p.x, y: p.y });
                 } else {
-                    currentMeasurement.points[currentMeasurement.points.length - 1] = {x, y};
+                    currentMeasurement.points[currentMeasurement.points.length - 1] = { x: p.x, y: p.y };
                 }
             }
             
@@ -2026,25 +2155,28 @@
             
             measurements.forEach((measurement, index) => {
                 if (measurement.type === 'distance') {
+                    const a = imagePxToCanvasPoint({ x: measurement.startX, y: measurement.startY });
+                    const b = imagePxToCanvasPoint({ x: measurement.endX, y: measurement.endY });
+                    if (!a || !b) return;
                     // Draw measurement line
                     ctx.beginPath();
-                    ctx.moveTo(measurement.startX, measurement.startY);
-                    ctx.lineTo(measurement.endX, measurement.endY);
+                    ctx.moveTo(a.x, a.y);
+                    ctx.lineTo(b.x, b.y);
                     ctx.stroke();
                     
                     // Draw measurement points
                     ctx.fillStyle = '#ff0000';
                     ctx.beginPath();
-                    ctx.arc(measurement.startX, measurement.startY, 4, 0, 2 * Math.PI);
+                    ctx.arc(a.x, a.y, 4, 0, 2 * Math.PI);
                     ctx.fill();
                     ctx.beginPath();
-                    ctx.arc(measurement.endX, measurement.endY, 4, 0, 2 * Math.PI);
+                    ctx.arc(b.x, b.y, 4, 0, 2 * Math.PI);
                     ctx.fill();
                     
                     // Draw distance text with background
                     const distance = calculateDistance(measurement);
-                    const midX = (measurement.startX + measurement.endX) / 2;
-                    const midY = (measurement.startY + measurement.endY) / 2;
+                    const midX = (a.x + b.x) / 2;
+                    const midY = (a.y + b.y) / 2;
                     
                     // Text background
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -2056,15 +2188,17 @@
                     
                     // Store measurement bounds for context menu
                     measurement.bounds = {
-                        x1: Math.min(measurement.startX, measurement.endX) - 10,
-                        y1: Math.min(measurement.startY, measurement.endY) - 10,
-                        x2: Math.max(measurement.startX, measurement.endX) + 10,
-                        y2: Math.max(measurement.startY, measurement.endY) + 10,
+                        x1: Math.min(a.x, b.x) - 10,
+                        y1: Math.min(a.y, b.y) - 10,
+                        x2: Math.max(a.x, b.x) + 10,
+                        y2: Math.max(a.y, b.y) + 10,
                         index: index
                     };
                 } else if (measurement.type === 'angle' && measurement.points && measurement.points.length >= 3) {
                     // Draw angle measurement
-                    const points = measurement.points;
+                    const pointsImg = measurement.points;
+                    const points = pointsImg.map(p => imagePxToCanvasPoint(p)).filter(Boolean);
+                    if (points.length < 3) return;
                     ctx.beginPath();
                     ctx.moveTo(points[0].x, points[0].y);
                     ctx.lineTo(points[1].x, points[1].y);
@@ -2090,7 +2224,9 @@
                     };
                 } else if (measurement.type === 'area' && measurement.points && measurement.points.length >= 3) {
                     // Draw area measurement
-                    const points = measurement.points;
+                    const pointsImg = measurement.points;
+                    const points = pointsImg.map(p => imagePxToCanvasPoint(p)).filter(Boolean);
+                    if (points.length < 3) return;
                     ctx.beginPath();
                     ctx.moveTo(points[0].x, points[0].y);
                     for (let i = 1; i < points.length; i++) {
@@ -2130,10 +2266,14 @@
             ctx.setLineDash([5, 5]);
             
             if (currentMeasurement.type === 'distance') {
+                const a = imagePxToCanvasPoint({ x: currentMeasurement.startX, y: currentMeasurement.startY });
+                const b = imagePxToCanvasPoint({ x: currentMeasurement.endX, y: currentMeasurement.endY });
+                if (a && b) {
                 ctx.beginPath();
-                ctx.moveTo(currentMeasurement.startX, currentMeasurement.startY);
-                ctx.lineTo(currentMeasurement.endX, currentMeasurement.endY);
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
                 ctx.stroke();
+                }
             }
             
             ctx.setLineDash([]);
@@ -2142,9 +2282,11 @@
         function drawAnnotations() {
             // Implementation for drawing annotations
             annotations.forEach(annotation => {
+                const pt = imagePxToCanvasPoint({ x: annotation.x, y: annotation.y });
+                if (!pt) return;
                 ctx.fillStyle = annotation.color || '#ffff00';
                 ctx.font = '14px Arial';
-                ctx.fillText(annotation.text, annotation.x, annotation.y);
+                ctx.fillText(annotation.text, pt.x, pt.y);
             });
         }
 
@@ -2166,15 +2308,6 @@
             ctx.stroke();
             
             ctx.setLineDash([]);
-        }
-
-        function getPixelSpacing() {
-            if (!currentSeries || !currentSeries.pixel_spacing) return null;
-            const parts = String(currentSeries.pixel_spacing).split('\\');
-            const row = parseFloat(parts[0]);
-            const col = parseFloat(parts.length >= 2 ? parts[1] : parts[0]);
-            if (!isFinite(row) || !isFinite(col) || row <= 0 || col <= 0) return null;
-            return { row, col };
         }
 
         function formatLengthFromMm(mm) {
@@ -2291,9 +2424,11 @@
         function addAnnotation(x, y) {
             const text = prompt('Enter annotation text:');
             if (text) {
+                const p = canvasPointToImagePx(x, y);
+                if (!p) return;
                 const annotation = {
-                    x: x,
-                    y: y,
+                    x: p.x,
+                    y: p.y,
                     text: text,
                     color: '#ffff00'
                 };
@@ -2511,7 +2646,10 @@
                 series.image_count > 0 ? `${imageData[0].columns} × ${imageData[0].rows}` : '-';
             
             document.getElementById('pixelSpacing').textContent = 
-                series.pixel_spacing ? series.pixel_spacing.replace('\\', ' × ') + ' mm' : '-';
+                (() => {
+                    const ps = _normalizePixelSpacing(series && series.pixel_spacing) || currentPixelSpacing;
+                    return ps ? `${ps.row} × ${ps.col} mm` : '-';
+                })();
             
             document.getElementById('seriesDescription').textContent = series.description || '-';
             document.getElementById('institutionName').textContent = currentStudy?.institution_name || '-';

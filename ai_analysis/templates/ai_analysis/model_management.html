@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Model Management - Noctis Pro</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-bg: #252525;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--primary-bg);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+        .header {
+            background: var(--secondary-bg);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 18px;
+            border: 1px solid var(--border-color);
+        }
+
+        .header h1 { color: var(--accent-color); font-size: 2rem; margin-bottom: 6px; }
+        .header p { color: var(--text-secondary); }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+
+        .filters {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            flex: 1;
+            min-width: 320px;
+        }
+
+        input, select {
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 10px 12px;
+            border-radius: 8px;
+            outline: none;
+        }
+
+        .btn {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 700;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn.secondary {
+            background: var(--secondary-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .table-wrap {
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px 14px; border-bottom: 1px solid var(--border-color); }
+        th { text-align: left; color: var(--text-secondary); font-size: 0.9rem; }
+        td { color: var(--text-primary); vertical-align: top; }
+        tr:hover td { background: rgba(255,255,255,0.03); }
+
+        .pill {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            border: 1px solid var(--border-color);
+            background: var(--card-bg);
+            color: var(--text-secondary);
+        }
+        .pill.active { color: var(--success-color); border-color: rgba(0,255,136,0.4); }
+        .pill.inactive { color: var(--danger-color); border-color: rgba(255,68,68,0.4); }
+
+        .muted { color: var(--text-secondary); }
+
+        .pagination {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            align-items: center;
+            padding: 16px 0;
+        }
+        .pagination a {
+            color: var(--text-primary);
+            text-decoration: none;
+            padding: 8px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--card-bg);
+        }
+        .pagination span { color: var(--text-secondary); }
+
+        @media (max-width: 1000px) {
+            th:nth-child(6), td:nth-child(6) { display: none; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1><i class="fas fa-cog"></i> AI Model Management</h1>
+        <p>Browse and filter AI models. Editing can be done via Django Admin.</p>
+    </div>
+
+    <div class="toolbar">
+        <form class="filters" method="get" action="">
+            <input type="text" name="search" value="{{ search_query|default:'' }}" placeholder="Search name/description/modality" />
+            <select name="model_type">
+                <option value="">All model types</option>
+                {% for k,v in model_types %}
+                    <option value="{{ k }}" {% if model_type_filter == k %}selected{% endif %}>{{ v }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn" type="submit"><i class="fas fa-filter"></i> Apply</button>
+            <a class="btn secondary" href="{% url 'ai_analysis:model_management' %}">Reset</a>
+        </form>
+        <div>
+            <a class="btn secondary" href="{% url 'ai_analysis:ai_dashboard' %}"><i class="fas fa-arrow-left"></i> Back</a>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Modality</th>
+                    <th>Status</th>
+                    <th>Usage</th>
+                    <th>File</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for m in models %}
+                <tr>
+                    <td>
+                        <strong>{{ m.name }}</strong> <span class="muted">v{{ m.version }}</span>
+                        <div class="muted">{{ m.description|truncatechars:140 }}</div>
+                    </td>
+                    <td>{{ m.get_model_type_display }}</td>
+                    <td>{{ m.modality }}{% if m.body_part %}<div class="muted">{{ m.body_part }}</div>{% endif %}</td>
+                    <td>
+                        {% if m.is_active %}
+                            <span class="pill active">Active</span>
+                        {% else %}
+                            <span class="pill inactive">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div><strong>{{ m.total_analyses }}</strong> analyses</div>
+                        <div class="muted">Avg time: {{ m.avg_processing_time|default:0 }}s</div>
+                    </td>
+                    <td class="muted">{{ m.model_file_path|truncatechars:60 }}</td>
+                    <td style="text-align:right; white-space:nowrap;">
+                        {% if user.is_admin %}
+                            <a class="btn" href="/admin/ai_analysis/aimodel/{{ m.id }}/change/" target="_blank" rel="noopener noreferrer">
+                                <i class="fas fa-pen"></i> Edit
+                            </a>
+                        {% else %}
+                            <span class="muted">View only</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="7" class="muted">No models found.</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if models.paginator.num_pages > 1 %}
+    <div class="pagination">
+        {% if models.has_previous %}
+            <a href="?search={{ search_query|urlencode }}&model_type={{ model_type_filter|urlencode }}&page={{ models.previous_page_number }}">Prev</a>
+        {% endif %}
+        <span>Page {{ models.number }} of {{ models.paginator.num_pages }}</span>
+        {% if models.has_next %}
+            <a href="?search={{ search_query|urlencode }}&model_type={{ model_type_filter|urlencode }}&page={{ models.next_page_number }}">Next</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+</body>
+</html>

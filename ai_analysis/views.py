@@ -49,6 +49,16 @@ def ai_dashboard(request):
         completed_at__date=timezone.now().date(),
         status='completed'
     ).count()
+    total_analyses = AIAnalysis.objects.count()
+    processing_queue = active_analyses
+
+    # Average accuracy from available performance metrics (percentage)
+    avg_accuracy = (
+        AIPerformanceMetric.objects.filter(ai_model__is_active=True)
+        .aggregate(avg=Avg('accuracy'))
+        .get('avg')
+    )
+    accuracy_rate = round((avg_accuracy or 0) * 100, 1)
     
     # Get recent analyses
     if user.is_facility_user():
@@ -80,6 +90,12 @@ def ai_dashboard(request):
         })
     
     context = {
+        # Template-friendly dashboard stats
+        'total_analyses': total_analyses,
+        'active_models': total_models,
+        'processing_queue': processing_queue,
+        'accuracy_rate': accuracy_rate,
+
         'total_models': total_models,
         'active_analyses': active_analyses,
         'completed_today': completed_today,
@@ -90,6 +106,41 @@ def ai_dashboard(request):
     }
     
     return render(request, 'ai_analysis/dashboard.html', context)
+
+
+@login_required
+@user_passes_test(is_admin_or_radiologist)
+def study_picker(request):
+    """Pick a study to run AI analysis on."""
+    user = request.user
+
+    studies = Study.objects.select_related('patient', 'modality', 'facility').order_by('-upload_date')
+
+    # Facility scoping
+    if user.is_facility_user():
+        studies = studies.filter(facility=user.facility)
+
+    q = (request.GET.get('q') or '').strip()
+    if q:
+        studies = studies.filter(
+            Q(accession_number__icontains=q)
+            | Q(patient__first_name__icontains=q)
+            | Q(patient__last_name__icontains=q)
+            | Q(patient__patient_id__icontains=q)
+        )
+
+    paginator = Paginator(studies, 25)
+    page_number = request.GET.get('page')
+    studies_page = paginator.get_page(page_number)
+
+    return render(
+        request,
+        'ai_analysis/study_picker.html',
+        {
+            'studies': studies_page,
+            'query': q,
+        },
+    )
 
 @login_required
 @csrf_exempt
@@ -227,6 +278,100 @@ def api_analysis_status(request, analysis_id):
         })
     
     return JsonResponse(data)
+
+
+@login_required
+@csrf_exempt
+def api_analyze_series(request, series_id):
+    """
+    DICOM viewer integration endpoint.
+    Runs a quick (synchronous) AI analysis for a given Series and returns a simple
+    findings list for UI display.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
+
+    user = request.user
+    series = get_object_or_404(Series, id=series_id)
+    study = series.study
+
+    # Facility permissions
+    if user.is_facility_user() and study.facility != user.facility:
+        return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+
+    # Only clinicians/admins can initiate AI runs
+    if not is_admin_or_radiologist(user):
+        return JsonResponse(
+            {'success': False, 'error': 'Only administrators or radiologists can start AI analyses'},
+            status=403,
+        )
+
+    # Pick one suitable active model for this modality
+    modality_code = getattr(study.modality, 'code', None)
+    ai_model = (
+        AIModel.objects.filter(is_active=True, modality__in=[modality_code, 'ALL'])
+        .order_by('model_type', '-created_at')
+        .first()
+    )
+    if not ai_model:
+        return JsonResponse(
+            {'success': False, 'error': f'No active AI models available for modality {modality_code}'},
+            status=400,
+        )
+
+    # Create and run analysis synchronously (keeps the viewer UX simple)
+    analysis = AIAnalysis.objects.create(
+        study=study,
+        ai_model=ai_model,
+        priority='normal',
+        status='pending',
+    )
+
+    try:
+        analysis.start_processing()
+        results = simulate_ai_analysis(analysis)
+        analysis.complete_analysis(results)
+        try:
+            _apply_ai_triage(analysis)
+        except Exception:
+            pass
+
+        conf = float(analysis.confidence_score or 0.0)
+
+        findings_list = []
+        if analysis.findings:
+            findings_list.append(
+                {
+                    'type': ai_model.name,
+                    'description': analysis.findings,
+                    'confidence': conf,
+                }
+            )
+        for abn in (analysis.abnormalities_detected or []):
+            label = _normalize_abnormality_label(abn)
+            if label:
+                findings_list.append(
+                    {
+                        'type': 'Abnormality',
+                        'description': label,
+                        'confidence': conf,
+                    }
+                )
+
+        return JsonResponse(
+            {
+                'success': True,
+                'analysis_id': analysis.id,
+                'findings': findings_list,
+                'annotations': [],
+                'measurements': analysis.measurements or {},
+            }
+        )
+    except Exception as e:
+        analysis.status = 'failed'
+        analysis.error_message = str(e)
+        analysis.save(update_fields=['status', 'error_message'])
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
 @login_required
 @user_passes_test(is_admin_or_radiologist)
@@ -392,7 +537,7 @@ def api_ai_feedback(request, analysis_id):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 @login_required
-@user_passes_test(lambda u: u.is_admin())
+@user_passes_test(is_admin_or_radiologist)
 def model_management(request):
     """AI model management interface"""
     models = AIModel.objects.all().order_by('-created_at')

@@ -255,10 +255,10 @@
             <a href="/worklist/" class="btn back-btn">
                 <i class="fas fa-arrow-left"></i> Back to Dashboard
             </a>
-            <a href="#" class="btn" onclick="alert('AI Analysis features are ready for integration with DICOM studies')">
+            <a href="{% url 'ai_analysis:study_picker' %}" class="btn">
                 <i class="fas fa-play"></i> Start Analysis
             </a>
-            <a href="#" class="btn" onclick="alert('Model management interface coming soon')">
+            <a href="{% url 'ai_analysis:model_management' %}" class="btn">
                 <i class="fas fa-cog"></i> Manage Models
             </a>
         </div>

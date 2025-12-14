@@ -302,7 +302,11 @@ def api_study_data(request, study_id):
 @login_required
 @csrf_exempt
 def api_image_data(request, image_id):
-    """API endpoint to get specific image data"""
+    """API endpoint to get specific image data.
+
+    NOTE: This endpoint is used by the canvas-based viewer (`masterpiece_viewer.html`)
+    which expects `pixel_data`, `rows`, `columns`, and default windowing values.
+    """
     image = get_object_or_404(DicomImage, id=image_id)
     user = request.user
     
@@ -320,7 +324,131 @@ def api_image_data(request, image_id):
         'series_id': image.series.id,
         'study_id': image.series.study.id,
     }
-    
+
+    # Optional escape hatch for callers that only want lightweight metadata.
+    include_pixels = (request.GET.get('include_pixels', '1') or '1').strip().lower() not in ('0', 'false', 'no', 'off')
+    if not include_pixels:
+        return JsonResponse(data)
+
+    warnings = {}
+    ds = None
+    pixel_array = None
+
+    # Read DICOM dataset (prefer storage-safe open over filesystem path).
+    try:
+        if not image.file_path:
+            raise FileNotFoundError("Image file_path is missing")
+        with image.file_path.open('rb') as f:
+            # Strict read first to avoid treating random binaries as DICOM.
+            ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
+    except Exception as e:
+        warnings['dicom_read_error'] = str(e)
+        # As a fallback (some environments store MEDIA_ROOT locally and some DICOMs are slightly non-conformant),
+        # try a forced read using a local path if available.
+        try:
+            if image.file_path and hasattr(image.file_path, 'path'):
+                ds = pydicom.dcmread(image.file_path.path, stop_before_pixels=False, force=True)
+        except Exception as e2:
+            warnings['dicom_read_error_fallback'] = str(e2)
+            ds = None
+
+    # Decode pixels (best-effort)
+    pixel_decode_error = None
+    if ds is not None:
+        try:
+            pixel_array = ds.pixel_array
+            # Apply VOI LUT for x-ray-ish modalities when present (helps DX/CR/MG).
+            try:
+                modality = str(getattr(ds, 'Modality', '')).upper()
+                if modality in ['DX', 'CR', 'XA', 'RF', 'MG']:
+                    pixel_array = apply_voi_lut(pixel_array, ds)
+            except Exception:
+                pass
+            pixel_array = pixel_array.astype(np.float32)
+        except Exception as e:
+            # Fallback for compressed DICOMs without a working pixel handler: try SimpleITK if we have a local path.
+            try:
+                import SimpleITK as sitk
+                if image.file_path and hasattr(image.file_path, 'path'):
+                    sitk_image = sitk.ReadImage(image.file_path.path)
+                    pixel_array = sitk.GetArrayFromImage(sitk_image)
+                    if pixel_array.ndim == 3 and pixel_array.shape[0] == 1:
+                        pixel_array = pixel_array[0]
+                    pixel_array = pixel_array.astype(np.float32)
+                else:
+                    raise RuntimeError("No local path available for SimpleITK fallback")
+            except Exception as _e:
+                pixel_decode_error = str(_e) or str(e)
+                pixel_array = None
+
+    # Apply rescale slope/intercept (HU for CT etc.)
+    if pixel_array is not None and ds is not None and hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
+        try:
+            pixel_array = pixel_array * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+        except Exception:
+            pass
+
+    # Window defaults (best-effort)
+    def _first_or_none(v):
+        try:
+            if hasattr(v, '__iter__') and not isinstance(v, str):
+                return v[0]
+        except Exception:
+            pass
+        return v
+
+    window_width = _first_or_none(getattr(ds, 'WindowWidth', None)) if ds is not None else None
+    window_center = _first_or_none(getattr(ds, 'WindowCenter', None)) if ds is not None else None
+
+    if (window_width is None or window_center is None) and pixel_array is not None:
+        try:
+            # Derive window using robust percentiles (fast enough for a single slice)
+            flat = pixel_array.astype(np.float32).flatten()
+            p2 = float(np.percentile(flat, 2))
+            p98 = float(np.percentile(flat, 98))
+            ww = max(1.0, p98 - p2)
+            wl = (p98 + p2) / 2.0
+            window_width = window_width if window_width is not None else ww
+            window_center = window_center if window_center is not None else wl
+        except Exception:
+            window_width = window_width if window_width is not None else 400.0
+            window_center = window_center if window_center is not None else 40.0
+
+    # Include pixel payload for canvas renderer
+    if pixel_array is not None:
+        try:
+            rows = int(getattr(ds, 'Rows', pixel_array.shape[0]) or pixel_array.shape[0])
+            cols = int(getattr(ds, 'Columns', pixel_array.shape[1]) or pixel_array.shape[1])
+        except Exception:
+            rows = int(pixel_array.shape[0])
+            cols = int(pixel_array.shape[1])
+
+        # Flatten in row-major order as numeric list (expected by JS canvas viewer)
+        data.update({
+            'rows': rows,
+            'columns': cols,
+            'pixel_data': pixel_array.reshape(rows * cols).tolist(),
+            'window_width': float(window_width) if window_width is not None else 400.0,
+            'window_center': float(window_center) if window_center is not None else 40.0,
+            'pixel_spacing': getattr(ds, 'PixelSpacing', None) if ds is not None else None,
+            'slice_thickness': getattr(ds, 'SliceThickness', None) if ds is not None else None,
+            'modality': getattr(ds, 'Modality', None) if ds is not None else None,
+            'photometric_interpretation': getattr(ds, 'PhotometricInterpretation', None) if ds is not None else None,
+            'bits_allocated': getattr(ds, 'BitsAllocated', None) if ds is not None else None,
+            'bits_stored': getattr(ds, 'BitsStored', None) if ds is not None else None,
+        })
+    else:
+        data.update({
+            'rows': int(getattr(ds, 'Rows', 0) or 0) if ds is not None else 0,
+            'columns': int(getattr(ds, 'Columns', 0) or 0) if ds is not None else 0,
+            'pixel_data': None,
+            'window_width': float(window_width) if window_width is not None else 400.0,
+            'window_center': float(window_center) if window_center is not None else 40.0,
+        })
+
+    if pixel_decode_error or warnings:
+        data['warnings'] = {**warnings, **({'pixel_decode_error': pixel_decode_error} if pixel_decode_error else {})}
+
     return JsonResponse(data)
 
 @login_required

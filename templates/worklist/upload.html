@@ -936,21 +936,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 };
                 const filesArrays = await Promise
                     .all(Array.from(items).map(i => traverseEntry(i.webkitGetAsEntry())));
-                handleFiles(filesArrays.flat());
+                await handleFiles(filesArrays.flat());
             } else {
                 // Fallback for browsers without webkitGetAsEntry (e.g., Firefox)
-                handleFiles(Array.from(e.dataTransfer.files || []));
+                await handleFiles(Array.from(e.dataTransfer.files || []));
             }
         } else {
-            handleFiles(Array.from(e.dataTransfer.files || []));
+            await handleFiles(Array.from(e.dataTransfer.files || []));
         }
     });
 
     // File input change
-    fileInput.addEventListener('change', (e) => {
+    fileInput.addEventListener('change', async (e) => {
         if (!isUploading) {
             const files = Array.from(e.target.files);
-            handleFiles(files);
+            await handleFiles(files);
         }
     });
 
@@ -962,14 +962,40 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    function handleFiles(files) {
-        // Enhanced DICOM file filtering with better detection
-        const dicomFiles = files.filter(file => {
-            const name = file.name.toLowerCase();
-            if (name.endsWith('.dcm') || name.endsWith('.dicom') || file.type === 'application/dicom' || name.includes('dicom')) return true;
-            // Heuristic: accept if size > 128 and header likely contains DICM when read later server-side
-            return file.size > 132; // don't over-restrict; backend will validate
-        });
+    function isTempOrHiddenFile(file) {
+        const name = (file?.name || '').toLowerCase();
+        const rel = (file?.webkitRelativePath || '').toLowerCase();
+        if (!name) return true;
+        if (name === 'dicomdir') return true; // DICOM directory record, not an image slice
+        if (name === '.ds_store' || name === 'thumbs.db' || name === 'desktop.ini') return true;
+        if (name.startsWith('.') || name.startsWith('._')) return true;
+        if (name.endsWith('.tmp') || name.endsWith('.temp') || name.endsWith('.swp') || name.endsWith('.swo') || name.endsWith('.bak') || name.endsWith('~')) return true;
+        if (rel.includes('__macosx/')) return true;
+        return false;
+    }
+
+    async function isLikelyDicom(file) {
+        if (!file || isTempOrHiddenFile(file)) return false;
+        const name = (file.name || '').toLowerCase();
+        // Extension-based allow-list (covers most uploads)
+        if (name.endsWith('.dcm') || name.endsWith('.dicom') || name.endsWith('.dicm') || name.endsWith('.ima')) return true;
+        if (file.type === 'application/dicom') return true;
+        // Fast preamble check: Part-10 DICOMs include "DICM" at byte offset 128
+        try {
+            if ((file.size || 0) >= 132) {
+                const buf = await file.slice(128, 132).arrayBuffer();
+                const b = new Uint8Array(buf);
+                return b.length === 4 && b[0] === 0x44 && b[1] === 0x49 && b[2] === 0x43 && b[3] === 0x4D; // "DICM"
+            }
+        } catch (_) {}
+        return false;
+    }
+
+    async function handleFiles(files) {
+        // Robust DICOM filtering (prevents temp/hidden/non-DICOM files from being uploaded)
+        const checks = await Promise.all((files || []).map(f => isLikelyDicom(f).catch(() => false)));
+        const dicomFiles = (files || []).filter((_, idx) => checks[idx]);
+        const ignoredCount = (files || []).length - dicomFiles.length;
 
         // Check file count limit (5000 images max)
         const maxFiles = 5000;
@@ -979,7 +1005,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (dicomFiles.length === 0) {
-            showNotification('Please select DICOM files or folders. Files without .dcm are allowed; they will be validated during upload.', 'error');
+            showNotification('Please select valid DICOM files (.dcm/.dicom) or a DICOM folder. Temp/hidden/non-DICOM files are ignored.', 'error');
             return;
         }
 
@@ -989,6 +1015,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (totalSize > maxSize) {
             showNotification(`Total file size too large. Maximum allowed: 5GB. Your files: ${formatFileSize(totalSize)}`, 'error');
             return;
+        }
+
+        // Notify if we ignored files (common with folders containing tempfiles)
+        if (ignoredCount > 0) {
+            showNotification(`Ignored ${ignoredCount} non‑DICOM/temp file(s). Uploading ${dicomFiles.length} DICOM file(s).`, 'info');
         }
 
         selectedFiles = [...selectedFiles, ...dicomFiles];

@@ -2454,13 +2454,9 @@
                 const link = document.createElement('a');
                 const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
                 const filename = `dicom_image_${timestamp}.png`;
-                
-                // Convert image to canvas for export
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                canvas.width = dicomImage.naturalWidth;
-                canvas.height = dicomImage.naturalHeight;
-                ctx.drawImage(dicomImage, 0, 0);
+
+                // Render image + patient/study overlay into a dedicated export canvas
+                const canvas = buildExportCanvasWithPatientOverlay(dicomImage);
                 
                 link.download = filename;
                 link.href = canvas.toDataURL('image/png');
@@ -2496,6 +2492,10 @@
                     showToast('No image loaded', 'warning');
                     return;
                 }
+
+                // Print the image bitmap with patient/study data baked into it
+                const exportCanvas = buildExportCanvasWithPatientOverlay(dicomImage);
+                const imageDataUrl = exportCanvas.toDataURL('image/png');
                 
                 // Create print window
                 const printWindow = window.open('', '_blank');
@@ -2523,7 +2523,7 @@
                                 <p>Medical Image Print - ${new Date().toLocaleString()}</p>
                             </div>
                             <div class="image-container">
-                                <img src="${dicomImage.src}" alt="DICOM Image" />
+                                <img src="${imageDataUrl}" alt="DICOM Image" />
                             </div>
                             <div class="image-info">
                                 <div class="info-grid">
@@ -2549,6 +2549,126 @@
                 console.error('Error printing image:', error);
                 showToast('Error printing image', 'error');
             }
+        }
+
+        // ---- Export/Print overlay helpers (bake patient data into the bitmap) ----
+        function formatDicomOrIsoDate(dateStr) {
+            if (!dateStr) return '';
+            const s = String(dateStr).trim();
+            // DICOM format: YYYYMMDD
+            if (/^\d{8}$/.test(s)) {
+                return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+            }
+            // ISO-like: YYYY-MM-DD...
+            if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+                return s.slice(0, 10);
+            }
+            return s;
+        }
+
+        function safeText(v) {
+            if (v === null || v === undefined) return '';
+            return String(v).trim();
+        }
+
+        function buildExportCanvasWithPatientOverlay(dicomImageEl) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            const w = dicomImageEl.naturalWidth || dicomImageEl.width || 0;
+            const h = dicomImageEl.naturalHeight || dicomImageEl.height || 0;
+            canvas.width = w;
+            canvas.height = h;
+
+            // Base image
+            ctx.drawImage(dicomImageEl, 0, 0);
+
+            // Overlay content (prefer structured data; fall back to the visible patientInfo string)
+            const patientInfoText = safeText(document.getElementById('patientInfo')?.textContent);
+            const parsedPatientName = safeText(patientInfoText.match(/Patient:\s*([^|]+)/i)?.[1]);
+            const parsedStudyDate = safeText(patientInfoText.match(/Study Date:\s*([^|]+)/i)?.[1]);
+            const parsedModality = safeText(patientInfoText.match(/Modality:\s*([^|]+)/i)?.[1]);
+
+            const patientName = safeText(currentStudy?.patient_name) || parsedPatientName;
+            const patientId = safeText(currentStudy?.patient_id);
+            const accession = safeText(currentStudy?.accession_number);
+
+            const modality = safeText(currentSeries?.modality) || safeText(currentStudy?.modality) || parsedModality;
+            const studyDate = formatDicomOrIsoDate(currentStudy?.study_date) || formatDicomOrIsoDate(parsedStudyDate);
+            const seriesDesc = safeText(currentSeries?.series_description) || safeText(currentSeries?.series_description?.description) || safeText(currentSeries?.description);
+
+            const sliceText = safeText(document.getElementById('sliceValue')?.textContent);
+            const ww = safeText(document.getElementById('wwValue')?.textContent);
+            const wl = safeText(document.getElementById('wlValue')?.textContent);
+            const now = new Date();
+
+            const topLeft = [
+                patientName ? `Patient: ${patientName}` : '',
+                patientId ? `ID: ${patientId}` : (accession ? `Accession: ${accession}` : '')
+            ].filter(Boolean);
+            const topRight = [
+                studyDate ? `Study Date: ${studyDate}` : '',
+                modality ? `Modality: ${modality}` : ''
+            ].filter(Boolean);
+            const bottomLeft = [
+                seriesDesc ? `Series: ${seriesDesc}` : '',
+                accession && !topLeft.some(l => l.startsWith('Accession:')) ? `Accession: ${accession}` : ''
+            ].filter(Boolean);
+            const bottomRight = [
+                sliceText ? `Image: ${sliceText}` : '',
+                (ww || wl) ? `WW/WL: ${ww || '?'} / ${wl || '?'}` : '',
+                `Printed: ${now.toLocaleString()}`
+            ].filter(Boolean);
+
+            drawCornerOverlay(ctx, canvas, topLeft, 'tl');
+            drawCornerOverlay(ctx, canvas, topRight, 'tr');
+            drawCornerOverlay(ctx, canvas, bottomLeft, 'bl');
+            drawCornerOverlay(ctx, canvas, bottomRight, 'br');
+
+            return canvas;
+        }
+
+        function drawCornerOverlay(ctx, canvas, lines, corner) {
+            if (!lines || lines.length === 0) return;
+
+            const base = Math.max(12, Math.round(canvas.width * 0.018));
+            const fontSize = Math.min(28, base);
+            const pad = Math.max(6, Math.round(fontSize * 0.5));
+            const margin = Math.max(10, Math.round(fontSize * 0.8));
+            const lineHeight = Math.round(fontSize * 1.25);
+
+            ctx.save();
+            ctx.font = `${fontSize}px Arial, sans-serif`;
+
+            let maxWidth = 0;
+            for (const line of lines) {
+                maxWidth = Math.max(maxWidth, ctx.measureText(line).width);
+            }
+            const boxW = Math.ceil(maxWidth + pad * 2);
+            const boxH = Math.ceil(lines.length * lineHeight + pad * 2);
+
+            const isRight = corner === 'tr' || corner === 'br';
+            const isBottom = corner === 'bl' || corner === 'br';
+
+            const x = isRight ? (canvas.width - margin - boxW) : margin;
+            const y = isBottom ? (canvas.height - margin - boxH) : margin;
+
+            // Background for legibility
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+            ctx.fillRect(x, y, boxW, boxH);
+
+            // Text
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+            ctx.textBaseline = 'top';
+            ctx.textAlign = 'left';
+
+            let ty = y + pad;
+            for (const line of lines) {
+                ctx.fillText(line, x + pad, ty);
+                ty += lineHeight;
+            }
+
+            ctx.restore();
         }
 
         // Utility Functions

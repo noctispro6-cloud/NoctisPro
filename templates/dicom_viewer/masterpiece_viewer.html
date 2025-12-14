@@ -1083,6 +1083,11 @@
         let zoom = 1.0;
         let panX = 0, panY = 0;
         let inverted = false;
+        // Dynamic WL/WW bounds per image (supports CT/MR/CR/DX/MG/etc without hard clamps).
+        // { p1, p99, range, wlMin, wlMax, wwMax } (derived from pixel_data sample)
+        let currentImageStats = null;
+        // Debounce MPR refresh while dragging window/level.
+        let _mprRefreshTimer = null;
         // Pixel spacing for real-world measurements (mm). Prefer per-image DICOM tag; fallback to Series field.
         let currentPixelSpacing = null; // { row: number, col: number } | null
         // Rendering pipeline uses an offscreen canvas because putImageData() ignores transforms.
@@ -1135,6 +1140,69 @@
             } catch {
                 return null;
             }
+        }
+
+        function _clamp(v, lo, hi) {
+            const x = Number(v);
+            if (!isFinite(x)) return lo;
+            if (x < lo) return lo;
+            if (x > hi) return hi;
+            return x;
+        }
+
+        function _computeImageStats(pixelData) {
+            try {
+                if (!pixelData || !pixelData.length) return null;
+                const n = pixelData.length >>> 0;
+                // Sample up to ~20k points for fast percentiles.
+                const target = 20000;
+                const step = Math.max(1, Math.floor(n / target));
+                const samples = [];
+                for (let i = 0; i < n; i += step) {
+                    const v = Number(pixelData[i]);
+                    if (isFinite(v)) samples.push(v);
+                }
+                if (samples.length < 64) return null;
+                samples.sort((a, b) => a - b);
+                const pct = (p) => {
+                    const idx = Math.min(samples.length - 1, Math.max(0, Math.floor((p / 100) * (samples.length - 1))));
+                    return samples[idx];
+                };
+                const p1 = pct(1);
+                const p99 = pct(99);
+                const range = Math.max(1, p99 - p1);
+                // Allow WL/WW to move far enough for any modality.
+                const wlMin = Math.floor(p1 - range);
+                const wlMax = Math.ceil(p99 + range);
+                const wwMax = Math.ceil(Math.max(4000, range * 4));
+                return { p1, p99, range, wlMin, wlMax, wwMax };
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function _applyWindowingBoundsFromStats() {
+            if (!currentImageStats) return;
+            const wwSlider = document.getElementById('windowWidthSlider');
+            const wlSlider = document.getElementById('windowLevelSlider');
+            if (!wwSlider || !wlSlider) return;
+
+            wwSlider.min = '1';
+            wwSlider.max = String(currentImageStats.wwMax);
+            wlSlider.min = String(currentImageStats.wlMin);
+            wlSlider.max = String(currentImageStats.wlMax);
+
+            windowWidth = Math.round(_clamp(windowWidth, 1, currentImageStats.wwMax));
+            windowLevel = Math.round(_clamp(windowLevel, currentImageStats.wlMin, currentImageStats.wlMax));
+        }
+
+        function _scheduleMPRRefresh() {
+            if (viewMode !== 'mpr') return;
+            if (_mprRefreshTimer) return;
+            _mprRefreshTimer = setTimeout(() => {
+                _mprRefreshTimer = null;
+                generateMPRViews();
+            }, 80);
         }
 
         function getPixelSpacing() {
@@ -1640,6 +1708,9 @@
                 // Update window/level from DICOM data - SAME AS YOUR ORIGINAL
                 windowWidth = data.window_width || windowWidth;
                 windowLevel = data.window_center || windowLevel;
+                // Derive WL/WW slider bounds from actual pixel distribution (fast sampled percentiles).
+                currentImageStats = _computeImageStats(data.pixel_data);
+                _applyWindowingBoundsFromStats();
                 // Capture per-image PixelSpacing if present (MultiValue -> array). Fallback to Series field.
                 currentPixelSpacing = _normalizePixelSpacing(data.pixel_spacing) || _normalizePixelSpacing(currentSeries && currentSeries.pixel_spacing);
                 // If Series pixel spacing is missing but the image has it, promote it for UI/measurements.
@@ -1652,6 +1723,7 @@
                 lastLoadedImagePayload = data;
                 lastLoadedImageId = imageId;
                 renderDicomImage(data);
+                _scheduleMPRRefresh();
                 
             } catch (error) {
                 console.error('Error loading image:', error);
@@ -1722,7 +1794,10 @@
             ctx.scale(sx, sy);
 
             // Draw centered
-            ctx.imageSmoothingEnabled = false;
+            // Nearest-neighbor is crisp when zooming in; enable smoothing only when downscaling to avoid aliasing.
+            const effScale = Math.max(Math.abs(sx), Math.abs(sy));
+            ctx.imageSmoothingEnabled = effScale < 1;
+            try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
             ctx.drawImage(_frameCanvas, -imgW / 2, -imgH / 2);
             ctx.restore();
 
@@ -1736,13 +1811,13 @@
         }
 
         function applyWindowing(pixelValue, ww, wl) {
-            const minVal = wl - ww / 2;
-            const maxVal = wl + ww / 2;
-            
-            if (pixelValue <= minVal) return 0;
-            if (pixelValue >= maxVal) return 255;
-            
-            return Math.round(((pixelValue - minVal) / ww) * 255);
+            const w = Math.max(1, Number(ww));
+            const c = Number(wl);
+            const minVal = c - w / 2;
+            const v = (Number(pixelValue) - minVal) * (255 / w);
+            if (v <= 0) return 0;
+            if (v >= 255) return 255;
+            return (v + 0.5) | 0;
         }
 
         // Event Handlers
@@ -1827,10 +1902,22 @@
             
             switch(activeTool) {
                 case 'windowing':
-                    windowWidth = Math.max(1, windowWidth + deltaX * 2);
-                    windowLevel = Math.max(-1000, Math.min(1000, windowLevel + deltaY * 2));
+                    // Drag sensitivity scales with WW so it feels consistent across CT/MR/X-ray ranges.
+                    const ww = Math.max(1, Number(windowWidth));
+                    const wwStep = Math.max(0.5, ww / 512);
+                    const wlStep = Math.max(0.5, ww / 512);
+                    windowWidth = Math.round(Number(windowWidth) + deltaX * wwStep);
+                    windowLevel = Math.round(Number(windowLevel) + deltaY * wlStep);
+
+                    if (currentImageStats) {
+                        windowWidth = _clamp(windowWidth, 1, currentImageStats.wwMax);
+                        windowLevel = _clamp(windowLevel, currentImageStats.wlMin, currentImageStats.wlMax);
+                    } else {
+                        windowWidth = Math.max(1, windowWidth);
+                    }
                     updateSliders();
                     redrawCurrentImage();
+                    _scheduleMPRRefresh();
                     break;
                 case 'zoom':
                     const zoomDelta = 1 + (deltaY * 0.01);
@@ -1963,17 +2050,21 @@
 
         // UI Update Functions
         function updateWindowWidth(value) {
-            windowWidth = parseInt(value);
+            windowWidth = Math.round(Number(value));
+            if (currentImageStats) windowWidth = _clamp(windowWidth, 1, currentImageStats.wwMax);
             document.getElementById('wwValue').textContent = windowWidth;
             document.getElementById('windowWidth').textContent = windowWidth;
             redrawCurrentImage();
+            _scheduleMPRRefresh();
         }
 
         function updateWindowLevel(value) {
-            windowLevel = parseInt(value);
+            windowLevel = Math.round(Number(value));
+            if (currentImageStats) windowLevel = _clamp(windowLevel, currentImageStats.wlMin, currentImageStats.wlMax);
             document.getElementById('wlValue').textContent = windowLevel;
             document.getElementById('windowLevel').textContent = windowLevel;
             redrawCurrentImage();
+            _scheduleMPRRefresh();
         }
 
         function updateSlice(value) {
@@ -2680,16 +2771,20 @@
             
             try {
                 showLoading(true);
-                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/`);
+                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`);
                 const data = await response.json();
                 
-                if (data.success) {
-                    renderMPRView('axial', data.axial);
-                    renderMPRView('sagittal', data.sagittal);
-                    renderMPRView('coronal', data.coronal);
+                const views = data && (data.mpr_views || data.views || data.mprViews);
+                if (views && (views.axial || views.sagittal || views.coronal)) {
+                    await Promise.all([
+                        _renderMPRDataUrl('axial', views.axial),
+                        _renderMPRDataUrl('sagittal', views.sagittal),
+                        _renderMPRDataUrl('coronal', views.coronal),
+                    ]);
                     generateBoneReconstruction();
                     showToast('MPR views generated', 'success');
                 } else {
+                    console.warn('Unexpected MPR response shape:', data);
                     showToast('Failed to generate MPR views', 'error');
                 }
                 
@@ -2701,45 +2796,31 @@
             }
         }
 
-        function renderMPRView(viewType, pixelData) {
+        async function _renderMPRDataUrl(viewType, dataUrl) {
             const canvas = mprCanvases[viewType];
-            if (!canvas || !pixelData) return;
-            
+            if (!canvas || !dataUrl) return;
             const ctx = canvas.getContext('2d');
-            const width = Math.sqrt(pixelData.length);
-            const height = width;
-            
-            const pixels = new Uint8ClampedArray(pixelData.length * 4);
-            
-            for (let i = 0; i < pixelData.length; i++) {
-                let value = applyWindowing(pixelData[i], windowWidth, windowLevel);
-                if (inverted) value = 255 - value;
-                
-                pixels[i * 4] = value;
-                pixels[i * 4 + 1] = value;
-                pixels[i * 4 + 2] = value;
-                pixels[i * 4 + 3] = 255;
-            }
-            
-            const imgData = new ImageData(pixels, width, height);
+            const img = new Image();
+            img.src = dataUrl;
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+            });
+
+            const w = img.naturalWidth || img.width;
+            const h = img.naturalHeight || img.height;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // Scale to fit canvas
-            const scaleX = canvas.width / width;
-            const scaleY = canvas.height / height;
-            const scale = Math.min(scaleX, scaleY);
-            
-            const offsetX = (canvas.width - width * scale) / 2;
-            const offsetY = (canvas.height - height * scale) / 2;
-            
-            // Create temporary canvas for scaling
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = width;
-            tempCanvas.height = height;
-            const tempCtx = tempCanvas.getContext('2d');
-            tempCtx.putImageData(imgData, 0, 0);
-            
-            ctx.drawImage(tempCanvas, offsetX, offsetY, width * scale, height * scale);
+
+            const scale = Math.min(canvas.width / w, canvas.height / h);
+            const dw = Math.round(w * scale);
+            const dh = Math.round(h * scale);
+            const dx = Math.round((canvas.width - dw) / 2);
+            const dy = Math.round((canvas.height - dh) / 2);
+
+            // Smooth downscale only (avoid blurry zoom-in).
+            ctx.imageSmoothingEnabled = scale < 1;
+            try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
+            ctx.drawImage(img, dx, dy, dw, dh);
         }
 
         async function generateBoneReconstruction() {

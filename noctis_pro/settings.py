@@ -281,10 +281,14 @@ SESSION_SAVE_EVERY_REQUEST = True
 # Expire session at browser close to require fresh login on new window
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
-# File upload settings - Enhanced for up to 5000 DICOM images
-FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024 * 1024  # 5GB for large DICOM batches
-DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024 * 1024  # 5GB for large DICOM batches
+# File upload settings
+# - Allow up to 5GB total upload payloads (e.g., large DICOM batches)
+# - Keep per-file in-memory buffering modest so large files stream to disk
+MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024 * 1024  # 5GB
+DATA_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_SIZE_BYTES
+DATA_UPLOAD_MAX_NUMBER_FILES = 5000  # Support for up to 5000 uploaded files per request
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 15000  # Support for up to 5000 images with metadata
+FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50MB
 
 # Security settings
 SECURE_BROWSER_XSS_FILTER = True
@@ -424,7 +428,7 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # DICOM viewer masterpiece settings
 DICOM_VIEWER_SETTINGS = {
-    'MAX_UPLOAD_SIZE': 100 * 1024 * 1024,  # 100MB
+    'MAX_UPLOAD_SIZE': MAX_UPLOAD_SIZE_BYTES,  # 5GB
     'SUPPORTED_MODALITIES': ['CT', 'MR', 'CR', 'DX', 'US', 'XA'],
     'CACHE_TIMEOUT': 3600,
     'ENABLE_3D_RECONSTRUCTION': True,

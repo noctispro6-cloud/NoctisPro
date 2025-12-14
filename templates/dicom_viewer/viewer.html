@@ -1253,6 +1253,52 @@
 
     <!-- Hidden file input for DICOM loading -->
     <input type="file" id="fileInput" accept=".dcm,.dicom,*" multiple webkitdirectory directory style="display: none;">
+
+    <!-- Print/Export modal (layout + multi-image support) -->
+    <div id="printExportModal" style="display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 10000; align-items: center; justify-content: center;">
+        <div style="width: 560px; max-width: 92vw; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 10px; padding: 16px;">
+            <div style="display:flex; align-items:center; justify-content: space-between; margin-bottom: 12px;">
+                <div style="font-weight: 700; color: var(--accent-color);">Print / Export</div>
+                <button class="btn" onclick="closePrintExportDialog()" style="padding: 6px 10px;">
+                    <i class="fas fa-times"></i> Close
+                </button>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                <div>
+                    <label style="display:block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">Source</label>
+                    <select id="peScope" class="select" style="width:100%;">
+                        <option value="current_image">Current image</option>
+                        <option value="current_series">Current series (multiple images)</option>
+                        <option value="study_series_first">Study (first image of each series)</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display:block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">Layout</label>
+                    <select id="peLayout" class="select" style="width:100%;">
+                        <option value="auto">Auto grid</option>
+                        <option value="1x2">1 × 2 (side-by-side)</option>
+                        <option value="2x2">2 × 2</option>
+                        <option value="3x3">3 × 3</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display:block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">Images</label>
+                    <input id="peCount" class="input" type="number" min="1" max="36" value="1" />
+                    <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">For series/study sources, prints up to this many tiles.</div>
+                </div>
+                <div>
+                    <label style="display:block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">Include</label>
+                    <label style="display:block; font-size: 11px; color: var(--text-secondary);"><input type="checkbox" id="peIncludePatient" checked> Patient data</label>
+                    <label style="display:block; font-size: 11px; color: var(--text-secondary);"><input type="checkbox" id="peIncludeMeasurements" checked> Measurements</label>
+                    <label style="display:block; font-size: 11px; color: var(--text-secondary);"><input type="checkbox" id="peIncludeAnnotations" checked> Annotations</label>
+                </div>
+            </div>
+            <div style="display:flex; gap: 10px; justify-content: flex-end; margin-top: 10px;">
+                <button class="btn" onclick="exportFromPrintExportDialog()"><i class="fas fa-download"></i> Export PNG</button>
+                <button class="btn" onclick="printFromPrintExportDialog()"><i class="fas fa-print"></i> Print</button>
+            </div>
+        </div>
+    </div>
     
     <!-- CSRF Token for AJAX requests -->
     {% csrf_token %}
@@ -1267,6 +1313,9 @@
         // Global variables - Based on PyQt implementation
         let currentStudy = null;
         let currentSeries = null;
+        let currentImageInfo = null; // last image_info from API
+        let currentPixelSpacing = null; // [rowMm, colMm] when available
+        let currentStudySeriesList = []; // series list for the loaded study
         let images = [];
         let currentImageIndex = 0;
         let dicomData = [];
@@ -1669,6 +1718,22 @@
 
         function updateImageInfo(info) {
             if (!info) return;
+
+            currentImageInfo = info;
+            // Track pixel spacing for real-world measurement conversion (mm)
+            try {
+                let ps = info.pixel_spacing;
+                if (typeof ps === 'string' && ps.includes('\\')) {
+                    ps = ps.split('\\').map(v => parseFloat(v));
+                }
+                if (Array.isArray(ps) && ps.length >= 2 && isFinite(ps[0]) && isFinite(ps[1]) && ps[0] > 0 && ps[1] > 0) {
+                    currentPixelSpacing = [parseFloat(ps[0]), parseFloat(ps[1])];
+                } else {
+                    currentPixelSpacing = null;
+                }
+            } catch (e) {
+                currentPixelSpacing = null;
+            }
             
             const imageInfoDiv = document.getElementById('imageInfo');
             imageInfoDiv.innerHTML = `
@@ -1754,6 +1819,7 @@
                 
                 if (data.study && data.series) {
                     currentStudy = data.study;
+                    currentStudySeriesList = Array.isArray(data.series) ? data.series : [];
                     
                     // Hide welcome screen and show image view
                     const welcomeScreen = document.getElementById('welcomeScreen');
@@ -2074,14 +2140,48 @@
         }
 
         // Measurement System - Professional grade from PyQt
+        function getImageElement() {
+            return document.getElementById('dicomImage');
+        }
+
+        function getImageViewportMetrics() {
+            const img = getImageElement();
+            if (!img) return null;
+            const rect = img.getBoundingClientRect();
+            const naturalW = img.naturalWidth || 0;
+            const naturalH = img.naturalHeight || 0;
+            const viewW = rect.width || img.clientWidth || 0;
+            const viewH = rect.height || img.clientHeight || 0;
+            if (!naturalW || !naturalH || !viewW || !viewH) return null;
+            return { rect, naturalW, naturalH, viewW, viewH };
+        }
+
+        function viewportPointToImagePx(event) {
+            const m = getImageViewportMetrics();
+            if (!m) return null;
+            const xView = event.clientX - m.rect.left;
+            const yView = event.clientY - m.rect.top;
+            const xImg = (xView / m.viewW) * m.naturalW;
+            const yImg = (yView / m.viewH) * m.naturalH;
+            return { x: xImg, y: yImg };
+        }
+
+        function imagePxToViewportPoint(pt) {
+            const m = getImageViewportMetrics();
+            if (!m) return null;
+            const xView = (pt.x / m.naturalW) * m.viewW;
+            const yView = (pt.y / m.naturalH) * m.viewH;
+            return { x: xView, y: yView };
+        }
+
         function startMeasurement(event) {
-            const rect = event.target.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
+            const p = viewportPointToImagePx(event);
+            if (!p) return;
             
             currentMeasurement = {
-                start: { x, y },
-                end: { x, y },
+                // store in image pixel coordinates (not viewport CSS pixels)
+                start: { x: p.x, y: p.y },
+                end: { x: p.x, y: p.y },
                 imageId: images[currentImageIndex]?.id
             };
             
@@ -2090,12 +2190,9 @@
 
         function updateMeasurement(event) {
             if (!currentMeasurement) return;
-            
-            const rect = event.target.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
-            
-            currentMeasurement.end = { x, y };
+            const p = viewportPointToImagePx(event);
+            if (!p) return;
+            currentMeasurement.end = { x: p.x, y: p.y };
             updateMeasurementOverlay();
         }
 
@@ -2121,11 +2218,13 @@
             );
             
             // Convert to real-world units if pixel spacing is available
-            if (currentSeries && currentSeries.pixel_spacing) {
+            const spacing = currentPixelSpacing || (currentSeries && currentSeries.pixel_spacing ? currentSeries.pixel_spacing : null);
+            if (spacing) {
                 try {
-                    const spacing = Array.isArray(currentSeries.pixel_spacing) ? 
-                        currentSeries.pixel_spacing : [1.0, 1.0];
-                    const avgSpacing = (parseFloat(spacing[0]) + parseFloat(spacing[1])) / 2;
+                    const s = Array.isArray(spacing) ? spacing : [1.0, 1.0];
+                    const row = parseFloat(s[0]);
+                    const col = parseFloat(s[1]);
+                    const avgSpacing = (row + col) / 2;
                     const distanceMm = pixelDistance * avgSpacing;
                     return {
                         pixels: pixelDistance.toFixed(1),
@@ -2162,8 +2261,10 @@
         }
 
         function drawMeasurementLine(overlay, measurement, isTemp = false, index = -1) {
-            const start = measurement.start;
-            const end = measurement.end;
+            // stored in image pixels; convert to viewport coords for drawing
+            const start = imagePxToViewportPoint(measurement.start);
+            const end = imagePxToViewportPoint(measurement.end);
+            if (!start || !end) return;
             
             // Calculate line properties
             const length = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2));
@@ -2254,14 +2355,14 @@
         function addAnnotation(event) {
             const text = prompt('Enter annotation text:');
             if (!text) return;
-            
-            const rect = event.target.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
+
+            const p = viewportPointToImagePx(event);
+            if (!p) return;
             
             annotations.push({
-                x: x,
-                y: y,
+                // store in image pixels (not viewport CSS pixels)
+                x: p.x,
+                y: p.y,
                 text: text,
                 imageId: images[currentImageIndex]?.id,
                 timestamp: new Date().toISOString()
@@ -2280,11 +2381,13 @@
             // Add current annotations
             annotations.forEach((annotation, index) => {
                 if (annotation.imageId === images[currentImageIndex]?.id) {
+                    const pt = imagePxToViewportPoint({ x: annotation.x, y: annotation.y });
+                    if (!pt) return;
                     const marker = document.createElement('div');
                     marker.className = 'annotation-marker';
                     marker.style.cssText = `
-                        left: ${annotation.x}px;
-                        top: ${annotation.y}px;
+                        left: ${pt.x}px;
+                        top: ${pt.y}px;
                     `;
                     marker.textContent = annotation.text;
                     overlay.appendChild(marker);
@@ -2413,7 +2516,7 @@
                 showToast('No image to print', 'warning');
                 return;
             }
-            printCurrentImage();
+            openPrintExportDialog();
         }
 
         // Export Functions
@@ -2459,8 +2562,12 @@
                 const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
                 const filename = `dicom_image_${timestamp}.png`;
 
-                // Render image + patient/study overlay into a dedicated export canvas
-                const canvas = buildExportCanvasWithPatientOverlay(dicomImage);
+                // Render image + overlays into a dedicated export canvas
+                const canvas = buildSingleImageExportCanvas(dicomImage, {
+                    includePatientInfo: true,
+                    includeMeasurements: true,
+                    includeAnnotations: true
+                });
                 
                 link.download = filename;
                 link.href = canvas.toDataURL('image/png');
@@ -2497,8 +2604,12 @@
                     return;
                 }
 
-                // Print the image bitmap with patient/study data baked into it
-                const exportCanvas = buildExportCanvasWithPatientOverlay(dicomImage);
+                // Print the image bitmap with overlays baked into it
+                const exportCanvas = buildSingleImageExportCanvas(dicomImage, {
+                    includePatientInfo: true,
+                    includeMeasurements: true,
+                    includeAnnotations: true
+                });
                 const imageDataUrl = exportCanvas.toDataURL('image/png');
                 
                 // Create print window
@@ -2575,7 +2686,11 @@
             return String(v).trim();
         }
 
-        function buildExportCanvasWithPatientOverlay(dicomImageEl) {
+        function buildSingleImageExportCanvas(dicomImageEl, opts = {}) {
+            const includePatientInfo = opts.includePatientInfo !== false;
+            const includeMeasurements = opts.includeMeasurements === true;
+            const includeAnnotations = opts.includeAnnotations === true;
+
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
 
@@ -2587,7 +2702,19 @@
             // Base image
             ctx.drawImage(dicomImageEl, 0, 0);
 
-            // Overlay content (prefer structured data; fall back to the visible patientInfo string)
+            // Measurements/annotations overlays (stored in image pixels, so they map directly here)
+            if (includeMeasurements) {
+                drawMeasurementsOnCanvas(ctx, canvas, images[currentImageIndex]?.id);
+            }
+            if (includeAnnotations) {
+                drawAnnotationsOnCanvas(ctx, canvas, images[currentImageIndex]?.id);
+            }
+
+            if (!includePatientInfo) {
+                return canvas;
+            }
+
+            // Patient/study overlays (prefer structured data; fall back to the visible patientInfo string)
             const patientInfoText = safeText(document.getElementById('patientInfo')?.textContent);
             const parsedPatientName = safeText(patientInfoText.match(/Patient:\s*([^|]+)/i)?.[1]);
             const parsedStudyDate = safeText(patientInfoText.match(/Study Date:\s*([^|]+)/i)?.[1]);
@@ -2632,6 +2759,72 @@
             return canvas;
         }
 
+        function drawMeasurementsOnCanvas(ctx, canvas, imageId) {
+            if (!imageId) return;
+            const relevant = measurements.filter(m => m.imageId === imageId);
+            if (relevant.length === 0) return;
+
+            // line style
+            ctx.save();
+            ctx.lineWidth = Math.max(2, Math.round(canvas.width * 0.002));
+            ctx.strokeStyle = 'rgba(255,0,0,0.95)';
+            ctx.fillStyle = 'rgba(255,255,255,0.95)';
+            ctx.font = `${Math.min(28, Math.max(12, Math.round(canvas.width * 0.018)))}px Arial, sans-serif`;
+
+            for (const m of relevant) {
+                const s = m.start;
+                const e = m.end;
+                if (!s || !e) continue;
+                ctx.beginPath();
+                ctx.moveTo(s.x, s.y);
+                ctx.lineTo(e.x, e.y);
+                ctx.stroke();
+
+                const midX = (s.x + e.x) / 2;
+                const midY = (s.y + e.y) / 2;
+                const label = (m.distance?.mm && m.distance.mm !== 'N/A')
+                    ? `${m.distance.mm} mm`
+                    : `${m.distance?.pixels || 'N/A'} px`;
+
+                // label background
+                const pad = 4;
+                const textW = ctx.measureText(label).width;
+                const boxW = textW + pad * 2;
+                const boxH = Math.round(parseInt(ctx.font, 10) * 1.3);
+                ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                ctx.fillRect(midX - boxW / 2, midY - boxH - 6, boxW, boxH);
+                ctx.fillStyle = 'rgba(255,255,255,0.95)';
+                ctx.fillText(label, midX - textW / 2, midY - boxH - 4);
+            }
+            ctx.restore();
+        }
+
+        function drawAnnotationsOnCanvas(ctx, canvas, imageId) {
+            if (!imageId) return;
+            const relevant = annotations.filter(a => a.imageId === imageId);
+            if (relevant.length === 0) return;
+
+            ctx.save();
+            const fontSize = Math.min(28, Math.max(12, Math.round(canvas.width * 0.018)));
+            ctx.font = `${fontSize}px Arial, sans-serif`;
+            ctx.textBaseline = 'top';
+            for (const a of relevant) {
+                if (!a || !a.text) continue;
+                const x = a.x;
+                const y = a.y;
+                const text = String(a.text);
+                const pad = 4;
+                const textW = ctx.measureText(text).width;
+                const boxW = textW + pad * 2;
+                const boxH = Math.round(fontSize * 1.3);
+                ctx.fillStyle = 'rgba(255,255,0,0.85)';
+                ctx.fillRect(x, y, boxW, boxH);
+                ctx.fillStyle = 'rgba(0,0,0,0.9)';
+                ctx.fillText(text, x + pad, y + 2);
+            }
+            ctx.restore();
+        }
+
         function drawCornerOverlay(ctx, canvas, lines, corner) {
             if (!lines || lines.length === 0) return;
 
@@ -2673,6 +2866,274 @@
             }
 
             ctx.restore();
+        }
+
+        // ---- Print/Export dialog + multi-image layout rendering ----
+        function openPrintExportDialog() {
+            const modal = document.getElementById('printExportModal');
+            if (!modal) return;
+
+            // Sensible defaults
+            const scope = document.getElementById('peScope');
+            const layout = document.getElementById('peLayout');
+            const count = document.getElementById('peCount');
+            if (scope && count) {
+                if (scope.value === 'current_image') count.value = 1;
+                if (scope.value === 'current_series') count.value = Math.min(4, images.length || 1);
+                if (scope.value === 'study_series_first') count.value = Math.min(4, (currentStudySeriesList || []).length || 1);
+            }
+
+            modal.style.display = 'flex';
+        }
+
+        function closePrintExportDialog() {
+            const modal = document.getElementById('printExportModal');
+            if (!modal) return;
+            modal.style.display = 'none';
+        }
+
+        function getPrintExportDialogOptions() {
+            const scope = document.getElementById('peScope')?.value || 'current_image';
+            const layout = document.getElementById('peLayout')?.value || 'auto';
+            const count = Math.max(1, Math.min(36, parseInt(document.getElementById('peCount')?.value || '1', 10)));
+            const includePatientInfo = !!document.getElementById('peIncludePatient')?.checked;
+            const includeMeasurements = !!document.getElementById('peIncludeMeasurements')?.checked;
+            const includeAnnotations = !!document.getElementById('peIncludeAnnotations')?.checked;
+            return { scope, layout, count, includePatientInfo, includeMeasurements, includeAnnotations };
+        }
+
+        async function exportFromPrintExportDialog() {
+            try {
+                const opts = getPrintExportDialogOptions();
+                const canvas = await buildCompositeExportCanvas(opts);
+                const link = document.createElement('a');
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                link.download = `dicom_export_${timestamp}.png`;
+                link.href = canvas.toDataURL('image/png');
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                showToast('Export completed', 'success');
+            } catch (e) {
+                console.error('Export failed:', e);
+                showToast('Export failed', 'error');
+            }
+        }
+
+        async function printFromPrintExportDialog() {
+            try {
+                const opts = getPrintExportDialogOptions();
+                const canvas = await buildCompositeExportCanvas(opts);
+                const imageDataUrl = canvas.toDataURL('image/png');
+                const w = window.open('', '_blank');
+                w.document.write(`
+                    <html>
+                        <head>
+                            <title>Noctis Pro DICOM Print</title>
+                            <style>
+                                @media print { body { margin: 0; padding: 0; } .no-print { display: none; } }
+                                body { margin: 0; padding: 0; background: #111; }
+                                img { width: 100%; height: auto; display: block; }
+                            </style>
+                        </head>
+                        <body>
+                            <img src="${imageDataUrl}" alt="DICOM Print" />
+                            <button class="no-print" onclick="window.print()" style="position: fixed; top: 10px; right: 10px; padding: 10px 16px; background: #00d4ff; color: white; border: none; border-radius: 6px; cursor: pointer;">Print</button>
+                        </body>
+                    </html>
+                `);
+                w.document.close();
+                setTimeout(() => w.print(), 600);
+                showToast('Print dialog opened', 'success');
+            } catch (e) {
+                console.error('Print failed:', e);
+                showToast('Print failed', 'error');
+            }
+        }
+
+        function layoutToGrid(layout, n) {
+            if (layout === '1x2') return { cols: 2, rows: Math.ceil(n / 2) };
+            if (layout === '2x2') return { cols: 2, rows: Math.ceil(n / 2) };
+            if (layout === '3x3') return { cols: 3, rows: Math.ceil(n / 3) };
+            // auto grid
+            const cols = Math.max(1, Math.ceil(Math.sqrt(n)));
+            const rows = Math.max(1, Math.ceil(n / cols));
+            return { cols, rows };
+        }
+
+        async function fetchImageDisplayDataUrl(imageId) {
+            const url = `/dicom-viewer/api/image/${imageId}/display/?ww=${windowWidth}&wl=${windowLevel}&invert=${inverted}`;
+            const r = await fetch(url);
+            const j = await r.json();
+            if (!j || !j.image_data) throw new Error('No image_data for image ' + imageId);
+            return j.image_data;
+        }
+
+        async function fetchFirstImageIdForSeries(seriesId) {
+            const r = await fetch(`/dicom-viewer/web/series/${seriesId}/images/`);
+            const j = await r.json();
+            const imgs = j?.images;
+            if (!Array.isArray(imgs) || imgs.length === 0) return null;
+            return imgs[0].id;
+        }
+
+        function parsePatientStudyOverlayLines() {
+            const patientInfoText = safeText(document.getElementById('patientInfo')?.textContent);
+            const parsedPatientName = safeText(patientInfoText.match(/Patient:\s*([^|]+)/i)?.[1]);
+            const parsedStudyDate = safeText(patientInfoText.match(/Study Date:\s*([^|]+)/i)?.[1]);
+            const parsedModality = safeText(patientInfoText.match(/Modality:\s*([^|]+)/i)?.[1]);
+
+            const patientName = safeText(currentStudy?.patient_name) || parsedPatientName;
+            const patientId = safeText(currentStudy?.patient_id);
+            const accession = safeText(currentStudy?.accession_number);
+            const modality = safeText(currentStudy?.modality) || parsedModality;
+            const studyDate = formatDicomOrIsoDate(currentStudy?.study_date) || formatDicomOrIsoDate(parsedStudyDate);
+
+            return [
+                patientName ? `Patient: ${patientName}` : '',
+                patientId ? `ID: ${patientId}` : '',
+                accession ? `Accession: ${accession}` : '',
+                studyDate ? `Study Date: ${studyDate}` : '',
+                modality ? `Modality: ${modality}` : ''
+            ].filter(Boolean);
+        }
+
+        async function renderImageDataUrlToCanvas(imageDataUrl, imageId, opts = {}) {
+            const includePatientInfo = opts.includePatientInfo === true;
+            const includeMeasurements = opts.includeMeasurements === true;
+            const includeAnnotations = opts.includeAnnotations === true;
+            const tileLabel = safeText(opts.tileLabel);
+
+            const img = new Image();
+            img.src = imageDataUrl;
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+            });
+
+            const c = document.createElement('canvas');
+            c.width = img.naturalWidth || img.width;
+            c.height = img.naturalHeight || img.height;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+
+            if (includeMeasurements) drawMeasurementsOnCanvas(ctx, c, imageId);
+            if (includeAnnotations) drawAnnotationsOnCanvas(ctx, c, imageId);
+
+            if (includePatientInfo) {
+                const lines = [];
+                if (tileLabel) lines.push(tileLabel);
+                drawCornerOverlay(ctx, c, lines, 'tl');
+            }
+            return c;
+        }
+
+        async function buildCompositeExportCanvas(opts) {
+            const scope = opts.scope || 'current_image';
+            const includePatientInfo = !!opts.includePatientInfo;
+            const includeMeasurements = !!opts.includeMeasurements;
+            const includeAnnotations = !!opts.includeAnnotations;
+
+            // Collect image IDs / data URLs
+            const items = [];
+            if (scope === 'current_image') {
+                const imgEl = document.getElementById('dicomImage');
+                items.push({
+                    imageId: images[currentImageIndex]?.id,
+                    dataUrl: imgEl?.src,
+                    tileLabel: 'Current'
+                });
+            } else if (scope === 'current_series') {
+                const n = Math.min(opts.count || 1, images.length || 0);
+                for (let i = 0; i < n; i++) {
+                    const idx = currentImageIndex + i;
+                    if (idx >= images.length) break;
+                    const id = images[idx].id;
+                    items.push({ imageId: id, dataUrl: null, tileLabel: `#${idx + 1}` });
+                }
+            } else if (scope === 'study_series_first') {
+                const series = Array.isArray(currentStudySeriesList) ? currentStudySeriesList : [];
+                const n = Math.min(opts.count || 1, series.length);
+                for (let i = 0; i < n; i++) {
+                    const s = series[i];
+                    items.push({ seriesId: s.id, imageId: null, dataUrl: null, tileLabel: `Series ${s.series_number || i + 1}` });
+                }
+            }
+
+            // Resolve data URLs for all items
+            for (const it of items) {
+                if (!it.dataUrl) {
+                    if (!it.imageId && it.seriesId) {
+                        it.imageId = await fetchFirstImageIdForSeries(it.seriesId);
+                    }
+                    if (it.imageId) {
+                        it.dataUrl = await fetchImageDisplayDataUrl(it.imageId);
+                    }
+                }
+            }
+            const resolved = items.filter(it => !!it.dataUrl);
+            if (resolved.length === 0) throw new Error('No images available for selection');
+
+            // Render each tile canvas (with measurement/annotation overlays where applicable)
+            const tiles = [];
+            for (const it of resolved) {
+                // For non-current images, measurements/annotations usually don't exist, but we support it if they do.
+                const tileCanvas = await renderImageDataUrlToCanvas(it.dataUrl, it.imageId, {
+                    includePatientInfo: includePatientInfo,
+                    includeMeasurements: includeMeasurements,
+                    includeAnnotations: includeAnnotations,
+                    tileLabel: it.tileLabel
+                });
+                tiles.push(tileCanvas);
+            }
+
+            // Determine grid and tile size
+            const n = tiles.length;
+            const grid = layoutToGrid(opts.layout || 'auto', n);
+            let tileW = 0;
+            let tileH = 0;
+            for (const t of tiles) {
+                tileW = Math.max(tileW, t.width);
+                tileH = Math.max(tileH, t.height);
+            }
+
+            const headerLines = includePatientInfo ? parsePatientStudyOverlayLines() : [];
+            const headerH = includePatientInfo ? Math.min(160, Math.max(70, Math.round(tileH * 0.12))) : 0;
+
+            const out = document.createElement('canvas');
+            out.width = grid.cols * tileW;
+            out.height = grid.rows * tileH + headerH;
+            const ctx = out.getContext('2d');
+
+            // Background
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, out.width, out.height);
+
+            // Header
+            if (includePatientInfo) {
+                ctx.fillStyle = 'rgba(0,0,0,0.85)';
+                ctx.fillRect(0, 0, out.width, headerH);
+                drawCornerOverlay(ctx, out, headerLines, 'tl');
+                drawCornerOverlay(ctx, out, [`Generated: ${new Date().toLocaleString()}`], 'tr');
+            }
+
+            // Tiles (fit into cell, preserving aspect)
+            for (let i = 0; i < tiles.length; i++) {
+                const r = Math.floor(i / grid.cols);
+                const c = i % grid.cols;
+                const x0 = c * tileW;
+                const y0 = headerH + r * tileH;
+                const t = tiles[i];
+
+                const scale = Math.min(tileW / t.width, tileH / t.height);
+                const dw = Math.round(t.width * scale);
+                const dh = Math.round(t.height * scale);
+                const dx = x0 + Math.round((tileW - dw) / 2);
+                const dy = y0 + Math.round((tileH - dh) / 2);
+                ctx.drawImage(t, dx, dy, dw, dh);
+            }
+
+            return out;
         }
 
         // Utility Functions

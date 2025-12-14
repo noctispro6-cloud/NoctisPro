@@ -328,17 +328,103 @@ def upload_study(request):
 			# Enhanced DICOM processing pipeline with professional validation
 			logger.info("Starting professional DICOM metadata extraction and validation")
 			
+			# Client-side filters are helpful, but we also enforce server-side validation
+			# to prevent temp/hidden files from being treated as DICOM (especially because `force=True`
+			# can otherwise parse arbitrary binaries into an "empty" Dataset).
+			_TEMP_BASENAMES = {
+				'.ds_store', 'thumbs.db', 'desktop.ini', 'icon\r', '.spotlight-v100', '.trashes'
+			}
+			_TEMP_SUFFIXES = ('.tmp', '.temp', '.swp', '.swo', '.bak', '~')
+			_ALLOWED_EXTS = ('.dcm', '.dicom', '.dicm', '.ima')
+
+			def _is_temp_or_hidden_name(name: str) -> bool:
+				base = (os.path.basename(name or '') or '').strip()
+				low = base.lower()
+				if not low:
+					return True
+				if low in _TEMP_BASENAMES:
+					return True
+				if low.startswith('.') or low.startswith('._'):
+					return True
+				if low.endswith(_TEMP_SUFFIXES):
+					return True
+				# Ignore macOS resource forks / metadata folders if path comes through
+				if '__macosx' in (name or '').lower():
+					return True
+				return False
+
+			def _has_dicm_preamble(fobj) -> bool:
+				"""Check DICOM Part-10 preamble marker safely without consuming the stream."""
+				try:
+					pos = fobj.tell()
+				except Exception:
+					pos = None
+				try:
+					fobj.seek(0)
+					head = fobj.read(132)
+					return len(head) >= 132 and head[128:132] == b'DICM'
+				except Exception:
+					return False
+				finally:
+					try:
+						if pos is not None:
+							fobj.seek(pos)
+						else:
+							fobj.seek(0)
+					except Exception:
+						pass
+
 			for file_index, in_file in enumerate(uploaded_files):
 				file_start_time = time.time()
 				file_size_mb = in_file.size / (1024 * 1024)  # Convert to MB
 				file_size_total += file_size_mb
 				try:
+					# Skip obvious temp/hidden files early
+					if _is_temp_or_hidden_name(getattr(in_file, 'name', '')):
+						invalid_files += 1
+						continue
+					# Skip very small files (not a useful DICOM object)
+					if getattr(in_file, 'size', 0) and in_file.size < 256:
+						invalid_files += 1
+						continue
+					# Skip DICOMDIR explicitly (it's a directory record, not an image slice)
+					if (os.path.basename(getattr(in_file, 'name', '') or '').upper() == 'DICOMDIR'):
+						invalid_files += 1
+						continue
+
 					# Professional DICOM reading with comprehensive error handling
 					# Prefer fast header read to avoid loading pixel data during request
+					name = (getattr(in_file, 'name', '') or '')
+					ext = (os.path.splitext(name)[1] or '').lower()
+					has_preamble = _has_dicm_preamble(in_file)
+
+					ds = None
 					try:
-						ds = pydicom.dcmread(in_file, stop_before_pixels=True, force=True)
+						# Strict parse first to avoid treating arbitrary binaries as DICOM
+						in_file.seek(0)
+						ds = pydicom.dcmread(in_file, stop_before_pixels=True, force=False)
 					except Exception:
-						ds = pydicom.dcmread(in_file, force=True)
+						# Allow slightly non-conformant DICOMs ONLY if they look like DICOM by extension or preamble.
+						if has_preamble or ext in _ALLOWED_EXTS:
+							try:
+								in_file.seek(0)
+								ds = pydicom.dcmread(in_file, stop_before_pixels=True, force=True)
+							except Exception:
+								ds = None
+						else:
+							ds = None
+
+					if ds is None:
+						invalid_files += 1
+						continue
+
+					# If this is a DICOM directory record SOP class, skip it (not image data)
+					try:
+						if str(getattr(ds, 'SOPClassUID', '')).strip() == '1.2.840.10008.1.3.10':
+							invalid_files += 1
+							continue
+					except Exception:
+						pass
 					
 					# Medical-grade metadata extraction and validation
 					study_uid = getattr(ds, 'StudyInstanceUID', None)

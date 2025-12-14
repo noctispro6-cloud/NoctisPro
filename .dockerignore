@@ -1,0 +1,15 @@
+.git
+__pycache__
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+node_modules
+staticfiles
+media
+logs
+data
+

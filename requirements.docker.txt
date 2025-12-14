@@ -1,0 +1,31 @@
+#
+# Minimal dependency set to run the Noctis Pro Django web app in Docker.
+# Intentionally excludes heavy/optional packages (torch, gdcm, SimpleITK, etc.)
+# that often slow builds or require system libraries.
+#
+
+# Core Django
+Django==5.2.5
+Pillow
+django-widget-tweaks
+python-dotenv
+
+# ASGI / WebSockets
+daphne
+channels
+
+# API
+djangorestframework
+django-cors-headers
+requests
+
+# DICOM processing (pure-Python wheels; keep lightweight)
+pydicom
+pynetdicom
+highdicom
+numpy
+
+# Production server utilities (optional but small)
+gunicorn
+whitenoise
+

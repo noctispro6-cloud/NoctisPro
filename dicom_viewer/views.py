@@ -39,6 +39,45 @@ from .models import WindowLevelPreset, HangingProtocol
 # Initialize logger
 logger = logging.getLogger(__name__)
 
+def _jsonify_dicom_value(v):
+    """Convert pydicom/numpy values to JSON-serializable primitives.
+
+    Django's JSON encoder can't serialize pydicom's MultiValue (e.g. PixelSpacing),
+    so normalize any DICOM-derived valuereps before returning JsonResponse.
+    """
+    if v is None:
+        return None
+    if isinstance(v, (str, int, float, bool)):
+        return v
+    # Numpy scalars
+    try:
+        import numpy as _np
+        if isinstance(v, _np.generic):
+            return v.item()
+    except Exception:
+        pass
+    # pydicom MultiValue / sequences
+    try:
+        from pydicom.multival import MultiValue as _MultiValue
+        if isinstance(v, _MultiValue):
+            return [_jsonify_dicom_value(x) for x in list(v)]
+    except Exception:
+        pass
+    if isinstance(v, (list, tuple)):
+        return [_jsonify_dicom_value(x) for x in v]
+    # pydicom valuereps
+    try:
+        if hasattr(v, "__float__"):
+            return float(v)
+        if hasattr(v, "__int__"):
+            return int(v)
+    except Exception:
+        pass
+    try:
+        return str(v)
+    except Exception:
+        return None
+
 # MPR volume small LRU cache (per-process) - optimized for 3D performance
 from threading import Lock
 import gc
@@ -430,12 +469,13 @@ def api_image_data(request, image_id):
             'pixel_data': pixel_array.reshape(rows * cols).tolist(),
             'window_width': float(window_width) if window_width is not None else 400.0,
             'window_center': float(window_center) if window_center is not None else 40.0,
-            'pixel_spacing': getattr(ds, 'PixelSpacing', None) if ds is not None else None,
-            'slice_thickness': getattr(ds, 'SliceThickness', None) if ds is not None else None,
-            'modality': getattr(ds, 'Modality', None) if ds is not None else None,
-            'photometric_interpretation': getattr(ds, 'PhotometricInterpretation', None) if ds is not None else None,
-            'bits_allocated': getattr(ds, 'BitsAllocated', None) if ds is not None else None,
-            'bits_stored': getattr(ds, 'BitsStored', None) if ds is not None else None,
+            # Normalize DICOM valuereps/MultiValue to JSON-safe types
+            'pixel_spacing': _jsonify_dicom_value(getattr(ds, 'PixelSpacing', None)) if ds is not None else None,
+            'slice_thickness': _jsonify_dicom_value(getattr(ds, 'SliceThickness', None)) if ds is not None else None,
+            'modality': _jsonify_dicom_value(getattr(ds, 'Modality', None)) if ds is not None else None,
+            'photometric_interpretation': _jsonify_dicom_value(getattr(ds, 'PhotometricInterpretation', None)) if ds is not None else None,
+            'bits_allocated': _jsonify_dicom_value(getattr(ds, 'BitsAllocated', None)) if ds is not None else None,
+            'bits_stored': _jsonify_dicom_value(getattr(ds, 'BitsStored', None)) if ds is not None else None,
         })
     else:
         data.update({
@@ -1122,17 +1162,17 @@ def api_dicom_image_display(request, image_id):
             'instance_number': getattr(image, 'instance_number', None),
             'slice_location': getattr(image, 'slice_location', None),
             'dimensions': [int(getattr(ds, 'Rows', 0) or 0), int(getattr(ds, 'Columns', 0) or 0)] if ds is not None else [0, 0],
-            'pixel_spacing': getattr(ds, 'PixelSpacing', [1.0, 1.0]) if ds is not None else (image.series.pixel_spacing or [1.0, 1.0]),
-            'slice_thickness': getattr(ds, 'SliceThickness', 1.0) if ds is not None else safe_float(getattr(image.series, 'slice_thickness', 1.0), 1.0),
+            'pixel_spacing': _jsonify_dicom_value(getattr(ds, 'PixelSpacing', [1.0, 1.0])) if ds is not None else (image.series.pixel_spacing or [1.0, 1.0]),
+            'slice_thickness': _jsonify_dicom_value(getattr(ds, 'SliceThickness', 1.0)) if ds is not None else safe_float(getattr(image.series, 'slice_thickness', 1.0), 1.0),
             'default_window_width': float(default_window_width) if default_window_width is not None else 400.0,
             'default_window_level': float(default_window_level) if default_window_level is not None else 40.0,
-            'modality': getattr(ds, 'Modality', '') if ds is not None else (image.series.modality or ''),
+            'modality': _jsonify_dicom_value(getattr(ds, 'Modality', '')) if ds is not None else (image.series.modality or ''),
             'series_description': getattr(ds, 'SeriesDescription', '') if ds is not None else getattr(image.series, 'series_description', ''),
             'patient_name': str(getattr(ds, 'PatientName', '')) if ds is not None else (getattr(image.series.study.patient, 'full_name', '') if hasattr(image.series.study, 'patient') else ''),
             'study_date': str(getattr(ds, 'StudyDate', '')) if ds is not None else (getattr(image.series.study, 'study_date', '') or ''),
-            'bits_allocated': getattr(ds, 'BitsAllocated', 16) if ds is not None else 16,
-            'bits_stored': getattr(ds, 'BitsStored', 16) if ds is not None else 16,
-            'photometric_interpretation': getattr(ds, 'PhotometricInterpretation', '') if ds is not None else '',
+            'bits_allocated': _jsonify_dicom_value(getattr(ds, 'BitsAllocated', 16)) if ds is not None else 16,
+            'bits_stored': _jsonify_dicom_value(getattr(ds, 'BitsStored', 16)) if ds is not None else 16,
+            'photometric_interpretation': _jsonify_dicom_value(getattr(ds, 'PhotometricInterpretation', '')) if ds is not None else '',
         }
         
         payload = {

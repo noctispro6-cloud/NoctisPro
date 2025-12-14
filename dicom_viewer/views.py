@@ -518,7 +518,7 @@ def api_mpr_reconstruction(request, series_id):
             logger.warning(f"Volume contains NaN or inf values for series {series_id}")
             volume = np.nan_to_num(volume, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # Windowing params
+        # Windowing params (support both window_width/window_level and ww/wl, and inverted/invert)
         def _derive_window(arr, fallback=(400.0, 40.0)):
             try:
                 flat = arr.astype(np.float32).flatten()
@@ -531,9 +531,17 @@ def api_mpr_reconstruction(request, series_id):
                 return fallback
 
         # Use provided window params if present; otherwise derive once
-        ww_param = request.GET.get('window_width')
-        wl_param = request.GET.get('window_level')
-        inverted = request.GET.get('inverted', 'false').lower() == 'true'
+        ww_param = request.GET.get('window_width', None)
+        if ww_param is None:
+            ww_param = request.GET.get('ww', None)
+        wl_param = request.GET.get('window_level', None)
+        if wl_param is None:
+            wl_param = request.GET.get('wl', None)
+
+        invert_param = request.GET.get('inverted', None)
+        if invert_param is None:
+            invert_param = request.GET.get('invert', 'false')
+        inverted = str(invert_param).strip().lower() in ('1', 'true', 'yes', 'on')
         if ww_param is None or wl_param is None:
             default_window_width, default_window_level = _derive_window(volume)
             window_width = float(ww_param) if ww_param is not None else float(default_window_width)
@@ -665,10 +673,20 @@ def api_mip_reconstruction(request, series_id):
             volume = ndimage.zoom(volume, (factor, 1, 1), order=3, prefilter=True)
             logger.info(f"MIP enhanced interpolation: {volume.shape[0]} slices (factor: {factor:.2f})")
         
-        # Get windowing parameters from request
-        window_width = float(request.GET.get('window_width', default_window_width))
-        window_level = float(request.GET.get('window_level', default_window_level))
-        inverted = request.GET.get('inverted', 'false').lower() == 'true'
+        # Get windowing parameters from request (support both window_width/window_level and ww/wl, and inverted/invert)
+        ww_param = request.GET.get('window_width', None)
+        if ww_param is None:
+            ww_param = request.GET.get('ww', default_window_width)
+        wl_param = request.GET.get('window_level', None)
+        if wl_param is None:
+            wl_param = request.GET.get('wl', default_window_level)
+        invert_param = request.GET.get('inverted', None)
+        if invert_param is None:
+            invert_param = request.GET.get('invert', 'false')
+
+        window_width = float(ww_param)
+        window_level = float(wl_param)
+        inverted = str(invert_param).strip().lower() in ('1', 'true', 'yes', 'on')
         
         # Generate MIP projections (vectorized)
         mip_views = {}
@@ -3161,20 +3179,29 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
             volume = ndimage.zoom(volume, (factor, 1, 1), order=1)
             st = st / factor
 
-    # Resample along Z to approximate isotropic voxels using in-plane pixel spacing average
-    # Keep in-plane resolution; only resample depth for quality MPR
+    # Resample along Z (carefully) to reduce extreme anisotropy.
+    # IMPORTANT: Avoid "full isotropic" upsampling that can explode depth (and latency/memory).
     try:
         py, px = float(first_ps[0]), float(first_ps[1])
         target_xy = (py + px) / 2.0
         if st and target_xy and st > 0 and target_xy > 0:
             z_factor = max(1e-6, float(st) / float(target_xy))
-            # If z_factor > 1, we need to upsample Z to match XY spacing
-            # Cap the target depth to avoid memory blow-ups
-            max_depth = 2048
-            target_depth = int(min(max_depth, round(volume.shape[0] * z_factor)))
-            if target_depth > volume.shape[0] + 1 or z_factor > 1.05:
-                volume = ndimage.zoom(volume, (float(target_depth) / volume.shape[0], 1, 1), order=1)
-                st = target_xy
+            # If z_factor > 1, Z spacing is larger than in-plane spacing -> upsample Z.
+            # Cap both absolute depth and relative upsample to keep requests fast.
+            if z_factor > 1.05:
+                original_depth = int(volume.shape[0])
+                max_depth = 2048  # absolute safety cap
+                max_target_depth = 512  # performance cap
+                max_upsample_factor = 2.5  # avoid huge jumps like 159 -> 1100
+
+                desired_target_depth = int(round(original_depth * float(z_factor)))
+                capped_by_factor = int(round(original_depth * max_upsample_factor))
+                target_depth = int(min(max_depth, max_target_depth, desired_target_depth, capped_by_factor))
+
+                if target_depth >= original_depth + 2:
+                    scale = float(target_depth) / float(original_depth)
+                    volume = ndimage.zoom(volume, (scale, 1, 1), order=1)
+                    st = float(st) / scale
     except Exception:
         pass
 

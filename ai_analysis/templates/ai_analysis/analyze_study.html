@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyze Study - AI Analysis</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-bg: #0a0a0a;
+            --secondary-bg: #1a1a1a;
+            --card-bg: #252525;
+            --border-color: #404040;
+            --accent-color: #00d4ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --success-color: #00ff88;
+            --warning-color: #ffaa00;
+            --danger-color: #ff4444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--primary-bg);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+        .header {
+            background: var(--secondary-bg);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+        }
+        .header h1 { color: var(--accent-color); font-size: 1.9rem; margin-bottom: 8px; }
+        .header p { color: var(--text-secondary); }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+        .card {
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 18px;
+        }
+
+        .card h2 {
+            color: var(--accent-color);
+            font-size: 1.2rem;
+            margin-bottom: 10px;
+        }
+
+        .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+        .btn {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 700;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn.secondary {
+            background: var(--card-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        select {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px 10px;
+            border-radius: 8px;
+        }
+
+        .model-list { margin-top: 10px; }
+        .model {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 12px;
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            margin-bottom: 10px;
+        }
+        .model label { display: block; font-weight: 700; }
+        .model small { display: block; color: var(--text-secondary); margin-top: 2px; }
+
+        .status {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: rgba(255,255,255,0.03);
+            color: var(--text-secondary);
+        }
+        .status.success { border-color: rgba(0,255,136,0.4); color: var(--success-color); }
+        .status.error { border-color: rgba(255,68,68,0.4); color: var(--danger-color); }
+
+        .analysis-item {
+            border-bottom: 1px solid var(--border-color);
+            padding: 10px 0;
+        }
+        .analysis-item:last-child { border-bottom: none; }
+        .pill {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            border: 1px solid var(--border-color);
+            background: var(--card-bg);
+            color: var(--text-secondary);
+        }
+        .pill.completed { color: var(--success-color); border-color: rgba(0,255,136,0.4); }
+        .pill.processing { color: var(--warning-color); border-color: rgba(255,170,0,0.4); }
+        .pill.failed { color: var(--danger-color); border-color: rgba(255,68,68,0.4); }
+
+        pre {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px;
+            overflow: auto;
+            white-space: pre-wrap;
+            color: var(--text-primary);
+            margin-top: 6px;
+        }
+
+        .muted { color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1><i class="fas fa-microscope"></i> Analyze Study</h1>
+        <p>
+            <strong>Accession:</strong> {{ study.accession_number }} &nbsp;|
+            <strong>Patient:</strong> {{ study.patient.full_name|default:'Unknown' }} &nbsp;|
+            <strong>Modality:</strong> {{ study.modality.code|default:study.modality.name|default:'-' }}
+        </p>
+        <div class="row" style="margin-top: 12px;">
+            <a class="btn secondary" href="{% url 'ai_analysis:study_picker' %}"><i class="fas fa-arrow-left"></i> Back to Studies</a>
+            <a class="btn secondary" href="{% url 'ai_analysis:ai_dashboard' %}"><i class="fas fa-chart-line"></i> AI Dashboard</a>
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2><i class="fas fa-play"></i> Start AI Analysis</h2>
+
+            {% if available_models %}
+                <div class="row" style="margin-bottom: 10px;">
+                    <label class="muted" for="priority">Priority</label>
+                    <select id="priority" name="priority">
+                        <option value="low">Low</option>
+                        <option value="normal" selected>Normal</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                    </select>
+                    <button id="startBtn" class="btn" type="button"><i class="fas fa-rocket"></i> Start</button>
+                </div>
+
+                <div class="model-list" id="modelList">
+                    {% for m in available_models %}
+                        <div class="model">
+                            <input type="checkbox" id="model_{{ m.id }}" value="{{ m.id }}" />
+                            <div>
+                                <label for="model_{{ m.id }}">{{ m.name }} <span class="muted">v{{ m.version }}</span></label>
+                                <small>{{ m.get_model_type_display }} | Modality: {{ m.modality }}{% if m.body_part %} | {{ m.body_part }}{% endif %}</small>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <div id="status" class="status" style="display:none;"></div>
+
+            {% else %}
+                <div class="status error">
+                    No AI models are available for this study, or you don’t have permission to start analyses.
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <h2><i class="fas fa-history"></i> Existing Analyses</h2>
+            {% if existing_analyses %}
+                <div id="existingAnalyses">
+                    {% for a in existing_analyses %}
+                        <div class="analysis-item" data-analysis-id="{{ a.id }}">
+                            <div class="row" style="justify-content: space-between;">
+                                <div>
+                                    <strong>{{ a.ai_model.name }}</strong>
+                                    <span class="muted">v{{ a.ai_model.version }}</span>
+                                </div>
+                                <span class="pill {{ a.status }}" id="pill_{{ a.id }}">{{ a.status|capfirst }}</span>
+                            </div>
+                            <div class="muted">Requested: {{ a.requested_at|date:"Y-m-d H:i" }}</div>
+                            <div id="details_{{ a.id }}" style="margin-top: 6px;"></div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="muted">No analyses yet for this study.</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const startBtn = document.getElementById('startBtn');
+    const statusEl = document.getElementById('status');
+
+    function showStatus(msg, kind) {
+        if (!statusEl) return;
+        statusEl.style.display = 'block';
+        statusEl.className = 'status' + (kind ? (' ' + kind) : '');
+        statusEl.textContent = msg;
+    }
+
+    function getSelectedModelIds() {
+        const inputs = document.querySelectorAll('#modelList input[type="checkbox"]');
+        const ids = [];
+        inputs.forEach(i => { if (i.checked) ids.push(i.value); });
+        return ids;
+    }
+
+    async function fetchStatus(analysisId) {
+        const resp = await fetch(`{% url 'ai_analysis:api_analysis_status' 0 %}`.replace('/0/', `/${analysisId}/`), {
+            credentials: 'same-origin'
+        });
+        if (!resp.ok) return null;
+        return await resp.json();
+    }
+
+    function renderDetails(analysisId, data) {
+        const pill = document.getElementById(`pill_${analysisId}`);
+        if (pill && data && data.status) {
+            pill.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+            pill.className = `pill ${data.status}`;
+        }
+
+        const details = document.getElementById(`details_${analysisId}`);
+        if (!details || !data) return;
+
+        if (data.status === 'completed') {
+            const findings = data.findings || '';
+            const conf = (data.confidence_score !== null && data.confidence_score !== undefined) ? data.confidence_score : '';
+            details.innerHTML = '';
+            if (conf !== '') {
+                details.innerHTML += `<div class="muted">Confidence: <strong>${conf}</strong></div>`;
+            }
+            if (findings) {
+                details.innerHTML += `<pre>${findings}</pre>`;
+            }
+        } else if (data.status === 'failed') {
+            const err = data.error_message || 'Unknown error';
+            details.innerHTML = `<div class="status error">${err}</div>`;
+        } else {
+            const pct = data.progress_percentage || 0;
+            details.innerHTML = `<div class="muted">Progress: ${pct}%</div>`;
+        }
+    }
+
+    async function poll(analysisIds) {
+        const pending = new Set(analysisIds.map(String));
+        const maxRounds = 90; // ~3 min at 2s interval
+        for (let round = 0; round < maxRounds && pending.size > 0; round++) {
+            for (const id of Array.from(pending)) {
+                try {
+                    const data = await fetchStatus(id);
+                    if (!data) continue;
+                    renderDetails(id, data);
+                    if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+                        pending.delete(id);
+                    }
+                } catch (e) {
+                    // ignore transient polling errors
+                }
+            }
+            if (pending.size > 0) {
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+    }
+
+    if (startBtn) {
+        startBtn.addEventListener('click', async () => {
+            const ids = getSelectedModelIds();
+            const priority = (document.getElementById('priority') || {}).value || 'normal';
+            if (!ids.length) {
+                showStatus('Please select at least one AI model.', 'error');
+                return;
+            }
+
+            showStatus('Starting AI analysis…', '');
+            startBtn.disabled = true;
+
+            const form = new FormData();
+            ids.forEach(id => form.append('ai_models', id));
+            form.append('priority', priority);
+
+            try {
+                const resp = await fetch('', { method: 'POST', body: form, credentials: 'same-origin' });
+                const data = await resp.json();
+                if (!resp.ok || data.error) {
+                    showStatus(data.error || 'Failed to start AI analysis.', 'error');
+                    startBtn.disabled = false;
+                    return;
+                }
+                showStatus(data.message || 'AI analysis started.', 'success');
+
+                // Poll the started analyses and refresh page after a short delay
+                if (data.analysis_ids && data.analysis_ids.length) {
+                    await poll(data.analysis_ids);
+                }
+
+                // Refresh to show new analyses in the list
+                setTimeout(() => { window.location.reload(); }, 800);
+
+            } catch (e) {
+                showStatus('Failed to start AI analysis (network/server error).', 'error');
+                startBtn.disabled = false;
+            }
+        });
+    }
+
+    // Auto-poll any pending/processing analyses already on the page
+    const existing = Array.from(document.querySelectorAll('[data-analysis-id]'))
+        .map(el => el.getAttribute('data-analysis-id'))
+        .filter(Boolean);
+    if (existing.length) {
+        poll(existing);
+    }
+})();
+</script>
+</body>
+</html>

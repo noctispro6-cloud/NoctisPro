@@ -1031,6 +1031,7 @@ def upload_attachment(request, study_id):
             attachment_type = request.POST.get('type', 'document')
             description = request.POST.get('description', '')
             attach_previous_study_id = request.POST.get('previous_study_id')
+            max_attachment_bytes = 5 * 1024 * 1024 * 1024  # 5GB per file
             
             if not files:
                 return JsonResponse({'error': 'No files provided'}, status=400)
@@ -1038,9 +1039,9 @@ def upload_attachment(request, study_id):
             uploaded_attachments = []
             
             for file in files:
-                # Validate file size (max 100MB)
-                if file.size > 100 * 1024 * 1024:
-                    return JsonResponse({'error': f'File {file.name} is too large (max 100MB)'}, status=400)
+                # Validate file size (max 5GB)
+                if file.size > max_attachment_bytes:
+                    return JsonResponse({'error': f'File {file.name} is too large (max 5GB)'}, status=400)
                 
                 # Determine file type based on extension
                 file_ext = os.path.splitext(file.name)[1].lower()

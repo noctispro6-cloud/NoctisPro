@@ -1,5 +1,6 @@
 # Core Django
-Django
+# Pin to the version this repo targets (see `noctis_pro/settings.py` header).
+Django==5.2.5
 Pillow
 django-widget-tweaks
 python-dotenv

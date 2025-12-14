@@ -74,9 +74,106 @@ def system_logs(request):
 @login_required
 @user_passes_test(is_admin)
 def settings_view(request):
-    """Placeholder: settings view."""
-    messages.info(request, 'Settings view is under construction.')
-    return dashboard(request)
+    """System settings view (integrations & automation)."""
+    from django.utils import timezone as _tz
+
+    # Helper to upsert a config value
+    def upsert(key: str, value: str, data_type: str = "string", category: str = "general", description: str = "", sensitive: bool = False):
+        obj, _ = SystemConfiguration.objects.get_or_create(
+            key=key,
+            defaults={
+                "value": value,
+                "data_type": data_type,
+                "category": category,
+                "description": description,
+                "is_sensitive": sensitive,
+                "updated_by": request.user,
+            },
+        )
+        if obj.value != value or obj.data_type != data_type or obj.category != category or obj.is_sensitive != sensitive:
+            obj.value = value
+            obj.data_type = data_type
+            obj.category = category
+            obj.description = description
+            obj.is_sensitive = sensitive
+            obj.updated_by = request.user
+            obj.updated_at = _tz.now()
+            obj.save()
+        return obj
+
+    # Ensure rows exist (so UI always has something to edit)
+    tw_sid = SystemConfiguration.objects.filter(key="twilio_account_sid").first()
+    tw_token = SystemConfiguration.objects.filter(key="twilio_auth_token").first()
+    tw_from = SystemConfiguration.objects.filter(key="twilio_from_number").first()
+    auto_ai = SystemConfiguration.objects.filter(key="ai_auto_analysis_on_upload").first()
+
+    if request.method == "POST":
+        # Twilio
+        sid = (request.POST.get("twilio_account_sid") or "").strip()
+        token = (request.POST.get("twilio_auth_token") or "").strip()
+        from_number = (request.POST.get("twilio_from_number") or "").strip()
+        enabled = (request.POST.get("ai_auto_analysis_on_upload") == "on")
+
+        upsert(
+            "twilio_account_sid",
+            sid,
+            data_type="string",
+            category="integrations",
+            description="Twilio Account SID for SMS/Call critical alerts",
+            sensitive=True,
+        )
+        upsert(
+            "twilio_auth_token",
+            token,
+            data_type="string",
+            category="integrations",
+            description="Twilio Auth Token for SMS/Call critical alerts",
+            sensitive=True,
+        )
+        upsert(
+            "twilio_from_number",
+            from_number,
+            data_type="string",
+            category="integrations",
+            description="Twilio From number (E.164) used for SMS and Calls",
+            sensitive=True,
+        )
+        upsert(
+            "ai_auto_analysis_on_upload",
+            "true" if enabled else "false",
+            data_type="boolean",
+            category="ai",
+            description="Automatically run preliminary AI analysis after each new study upload",
+            sensitive=False,
+        )
+
+        messages.success(request, "System settings saved")
+        # Re-fetch for display
+        tw_sid = SystemConfiguration.objects.filter(key="twilio_account_sid").first()
+        tw_token = SystemConfiguration.objects.filter(key="twilio_auth_token").first()
+        tw_from = SystemConfiguration.objects.filter(key="twilio_from_number").first()
+        auto_ai = SystemConfiguration.objects.filter(key="ai_auto_analysis_on_upload").first()
+
+    # Defaults (if not created yet)
+    if not tw_sid:
+        tw_sid = upsert("twilio_account_sid", "", category="integrations", description="Twilio Account SID", sensitive=True)
+    if not tw_token:
+        tw_token = upsert("twilio_auth_token", "", category="integrations", description="Twilio Auth Token", sensitive=True)
+    if not tw_from:
+        tw_from = upsert("twilio_from_number", "", category="integrations", description="Twilio From number (E.164)", sensitive=True)
+    if not auto_ai:
+        auto_ai = upsert("ai_auto_analysis_on_upload", "true", data_type="boolean", category="ai", description="Auto AI analysis on upload", sensitive=False)
+
+    return render(
+        request,
+        "admin_panel/settings.html",
+        {
+            "twilio_account_sid": tw_sid.value if tw_sid else "",
+            "twilio_auth_token": tw_token.value if tw_token else "",
+            "twilio_from_number": tw_from.value if tw_from else "",
+            "ai_auto_analysis_on_upload": (auto_ai.value or "").strip().lower() in ("true", "1", "yes", "on"),
+        },
+    )
 
 @login_required
 @user_passes_test(is_admin)

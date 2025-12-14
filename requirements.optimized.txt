@@ -1,8 +1,13 @@
 # Core Django
-Django>=4.2,<5.0
+# Settings/codebase expect Django 5.2.x (see `noctis_pro/settings.py` header).
+Django==5.2.5
 Pillow
 django-widget-tweaks
 python-dotenv
+
+# ASGI / WebSockets (required by INSTALLED_APPS: daphne, channels)
+daphne
+channels
 
 # Production server
 gunicorn

@@ -1090,6 +1090,12 @@
         let cineMode = false;
         let cineInterval = null;
 
+        // Magnifier tool (overlay canvas)
+        let magnifierCanvas = null;
+        let magnifierCtx = null;
+        const magnifierSize = 180;
+        const magnifierZoomFactor = 2.5;
+
         // 3D Bone Reconstruction variables
         let boneThreshold = 200;
         let boneOpacity = 0.8;
@@ -1166,6 +1172,8 @@
         function initializeViewer() {
             canvas = document.getElementById('dicomCanvas');
             ctx = canvas.getContext('2d');
+
+            setupMagnifier();
             
             // Set canvas size
             resizeCanvas();
@@ -1181,6 +1189,33 @@
             
             // Set up 3D canvas for bone reconstruction
             setupBone3DCanvas();
+        }
+
+        function setupMagnifier() {
+            const host = canvas?.parentElement;
+            if (!host) return;
+            host.style.position = host.style.position || 'relative';
+
+            magnifierCanvas = document.createElement('canvas');
+            magnifierCanvas.id = 'magnifierCanvas';
+            magnifierCanvas.width = magnifierSize;
+            magnifierCanvas.height = magnifierSize;
+            magnifierCanvas.style.cssText = `
+                position: absolute;
+                left: 12px;
+                top: 12px;
+                width: ${magnifierSize}px;
+                height: ${magnifierSize}px;
+                border-radius: 50%;
+                border: 2px solid rgba(0, 212, 255, 0.85);
+                box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+                background: rgba(0,0,0,0.3);
+                pointer-events: none;
+                z-index: 50;
+                display: none;
+            `;
+            magnifierCtx = magnifierCanvas.getContext('2d');
+            host.appendChild(magnifierCanvas);
         }
 
         // Auto-hide UI
@@ -1238,9 +1273,9 @@
         function setupEventListeners() {
             // Tool button clicks
             document.querySelectorAll('.tool-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
+                btn.addEventListener('click', function(e) {
                     const tool = this.dataset.tool;
-                    handleToolClick(tool);
+                    handleToolClick(tool, e, this);
                 });
             });
 
@@ -1255,12 +1290,28 @@
             document.addEventListener('keydown', handleKeyDown);
         }
 
-        function handleToolClick(tool) {
-            // Remove active class from all buttons
+        function refreshToolButtonStates(primaryTool = activeTool) {
+            // Primary (mutually-exclusive) tools
+            const primaryTools = new Set(['windowing', 'zoom', 'pan', 'measure', 'angle', 'area', 'annotate', 'magnify']);
             document.querySelectorAll('.tool-btn').forEach(btn => {
-                btn.classList.remove('active');
+                const t = btn.dataset.tool;
+                if (primaryTools.has(t)) {
+                    btn.classList.toggle('active', t === primaryTool);
+                }
             });
 
+            // Toggle tools keep their own state
+            const crosshairBtn = document.querySelector('[data-tool="crosshair"]');
+            if (crosshairBtn) crosshairBtn.classList.toggle('active', !!crosshair);
+
+            const cineBtn = document.querySelector('[data-tool="cine"]');
+            if (cineBtn) cineBtn.classList.toggle('active', !!cineMode);
+
+            const invertBtn = document.querySelector('[data-tool="invert"]');
+            if (invertBtn) invertBtn.classList.toggle('active', !!inverted);
+        }
+
+        function handleToolClick(tool, event, buttonEl) {
             // Handle specific tools
             switch(tool) {
                 case 'reset':
@@ -1272,6 +1323,9 @@
                     break;
                 case 'crosshair':
                     crosshair = !crosshair;
+                    if (crosshair && crosshairPos && (crosshairPos.x == null || crosshairPos.y == null)) {
+                        crosshairPos = { x: canvas.width / 2, y: canvas.height / 2 };
+                    }
                     redrawCurrentImage();
                     break;
                 case 'rotate':
@@ -1299,10 +1353,10 @@
                     break;
                 default:
                     activeTool = tool;
-                    // Add active class to clicked button
-                    event.target.closest('.tool-btn').classList.add('active');
                     break;
             }
+
+            refreshToolButtonStates(activeTool);
         }
 
         function toggleCineMode() {
@@ -1475,6 +1529,12 @@
             }
         }
 
+        // Cache the last loaded image payload so redraws during mousemove don't refetch
+        // and cause "spray" artifacts from repeated overlay drawing.
+        let lastLoadedImagePayload = null;
+        let lastLoadedImageId = null;
+        let redrawRaf = null;
+
         async function loadCurrentImage() {
             if (!imageData[currentImageIndex]) return;
             
@@ -1488,6 +1548,8 @@
                 windowLevel = data.window_center || windowLevel;
                 
                 updateSliders();
+                lastLoadedImagePayload = data;
+                lastLoadedImageId = imageId;
                 renderDicomImage(data);
                 
             } catch (error) {
@@ -1547,6 +1609,8 @@
             if (crosshair) {
                 drawCrosshair();
             }
+            // Draw in-progress measurement last (on top)
+            drawCurrentMeasurement();
             
             updateOverlayLabels();
         }
@@ -1591,6 +1655,13 @@
             
             // Handle left-click (button 0)
             if (event.button === 0) {
+                // Alt+click to reposition crosshair when enabled
+                if (crosshair && event.altKey) {
+                    crosshairPos = { x: lastMouseX, y: lastMouseY };
+                    redrawCurrentImage();
+                    return;
+                }
+
                 isDragging = true;
                 hideContextMenu(); // Hide any open context menu
                 
@@ -1625,6 +1696,9 @@
             
             // Update Hounsfield value display
             updateHounsfieldValue(mouseX, mouseY);
+
+            // Magnifier works without dragging
+            updateMagnifier(mouseX, mouseY);
             
             if (!isDragging) return;
             
@@ -1660,6 +1734,48 @@
             
             lastMouseX = mouseX;
             lastMouseY = mouseY;
+        }
+
+        function updateMagnifier(mouseX, mouseY) {
+            if (!magnifierCanvas || !magnifierCtx) return;
+
+            const shouldShow = activeTool === 'magnify';
+            magnifierCanvas.style.display = shouldShow ? 'block' : 'none';
+            if (!shouldShow) return;
+
+            // Position near cursor, clamp inside host
+            const host = canvas.parentElement;
+            const pad = 12;
+            const x = Math.max(pad, Math.min(host.clientWidth - magnifierSize - pad, mouseX + 16));
+            const y = Math.max(pad, Math.min(host.clientHeight - magnifierSize - pad, mouseY + 16));
+            magnifierCanvas.style.left = `${x}px`;
+            magnifierCanvas.style.top = `${y}px`;
+
+            // Draw zoomed region from the already-rendered main canvas
+            const srcSize = magnifierSize / magnifierZoomFactor;
+            const sx = Math.max(0, Math.min(canvas.width - srcSize, mouseX - srcSize / 2));
+            const sy = Math.max(0, Math.min(canvas.height - srcSize, mouseY - srcSize / 2));
+
+            magnifierCtx.clearRect(0, 0, magnifierSize, magnifierSize);
+
+            // Circular clip
+            magnifierCtx.save();
+            magnifierCtx.beginPath();
+            magnifierCtx.arc(magnifierSize / 2, magnifierSize / 2, magnifierSize / 2 - 2, 0, 2 * Math.PI);
+            magnifierCtx.clip();
+            magnifierCtx.imageSmoothingEnabled = false;
+            magnifierCtx.drawImage(canvas, sx, sy, srcSize, srcSize, 0, 0, magnifierSize, magnifierSize);
+
+            // Crosshair inside magnifier
+            magnifierCtx.strokeStyle = 'rgba(255,255,0,0.8)';
+            magnifierCtx.lineWidth = 1;
+            magnifierCtx.beginPath();
+            magnifierCtx.moveTo(magnifierSize / 2, 0);
+            magnifierCtx.lineTo(magnifierSize / 2, magnifierSize);
+            magnifierCtx.moveTo(0, magnifierSize / 2);
+            magnifierCtx.lineTo(magnifierSize, magnifierSize / 2);
+            magnifierCtx.stroke();
+            magnifierCtx.restore();
         }
 
         function handleMouseUp(event) {
@@ -1816,14 +1932,16 @@
         }
 
         function redrawCurrentImage() {
-            if (currentImageIndex >= 0 && currentImageIndex < imageData.length) {
-                loadCurrentImage().then(() => {
-                    // Redraw measurements and annotations after image is loaded
-                    drawMeasurements();
-                    drawAnnotations();
-                    drawCurrentMeasurement();
-                });
-            }
+            if (redrawRaf) return;
+            redrawRaf = requestAnimationFrame(() => {
+                redrawRaf = null;
+                const currentId = imageData[currentImageIndex]?.id;
+                if (lastLoadedImagePayload && lastLoadedImageId === currentId) {
+                    renderDicomImage(lastLoadedImagePayload);
+                } else {
+                    loadCurrentImage();
+                }
+            });
         }
 
         // Measurement Functions
@@ -1867,18 +1985,34 @@
             }
             
             redrawCurrentImage();
-            drawCurrentMeasurement();
         }
 
         function finalizeMeasurement() {
-            if (currentMeasurement) {
-                measurements.push({...currentMeasurement});
-                saveMeasurement(currentMeasurement);
-                updateMeasurementsList();
-                currentMeasurement = null;
-                redrawCurrentImage();
-                showToast('Measurement saved', 'success');
+            if (!currentMeasurement) return;
+
+            const finalized = { ...currentMeasurement };
+
+            // Compute and store value/unit for list + persistence
+            if (finalized.type === 'distance') {
+                const d = calculateDistance(finalized);
+                finalized.value = d.mm != null ? d.mm : d.pixels;
+                finalized.unit = d.mm != null ? 'mm' : 'px';
+            } else if (finalized.type === 'angle' && finalized.points && finalized.points.length >= 3) {
+                const angle = calculateAngle(finalized.points[0], finalized.points[1], finalized.points[2]);
+                finalized.value = Math.round(angle.degrees * 10) / 10;
+                finalized.unit = 'deg';
+            } else if (finalized.type === 'area' && finalized.points && finalized.points.length >= 3) {
+                const a = calculateArea(finalized.points);
+                finalized.value = a.mm2 != null ? a.mm2 : a.px2;
+                finalized.unit = a.mm2 != null ? 'mm2' : 'px2';
             }
+
+            measurements.push(finalized);
+            saveMeasurement(finalized);
+            updateMeasurementsList();
+            currentMeasurement = null;
+            redrawCurrentImage();
+            showToast('Measurement saved', 'success');
         }
 
         function drawMeasurements() {
@@ -1969,13 +2103,13 @@
                     ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
                     ctx.fill();
                     
-                    // Calculate and display area
-                    const area = calculatePolygonArea(points);
+                    // Calculate and display area (mm²/cm² when PixelSpacing available)
+                    const area = calculateArea(points);
                     const centerX = points.reduce((sum, p) => sum + p.x, 0) / points.length;
                     const centerY = points.reduce((sum, p) => sum + p.y, 0) / points.length;
                     
                     ctx.fillStyle = '#ffff00';
-                    ctx.fillText(`${area.toFixed(2)} mm²`, centerX, centerY);
+                    ctx.fillText(area.text, centerX, centerY);
                     
                     measurement.bounds = {
                         x1: Math.min(...points.map(p => p.x)) - 10,
@@ -2014,9 +2148,11 @@
             });
         }
 
+        let crosshairPos = { x: null, y: null };
+
         function drawCrosshair() {
-            const centerX = canvas.width / 2;
-            const centerY = canvas.height / 2;
+            const centerX = (crosshairPos && crosshairPos.x != null) ? crosshairPos.x : (canvas.width / 2);
+            const centerY = (crosshairPos && crosshairPos.y != null) ? crosshairPos.y : (canvas.height / 2);
             
             ctx.strokeStyle = '#00ffff';
             ctx.lineWidth = 1;
@@ -2032,27 +2168,88 @@
             ctx.setLineDash([]);
         }
 
+        function getPixelSpacing() {
+            if (!currentSeries || !currentSeries.pixel_spacing) return null;
+            const parts = String(currentSeries.pixel_spacing).split('\\');
+            const row = parseFloat(parts[0]);
+            const col = parseFloat(parts.length >= 2 ? parts[1] : parts[0]);
+            if (!isFinite(row) || !isFinite(col) || row <= 0 || col <= 0) return null;
+            return { row, col };
+        }
+
+        function formatLengthFromMm(mm) {
+            if (mm == null || !isFinite(mm)) return { text: null };
+            if (mm >= 10) {
+                const cm = mm / 10;
+                const v = Math.round(cm * 100) / 100;
+                return { text: `${v} cm` };
+            }
+            const v = Math.round(mm * 100) / 100;
+            return { text: `${v} mm` };
+        }
+
         function calculateDistance(measurement) {
             const deltaX = measurement.endX - measurement.startX;
             const deltaY = measurement.endY - measurement.startY;
             const pixelDistance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-            
-            let realDistance = pixelDistance;
-            let unit = 'px';
-            
-            if (currentSeries && currentSeries.pixel_spacing) {
-                const spacing = currentSeries.pixel_spacing.split('\\');
-                if (spacing.length >= 2) {
-                    const avgSpacing = (parseFloat(spacing[0]) + parseFloat(spacing[1])) / 2;
-                    realDistance = pixelDistance * avgSpacing;
-                    unit = 'mm';
-                }
+
+            const spacing = getPixelSpacing();
+            if (spacing) {
+                // Non-square pixels: scale per axis
+                const dxMm = deltaX * spacing.col;
+                const dyMm = deltaY * spacing.row;
+                const mm = Math.sqrt(dxMm * dxMm + dyMm * dyMm);
+                return {
+                    pixels: Math.round(pixelDistance),
+                    mm: Math.round(mm * 100) / 100,
+                    text: formatLengthFromMm(mm).text
+                };
             }
-            
+
             return {
                 pixels: Math.round(pixelDistance),
-                real: Math.round(realDistance * 100) / 100,
-                text: `${Math.round(realDistance * 100) / 100} ${unit}`
+                mm: null,
+                text: `${Math.round(pixelDistance)} px`
+            };
+        }
+
+        function calculatePolygonAreaPx2(points) {
+            if (!points || points.length < 3) return 0;
+            let area = 0;
+            for (let i = 0; i < points.length; i++) {
+                const j = (i + 1) % points.length;
+                area += points[i].x * points[j].y;
+                area -= points[j].x * points[i].y;
+            }
+            return Math.abs(area / 2);
+        }
+
+        function formatAreaFromMm2(mm2) {
+            if (mm2 == null || !isFinite(mm2)) return { text: null };
+            if (mm2 >= 100) {
+                const cm2 = mm2 / 100;
+                const v = Math.round(cm2 * 100) / 100;
+                return { text: `${v} cm²` };
+            }
+            const v = Math.round(mm2 * 100) / 100;
+            return { text: `${v} mm²` };
+        }
+
+        function calculateArea(points) {
+            const px2 = calculatePolygonAreaPx2(points);
+            const spacing = getPixelSpacing();
+            if (spacing) {
+                const mm2 = px2 * spacing.row * spacing.col;
+                return {
+                    px2: Math.round(px2 * 100) / 100,
+                    mm2: Math.round(mm2 * 100) / 100,
+                    text: formatAreaFromMm2(mm2).text
+                };
+            }
+            return {
+                px2: Math.round(px2 * 100) / 100,
+                mm2: null,
+                text: `${Math.round(px2 * 100) / 100} px²`
             };
         }
 
@@ -2060,6 +2257,10 @@
             if (!currentSeries) return;
             
             try {
+                const typeMap = { distance: 'length', angle: 'angle', area: 'area' };
+                const backendType = typeMap[measurement.type] || measurement.type;
+                const spacing = getPixelSpacing();
+
                 const response = await fetch('/dicom-viewer/measurements/save/', {
                     method: 'POST',
                     headers: {
@@ -2068,10 +2269,14 @@
                     },
                     body: JSON.stringify({
                         image_id: imageData[currentImageIndex].id,
-                        measurement_type: measurement.type,
+                        measurement_type: backendType,
                         points: JSON.stringify(measurement),
-                        value: measurement.type === 'distance' ? calculateDistance(measurement).real : null,
-                        unit: currentSeries.pixel_spacing ? 'mm' : 'px'
+                        value: measurement.type === 'distance'
+                            ? (calculateDistance(measurement).mm ?? calculateDistance(measurement).pixels)
+                            : (measurement.value ?? null),
+                        unit: measurement.type === 'distance'
+                            ? (spacing ? 'mm' : 'px')
+                            : (measurement.unit || (spacing ? 'mm' : 'px'))
                     })
                 });
                 
@@ -2151,9 +2356,10 @@
                         Angle: ${measurement.value || 'N/A'}°
                     `;
                 } else if (measurement.type === 'area') {
+                    const area = calculateArea(measurement.points || []);
                     item.innerHTML = `
                         <strong>Area ${index + 1}</strong><br>
-                        Area: ${measurement.value || 'N/A'} mm²
+                        Area: ${area.text || 'N/A'}
                     `;
                 }
                 
@@ -2193,15 +2399,7 @@
         }
 
         function calculatePolygonArea(points) {
-            if (points.length < 3) return 0;
-            
-            let area = 0;
-            for (let i = 0; i < points.length; i++) {
-                const j = (i + 1) % points.length;
-                area += points[i].x * points[j].y;
-                area -= points[j].x * points[i].y;
-            }
-            return Math.abs(area / 2);
+            return calculatePolygonAreaPx2(points);
         }
 
         // Context Menu Functions
@@ -2289,8 +2487,8 @@
                     const angle = calculateAngle(measurement.points[0], measurement.points[1], measurement.points[2]);
                     value = `${angle.degrees.toFixed(1)}°`;
                 } else if (measurement.type === 'area') {
-                    const area = calculatePolygonArea(measurement.points);
-                    value = `${area.toFixed(2)} mm²`;
+                    const area = calculateArea(measurement.points || []);
+                    value = area.text || 'N/A';
                 }
                 
                 navigator.clipboard.writeText(value).then(() => {
@@ -2334,6 +2532,11 @@
         }
 
         // MPR and 3D Functions
+        // Backwards-compatible alias (some buttons call generateMPR()).
+        async function generateMPR() {
+            return generateMPRViews();
+        }
+
         async function generateMPRViews() {
             if (!currentSeries) return;
             

@@ -2274,13 +2274,21 @@
         function updateWindowWidth(value) {
             windowWidth = parseInt(value);
             document.getElementById('wwValue').textContent = windowWidth;
-            updateImageDisplay();
+            if (mprMode) {
+                refreshMPRForWindowingChange();
+            } else {
+                updateImageDisplay();
+            }
         }
 
         function updateWindowLevel(value) {
             windowLevel = parseInt(value);
             document.getElementById('wlValue').textContent = windowLevel;
-            updateImageDisplay();
+            if (mprMode) {
+                refreshMPRForWindowingChange();
+            } else {
+                updateImageDisplay();
+            }
         }
 
         function applyPreset(preset) {
@@ -2310,7 +2318,11 @@
                 document.getElementById('wlValue').textContent = windowLevel;
                 
                 // Immediate image update
-                updateImageDisplay();
+                if (mprMode) {
+                    refreshMPRForWindowingChange();
+                } else {
+                    updateImageDisplay();
+                }
                 
                 // Quick notification
                 const desc = windowPresets[preset].desc || preset;
@@ -2367,7 +2379,11 @@
             windowLevel = defaultWindowLevel;
             
             updateWindowSliders();
-            updateImageDisplay();
+            if (mprMode) {
+                refreshMPRForWindowingChange();
+            } else {
+                updateImageDisplay();
+            }
             
             showToast(`Reset to DICOM defaults: WW:${windowWidth}, WL:${windowLevel}`, 'info');
         }
@@ -2398,7 +2414,11 @@
             // Show live feedback during dragging
             updateWindowLevelIndicator(Math.round(windowWidth), Math.round(windowLevel));
             
-            updateImageDisplay();
+            if (mprMode) {
+                refreshMPRForWindowingChange();
+            } else {
+                updateImageDisplay();
+            }
         }
 
         // Zoom Management
@@ -2916,7 +2936,11 @@
 
         function toggleInvert() {
             inverted = !inverted;
-            updateImageDisplay();
+            if (mprMode) {
+                refreshMPRForWindowingChange();
+            } else {
+                updateImageDisplay();
+            }
             
             // Update tool visual state
             const tool = document.querySelector('[data-tool="invert"]');
@@ -3622,11 +3646,13 @@
                 mprCrosshair.x = x;
                 mprCrosshair.y = y;
             } else if (plane === 'sagittal') {
-                mprCrosshair.z = x;
-                mprCrosshair.y = y;
+                // Sagittal axes: horizontal = Y, vertical = Z (superior at top)
+                mprCrosshair.y = x;
+                mprCrosshair.z = 100 - y;
             } else if (plane === 'coronal') {
                 mprCrosshair.x = x;
-                mprCrosshair.z = y;
+                // Coronal axes: horizontal = X, vertical = Z (superior at top)
+                mprCrosshair.z = 100 - y;
             }
             
             // Update crosshair display on all planes
@@ -3674,13 +3700,33 @@
                     if (hLine) hLine.style.top = `${mprCrosshair.y}%`;
                     if (vLine) vLine.style.left = `${mprCrosshair.x}%`;
                 } else if (plane === 'sagittal') {
-                    if (hLine) hLine.style.top = `${mprCrosshair.y}%`;
-                    if (vLine) vLine.style.left = `${mprCrosshair.z}%`;
+                    if (hLine) hLine.style.top = `${100 - mprCrosshair.z}%`;
+                    if (vLine) vLine.style.left = `${mprCrosshair.y}%`;
                 } else if (plane === 'coronal') {
-                    if (hLine) hLine.style.top = `${mprCrosshair.z}%`;
+                    if (hLine) hLine.style.top = `${100 - mprCrosshair.z}%`;
                     if (vLine) vLine.style.left = `${mprCrosshair.x}%`;
                 }
             });
+        }
+
+        // When WW/WL or inversion changes while in MPR mode, refresh the current slices.
+        // This makes presets (e.g., Bone) immediately visible in the MPR panels.
+        function refreshMPRForWindowingChange() {
+            if (!mprMode || !currentSeries || !volumeMetadata || !volumeMetadata.counts) return;
+            try {
+                // Clear cache so new WW/WL is reflected immediately
+                if (typeof mprSliceCache !== 'undefined' && mprSliceCache && mprSliceCache.clear) {
+                    mprSliceCache.clear();
+                }
+                ['axial', 'sagittal', 'coronal'].forEach(plane => {
+                    const idx = (mprIndices && typeof mprIndices[plane] === 'number')
+                        ? mprIndices[plane]
+                        : Math.floor(volumeMetadata.counts[plane] / 2);
+                    loadMPRSlice(plane, idx, true);
+                });
+            } catch (e) {
+                console.error('Failed to refresh MPR after windowing change:', e);
+            }
         }
 
         // Apply transform to individual MPR viewport

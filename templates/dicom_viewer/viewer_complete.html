@@ -2401,7 +2401,7 @@
             try {
                 showLoading('Generating MPR views...');
                 
-                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?ww=${windowWidth}&wl=${windowLevel}&invert=${inverted}`);
+                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`);
                 const data = await response.json();
                 
                 if (data.views) {

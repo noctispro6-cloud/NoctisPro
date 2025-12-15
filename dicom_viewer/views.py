@@ -140,7 +140,13 @@ def _get_encoded_mpr_slice(series_id, volume, plane, slice_index, ww, wl, invert
         if slice_index < 0 or slice_index >= volume.shape[2]:
             logger.warning(f"Invalid sagittal slice index {slice_index} for volume shape {volume.shape}")
             slice_index = min(max(0, slice_index), volume.shape[2] - 1)
-        slice_array = volume[:, :, slice_index]
+        # NOTE:
+        # volume is (depth=z, height=y, width=x).
+        # For sagittal we want the horizontal axis to be z (depth) and vertical axis to be y (height)
+        # to match the frontend's crosshair mapping (x% -> z, y% -> y).
+        # volume[:, :, x] returns (z, y) which would display with x-axis=y and y-axis=z (swapped).
+        # Transpose to (y, z) so x-axis=z and y-axis=y.
+        slice_array = np.transpose(volume[:, :, slice_index], (1, 0))
     else:  # coronal
         if slice_index < 0 or slice_index >= volume.shape[1]:
             logger.warning(f"Invalid coronal slice index {slice_index} for volume shape {volume.shape}")
@@ -530,10 +536,16 @@ def api_mpr_reconstruction(request, series_id):
             except Exception:
                 return fallback
 
-        # Use provided window params if present; otherwise derive once
-        ww_param = request.GET.get('window_width')
-        wl_param = request.GET.get('window_level')
-        inverted = request.GET.get('inverted', 'false').lower() == 'true'
+        # Use provided window params if present; otherwise derive once.
+        # Backwards-compatible aliases:
+        # - ww/wl (older frontend)
+        # - invert (older frontend)
+        ww_param = request.GET.get('window_width') or request.GET.get('ww')
+        wl_param = request.GET.get('window_level') or request.GET.get('wl')
+        inverted_param = request.GET.get('inverted')
+        if inverted_param is None:
+            inverted_param = request.GET.get('invert')
+        inverted = (inverted_param or 'false').lower() == 'true'
         if ww_param is None or wl_param is None:
             default_window_width, default_window_level = _derive_window(volume)
             window_width = float(ww_param) if ww_param is not None else float(default_window_width)
@@ -1006,9 +1018,13 @@ def api_dicom_image_display(request, image_id):
     warnings = {}
     try:
         # Get windowing parameters from request
-        window_width_param = request.GET.get('window_width')
-        window_level_param = request.GET.get('window_level')
-        inverted = request.GET.get('inverted', 'false').lower() == 'true'
+        # Support both new (window_width/window_level/inverted) and legacy (ww/wl/invert) query params
+        window_width_param = request.GET.get('window_width') or request.GET.get('ww')
+        window_level_param = request.GET.get('window_level') or request.GET.get('wl')
+        inverted_param = request.GET.get('inverted')
+        if inverted_param is None:
+            inverted_param = request.GET.get('invert')
+        inverted = (inverted_param or 'false').lower() == 'true'
 
         # Read DICOM file (best-effort)
         ds = None
@@ -1135,7 +1151,7 @@ def api_dicom_image_display(request, image_id):
                 window_level = float(default_window_level)
             else:
                 window_level = float(window_level_param)
-            if request.GET.get('inverted') is None:
+            if request.GET.get('inverted') is None and request.GET.get('invert') is None:
                 inverted = bool(default_inverted)
         except Exception:
             window_width = float(default_window_width)

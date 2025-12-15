@@ -140,18 +140,17 @@ def _get_encoded_mpr_slice(series_id, volume, plane, slice_index, ww, wl, invert
         if slice_index < 0 or slice_index >= volume.shape[2]:
             logger.warning(f"Invalid sagittal slice index {slice_index} for volume shape {volume.shape}")
             slice_index = min(max(0, slice_index), volume.shape[2] - 1)
-        # NOTE:
         # volume is (depth=z, height=y, width=x).
-        # For sagittal we want the horizontal axis to be z (depth) and vertical axis to be y (height)
-        # to match the frontend's crosshair mapping (x% -> z, y% -> y).
-        # volume[:, :, x] returns (z, y) which would display with x-axis=y and y-axis=z (swapped).
-        # Transpose to (y, z) so x-axis=z and y-axis=y.
-        slice_array = np.transpose(volume[:, :, slice_index], (1, 0))
+        # Sagittal slice at fixed x: (z, y) -> rows=z, cols=y.
+        # Display convention: superior at top, so flip the z axis for display.
+        slice_array = np.flipud(volume[:, :, slice_index])
     else:  # coronal
         if slice_index < 0 or slice_index >= volume.shape[1]:
             logger.warning(f"Invalid coronal slice index {slice_index} for volume shape {volume.shape}")
             slice_index = min(max(0, slice_index), volume.shape[1] - 1)
-        slice_array = volume[:, slice_index, :]
+        # Coronal slice at fixed y: (z, x) -> rows=z, cols=x.
+        # Display convention: superior at top, so flip the z axis for display.
+        slice_array = np.flipud(volume[:, slice_index, :])
     
     img_b64 = _array_to_base64_image(slice_array, ww, wl, inverted)
     if img_b64:
@@ -685,8 +684,10 @@ def api_mip_reconstruction(request, series_id):
         # Generate MIP projections (vectorized)
         mip_views = {}
         mip_views['axial'] = _array_to_base64_image(np.max(volume, axis=0), window_width, window_level, inverted)
-        mip_views['sagittal'] = _array_to_base64_image(np.max(volume, axis=1), window_width, window_level, inverted)
-        mip_views['coronal'] = _array_to_base64_image(np.max(volume, axis=2), window_width, window_level, inverted)
+        # For (z,y,x): sagittal is (z,y) (max over x), coronal is (z,x) (max over y).
+        # Flip Z vertically so superior is at the top for these reformats.
+        mip_views['sagittal'] = _array_to_base64_image(np.flipud(np.max(volume, axis=2)), window_width, window_level, inverted)
+        mip_views['coronal'] = _array_to_base64_image(np.flipud(np.max(volume, axis=1)), window_width, window_level, inverted)
         
         return JsonResponse({
             'mip_views': mip_views,
@@ -772,8 +773,9 @@ def api_bone_reconstruction(request, series_id):
         sag_idx = bone_volume.shape[2] // 2
         cor_idx = bone_volume.shape[1] // 2
         bone_views['axial'] = _array_to_base64_image(bone_volume[axial_idx], window_width, window_level, inverted)
-        bone_views['sagittal'] = _array_to_base64_image(bone_volume[:, :, sag_idx], window_width, window_level, inverted)
-        bone_views['coronal'] = _array_to_base64_image(bone_volume[:, cor_idx, :], window_width, window_level, inverted)
+        # Match MPR display convention: superior at top (flip Z vertically)
+        bone_views['sagittal'] = _array_to_base64_image(np.flipud(bone_volume[:, :, sag_idx]), window_width, window_level, inverted)
+        bone_views['coronal'] = _array_to_base64_image(np.flipud(bone_volume[:, cor_idx, :]), window_width, window_level, inverted)
         
         mesh_payload = None
         if want_mesh:
@@ -3189,7 +3191,12 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
             max_depth = 2048
             target_depth = int(min(max_depth, round(volume.shape[0] * z_factor)))
             if target_depth > volume.shape[0] + 1 or z_factor > 1.05:
-                volume = ndimage.zoom(volume, (float(target_depth) / volume.shape[0], 1, 1), order=1)
+                # Prefer higher-order interpolation for sharper MPR reformats
+                try:
+                    volume = ndimage.zoom(volume, (float(target_depth) / volume.shape[0], 1, 1), order=3, prefilter=True)
+                except Exception as _e:
+                    logger.warning(f"Z resample (order=3) failed, falling back to linear: {_e}")
+                    volume = ndimage.zoom(volume, (float(target_depth) / volume.shape[0], 1, 1), order=1)
                 st = target_xy
     except Exception:
         pass

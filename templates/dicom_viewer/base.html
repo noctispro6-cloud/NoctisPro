@@ -246,6 +246,7 @@
 
         /* MPR Grid Layout */
         .mpr-grid {
+            position: relative;
             display: grid;
             grid-template-columns: 1fr 1fr;
             grid-template-rows: 1fr 1fr;
@@ -253,6 +254,68 @@
             width: 100%;
             height: 100%;
             background: var(--border-color);
+        }
+
+        /* MPR Focus mode (single-plane maximize) */
+        .mpr-grid.mpr-focused {
+            grid-template-columns: 1fr;
+            grid-template-rows: 1fr;
+        }
+
+        .mpr-grid.mpr-focused .mpr-viewport {
+            display: none;
+        }
+
+        .mpr-grid.mpr-focused.mpr-focus-axial .mpr-viewport[data-plane="axial"],
+        .mpr-grid.mpr-focused.mpr-focus-sagittal .mpr-viewport[data-plane="sagittal"],
+        .mpr-grid.mpr-focused.mpr-focus-coronal .mpr-viewport[data-plane="coronal"] {
+            display: flex;
+            grid-column: 1;
+            grid-row: 1;
+        }
+
+        .mpr-focus-bar {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            right: 8px;
+            z-index: 30;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            pointer-events: auto;
+        }
+
+        .mpr-grid.mpr-focused .mpr-focus-bar {
+            display: flex;
+        }
+
+        .mpr-focus-bar .mpr-focus-title {
+            background: rgba(0, 0, 0, 0.8);
+            color: var(--accent-color);
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            border: 1px solid var(--border-color);
+        }
+
+        .mpr-focus-bar .mpr-focus-back {
+            background: rgba(0,0,0,0.85);
+            border: 1px solid var(--border-color);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .mpr-focus-bar .mpr-focus-back:hover {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            border-color: var(--accent-color);
         }
 
         .mpr-viewport {
@@ -1381,7 +1444,14 @@
 
             <!-- Professional 2x2 Orthogonal View Grid -->
             <div class="mpr-grid" id="mprView" style="display: none;">
-                <div class="mpr-viewport" data-plane="axial" onclick="setActivePlane('axial')">
+                <div class="mpr-focus-bar" id="mprFocusBar">
+                    <button class="mpr-focus-back" onclick="event.stopPropagation(); exitMPRFocus();" title="Back to MPR grid">
+                        <i class="fas fa-th-large"></i> Back to MPR
+                    </button>
+                    <div class="mpr-focus-title" id="mprFocusTitle">MPR</div>
+                </div>
+
+                <div class="mpr-viewport" data-plane="axial" onclick="onMPRViewportClick('axial', event)">
                     <div class="mpr-label">Axial (Z)</div>
                     <div class="mpr-controls" style="position: absolute; top: 8px; right: 8px; display: none; gap: 4px;">
                         <button onclick="event.stopPropagation(); resetMPRViewport('axial')" title="Reset Axial View" 
@@ -1395,7 +1465,7 @@
                         <div class="crosshair-line-v-mpr"></div>
                     </div>
                 </div>
-                <div class="mpr-viewport" data-plane="sagittal" onclick="setActivePlane('sagittal')">
+                <div class="mpr-viewport" data-plane="sagittal" onclick="onMPRViewportClick('sagittal', event)">
                     <div class="mpr-label">Sagittal (X)</div>
                     <div class="mpr-controls" style="position: absolute; top: 8px; right: 8px; display: none; gap: 4px;">
                         <button onclick="event.stopPropagation(); resetMPRViewport('sagittal')" title="Reset Sagittal View"
@@ -1409,7 +1479,7 @@
                         <div class="crosshair-line-v-mpr"></div>
                     </div>
                 </div>
-                <div class="mpr-viewport" data-plane="coronal" onclick="setActivePlane('coronal')">
+                <div class="mpr-viewport" data-plane="coronal" onclick="onMPRViewportClick('coronal', event)">
                     <div class="mpr-label">Coronal (Y)</div>
                     <div class="mpr-controls" style="position: absolute; top: 8px; right: 8px; display: none; gap: 4px;">
                         <button onclick="event.stopPropagation(); resetMPRViewport('coronal')" title="Reset Coronal View"
@@ -1423,7 +1493,7 @@
                         <div class="crosshair-line-v-mpr"></div>
                     </div>
                 </div>
-                <div class="mpr-viewport" data-plane="3d" onclick="setActivePlane('3d')">
+                <div class="mpr-viewport" data-plane="3d" onclick="onMPRViewportClick('3d', event)">
                     <div class="mpr-label">3D Volume</div>
                     <div id="threeDContainer" class="three-container"></div>
                 </div>
@@ -1871,6 +1941,8 @@
             sagittal: { zoom: 1.0, panX: 0, panY: 0 },
             coronal: { zoom: 1.0, panX: 0, panY: 0 }
         };
+        // MPR "single window" focus mode
+        let mprFocusedPlane = null; // null = 2x2 grid, otherwise 'axial'|'sagittal'|'coronal'
         
         // Professional caching for performance (PyQt-inspired)
         let imageCache = new Map();
@@ -3077,15 +3149,66 @@
                 await generateMPRViews();
                 document.getElementById('singleView').style.display = 'none';
                 document.getElementById('mprView').style.display = 'grid';
+                exitMPRFocus(true);
                 
                 // Update tool state
                 document.querySelector('[data-tool="mpr"]').classList.add('active');
             } else {
                 document.getElementById('singleView').style.display = 'flex';
                 document.getElementById('mprView').style.display = 'none';
+                exitMPRFocus(true);
                 
                 // Update tool state
                 document.querySelector('[data-tool="mpr"]').classList.remove('active');
+            }
+        }
+
+        function _clearMPRFocusClasses(mprEl) {
+            if (!mprEl) return;
+            mprEl.classList.remove('mpr-focused', 'mpr-focus-axial', 'mpr-focus-sagittal', 'mpr-focus-coronal');
+        }
+
+        function focusMPRPlane(plane) {
+            if (!mprMode) return;
+            if (!['axial', 'sagittal', 'coronal'].includes(plane)) return;
+            const mprEl = document.getElementById('mprView');
+            if (!mprEl) return;
+
+            _clearMPRFocusClasses(mprEl);
+            mprEl.classList.add('mpr-focused', `mpr-focus-${plane}`);
+            mprFocusedPlane = plane;
+
+            const title = document.getElementById('mprFocusTitle');
+            if (title) title.textContent = `${plane.toUpperCase()} VIEW`;
+
+            // Keep active plane consistent for wheel/zoom/pan behavior
+            setActivePlane(plane);
+        }
+
+        function exitMPRFocus(silent = false) {
+            const mprEl = document.getElementById('mprView');
+            if (!mprEl) return;
+            _clearMPRFocusClasses(mprEl);
+            mprFocusedPlane = null;
+            const title = document.getElementById('mprFocusTitle');
+            if (title) title.textContent = 'MPR';
+            if (!silent && mprMode) {
+                showToast('Back to MPR grid', 'info', 1200);
+            }
+        }
+
+        function onMPRViewportClick(plane, e) {
+            try {
+                if (e) e.stopPropagation();
+                setActivePlane(plane);
+                // Only focus real MPR planes (not 3D).
+                if (plane === '3d') return;
+                // Click to focus that plane; use "Back to MPR" to return.
+                if (mprFocusedPlane !== plane) {
+                    focusMPRPlane(plane);
+                }
+            } catch (err) {
+                console.error('MPR viewport click failed:', err);
             }
         }
 
@@ -3601,9 +3724,7 @@
                     }
                 });
                 
-                viewport.addEventListener('click', function(e) {
-                    setActivePlane(plane);
-                });
+                // Click handling is done via the inline onclick on each viewport (focus + setActivePlane).
                 
                 // Wheel event for individual viewport zoom
                 viewport.addEventListener('wheel', function(e) {

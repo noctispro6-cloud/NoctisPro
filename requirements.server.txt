@@ -1,0 +1,39 @@
+# Minimal production requirements for a small VPS (Ubuntu 24.04)
+# Focus: web app + DICOM receiver/viewer. Heavy AI packages intentionally excluded.
+#
+# If you need AI later (torch/transformers/etc), install from requirements.txt.
+
+# Core Django
+Django==5.2.5
+python-dotenv
+Pillow
+django-widget-tweaks
+
+# API / CORS / ASGI
+djangorestframework
+django-cors-headers
+daphne
+channels
+
+# Production serving
+gunicorn
+whitenoise
+
+# Database (optional; project defaults to SQLite if unset)
+psycopg2-binary
+dj-database-url
+
+# DICOM
+pydicom
+pynetdicom
+highdicom
+
+# Imaging / math used by viewer + recon
+numpy
+scipy
+scikit-image
+
+# Utilities
+requests
+python-magic
+

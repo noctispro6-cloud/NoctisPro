@@ -5,10 +5,11 @@ Requires=noctis-pro.service
 
 [Service]
 Type=simple
-Environment=APP_DIR=/opt/noctispro
-WorkingDirectory=%E{APP_DIR}
+EnvironmentFile=-/etc/noctis-pro/noctis-pro.env
+EnvironmentFile=-/etc/noctispro/noctispro.env
+WorkingDirectory=/
 Environment=DJANGO_SETTINGS_MODULE=noctis_pro.settings
-ExecStart=%E{APP_DIR}/venv/bin/celery -A noctis_pro worker -l info
+ExecStart=/usr/bin/env bash -lc 'APP_DIR="${APP_DIR:-/opt/noctispro}"; cd "${APP_DIR}"; exec "${APP_DIR}/venv/bin/celery" -A noctis_pro worker -l info'
 Restart=always
 RestartSec=5
 

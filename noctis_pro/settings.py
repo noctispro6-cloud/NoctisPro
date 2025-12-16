@@ -93,7 +93,14 @@ def normalize_domain_name(value: str) -> str:
 DOMAIN_NAME = normalize_domain_name(os.environ.get('DOMAIN_NAME', 'noctis-pro.com'))
 DOMAIN_HOSTS = [h for h in [DOMAIN_NAME, f"www.{DOMAIN_NAME}", f"dicom.{DOMAIN_NAME}"] if h and h != '.']
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')
+# Parse ALLOWED_HOSTS safely (ignore blanks/whitespace).
+# A common production misconfig is: ALLOWED_HOSTS="example.com, www.example.com"
+# which would otherwise include a leading space and trigger DisallowedHost (400).
+ALLOWED_HOSTS = [
+    h.strip().lower()
+    for h in os.environ.get('ALLOWED_HOSTS', '').split(',')
+    if h.strip()
+]
 if DEBUG:
     # Keep dev frictionless unless explicitly locked down
     ALLOWED_HOSTS.append('*')

@@ -4,9 +4,10 @@ After=network-online.target
 
 [Service]
 Type=simple
-Environment=APP_DIR=/opt/noctispro
-WorkingDirectory=%E{APP_DIR}
-ExecStart=%E{APP_DIR}/venv/bin/python %E{APP_DIR}/dicom_receiver.py --port 11112 --aet NOCTIS_SCP
+EnvironmentFile=-/etc/noctis-pro/noctis-pro.env
+EnvironmentFile=-/etc/noctispro/noctispro.env
+WorkingDirectory=/
+ExecStart=/usr/bin/env bash -lc 'APP_DIR="${APP_DIR:-/opt/noctispro}"; cd "${APP_DIR}"; exec "${APP_DIR}/venv/bin/python" "${APP_DIR}/dicom_receiver.py" --port 11112 --aet NOCTIS_SCP'
 Restart=always
 RestartSec=5
 

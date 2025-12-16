@@ -4,6 +4,7 @@ from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
 from django.db.models import Q, Count, Max
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 from .models import ChatRoom, ChatParticipant, ChatMessage, ChatInvitation
 from accounts.models import User
 
@@ -137,6 +138,16 @@ def join_room(request, room_id):
     
     # Check if room is private
     if room.is_private:
+        # If the user has a valid pending invitation, accept it.
+        invitation = ChatInvitation.objects.filter(
+            room=room,
+            invited_user=request.user,
+            status='pending',
+            expires_at__gt=timezone.now()
+        ).first()
+        if invitation and invitation.accept():
+            messages.success(request, f'You joined "{room.name}"!')
+            return redirect('chat:chat_room', room_id=room.id)
         messages.error(request, 'This is a private room. You need an invitation to join.')
         return redirect('chat:chat_rooms')
     
@@ -168,4 +179,37 @@ def leave_room(request, room_id):
     except ChatParticipant.DoesNotExist:
         messages.error(request, "You're not a member of this room.")
     
+    return redirect('chat:chat_rooms')
+
+
+@login_required
+@require_POST
+def accept_invitation(request, invitation_id: int):
+    """Accept a chat invitation."""
+    invitation = get_object_or_404(
+        ChatInvitation,
+        id=invitation_id,
+        invited_user=request.user
+    )
+    if invitation.status != 'pending' or timezone.now() >= invitation.expires_at:
+        messages.error(request, 'This invitation is no longer valid.')
+        return redirect('chat:chat_rooms')
+    invitation.accept()
+    messages.success(request, f'Invitation accepted: "{invitation.room.name}"')
+    return redirect('chat:chat_room', room_id=invitation.room.id)
+
+
+@login_required
+@require_POST
+def decline_invitation(request, invitation_id: int):
+    """Decline a chat invitation."""
+    invitation = get_object_or_404(
+        ChatInvitation,
+        id=invitation_id,
+        invited_user=request.user
+    )
+    if invitation.status != 'pending':
+        return redirect('chat:chat_rooms')
+    invitation.decline()
+    messages.success(request, 'Invitation declined.')
     return redirect('chat:chat_rooms')

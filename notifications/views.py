@@ -1,6 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
+from django.views.decorators.http import require_POST
 from .models import Notification
 
 @login_required
@@ -42,3 +43,27 @@ def mark_read(request, notification_id):
         notif.read_at = timezone.now()
         notif.save(update_fields=['is_read', 'read_at'])
     return redirect('notifications:notification_list')
+
+
+@login_required
+@require_POST
+def api_mark_read(request, notification_id: int):
+    """Mark a notification as read (JSON)."""
+    notif = get_object_or_404(Notification, id=notification_id, recipient=request.user)
+    if not notif.is_read:
+        from django.utils import timezone
+        notif.is_read = True
+        notif.read_at = timezone.now()
+        notif.save(update_fields=['is_read', 'read_at'])
+    unread_count = Notification.objects.filter(recipient=request.user, is_read=False).count()
+    return JsonResponse({'ok': True, 'id': notif.id, 'unread_count': unread_count})
+
+
+@login_required
+@require_POST
+def api_mark_all_read(request):
+    """Mark all notifications as read for current user (JSON)."""
+    from django.utils import timezone
+    qs = Notification.objects.filter(recipient=request.user, is_read=False)
+    updated = qs.update(is_read=True, read_at=timezone.now())
+    return JsonResponse({'ok': True, 'updated': updated, 'unread_count': 0})

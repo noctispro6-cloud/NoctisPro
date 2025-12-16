@@ -17,7 +17,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         username = options['username']
-        email = options['email'] or f"admin@{getattr(settings, 'DOMAIN_NAME', '') or 'noctis-pro.com'}"
+        email = options['email'] or f"admin@{getattr(settings, 'DOMAIN_NAME', '') or 'noctis-pro'}"
         password = options['password']
         first_name = options['first_name']
         last_name = options['last_name']

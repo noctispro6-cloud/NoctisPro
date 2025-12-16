@@ -240,7 +240,7 @@ This export was created on: $(date)
 ## Verification
 
 - Check that all services are running: \`docker compose ps\`
-- Access the web interface: \`https://noctis-pro.com\`
+- Access the web interface: \`https://noctis-pro\`
 - Check logs: \`docker compose logs -f\`
 - Test DICOM receiver on port 11112
 

@@ -39,7 +39,7 @@ ALLOWED_HOSTS.extend([
     '127.0.0.1',
     '0.0.0.0',
     'noctispro',
-    'noctispro2.duckdns.org',
+    'noctis-pro',
     '*.duckdns.org',
     '*.ngrok.io',
     '*.ngrok-free.app',
@@ -237,8 +237,8 @@ CORS_ALLOW_CREDENTIALS = True
 
 # CSRF trusted origins - Fix for 403 errors and ngrok support
 CSRF_TRUSTED_ORIGINS = [
-    "http://noctispro",
-    "https://noctispro", 
+    "http://noctis-pro",
+    "https://noctis-pro", 
     "https://*.ngrok.io",
     "https://*.ngrok-free.app",
     "https://*.ngrok.app",

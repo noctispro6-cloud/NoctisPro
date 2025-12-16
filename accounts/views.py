@@ -15,7 +15,7 @@ def login_view(request):
     # Auto-create initial superuser on first access if none exists
     try:
         if not User.objects.filter(is_superuser=True).exists():
-            domain = getattr(settings, 'DOMAIN_NAME', '') or 'noctis-pro.com'
+            domain = getattr(settings, 'DOMAIN_NAME', '') or 'noctis-pro'
             su = User.objects.create_superuser('admin', f'admin@{domain}', 'admin')
             su.role = 'admin'
             su.is_verified = True

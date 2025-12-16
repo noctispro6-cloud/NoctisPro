@@ -36,7 +36,27 @@ IS_NGROK = bool(NGROK_URL) or any('ngrok' in host for host in os.environ.get('AL
 SSL_ENABLED = os.environ.get('SSL_ENABLED', '').lower() == 'true' or os.environ.get('SECURE_SSL_REDIRECT', '').lower() == 'true'
 
 # Primary public domain (can be overridden via env)
-DOMAIN_NAME = os.environ.get('DOMAIN_NAME', 'noctis-pro.com').strip()
+#
+# NOTE: Some older deployments/configs used "noctispro.com" (missing hyphen).
+# We keep a small compatibility alias so the canonical hostname stays
+# "noctis-pro.com" unless the operator explicitly sets a different valid domain.
+def normalize_domain_name(value: str) -> str:
+    value = (value or "").strip()
+    # Accept users pasting full URLs (keep only the hostname).
+    if value.startswith("http://"):
+        value = value[len("http://") :]
+    elif value.startswith("https://"):
+        value = value[len("https://") :]
+    if "/" in value:
+        value = value.split("/", 1)[0]
+    value = value.rstrip(".").lower()
+
+    # Legacy alias: preserve the intended public hostname with hyphen.
+    if value in {"noctispro.com", "www.noctispro.com", "dicom.noctispro.com"}:
+        value = value.replace("noctispro.com", "noctis-pro.com")
+    return value
+
+DOMAIN_NAME = normalize_domain_name(os.environ.get('DOMAIN_NAME', 'noctis-pro.com'))
 DOMAIN_HOSTS = [h for h in [DOMAIN_NAME, f"www.{DOMAIN_NAME}", f"dicom.{DOMAIN_NAME}"] if h and h != '.']
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')

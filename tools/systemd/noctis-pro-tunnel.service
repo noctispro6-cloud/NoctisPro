@@ -1,0 +1,15 @@
+[Unit]
+Description=Noctis Pro Public HTTPS Tunnel (cloudflared)
+After=network-online.target noctis-pro.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=APP_DIR=/opt/noctispro
+WorkingDirectory=%E{APP_DIR}
+ExecStart=/usr/bin/env bash %E{APP_DIR}/scripts/quick-tunnel.sh --url http://localhost:8000 --write %E{APP_DIR}/.tunnel-url
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -21,10 +21,19 @@ DOMAIN=""
 LE_EMAIL=""
 FRESH_INSTALL=0
 USE_NGROK=0
+# Track whether values were explicitly provided (vs defaults/prompts).
+DOMAIN_PROVIDED=0
+EMAIL_PROVIDED=0
 # These can be provided via flags or environment variables:
 #   NGROK_AUTHTOKEN="..." NGROK_DOMAIN="noctis-pro.com.ngrok.app" sudo bash scripts/contabo_ubuntu2404_deploy.sh --ngrok --fresh
 NGROK_AUTHTOKEN="${NGROK_AUTHTOKEN:-}"
 NGROK_DOMAIN="${NGROK_DOMAIN:-}"
+NGROK_DOMAIN_PROVIDED=0
+NGROK_TOKEN_PROVIDED=0
+
+is_interactive() {
+  [[ -t 0 && -t 1 ]]
+}
 
 # Backwards-compatible arg parsing:
 # - Positional: <domain> <email> [--fresh]
@@ -33,10 +42,12 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --domain)
       DOMAIN="${2:-}"
+      DOMAIN_PROVIDED=1
       shift 2
       ;;
     --email)
       LE_EMAIL="${2:-}"
+      EMAIL_PROVIDED=1
       shift 2
       ;;
     --fresh)
@@ -50,23 +61,50 @@ while [[ $# -gt 0 ]]; do
     --ngrok-domain)
       USE_NGROK=1
       NGROK_DOMAIN="${2:-}"
+      NGROK_DOMAIN_PROVIDED=1
       shift 2
       ;;
     --ngrok-token|--ngrok-authtoken)
       USE_NGROK=1
       NGROK_AUTHTOKEN="${2:-}"
+      NGROK_TOKEN_PROVIDED=1
       shift 2
       ;;
     *)
       if [[ -z "${DOMAIN}" ]]; then
         DOMAIN="$1"
+        DOMAIN_PROVIDED=1
       elif [[ -z "${LE_EMAIL}" ]]; then
         LE_EMAIL="$1"
+        EMAIL_PROVIDED=1
       fi
       shift
       ;;
   esac
 done
+
+# Interactive prompts (TTY only): make the script friendlier when run without args.
+if is_interactive; then
+  if [[ "${USE_NGROK}" != "1" && "${DOMAIN_PROVIDED}" == "0" ]]; then
+    read -r -p "Domain for HTTPS (default: noctis-pro.com): " _domain_in
+    DOMAIN="${_domain_in:-noctis-pro.com}"
+  fi
+  if [[ "${USE_NGROK}" != "1" && "${EMAIL_PROVIDED}" == "0" ]]; then
+    read -r -p "Let's Encrypt email (default: admin@${DOMAIN:-noctis-pro.com}): " _email_in
+    LE_EMAIL="${_email_in:-admin@${DOMAIN:-noctis-pro.com}}"
+  fi
+  if [[ "${USE_NGROK}" == "1" ]]; then
+    if [[ -z "${NGROK_DOMAIN}" ]]; then
+      read -r -p "ngrok reserved domain (e.g. noctis-pro.com.ngrok.app): " _ngrok_domain_in
+      NGROK_DOMAIN="${_ngrok_domain_in}"
+    fi
+    if [[ -z "${NGROK_AUTHTOKEN}" ]]; then
+      read -r -s -p "ngrok authtoken: " _ngrok_token_in
+      echo
+      NGROK_AUTHTOKEN="${_ngrok_token_in}"
+    fi
+  fi
+fi
 
 # Default domain if not provided
 DOMAIN="${DOMAIN:-noctis-pro.com}"

@@ -21,7 +21,7 @@
 
     .chat-room-container {
         background: var(--dark-bg);
-        min-height: 100vh;
+        min-height: calc(100vh - 50px);
         display: flex;
         flex-direction: column;
     }
@@ -45,7 +45,7 @@
         flex: 1;
         padding: 1rem;
         overflow-y: auto;
-        max-height: calc(100vh - 200px);
+        max-height: calc(100vh - 240px);
     }
 
     .participants-sidebar {
@@ -61,6 +61,11 @@
         background: var(--card-bg);
         border-radius: 12px;
         border: 1px solid var(--border-color);
+    }
+
+    .message-item.own {
+        border-color: rgba(0, 212, 255, 0.35);
+        background: rgba(0, 212, 255, 0.06);
     }
 
     .message-header {
@@ -172,6 +177,53 @@
         font-size: 0.8rem;
         margin-left: 1rem;
     }
+
+    .composer {
+        background: rgba(255, 255, 255, 0.02);
+        border-top: 1px solid var(--border-color);
+        padding: 12px;
+        position: sticky;
+        bottom: 0;
+        z-index: 50;
+    }
+
+    .composer-inner {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+    }
+
+    .composer textarea {
+        resize: none;
+        min-height: 40px;
+        max-height: 140px;
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(64, 64, 64, 0.5);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text-primary);
+        font-size: 12px;
+        line-height: 1.35;
+    }
+
+    .composer textarea:focus {
+        outline: none;
+        border-color: rgba(0, 212, 255, 0.6);
+        box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.12);
+    }
+
+    .typing-indicator {
+        color: var(--text-muted);
+        font-size: 10px;
+        padding: 0 4px 6px;
+        min-height: 14px;
+    }
+
+    @media (max-width: 992px) {
+        .participants-sidebar { display: none; }
+        .messages-container { max-height: calc(100vh - 220px); }
+    }
 </style>
 {% endblock %}
 
@@ -224,10 +276,10 @@
     <!-- Chat Body -->
     <div class="chat-body">
         <!-- Messages Container -->
-        <div class="messages-container" id="messagesContainer">
+        <div class="messages-container" id="messagesContainer" data-room-id="{{ room.id }}" data-user-id="{{ user.id }}" data-username="{{ user.username|escapejs }}">
             {% if messages %}
                 {% for message in messages %}
-                <div class="message-item">
+                <div class="message-item{% if message.sender_id == user.id %} own{% endif %}" data-message-id="{{ message.id }}">
                     <div class="message-header">
                         <div class="message-avatar">
                             {{ message.sender.first_name|first|default:"U" }}{{ message.sender.last_name|first|default:"" }}
@@ -338,11 +390,14 @@
         </div>
     </div>
 
-    <!-- Message Input (Coming Soon) -->
-    <div class="coming-soon" style="padding: 1rem; background: var(--card-bg); border-top: 1px solid var(--border-color);">
-        <div class="d-flex align-items-center justify-content-center">
-            <i class="fas fa-keyboard me-2"></i>
-            <span>Real-time messaging coming soon! This will include text, file sharing, and study links.</span>
+    <!-- Message Composer -->
+    <div class="composer">
+        <div class="typing-indicator" id="typingIndicator"></div>
+        <div class="composer-inner">
+            <textarea id="chatInput" placeholder="Type a message… (Enter to send, Shift+Enter for newline)"></textarea>
+            <button type="button" class="btn-control" id="sendBtn" title="Send">
+                <i class="fas fa-paper-plane"></i>
+            </button>
         </div>
     </div>
 </div>
@@ -368,10 +423,174 @@ document.addEventListener('DOMContentLoaded', function() {
     scrollToBottom();
 });
 
-// Simulate real-time message updates
-setInterval(function() {
-    // This would typically connect to WebSocket for real-time messages
-    console.log('Checking for new messages...');
-}, 5000);
+// Real-time chat via WebSocket (Channels)
+(function () {
+    function ready(fn) {
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
+        else fn();
+    }
+
+    function wsUrl(path) {
+        var proto = (window.location.protocol === 'https:') ? 'wss://' : 'ws://';
+        return proto + window.location.host + path;
+    }
+
+    function esc(s) {
+        return (s || '').toString().replace(/[&<>"']/g, function (c) {
+            return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]);
+        });
+    }
+
+    function initials(name) {
+        var s = (name || '').trim();
+        if (!s) return 'U';
+        return s.slice(0, 2).toUpperCase();
+    }
+
+    function formatTime(iso) {
+        try {
+            var d = new Date(iso);
+            return d.toLocaleString(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        } catch (e) {
+            return '';
+        }
+    }
+
+    ready(function () {
+        var container = document.getElementById('messagesContainer');
+        var input = document.getElementById('chatInput');
+        var sendBtn = document.getElementById('sendBtn');
+        var typingEl = document.getElementById('typingIndicator');
+        if (!container || !input || !sendBtn) return;
+
+        var roomId = container.getAttribute('data-room-id');
+        var currentUserId = parseInt(container.getAttribute('data-user-id') || '0', 10);
+        var currentUsername = container.getAttribute('data-username') || '';
+
+        var socket;
+        var typingTimer;
+        var typingActive = false;
+        var lastTypingFrom = null;
+
+        function appendMessage(evt) {
+            var isOwn = (evt.user_id === currentUserId);
+            var wrapper = document.createElement('div');
+            wrapper.className = 'message-item' + (isOwn ? ' own' : '');
+            wrapper.setAttribute('data-message-id', evt.message_id || '');
+
+            var senderLabel = isOwn ? 'You' : (evt.username || 'User');
+            wrapper.innerHTML =
+                '<div class="message-header">' +
+                    '<div class="message-avatar">' + esc(initials(evt.username)) + '</div>' +
+                    '<span class="message-sender">' + esc(senderLabel) + '</span>' +
+                    '<span class="message-time">' + esc(formatTime(evt.timestamp)) + '</span>' +
+                '</div>' +
+                '<div class="message-content">' + esc(evt.message || '').replace(/\n/g, '<br>') + '</div>';
+
+            container.appendChild(wrapper);
+            scrollToBottom();
+        }
+
+        function setConnectedUi(connected) {
+            sendBtn.disabled = !connected;
+            input.disabled = !connected;
+            input.placeholder = connected ? 'Type a message… (Enter to send, Shift+Enter for newline)' : 'Connecting…';
+        }
+
+        function connect() {
+            try {
+                socket = new WebSocket(wsUrl('/ws/chat/' + roomId + '/'));
+            } catch (e) {
+                setConnectedUi(false);
+                return;
+            }
+
+            setConnectedUi(false);
+            socket.onopen = function () {
+                setConnectedUi(true);
+                try { socket.send(JSON.stringify({ type: 'mark_read' })); } catch(e) {}
+            };
+
+            socket.onmessage = function (e) {
+                var data;
+                try { data = JSON.parse(e.data); } catch (err) { return; }
+                if (!data || !data.type) return;
+
+                if (data.type === 'chat_message') {
+                    appendMessage(data);
+                    return;
+                }
+                if (data.type === 'typing_indicator') {
+                    if (data.is_typing) {
+                        lastTypingFrom = data.username || 'Someone';
+                        typingEl.textContent = lastTypingFrom + ' is typing…';
+                    } else {
+                        typingEl.textContent = '';
+                    }
+                    return;
+                }
+            };
+
+            socket.onclose = function () {
+                setConnectedUi(false);
+                // retry with backoff-ish delay
+                setTimeout(connect, 1500);
+            };
+        }
+
+        function sendMessage() {
+            var text = (input.value || '').trim();
+            if (!text || !socket || socket.readyState !== 1) return;
+            try {
+                socket.send(JSON.stringify({ type: 'message', message: text }));
+                input.value = '';
+                input.style.height = '';
+                if (typingActive) {
+                    typingActive = false;
+                    socket.send(JSON.stringify({ type: 'typing', is_typing: false }));
+                }
+            } catch (e) {}
+        }
+
+        function autoGrow() {
+            input.style.height = 'auto';
+            input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+        }
+
+        sendBtn.addEventListener('click', function () { sendMessage(); });
+        input.addEventListener('input', function () {
+            autoGrow();
+            if (!socket || socket.readyState !== 1) return;
+            if (!typingActive) {
+                typingActive = true;
+                try { socket.send(JSON.stringify({ type: 'typing', is_typing: true })); } catch(e) {}
+            }
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(function () {
+                if (!socket || socket.readyState !== 1) return;
+                typingActive = false;
+                try { socket.send(JSON.stringify({ type: 'typing', is_typing: false })); } catch(e) {}
+            }, 900);
+        });
+        input.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'visible' && socket && socket.readyState === 1) {
+                try { socket.send(JSON.stringify({ type: 'mark_read' })); } catch(e) {}
+            }
+        });
+
+        // initial connect
+        connect();
+        // if JS is disabled or socket fails, keep input disabled rather than misleading
+        setConnectedUi(false);
+        // prefill typing indicator empty
+        if (typingEl) typingEl.textContent = '';
+    });
+})();
 </script>
 {% endblock %}

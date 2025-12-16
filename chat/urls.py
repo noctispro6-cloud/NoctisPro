@@ -9,4 +9,6 @@ urlpatterns = [
     path('create/', views.create_room, name='create_room'),
     path('join/<uuid:room_id>/', views.join_room, name='join_room'),
     path('leave/<uuid:room_id>/', views.leave_room, name='leave_room'),
+    path('invitation/<int:invitation_id>/accept/', views.accept_invitation, name='accept_invitation'),
+    path('invitation/<int:invitation_id>/decline/', views.decline_invitation, name='decline_invitation'),
 ]

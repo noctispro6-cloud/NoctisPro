@@ -20,6 +20,11 @@ set -euo pipefail
 DOMAIN=""
 LE_EMAIL=""
 FRESH_INSTALL=0
+USE_NGROK=0
+# These can be provided via flags or environment variables:
+#   NGROK_AUTHTOKEN="..." NGROK_DOMAIN="noctis-pro.com.ngrok.app" sudo bash scripts/contabo_ubuntu2404_deploy.sh --ngrok --fresh
+NGROK_AUTHTOKEN="${NGROK_AUTHTOKEN:-}"
+NGROK_DOMAIN="${NGROK_DOMAIN:-}"
 
 # Backwards-compatible arg parsing:
 # - Positional: <domain> <email> [--fresh]
@@ -37,6 +42,20 @@ while [[ $# -gt 0 ]]; do
     --fresh)
       FRESH_INSTALL=1
       shift
+      ;;
+    --ngrok)
+      USE_NGROK=1
+      shift
+      ;;
+    --ngrok-domain)
+      USE_NGROK=1
+      NGROK_DOMAIN="${2:-}"
+      shift 2
+      ;;
+    --ngrok-token|--ngrok-authtoken)
+      USE_NGROK=1
+      NGROK_AUTHTOKEN="${2:-}"
+      shift 2
       ;;
     *)
       if [[ -z "${DOMAIN}" ]]; then
@@ -60,6 +79,23 @@ DOMAIN="${DOMAIN#http://}"
 DOMAIN="${DOMAIN#https://}"
 DOMAIN="${DOMAIN%%/*}"
 DOMAIN="${DOMAIN%.}"
+
+# ngrok mode: use the ngrok reserved domain as the public hostname and skip nginx/Let's Encrypt.
+if [[ "${USE_NGROK}" == "1" ]]; then
+  if [[ -z "${NGROK_DOMAIN}" ]]; then
+    echo "[!] --ngrok requires --ngrok-domain <reserved-domain> (e.g., noctis-pro.com.ngrok.app)" >&2
+    exit 2
+  fi
+  if [[ -z "${NGROK_AUTHTOKEN}" ]]; then
+    echo "[!] --ngrok requires --ngrok-token <authtoken> (or set NGROK_AUTHTOKEN env var)" >&2
+    exit 2
+  fi
+  DOMAIN="${NGROK_DOMAIN#http://}"
+  DOMAIN="${DOMAIN#https://}"
+  DOMAIN="${DOMAIN%%/*}"
+  DOMAIN="${DOMAIN%.}"
+  LE_EMAIL="admin@${DOMAIN}"
+fi
 
 # Guard against legacy/incorrect domain value (missing hyphen).
 # If someone passes "noctispro.com" we always deploy as "noctis-pro.com".
@@ -89,8 +125,9 @@ echo "[+] Email: ${LE_EMAIL}"
 echo "[+] App dir: ${APP_DIR}"
 
 # Detect whether www.<domain> actually resolves; many installs only set the apex A record.
+# In ngrok mode we do not include www.*.
 INCLUDE_WWW=0
-if getent ahosts "www.${DOMAIN}" >/dev/null 2>&1; then
+if [[ "${USE_NGROK}" != "1" ]] && getent ahosts "www.${DOMAIN}" >/dev/null 2>&1; then
   INCLUDE_WWW=1
 fi
 
@@ -111,16 +148,19 @@ if [[ "${FRESH_INSTALL}" == "1" ]]; then
   # Stop/disable app services (ignore if not present)
   systemctl stop noctis-pro.service 2>/dev/null || true
   systemctl stop noctis-pro-dicom.service 2>/dev/null || true
+  systemctl stop noctis-pro-ngrok-tunnel.service 2>/dev/null || true
   systemctl stop noctispro-web.service 2>/dev/null || true
   systemctl stop noctispro-dicom.service 2>/dev/null || true
   systemctl disable noctis-pro.service 2>/dev/null || true
   systemctl disable noctis-pro-dicom.service 2>/dev/null || true
+  systemctl disable noctis-pro-ngrok-tunnel.service 2>/dev/null || true
   systemctl disable noctispro-web.service 2>/dev/null || true
   systemctl disable noctispro-dicom.service 2>/dev/null || true
 
   # Remove systemd unit files (ignore if missing)
   rm -f "${SYSTEMD_DIR}/noctis-pro.service" || true
   rm -f "${SYSTEMD_DIR}/noctis-pro-dicom.service" || true
+  rm -f "${SYSTEMD_DIR}/noctis-pro-ngrok-tunnel.service" || true
   rm -f "${SYSTEMD_DIR}/noctispro-web.service" || true
   rm -f "${SYSTEMD_DIR}/noctispro-dicom.service" || true
   systemctl daemon-reload || true
@@ -212,6 +252,10 @@ DB_NAME=${APP_DIR}/db.sqlite3
 EOF
 
 chmod 600 "${ENV_FILE}"
+if [[ "${USE_NGROK}" == "1" ]]; then
+  # Helps Django auto-allow the host and generate correct absolute URLs.
+  echo "NGROK_URL=https://${DOMAIN}" >> "${ENV_FILE}"
+fi
 
 echo "[+] Running migrations + collectstatic..."
 cd "${APP_DIR}"
@@ -271,6 +315,61 @@ systemctl daemon-reload
 systemctl enable --now noctis-pro.service
 systemctl enable --now noctis-pro-dicom.service
 
+install_ngrok() {
+  if command -v ngrok >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "[+] Installing ngrok..."
+  local url="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"
+  curl -fsSL "${url}" -o /tmp/ngrok.tgz
+  tar -xzf /tmp/ngrok.tgz -C /tmp
+  install -m 0755 /tmp/ngrok /usr/local/bin/ngrok
+}
+
+if [[ "${USE_NGROK}" == "1" ]]; then
+  echo "[+] Setting up ngrok HTTPS tunnel (skipping nginx/Let's Encrypt)..."
+  install_ngrok
+
+  # Persist tunnel URL so Django can auto-detect it (see noctis_pro/settings.py).
+  echo -n "https://${DOMAIN}" > "${APP_DIR}/.tunnel-url"
+
+  # Write ngrok config (root-only readable).
+  NGROK_CFG="${ENV_DIR}/ngrok.yml"
+  cat > "${NGROK_CFG}" <<YAML
+version: 2
+authtoken: ${NGROK_AUTHTOKEN}
+tunnels:
+  noctis-web:
+    proto: http
+    addr: 8000
+    schemes:
+      - https
+    domain: ${DOMAIN}
+YAML
+  chmod 600 "${NGROK_CFG}"
+
+  # Create a dedicated systemd unit for the tunnel.
+  cat > "${SYSTEMD_DIR}/noctis-pro-ngrok-tunnel.service" <<EOF
+[Unit]
+Description=Noctis Pro Public HTTPS Tunnel (ngrok)
+After=network-online.target noctis-pro.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ngrok start --config ${NGROK_CFG} noctis-web
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now noctis-pro-ngrok-tunnel.service
+fi
+
+if [[ "${USE_NGROK}" != "1" ]]; then
 echo "[+] Configuring nginx reverse proxy..."
 cat > "${NGINX_SITE}" <<EOF
 server {
@@ -515,6 +614,7 @@ EOF
   systemctl reload nginx || systemctl restart nginx
   systemctl restart noctis-pro.service || true
 fi
+fi
 
 echo ""
 echo "============================================================"
@@ -528,7 +628,12 @@ echo "Admin login:"
 echo "  username: admin"
 echo "  password: ${ADMIN_PW}"
 echo ""
-echo "If SSL failed, confirm DNS A record points to this server,"
-echo "then re-run: sudo certbot certonly --webroot -w ${ACME_ROOT} -d ${DOMAIN} -d www.${DOMAIN}"
+if [[ "${USE_NGROK}" == "1" ]]; then
+  echo "ngrok tunnel enabled: ${DOMAIN}"
+  echo "Note: nginx/Let's Encrypt was skipped (ngrok provides HTTPS)."
+else
+  echo "If SSL failed, confirm DNS A record points to this server,"
+  echo "then re-run: sudo certbot certonly --webroot -w ${ACME_ROOT} -d ${DOMAIN} -d www.${DOMAIN}"
+fi
 echo "============================================================"
 

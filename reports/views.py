@@ -197,6 +197,9 @@ def write_report(request, study_id):
 
 @login_required
 def print_report_stub(request, study_id):
+    # Restrict to admin and radiologist
+    if not getattr(request.user, 'can_edit_reports', None) or not request.user.can_edit_reports():
+        return HttpResponse(status=403)
     """Printable HTML that mirrors facility letterhead, includes author signature and QR/link footer."""
     study = get_object_or_404(Study, id=study_id)
     report = Report.objects.filter(study=study).first()

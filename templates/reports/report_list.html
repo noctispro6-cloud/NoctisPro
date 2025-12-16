@@ -1,666 +1,150 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reports - Noctis Pro PACS</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <style>
-        :root {
-            --primary-bg: #0a0a0a;
-            --secondary-bg: #1a1a1a;
-            --card-bg: #252525;
-            --card-surface: #252525;
-            --header-bg: #333333;
-            --border-color: #404040;
-            --accent-color: #00d4ff;
-            --text-primary: #ffffff;
-            --text-secondary: #b3b3b3;
-            --text-muted: #666666;
-            --success-color: #00ff88;
-            --warning-color: #ffaa00;
-            --danger-color: #ff4444;
-            --urgent-color: #ff0066;
-            --scheduled-color: #4a90e2;
-            --in-progress-color: #f5a623;
-            --completed-color: #7ed321;
-            --cancelled-color: #d0021b;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--primary-bg);
-            color: var(--text-primary);
-            font-size: 12px;
-            overflow: hidden;
-        }
-
-        .dashboard-container {
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-
-        /* Top Navigation */
-        .top-navbar {
-            background: var(--header-bg);
-            border-bottom: 1px solid var(--border-color);
-            padding: 8px 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            height: 50px;
-        }
-
-        .nav-left {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-        }
-
-        .logo {
-            color: var(--accent-color);
-            font-weight: bold;
-            font-size: 16px;
-        }
-
-        .nav-tabs {
-            display: flex;
-            gap: 2px;
-        }
-
-        .nav-tab {
-            background: var(--secondary-bg);
-            border: 1px solid var(--border-color);
-            color: var(--text-secondary);
-            padding: 6px 12px;
-            font-size: 11px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .nav-tab.active {
-            background: var(--accent-color);
-            color: var(--primary-bg);
-            font-weight: bold;
-        }
-
-        .nav-tab:hover:not(.active) {
-            background: var(--card-bg);
-            color: var(--text-primary);
-        }
-
-        .nav-right {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            font-size: 11px;
-        }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .user-avatar {
-            background: var(--accent-color);
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            color: var(--primary-bg);
-            font-size: 10px;
-        }
-
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .status-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--success-color);
-        }
-
-        .btn-control {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            padding: 4px 12px;
-            font-size: 11px;
-            cursor: pointer;
-            border-radius: 2px;
-            transition: all 0.2s ease;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .btn-control:hover {
-            background: var(--accent-color);
-            color: var(--primary-bg);
-        }
-
-        /* Controls Bar */
-        .controls-bar {
-            background: var(--secondary-bg);
-            border-bottom: 1px solid var(--border-color);
-            padding: 8px 16px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            height: 40px;
-            flex-wrap: wrap;
-        }
-
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .control-label {
-            font-size: 11px;
-            color: var(--text-secondary);
-            font-weight: 500;
-        }
-
-        .control-input, .control-select {
-            background: var(--primary-bg);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            padding: 4px 8px;
-            font-size: 11px;
-            border-radius: 2px;
-            min-width: 100px;
-        }
-
-        .control-input:focus, .control-select:focus {
-            outline: none;
-            border-color: var(--accent-color);
-            box-shadow: 0 0 0 1px var(--accent-color);
-        }
-
-        .control-input::placeholder {
-            color: var(--text-muted);
-            font-style: italic;
-        }
-
-        /* Main Content */
-        .main-content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        /* Stats Grid */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 12px;
-            padding: 16px;
-            background: var(--primary-bg);
-        }
-
-        .stat-card {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 16px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            transition: all 0.2s ease;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
-        }
-
-        .stat-icon {
-            background: var(--accent-color);
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--primary-bg);
-            font-size: 16px;
-        }
-
-        .stat-content h3 {
-            color: var(--text-primary);
-            font-size: 24px;
-            font-weight: bold;
-            margin-bottom: 4px;
-        }
-
-        .stat-content p {
-            color: var(--text-secondary);
-            font-size: 11px;
-            margin: 0;
-        }
-
-        /* Data Table */
-        .data-table-container {
-            flex: 1;
-            overflow: auto;
-            background: var(--primary-bg);
-        }
-
-        .data-table {
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0;
-            font-size: 11px;
-        }
-
-        .data-table th {
-            background: var(--header-bg);
-            color: var(--text-primary);
-            padding: 8px 12px;
-            text-align: left;
-            font-weight: 600;
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border-bottom: 1px solid var(--border-color);
-            border-right: 1px solid var(--border-color);
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            white-space: nowrap;
-        }
-
-        .data-table th:last-child {
-            border-right: none;
-        }
-
-        .data-table th.sortable {
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .data-table th.sortable:hover {
-            background: var(--card-bg);
-        }
-
-        .data-table td {
-            padding: 4px 12px;
-            border-bottom: 1px solid rgba(64, 64, 64, 0.3);
-            border-right: 1px solid rgba(64, 64, 64, 0.3);
-            color: var(--text-secondary);
-            white-space: nowrap;
-            vertical-align: middle;
-            font-size: 11px;
-        }
-
-        .data-table td:last-child {
-            border-right: none;
-        }
-
-        .data-table tbody tr {
-            transition: background-color 0.1s ease;
-            cursor: pointer;
-        }
-
-        .data-table tbody tr:hover {
-            background: rgba(0, 212, 255, 0.08);
-        }
-
-        .data-table tbody tr:nth-child(even) {
-            background: rgba(255, 255, 255, 0.02);
-        }
-
-        .data-table tbody tr:nth-child(even):hover {
-            background: rgba(0, 212, 255, 0.08);
-        }
-
-        /* Status Badges */
-        .status-badge {
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 9px;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .status-draft {
-            background: rgba(156, 163, 175, 0.2);
-            color: #9ca3af;
-            border: 1px solid #9ca3af;
-        }
-
-        .status-preliminary {
-            background: rgba(245, 158, 11, 0.2);
-            color: #f59e0b;
-            border: 1px solid #f59e0b;
-        }
-
-        .status-final {
-            background: rgba(16, 185, 129, 0.2);
-            color: #10b981;
-            border: 1px solid #10b981;
-        }
-
-        /* Action Buttons */
-        .action-buttons {
-            display: flex;
-            gap: 4px;
-            align-items: center;
-        }
-
-        .btn-viewer {
-            background: var(--accent-color);
-            border: none;
-            color: var(--primary-bg);
-            padding: 4px 8px;
-            border-radius: 3px;
-            font-size: 9px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 2px;
-        }
-
-        .btn-viewer:hover {
-            background: #00b8d4;
-        }
-
-        .btn-viewer.viewer-only {
-            background: var(--card-bg);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-        }
-
-        .btn-viewer.viewer-only:hover {
-            background: var(--text-secondary);
-            color: var(--primary-bg);
-        }
-
-        /* Footer Status Bar */
-        .footer-status {
-            background: var(--secondary-bg);
-            border-top: 1px solid var(--border-color);
-            padding: 6px 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 10px;
-            color: var(--text-muted);
-            height: 30px;
-        }
-
-        .status-left {
-            display: flex;
-            gap: 20px;
-        }
-
-        .status-right {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-        }
-
-        .connection-status {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .connection-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--success-color);
-        }
-
-        /* Patient and report styling */
-        .patient-name {
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .patient-id {
-            font-family: 'Courier New', monospace;
-            color: var(--accent-color);
-            font-size: 10px;
-        }
-
-        .modality-badge {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 9px;
-            font-weight: bold;
-        }
-
-        .timestamp {
-            font-family: 'Courier New', monospace;
-            color: var(--text-muted);
-            font-size: 10px;
-        }
-
-        /* Responsive adjustments */
-        @media (max-width: 1200px) {
-            .data-table th,
-            .data-table td {
-                padding: 4px 8px;
-                font-size: 10px;
-            }
-            
-            .controls-bar {
-                flex-wrap: wrap;
-                height: auto;
-                min-height: 40px;
-            }
-
-            .action-buttons {
-                flex-direction: column;
-                gap: 2px;
-            }
-
-            .btn-viewer {
-                font-size: 8px;
-                padding: 3px 6px;
-            }
-
-            .stats-grid {
-                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-                gap: 8px;
-                padding: 12px;
-            }
-        }
-    </style>
-</head>
-<body>
-
-    <div class="dashboard-container">
-        <!-- Top Navigation -->
-        <nav class="top-navbar">
-            <div class="nav-left">
-                <div class="logo">
-                    <i class="fas fa-file-medical"></i> Noctis Pro PACS - Reports
-                </div>
-                <div class="nav-tabs">
-                    <div class="nav-tab" onclick="window.location.href='{% url 'worklist:dashboard' %}'">WORKLIST</div>
-                    <div class="nav-tab" onclick="window.location.href='{% url 'worklist:study_list' %}'">STUDIES</div>
-                    <div class="nav-tab active">REPORTS</div>
-                    {% if user.role == 'admin' %}
-                    <div class="nav-tab" onclick="window.location.href='{% url 'admin_panel:user_management' %}'"><i class="fas fa-user-cog"></i> MANAGE USERS</div>
-                    {% endif %}
+{% extends "base.html" %}
+
+{% block title %}Reports{% endblock %}
+
+{% block extra_css %}
+<style>
+    .reports-page .card-header { gap: 12px; flex-wrap: wrap; align-items: center; }
+    .reports-page .reports-title { display:flex; align-items:center; gap:10px; line-height:1.2; }
+    .reports-page .reports-title i { color: var(--accent-color); }
+    .reports-page .reports-subtitle { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+    .reports-page .reports-toolbar { display:flex; gap: 10px; align-items:center; flex-wrap: wrap; justify-content: flex-end; }
+    .reports-page .reports-search { position: relative; min-width: 260px; max-width: 460px; flex: 1; }
+    .reports-page .reports-search i { position:absolute; left:10px; top:50%; transform: translateY(-50%); color: var(--text-muted); font-size: 12px; pointer-events:none; }
+    .reports-page .reports-search input { padding-left: 30px; height: 32px; }
+    .reports-page .reports-mini { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+
+    .reports-page .stats-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; }
+    .reports-page .stat-card { background: rgba(255,255,255,0.02); border: 1px solid rgba(64,64,64,0.35); border-radius: 12px; padding: 14px; display:flex; gap: 12px; align-items:center; }
+    .reports-page .stat-icon { background: rgba(0, 212, 255, 0.16); border: 1px solid rgba(0, 212, 255, 0.25); color: var(--accent-color); width: 40px; height: 40px; border-radius: 999px; display:flex; align-items:center; justify-content:center; }
+    .reports-page .stat-num { font-size: 20px; font-weight: 900; margin: 0; }
+    .reports-page .stat-label { font-size: 11px; color: var(--text-secondary); margin: 0; }
+
+    .reports-page .table-wrap { border: 1px solid rgba(64,64,64,0.35); border-radius: 12px; overflow: hidden; }
+    .reports-page table { margin: 0; }
+    .reports-page thead th { position: sticky; top: 0; z-index: 5; background: var(--header-bg); font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; white-space: nowrap; }
+    .reports-page tbody tr:hover { background: rgba(0, 212, 255, 0.06); }
+    .reports-page .patient-name { font-weight: 800; color: var(--text-primary); }
+    .reports-page .patient-id { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; color: var(--text-muted); font-size: 10px; }
+    .reports-page .badge-status { padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 800; border: 1px solid transparent; }
+    .reports-page .badge-status.draft { background: rgba(156,163,175,0.12); border-color: rgba(156,163,175,0.25); color: #cbd5e1; }
+    .reports-page .badge-status.preliminary { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.25); color: #fbbf24; }
+    .reports-page .badge-status.final { background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.25); color: #34d399; }
+    .reports-page .badge-status.amended { background: rgba(0,212,255,0.10); border-color: rgba(0,212,255,0.22); color: var(--accent-color); }
+
+    .reports-page .btn-mini { padding: 6px 10px; font-size: 11px; }
+    .reports-page .actions { display:flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    @media (max-width: 992px) { .reports-page .actions { justify-content: flex-start; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3 reports-page">
+    <div class="card">
+        <div class="card-header">
+            <div class="reports-title">
+                <i class="fas fa-file-medical" aria-hidden="true"></i>
+                <div>
+                    <div style="font-weight:700;">Reports</div>
+                    <div class="reports-subtitle">Search, edit, and print radiology reports</div>
                 </div>
             </div>
-            <div class="nav-right">
-                <div class="status-indicator">
-                    <div class="status-dot"></div>
-                    <span>ONLINE</span>
-                </div>
-                <div class="user-info">
-                    <div class="user-avatar">{{ user.get_full_name|default:user.username|slice:":2"|upper }}</div>
-                    <div>
-                        <div>{{ user.get_full_name|default:user.username }}</div>
-                        <div style="color: var(--text-muted); font-size: 10px;">{% if user.role == 'admin' %}Administrator{% elif user.role == 'radiologist' %}Radiologist{% else %}Facility User{% endif %}</div>
-                    </div>
-                </div>
-                {% if user.is_authenticated and user.role == 'admin' %}
-                <button type="button" class="btn-control" onclick="window.location.href='{% url 'admin_panel:dashboard' %}'"   title="Admin Panel">
-                    <i class="fas fa-shield-alt"></i> ADMIN
-                </button>
-                {% endif %}
-                <button type="button" class="btn-control" onclick="window.location.href='{% url 'worklist:dashboard' %}'"   title="Back to Worklist">
-                    <i class="fas fa-arrow-left"></i> WORKLIST
-                </button>
-                {% if user.is_authenticated %}
-                <button type="button" class="btn-control" onclick="window.location.href='{% url 'accounts:logout' %}'"   title="Logout">
-                    <i class="fas fa-sign-out-alt"></i> LOGOUT
-                </button>
-                {% endif %}
-            </div>
-        </nav>
 
-        <!-- Controls Bar -->
-        <div class="controls-bar">
-            <div class="control-group">
-                <label class="control-label">Search:</label>
-                <input type="text" class="control-input" id="searchInput" placeholder="Patient, Accession, Radiologist...">
-            </div>
-            <div class="control-group">
-                <label class="control-label">Status:</label>
-                <select class="control-select" id="statusFilter">
-                    <option value="">All Status</option>
-                    <option value="draft">Draft</option>
-                    <option value="preliminary">Preliminary</option>
-                    <option value="final">Final</option>
-                    <option value="amended">Amended</option>
+            <form class="reports-toolbar" method="get" action="{% url 'reports:report_list' %}">
+                <div class="reports-search">
+                    <i class="fas fa-search" aria-hidden="true"></i>
+                    <input id="searchInput" class="form-control form-control-sm" type="text" name="search"
+                           value="{{ search_query|default:'' }}"
+                           placeholder="Patient, accession, radiologist…" autocomplete="off">
+                </div>
+                <select id="statusFilter" class="form-control form-control-sm" name="status" style="height:32px; min-width: 160px;">
+                    <option value="" {% if not status_filter %}selected{% endif %}>All status</option>
+                    <option value="draft" {% if status_filter == 'draft' %}selected{% endif %}>Draft</option>
+                    <option value="preliminary" {% if status_filter == 'preliminary' %}selected{% endif %}>Preliminary</option>
+                    <option value="final" {% if status_filter == 'final' %}selected{% endif %}>Final</option>
+                    <option value="amended" {% if status_filter == 'amended' %}selected{% endif %}>Amended</option>
                 </select>
-            </div>
-            <div class="control-group">
-                <label class="control-label">Modality:</label>
-                <select class="control-select" id="modalityFilter">
-                    <option value="">All Modalities</option>
-                    <option value="CT">CT</option>
-                    <option value="MR">MR</option>
-                    <option value="XR">X-Ray</option>
-                    <option value="US">Ultrasound</option>
+                <select id="modalityFilter" class="form-control form-control-sm" name="modality" style="height:32px; min-width: 160px;">
+                    <option value="" {% if not modality_filter %}selected{% endif %}>All modalities</option>
+                    <option value="CT" {% if modality_filter == 'CT' %}selected{% endif %}>CT</option>
+                    <option value="MR" {% if modality_filter == 'MR' %}selected{% endif %}>MR</option>
+                    <option value="XR" {% if modality_filter == 'XR' %}selected{% endif %}>X-Ray</option>
+                    <option value="US" {% if modality_filter == 'US' %}selected{% endif %}>Ultrasound</option>
                 </select>
-            </div>
-            <button type="button" class="btn-control reset" onclick="applyFilters()"  >REFRESH</button>
-            <button type="button" class="btn-control" onclick="resetFilters()"  >RESET FILTERS</button>
+                <button class="btn-control btn-mini" type="submit"><i class="fas fa-filter"></i> Apply</button>
+                <a class="btn-control btn-mini" href="{% url 'reports:report_list' %}"><i class="fas fa-undo"></i> Reset</a>
+            </form>
         </div>
 
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Statistics -->
+        <div class="card-body">
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="stat-icon">
-                        <i class="fas fa-file-medical"></i>
-                    </div>
-                    <div class="stat-content">
-                        <h3>{{ total_reports|default:0 }}</h3>
-                        <p>Total Reports</p>
+                    <div class="stat-icon"><i class="fas fa-file-medical" aria-hidden="true"></i></div>
+                    <div>
+                        <p class="stat-num">{{ total_reports|default:0 }}</p>
+                        <p class="stat-label">Total reports</p>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon">
-                        <i class="fas fa-edit"></i>
-                    </div>
-                    <div class="stat-content">
-                        <h3>{{ draft_reports|default:0 }}</h3>
-                        <p>Draft Reports</p>
+                    <div class="stat-icon"><i class="fas fa-edit" aria-hidden="true"></i></div>
+                    <div>
+                        <p class="stat-num">{{ draft_reports|default:0 }}</p>
+                        <p class="stat-label">Draft</p>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon">
-                        <i class="fas fa-clock"></i>
-                    </div>
-                    <div class="stat-content">
-                        <h3>{{ pending_reports|default:0 }}</h3>
-                        <p>Pending Review</p>
+                    <div class="stat-icon"><i class="fas fa-clock" aria-hidden="true"></i></div>
+                    <div>
+                        <p class="stat-num">{{ pending_reports|default:0 }}</p>
+                        <p class="stat-label">Preliminary</p>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon">
-                        <i class="fas fa-check-circle"></i>
-                    </div>
-                    <div class="stat-content">
-                        <h3>{{ final_reports|default:0 }}</h3>
-                        <p>Final Reports</p>
+                    <div class="stat-icon"><i class="fas fa-check-circle" aria-hidden="true"></i></div>
+                    <div>
+                        <p class="stat-num">{{ final_reports|default:0 }}</p>
+                        <p class="stat-label">Final</p>
                     </div>
                 </div>
             </div>
 
-            <!-- Data Table -->
-            <div class="data-table-container">
-                <table class="data-table">
+            <div class="table-responsive table-wrap">
+                <table class="table table-dark table-striped align-middle" style="width:100%">
                     <thead>
                         <tr>
-                            <th class="sortable">PATIENT</th>
-                            <th class="sortable">STUDY DATE</th>
-                            <th class="sortable">MODALITY</th>
-                            <th class="sortable">BODY PART</th>
-                            <th class="sortable">RADIOLOGIST</th>
-                            <th class="sortable">STATUS</th>
-                            <th class="sortable">REPORT DATE</th>
-                            <th>ACTIONS</th>
+                            <th>Patient</th>
+                            <th>Study Date</th>
+                            <th>Modality</th>
+                            <th>Body Part</th>
+                            <th>Radiologist</th>
+                            <th>Status</th>
+                            <th>Report Date</th>
+                            <th style="text-align:right;">Actions</th>
                         </tr>
                     </thead>
-                    <tbody id="reportsTableBody">
+                    <tbody>
                         {% if reports %}
                         {% for report in reports %}
-                        <tr onclick="selectReport(this)" data-report-id="{{ report.id }}">
+                        <tr>
                             <td>
                                 <div class="patient-name">{{ report.study.patient.full_name }}</div>
                                 <div class="patient-id">{{ report.study.patient.patient_id }}</div>
                             </td>
-                            <td class="timestamp">{{ report.study.study_date|date:"M d, Y" }}</td>
+                            <td class="patient-id">{{ report.study.study_date|date:"M d, Y" }}</td>
                             <td><span class="modality-badge">{{ report.study.modality.code }}</span></td>
                             <td>{{ report.study.body_part_examined|default:"-" }}</td>
-                            <td>{{ report.radiologist.get_full_name }}</td>
-                            <td>
-                                <span class="status-badge status-{{ report.status }}">
-                                    {{ report.get_status_display }}
-                                </span>
-                            </td>
-                            <td class="timestamp">{{ report.report_date|date:"M d, Y H:i" }}</td>
-                            <td>
-                                <div class="action-buttons">
-                                    <a href="{% url 'reports:write_report' report.study.id %}" class="btn-viewer" title="View/Edit Report">
-                                        <i class="fas fa-edit"></i> EDIT
+                            <td>{{ report.radiologist.get_full_name|default:report.radiologist.username }}</td>
+                            <td><span class="badge-status {{ report.status }}">{{ report.get_status_display }}</span></td>
+                            <td class="patient-id">{{ report.report_date|date:"M d, Y H:i" }}</td>
+                            <td style="text-align:right;">
+                                <div class="actions">
+                                    <a href="{% url 'reports:write_report' report.study.id %}" class="btn-control btn-mini" title="View/Edit Report">
+                                        <i class="fas fa-edit"></i> Edit
                                     </a>
-                                    <a href="{% url 'reports:print_report' report.study.id %}" class="btn-viewer viewer-only" title="Print Report" target="_blank">
-                                        <i class="fas fa-print"></i> PRINT
+                                    <a href="{% url 'reports:print_report' report.study.id %}" class="btn-control btn-mini" title="Print Report" target="_blank">
+                                        <i class="fas fa-print"></i> Print
                                     </a>
-                                    <a href="{% url 'reports:export_report_pdf' report.study.id %}" class="btn-viewer viewer-only" title="Download PDF">
+                                    <a href="{% url 'reports:export_report_pdf' report.study.id %}" class="btn-control btn-mini" title="Download PDF">
                                         <i class="fas fa-download"></i> PDF
                                     </a>
                                 </div>
@@ -668,11 +152,11 @@
                         </tr>
                         {% endfor %}
                         {% else %}
-                        <tr id="noDataRow">
-                            <td colspan="8" style="text-align: center; padding: 40px; color: var(--text-muted);">
-                                <i class="fas fa-file-medical" style="font-size: 48px; opacity: 0.3; margin-bottom: 16px; display: block;"></i>
-                                <div style="font-size: 14px; margin-bottom: 8px;">No reports found</div>
-                                <div style="font-size: 12px;">Reports will appear here when radiologists create them for studies</div>
+                        <tr>
+                            <td colspan="8" style="text-align:center; padding: 40px; color: var(--text-muted);">
+                                <i class="fas fa-file-medical" style="font-size: 44px; opacity: 0.25; margin-bottom: 10px; display:block;" aria-hidden="true"></i>
+                                <div style="font-size: 14px; margin-bottom: 6px; font-weight: 800;">No reports found</div>
+                                <div style="font-size: 12px;">Try adjusting your filters, or create a report from a study.</div>
                             </td>
                         </tr>
                         {% endif %}
@@ -680,64 +164,37 @@
                 </table>
             </div>
         </div>
-
-        <!-- Footer Status Bar -->
-        <div class="footer-status">
-            <div class="status-left">
-                <span>Total Reports: <strong>{{ total_reports|default:0 }}</strong></span>
-                <span>Draft: <strong style="color: var(--warning-color);">{{ draft_reports|default:0 }}</strong></span>
-                <span>Pending: <strong style="color: var(--urgent-color);">{{ pending_reports|default:0 }}</strong></span>
-                <span>Final: <strong style="color: var(--completed-color);">{{ final_reports|default:0 }}</strong></span>
-            </div>
-            <div class="status-right">
-                <div class="connection-status">
-                    <div class="connection-dot"></div>
-                    <span>Reports Database Connected</span>
-                </div>
-                <span>Last Update: <strong>{{ "now"|date:"H:i:s" }}</strong></span>
-                <span>Auto-refresh: <strong>ON</strong></span>
-            </div>
-        </div>
     </div>
+</div>
+{% endblock %}
 
+{% block extra_js %}
 <script>
-function selectReport(row) {
-    // Remove previous selection
-    document.querySelectorAll('.data-table tbody tr').forEach(r => {
-        r.style.background = '';
-    });
-    
-    // Highlight selected row
-    row.style.background = 'rgba(0, 212, 255, 0.15)';
-    
-    console.log('Selected report:', row.getAttribute('data-report-id'));
-}
+    (function () {
+        function ready(fn) {
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
+            else fn();
+        }
+        ready(function () {
+            var form = document.querySelector('.reports-toolbar');
+            var search = document.getElementById('searchInput');
+            var status = document.getElementById('statusFilter');
+            var modality = document.getElementById('modalityFilter');
+            if (!form) return;
 
-function applyFilters() {
-    // Implement filtering logic here
-    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-    const statusFilter = document.getElementById('statusFilter').value;
-    const modalityFilter = document.getElementById('modalityFilter').value;
-    
-    // This would typically make an AJAX call to filter results
-    console.log('Applying filters:', { searchTerm, statusFilter, modalityFilter });
-}
+            // submit on select change
+            if (status) status.addEventListener('change', function () { form.submit(); });
+            if (modality) modality.addEventListener('change', function () { form.submit(); });
 
-function resetFilters() {
-    document.getElementById('searchInput').value = '';
-    document.getElementById('statusFilter').value = '';
-    document.getElementById('modalityFilter').value = '';
-    applyFilters();
-}
-
-// Real-time search
-document.getElementById('searchInput').addEventListener('input', function() {
-    // Implement real-time search here
-    applyFilters();
-});
-
-document.getElementById('statusFilter').addEventListener('change', applyFilters);
-document.getElementById('modalityFilter').addEventListener('change', applyFilters);
+            // debounce search submit
+            var t;
+            if (search) {
+                search.addEventListener('input', function () {
+                    clearTimeout(t);
+                    t = setTimeout(function () { form.submit(); }, 450);
+                }, { passive: true });
+            }
+        });
+    })();
 </script>
-</body>
-</html>
+{% endblock %}

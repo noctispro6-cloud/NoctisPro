@@ -12,10 +12,10 @@ set -euo pipefail
 # - Opens firewall ports (22/80/443/11112)
 #
 # Usage:
-#   sudo bash scripts/contabo_ubuntu2404_deploy.sh noctis-pro admin@noctis-pro
-#   sudo bash scripts/contabo_ubuntu2404_deploy.sh noctis-pro admin@noctis-pro --fresh
+#   sudo bash scripts/contabo_ubuntu2404_deploy.sh noctis-pro.com admin@noctis-pro.com
+#   sudo bash scripts/contabo_ubuntu2404_deploy.sh noctis-pro.com admin@noctis-pro.com --fresh
 #   sudo bash scripts/contabo_ubuntu2404_deploy.sh --fresh
-#   sudo bash scripts/contabo_ubuntu2404_deploy.sh --domain noctis-pro --email admin@noctis-pro --fresh
+#   sudo bash scripts/contabo_ubuntu2404_deploy.sh --domain noctis-pro.com --email admin@noctis-pro.com --fresh
 
 DOMAIN=""
 LE_EMAIL=""
@@ -50,7 +50,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Default domain if not provided
-DOMAIN="${DOMAIN:-noctis-pro}"
+DOMAIN="${DOMAIN:-noctis-pro.com}"
 if [[ -z "${LE_EMAIL}" ]]; then
   LE_EMAIL="admin@${DOMAIN}"
 fi

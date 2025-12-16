@@ -36,7 +36,7 @@ IS_NGROK = bool(NGROK_URL) or any('ngrok' in host for host in os.environ.get('AL
 SSL_ENABLED = os.environ.get('SSL_ENABLED', '').lower() == 'true' or os.environ.get('SECURE_SSL_REDIRECT', '').lower() == 'true'
 
 # Primary public domain (can be overridden via env)
-DOMAIN_NAME = os.environ.get('DOMAIN_NAME', 'noctis-pro').strip()
+DOMAIN_NAME = os.environ.get('DOMAIN_NAME', 'noctis-pro.com').strip()
 DOMAIN_HOSTS = [h for h in [DOMAIN_NAME, f"www.{DOMAIN_NAME}", f"dicom.{DOMAIN_NAME}"] if h and h != '.']
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')
@@ -53,7 +53,7 @@ EXTRA_ALLOWED_HOSTS = [
 ]
 ALLOW_LEGACY_HOSTS = os.environ.get('ALLOW_LEGACY_HOSTS', '').lower() == 'true'
 LEGACY_ALLOWED_HOSTS = [
-    'noctis-pro',
+    'noctis-pro.com',
     '*.duckdns.org',
     '*.ngrok.io',
     '*.ngrok-free.app',

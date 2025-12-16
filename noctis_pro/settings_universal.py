@@ -12,7 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DEBUG = False
 
 # Primary public domain (can be overridden via env)
-DOMAIN_NAME = os.environ.get('DOMAIN_NAME', 'noctis-pro').strip()
+DOMAIN_NAME = os.environ.get('DOMAIN_NAME', 'noctis-pro.com').strip()
 DOMAIN_HOSTS = [h for h in [DOMAIN_NAME, f"www.{DOMAIN_NAME}", f"dicom.{DOMAIN_NAME}"] if h and h != '.']
 
 # Hosts/domain names that are valid for this site
@@ -141,7 +141,7 @@ LOGOUT_REDIRECT_URL = '/login/'
 
 # Email configuration (for notifications)
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-DEFAULT_FROM_EMAIL = f'noctis@{DOMAIN_NAME}' if DOMAIN_NAME else 'noctis@noctis-pro'
+DEFAULT_FROM_EMAIL = f'noctis@{DOMAIN_NAME}' if DOMAIN_NAME else 'noctis@noctis-pro.com'
 
 # Logging configuration
 LOGGING = {

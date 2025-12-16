@@ -13,9 +13,11 @@ set -euo pipefail
 #
 # Usage:
 #   sudo bash scripts/contabo_ubuntu2404_deploy.sh noctispro.com admin@noctispro.com
+#   sudo bash scripts/contabo_ubuntu2404_deploy.sh noctispro.com admin@noctispro.com --fresh
 
 DOMAIN="${1:-}"
 LE_EMAIL="${2:-}"
+MODE="${3:-}"
 
 if [[ -z "${DOMAIN}" ]]; then
   echo "Usage: sudo bash $0 <domain> <letsencrypt-email>"
@@ -39,6 +41,32 @@ echo "[+] Email: ${LE_EMAIL}"
 echo "[+] App dir: ${APP_DIR}"
 
 export DEBIAN_FRONTEND=noninteractive
+
+FRESH_INSTALL=0
+if [[ "${MODE}" == "--fresh" ]]; then
+  FRESH_INSTALL=1
+fi
+
+if [[ "${FRESH_INSTALL}" == "1" ]]; then
+  echo "[+] Fresh reinstall requested: removing previous NoctisPro install artifacts..."
+  # Stop/disable app services (ignore if not present)
+  systemctl stop noctispro-web.service 2>/dev/null || true
+  systemctl stop noctispro-dicom.service 2>/dev/null || true
+  systemctl disable noctispro-web.service 2>/dev/null || true
+  systemctl disable noctispro-dicom.service 2>/dev/null || true
+
+  # Remove systemd unit files (ignore if missing)
+  rm -f "${SYSTEMD_DIR}/noctispro-web.service" || true
+  rm -f "${SYSTEMD_DIR}/noctispro-dicom.service" || true
+  systemctl daemon-reload || true
+
+  # Remove nginx site config + link (ignore if missing)
+  rm -f "${NGINX_SITE}" "${NGINX_SITE_LINK}" || true
+
+  # Remove env dir + app dir (includes venv/db/staticfiles/media)
+  rm -rf "${ENV_DIR}" || true
+  rm -rf "${APP_DIR}" || true
+fi
 
 echo "[+] Installing OS packages..."
 apt-get update -y

@@ -14,6 +14,8 @@ Usage:
 
 Create `.ngrok.env` in the repo root (recommended, gitignored):
   NGROK_AUTHTOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  # Optional (requires reserved domain in your ngrok account):
+  NGROK_DOMAIN=noctis-pro.com.ngrok.app
 """
 
 from __future__ import annotations
@@ -91,6 +93,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Start ngrok and write public URL to .tunnel-url")
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
     parser.add_argument(
+        "--domain",
+        default=os.environ.get("NGROK_DOMAIN", ""),
+        help="Reserved ngrok domain (e.g. noctis-pro.com.ngrok.app). Requires paid/reserved domain.",
+    )
+    parser.add_argument(
         "--tunnel-url-file",
         default=str(DEFAULT_TUNNEL_URL_FILE),
         help="Where to write the detected public URL (default: .tunnel-url in repo root).",
@@ -131,6 +138,9 @@ def main() -> int:
 
     # Start ngrok. We'll poll the local API for the public URL.
     cmd = ["ngrok", "http", str(args.port), "--log=stdout", "--log-format=json"]
+    if args.domain:
+        # ngrok v3 uses --domain for reserved domains.
+        cmd.insert(2, f"--domain={args.domain.strip()}")
     proc = subprocess.Popen(cmd, cwd=str(REPO_ROOT))
 
     def _shutdown(_signum: int, _frame) -> None:  # type: ignore[override]

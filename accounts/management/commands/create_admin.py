@@ -1,6 +1,7 @@
 from django.core.management.base import BaseCommand, CommandError
 from django.contrib.auth import get_user_model
 from accounts.models import Facility
+from django.conf import settings
 
 User = get_user_model()
 
@@ -9,14 +10,14 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--username', type=str, help='Username for the admin user', default='admin')
-        parser.add_argument('--email', type=str, help='Email for the admin user', default='admin@noctispro.com')
+        parser.add_argument('--email', type=str, help='Email for the admin user (defaults to admin@<DOMAIN_NAME>)', default='')
         parser.add_argument('--password', type=str, help='Password for the admin user', default='admin123')
         parser.add_argument('--first-name', type=str, help='First name', default='System')
         parser.add_argument('--last-name', type=str, help='Last name', default='Administrator')
 
     def handle(self, *args, **options):
         username = options['username']
-        email = options['email']
+        email = options['email'] or f"admin@{getattr(settings, 'DOMAIN_NAME', '') or 'noctis-pro.com'}"
         password = options['password']
         first_name = options['first_name']
         last_name = options['last_name']

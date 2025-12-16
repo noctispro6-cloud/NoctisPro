@@ -31,6 +31,10 @@ DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 NGROK_URL = os.environ.get('NGROK_URL', '')
 IS_NGROK = bool(NGROK_URL) or any('ngrok' in host for host in os.environ.get('ALLOWED_HOSTS', '').split(','))
 
+# Whether HTTPS is actually configured in front of Django (e.g., nginx + Let's Encrypt).
+# This allows safe HTTP-only bootstrapping during first-time certificate issuance.
+SSL_ENABLED = os.environ.get('SSL_ENABLED', '').lower() == 'true' or os.environ.get('SECURE_SSL_REDIRECT', '').lower() == 'true'
+
 # Primary public domain (can be overridden via env)
 DOMAIN_NAME = os.environ.get('DOMAIN_NAME', 'noctis-pro.com').strip()
 DOMAIN_HOSTS = [h for h in [DOMAIN_NAME, f"www.{DOMAIN_NAME}", f"dicom.{DOMAIN_NAME}"] if h and h != '.']
@@ -329,12 +333,14 @@ if IS_NGROK:
 
 # Production security enhancements (only if not using ngrok)
 if not DEBUG and not IS_NGROK:
-    SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
-    SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '31536000'))
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True' if SSL_ENABLED else 'False').lower() == 'true'
+    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'True' if SSL_ENABLED else 'False').lower() == 'true'
+    CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'True' if SSL_ENABLED else 'False').lower() == 'true'
+
+    # Only enable HSTS when HTTPS is confirmed enabled, otherwise it can lock browsers onto HTTPS.
+    SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '31536000' if SSL_ENABLED else '0'))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = SSL_ENABLED and os.environ.get('SECURE_HSTS_INCLUDE_SUBDOMAINS', 'True').lower() == 'true'
+    SECURE_HSTS_PRELOAD = SSL_ENABLED and os.environ.get('SECURE_HSTS_PRELOAD', 'True').lower() == 'true'
     SESSION_COOKIE_HTTPONLY = True
     CSRF_COOKIE_HTTPONLY = True
 

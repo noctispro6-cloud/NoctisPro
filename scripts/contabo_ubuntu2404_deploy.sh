@@ -29,6 +29,53 @@ NGROK_DOMAIN="${NGROK_DOMAIN:-}"
 NGROK_DOMAIN_PROVIDED=0
 NGROK_TOKEN_PROVIDED=0
 
+extract_ngrok_authtoken_from_file() {
+  # Print the authtoken from a ngrok YAML config file (best-effort), or nothing.
+  # Avoids leaking the token into logs (callers should not echo the value).
+  local cfg="${1:-}"
+  [[ -n "${cfg}" && -f "${cfg}" ]] || return 1
+  # Extract first matching "authtoken: ..." line, stripping quotes and inline comments.
+  # Example lines:
+  #   authtoken: abc123
+  #   authtoken: "abc123"  # comment
+  local token=""
+  token="$(sed -nE 's/^[[:space:]]*authtoken[[:space:]]*:[[:space:]]*"?([^"#]+)"?[[:space:]]*(#.*)?$/\1/p' "${cfg}" | sed -n '1p' | tr -d '\r' | xargs || true)"
+  if [[ -n "${token}" ]]; then
+    printf '%s' "${token}"
+  fi
+}
+
+discover_existing_ngrok_authtoken() {
+  # Search common locations for an existing authtoken.
+  local cfg token
+  for cfg in \
+    "/etc/noctis-pro/ngrok.yml" \
+    "/etc/noctispro/ngrok.yml" \
+    "/etc/ngrok.yml" \
+    "/root/.config/ngrok/ngrok.yml" \
+    "${HOME:-/root}/.config/ngrok/ngrok.yml"
+  do
+    token="$(extract_ngrok_authtoken_from_file "${cfg}")"
+    if [[ -n "${token}" ]]; then
+      printf '%s' "${token}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+adopt_existing_ngrok_token_if_missing() {
+  # If no token was provided, try to adopt an already-configured server token.
+  if [[ -z "${NGROK_AUTHTOKEN}" ]]; then
+    local token=""
+    token="$(discover_existing_ngrok_authtoken || true)"
+    if [[ -n "${token}" ]]; then
+      NGROK_AUTHTOKEN="${token}"
+      echo "[+] Adopted existing ngrok authtoken from server config."
+    fi
+  fi
+}
+
 is_interactive() {
   [[ -t 0 && -t 1 ]]
 }
@@ -81,6 +128,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# If the server already has an ngrok authtoken configured, adopt it so we don't
+# force re-entry or overwrite/remove it during deployment.
+adopt_existing_ngrok_token_if_missing
+
 # Interactive prompts (TTY only): make the script friendlier when run without args.
 if is_interactive; then
   if [[ "${USE_NGROK}" == "1" ]]; then
@@ -121,8 +172,10 @@ if [[ "${USE_NGROK}" == "1" ]]; then
     echo "[!] --ngrok requires --ngrok-domain <reserved-domain> (e.g., noctis-pro.com.ngrok.app)" >&2
     exit 2
   fi
+  adopt_existing_ngrok_token_if_missing
   if [[ -z "${NGROK_AUTHTOKEN}" ]]; then
-    echo "[!] --ngrok requires --ngrok-token <authtoken> (or set NGROK_AUTHTOKEN env var)" >&2
+    echo "[!] ngrok authtoken not provided and no existing server token found." >&2
+    echo "    Provide --ngrok-token <authtoken> (or set NGROK_AUTHTOKEN) once, and future runs will reuse it." >&2
     exit 2
   fi
   DOMAIN="${NGROK_DOMAIN#http://}"
@@ -179,6 +232,10 @@ SERVER_NAMES="${ALLOWED_HOSTS_CSV//,/ }"
 export DEBIAN_FRONTEND=noninteractive
 
 if [[ "${FRESH_INSTALL}" == "1" ]]; then
+  # Preserve an already-configured ngrok token before removing /etc/noctis-pro.
+  # This allows --fresh installs to keep the ngrok auth state.
+  adopt_existing_ngrok_token_if_missing
+
   echo "[+] Fresh reinstall requested: removing previous NoctisPro install artifacts..."
   # Stop/disable app services (ignore if not present)
   systemctl stop noctis-pro.service 2>/dev/null || true

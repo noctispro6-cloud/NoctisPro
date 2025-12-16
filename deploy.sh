@@ -191,8 +191,8 @@ write_env_file() {
 
   # Add www.<domain> automatically if it resolves (domain mode only)
   if [[ "$MODE" == "domain" ]] && getent ahosts "www.${DOMAIN}" >/dev/null 2>&1; then
-    domain_hosts_csv+="",www.${DOMAIN}"
-    csrf_csv+="",https://www.${DOMAIN}"
+    domain_hosts_csv+=",www.${DOMAIN}"
+    csrf_csv+=",https://www.${DOMAIN}"
   fi
 
   info "Writing ${ENV_FILE}..."
@@ -336,6 +336,23 @@ enable_services() {
     systemctl stop noctis-pro-tunnel.service 2>/dev/null || true
     systemctl disable noctis-pro-tunnel.service 2>/dev/null || true
   fi
+}
+
+wait_for_tunnel_url() {
+  [[ "$MODE" == "ngrok" ]] || return 0
+
+  # If a reserved domain is configured, the service pre-writes .tunnel-url.
+  if [[ -s "${APP_DIR}/.tunnel-url" ]]; then
+    return 0
+  fi
+
+  # Best-effort: give the tunnel a moment to start and persist its URL.
+  for _ in $(seq 1 60); do
+    if [[ -s "${APP_DIR}/.tunnel-url" ]]; then
+      return 0
+    fi
+    sleep 0.5
+  done
 }
 
 install_ngrok() {
@@ -494,6 +511,7 @@ migrate_and_collectstatic
 ensure_admin_user
 install_systemd_units
 enable_services
+wait_for_tunnel_url
 
 if [[ "$MODE" == "domain" ]]; then
   configure_nginx_for_domain

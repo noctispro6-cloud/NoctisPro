@@ -53,7 +53,7 @@ EXTRA_ALLOWED_HOSTS = [
 ]
 ALLOW_LEGACY_HOSTS = os.environ.get('ALLOW_LEGACY_HOSTS', '').lower() == 'true'
 LEGACY_ALLOWED_HOSTS = [
-    'noctispro',
+    'noctis-pro.com',
     'noctispro2.duckdns.org',
     '*.duckdns.org',
     '*.ngrok.io',

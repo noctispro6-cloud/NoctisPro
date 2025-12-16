@@ -36,6 +36,27 @@ DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 NGROK_URL = os.environ.get('NGROK_URL', '')
 TUNNEL_URL = os.environ.get('TUNNEL_URL', '')
 
+# If a tunnel launcher (e.g., scripts/quick-tunnel.sh) is used via systemd, it
+# typically writes the public URL to a file (default: $APP_DIR/.tunnel-url).
+# Auto-detect that URL so production deployments don't end up rejecting the
+# dynamic hostname or generating mixed-scheme links.
+APP_DIR = Path(os.environ.get('APP_DIR', str(BASE_DIR)))
+_tunnel_url_file_candidates = [
+    APP_DIR / '.tunnel-url',
+    BASE_DIR / '.tunnel-url',
+]
+if not TUNNEL_URL:
+    for _p in _tunnel_url_file_candidates:
+        try:
+            if _p.exists():
+                _val = _p.read_text(encoding='utf-8').strip()
+                if _val:
+                    TUNNEL_URL = _val
+                    break
+        except Exception:
+            # Best-effort: if unreadable, continue without tunnel autodetect.
+            pass
+
 _allowed_hosts_env = os.environ.get('ALLOWED_HOSTS', '')
 _allowed_hosts_tokens = [h.strip().lower() for h in _allowed_hosts_env.split(',') if h.strip()]
 IS_NGROK = bool(NGROK_URL) or any('ngrok' in host for host in _allowed_hosts_tokens)
@@ -72,8 +93,8 @@ DOMAIN_NAME = normalize_domain_name(os.environ.get('DOMAIN_NAME', 'noctis-pro.co
 DOMAIN_HOSTS = [h for h in [DOMAIN_NAME, f"www.{DOMAIN_NAME}", f"dicom.{DOMAIN_NAME}"] if h and h != '.']
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')
-if DEBUG or IS_TUNNEL:
-    # Keep dev/ngrok frictionless unless explicitly locked down
+if DEBUG:
+    # Keep dev frictionless unless explicitly locked down
     ALLOWED_HOSTS.append('*')
 
 # Production-safe host handling:
@@ -113,6 +134,12 @@ if NGROK_URL:
     import re
     ngrok_domain = re.sub(r'^https?://', '', NGROK_URL.strip('/'))
     ALLOWED_HOSTS.append(ngrok_domain)
+
+# Add specific tunnel URL host if provided (e.g., https://xxxx.trycloudflare.com)
+if TUNNEL_URL:
+    import re
+    tunnel_domain = re.sub(r'^https?://', '', TUNNEL_URL.strip('/'))
+    ALLOWED_HOSTS.append(tunnel_domain)
 
 # Remove duplicates and empty strings
 ALLOWED_HOSTS = list(filter(None, list(set(ALLOWED_HOSTS))))
@@ -295,6 +322,13 @@ if NGROK_URL:
         NGROK_URL.replace('https://', 'http://') if NGROK_URL.startswith('https://') else NGROK_URL.replace('http://', 'https://')
     ])
 
+# Add specific tunnel URL to CORS if provided
+if TUNNEL_URL:
+    CORS_ALLOWED_ORIGINS.extend([
+        TUNNEL_URL,
+        TUNNEL_URL.replace('https://', 'http://') if TUNNEL_URL.startswith('https://') else TUNNEL_URL.replace('http://', 'https://')
+    ])
+
 # Add ngrok support dynamically
 CORS_ALLOW_ALL_ORIGINS = DEBUG or IS_TUNNEL  # Allow all origins in debug mode or when using a tunnel
 
@@ -337,6 +371,13 @@ if NGROK_URL:
     CSRF_TRUSTED_ORIGINS.extend([
         NGROK_URL,
         NGROK_URL.replace('https://', 'http://') if NGROK_URL.startswith('https://') else NGROK_URL.replace('http://', 'https://')
+    ])
+
+# Add specific tunnel URL to CSRF trusted origins if provided
+if TUNNEL_URL:
+    CSRF_TRUSTED_ORIGINS.extend([
+        TUNNEL_URL,
+        TUNNEL_URL.replace('https://', 'http://') if TUNNEL_URL.startswith('https://') else TUNNEL_URL.replace('http://', 'https://')
     ])
 
 # Custom user model

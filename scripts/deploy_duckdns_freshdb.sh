@@ -5,6 +5,11 @@ set -euo pipefail
 # Usage:
 #   sudo bash scripts/deploy_duckdns_freshdb.sh <DUCKDNS_TOKEN> <DUCKDNS_SUBDOMAIN>
 
+echo "[ERROR] deploy_duckdns_freshdb.sh is suspended (DuckDNS deployment disabled)." >&2
+echo "[HINT] Use ngrok-only deployment instead:" >&2
+echo "  NGROK_AUTHTOKEN=\"...\" NGROK_DOMAIN=\"your-reserved-domain.ngrok.app\" sudo bash scripts/contabo_ubuntu2404_deploy.sh --fresh" >&2
+exit 2
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VENV_DIR="$APP_DIR/venv"

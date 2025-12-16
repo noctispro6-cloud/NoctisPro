@@ -13,9 +13,11 @@ set -euo pipefail
 #
 # Usage:
 #   sudo bash scripts/contabo_ubuntu2404_deploy.sh noctispro.com admin@noctispro.com
+#   sudo bash scripts/contabo_ubuntu2404_deploy.sh noctispro.com admin@noctispro.com --fresh
 
 DOMAIN="${1:-}"
 LE_EMAIL="${2:-}"
+MODE="${3:-}"
 
 if [[ -z "${DOMAIN}" ]]; then
   echo "Usage: sudo bash $0 <domain> <letsencrypt-email>"
@@ -40,13 +42,39 @@ echo "[+] App dir: ${APP_DIR}"
 
 export DEBIAN_FRONTEND=noninteractive
 
+FRESH_INSTALL=0
+if [[ "${MODE}" == "--fresh" ]]; then
+  FRESH_INSTALL=1
+fi
+
+if [[ "${FRESH_INSTALL}" == "1" ]]; then
+  echo "[+] Fresh reinstall requested: removing previous NoctisPro install artifacts..."
+  # Stop/disable app services (ignore if not present)
+  systemctl stop noctispro-web.service 2>/dev/null || true
+  systemctl stop noctispro-dicom.service 2>/dev/null || true
+  systemctl disable noctispro-web.service 2>/dev/null || true
+  systemctl disable noctispro-dicom.service 2>/dev/null || true
+
+  # Remove systemd unit files (ignore if missing)
+  rm -f "${SYSTEMD_DIR}/noctispro-web.service" || true
+  rm -f "${SYSTEMD_DIR}/noctispro-dicom.service" || true
+  systemctl daemon-reload || true
+
+  # Remove nginx site config + link (ignore if missing)
+  rm -f "${NGINX_SITE}" "${NGINX_SITE_LINK}" || true
+
+  # Remove env dir + app dir (includes venv/db/staticfiles/media)
+  rm -rf "${ENV_DIR}" || true
+  rm -rf "${APP_DIR}" || true
+fi
+
 echo "[+] Installing OS packages..."
 apt-get update -y
 apt-get install -y \
   ca-certificates curl git \
   python3 python3-venv python3-pip \
   build-essential pkg-config \
-  nginx ufw \
+  nginx ufw psmisc \
   certbot python3-certbot-nginx \
   libpq-dev \
   libjpeg-dev zlib1g-dev \
@@ -205,10 +233,28 @@ server {
 }
 EOF
 
+echo "[+] Ensuring ports 80/443 are free for nginx..."
+# Stop common conflicting web servers if installed/enabled.
+for svc in apache2 httpd caddy lighttpd haproxy; do
+  systemctl stop "${svc}" 2>/dev/null || true
+  systemctl disable "${svc}" 2>/dev/null || true
+  systemctl mask "${svc}" 2>/dev/null || true
+done
+# Kill any remaining listeners on 80/443 (best-effort).
+fuser -k 80/tcp 2>/dev/null || true
+fuser -k 443/tcp 2>/dev/null || true
+
 rm -f /etc/nginx/sites-enabled/default || true
 ln -sf "${NGINX_SITE}" "${NGINX_SITE_LINK}"
 nginx -t
-systemctl reload nginx
+
+# nginx "reload" fails if nginx isn't running yet; start/enable and fall back to restart.
+systemctl enable --now nginx 2>/dev/null || true
+if systemctl is-active --quiet nginx; then
+  systemctl reload nginx
+else
+  systemctl restart nginx
+fi
 
 echo "[+] Issuing Let's Encrypt certificate (requires DNS A record already set)..."
 certbot --nginx -d "${DOMAIN}" -d "www.${DOMAIN}" \

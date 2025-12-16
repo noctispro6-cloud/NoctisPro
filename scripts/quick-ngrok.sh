@@ -19,6 +19,7 @@ ADDR="8000"
 URL_FILE="/workspace/.tunnel-url"
 LOG_OUT="/tmp/ngrok.out"
 WEB_ADDR="127.0.0.1:4040"
+ENV_FILE="/workspace/.ngrok.env"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,6 +57,47 @@ if [[ -n "${TARGET_URL}" ]]; then
 fi
 
 mkdir -p "$(dirname "${URL_FILE}")"
+
+load_saved_env() {
+  if [[ -f "${ENV_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${ENV_FILE}" || true
+  fi
+}
+
+prompt_for_config_if_missing() {
+  # Token is required for paid features / reserved domains.
+  if [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
+    echo "Enter your ngrok authtoken (will not echo while typing), then press Enter:"
+    read -r -s NGROK_AUTHTOKEN
+    echo ""
+  fi
+
+  # Reserved domain is optional; blank means random URL.
+  if [[ -z "${NGROK_DOMAIN:-}" ]]; then
+    echo "Enter your reserved domain (optional; press Enter to skip):"
+    read -r NGROK_DOMAIN
+  fi
+
+  # Offer to save for next time.
+  if [[ -n "${NGROK_AUTHTOKEN:-}" ]]; then
+    echo "Save these settings to ${ENV_FILE} so you don't retype? (y/N)"
+    read -r _save
+    case "${_save,,}" in
+      y|yes)
+        umask 077
+        {
+          echo "NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}"
+          if [[ -n "${NGROK_DOMAIN:-}" ]]; then
+            echo "NGROK_DOMAIN=${NGROK_DOMAIN}"
+          fi
+        } > "${ENV_FILE}"
+        echo "[INFO] Saved."
+        ;;
+      *) ;;
+    esac
+  fi
+}
 
 install_ngrok() {
   if command -v ngrok >/dev/null 2>&1; then
@@ -104,6 +146,8 @@ for t in data.get('tunnels', []) or []:
 PY
 }
 
+load_saved_env
+prompt_for_config_if_missing
 install_ngrok
 
 # Best-effort: avoid ERR_NGROK_108 (multiple agent sessions)
@@ -149,11 +193,8 @@ while true; do
   # If we never got a URL, fail fast with a helpful hint.
   if [[ -z "${URL}" ]]; then
     echo "[ERROR] ngrok tunnel URL not detected." >&2
-    if [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
-      echo "[HINT] Set NGROK_AUTHTOKEN to let this script auto-configure ngrok." >&2
-    else
-      echo "[HINT] Check logs: ${LOG_OUT}" >&2
-    fi
+    echo "[HINT] Check logs: ${LOG_OUT}" >&2
+    echo "[HINT] Common causes: wrong NGROK_DOMAIN (not reserved on your account), invalid token, or another ngrok already running." >&2
     kill "${PID}" 2>/dev/null || true
     exit 1
   fi

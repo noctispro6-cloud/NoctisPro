@@ -11,8 +11,11 @@ WorkingDirectory=%E{APP_DIR}
 EnvironmentFile=-/etc/noctis-pro/noctis-pro.env
 EnvironmentFile=-/etc/noctispro/noctispro.env
 
-# Reserved domain you want to access (override in env file if needed)
-Environment=NGROK_DOMAIN=noctis-pro.com.ngrok.app
+# Optional reserved domain to use for the tunnel.
+# IMPORTANT: do not hardcode a domain here unless you have actually reserved it
+# in your ngrok account; otherwise the tunnel may fail to start.
+# Set this in /etc/noctis-pro/noctis-pro.env if you have one:
+#   NGROK_DOMAIN=your-reserved-domain.ngrok.app
 
 # ngrok config path (written server-side; MUST NOT be committed)
 Environment=NGROK_CONFIG=/etc/noctis-pro/ngrok.yml
@@ -20,7 +23,7 @@ Environment=NGROK_BIN=/usr/local/bin/ngrok
 
 # If NGROK_AUTHTOKEN is set (in /etc/noctis-pro/noctis-pro.env), ensure the ngrok
 # config exists. This keeps the token out of git while making setup one-step.
-ExecStartPre=/usr/bin/env bash -lc 'CFG="${NGROK_CONFIG:-/etc/noctis-pro/ngrok.yml}"; if [[ ! -f "${CFG}" ]]; then if [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then echo "ERROR: ${CFG} missing and NGROK_AUTHTOKEN not set. Put NGROK_AUTHTOKEN in /etc/noctis-pro/noctis-pro.env or create ${CFG}." >&2; exit 1; fi; install -d -m 0755 "$(dirname "${CFG}")"; umask 077; cat > "${CFG}" <<YAML\nversion: 2\nauthtoken: ${NGROK_AUTHTOKEN}\ntunnels:\n  noctis-web:\n    proto: http\n    addr: 8000\n    schemes:\n      - https\n    domain: ${NGROK_DOMAIN}\nYAML\nchmod 600 "${CFG}"; fi'
+ExecStartPre=/usr/bin/env bash -lc 'CFG="${NGROK_CONFIG:-/etc/noctis-pro/ngrok.yml}"; if [[ ! -f "${CFG}" ]]; then if [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then echo "ERROR: ${CFG} missing and NGROK_AUTHTOKEN not set. Put NGROK_AUTHTOKEN in /etc/noctis-pro/noctis-pro.env or create ${CFG}." >&2; exit 1; fi; install -d -m 0755 "$(dirname "${CFG}")"; umask 077; { echo "version: 2"; echo "authtoken: ${NGROK_AUTHTOKEN}"; echo "tunnels:"; echo "  noctis-web:"; echo "    proto: http"; echo "    addr: 8000"; echo "    schemes:"; echo "      - https"; if [[ -n "${NGROK_DOMAIN:-}" ]]; then echo "    domain: ${NGROK_DOMAIN}"; fi; } > "${CFG}"; chmod 600 "${CFG}"; fi'
 
 # Persist tunnel URL so Django can auto-detect it (see noctis_pro/settings.py)
 ExecStartPre=/usr/bin/env bash -lc 'if [[ -n "${NGROK_DOMAIN:-}" ]]; then echo -n "https://${NGROK_DOMAIN}" > "%E{APP_DIR}/.tunnel-url"; fi'

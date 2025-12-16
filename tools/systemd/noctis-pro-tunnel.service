@@ -1,5 +1,5 @@
 [Unit]
-Description=Noctis Pro Public HTTPS Tunnel (cloudflared)
+Description=Noctis Pro Public HTTPS Tunnel (ngrok)
 After=network-online.target noctis-pro.service
 Wants=network-online.target
 
@@ -7,7 +7,26 @@ Wants=network-online.target
 Type=simple
 Environment=APP_DIR=/opt/noctispro
 WorkingDirectory=%E{APP_DIR}
-ExecStart=/usr/bin/env bash %E{APP_DIR}/scripts/quick-tunnel.sh --url http://localhost:8000 --write %E{APP_DIR}/.tunnel-url
+# Optional env files used by server deploy scripts
+EnvironmentFile=-/etc/noctis-pro/noctis-pro.env
+EnvironmentFile=-/etc/noctispro/noctispro.env
+
+# Reserved domain you want to access (override in env file if needed)
+Environment=NGROK_DOMAIN=noctis-pro.com.ngrok.app
+
+# ngrok config path (written server-side; MUST NOT be committed)
+Environment=NGROK_CONFIG=/etc/noctis-pro/ngrok.yml
+Environment=NGROK_BIN=/usr/local/bin/ngrok
+
+# If NGROK_AUTHTOKEN is set (in /etc/noctis-pro/noctis-pro.env), ensure the ngrok
+# config exists. This keeps the token out of git while making setup one-step.
+ExecStartPre=/usr/bin/env bash -lc 'CFG="${NGROK_CONFIG:-/etc/noctis-pro/ngrok.yml}"; if [[ ! -f "${CFG}" ]]; then if [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then echo "ERROR: ${CFG} missing and NGROK_AUTHTOKEN not set. Put NGROK_AUTHTOKEN in /etc/noctis-pro/noctis-pro.env or create ${CFG}." >&2; exit 1; fi; install -d -m 0755 "$(dirname "${CFG}")"; umask 077; cat > "${CFG}" <<YAML\nversion: 2\nauthtoken: ${NGROK_AUTHTOKEN}\ntunnels:\n  noctis-web:\n    proto: http\n    addr: 8000\n    schemes:\n      - https\n    domain: ${NGROK_DOMAIN}\nYAML\nchmod 600 "${CFG}"; fi'
+
+# Persist tunnel URL so Django can auto-detect it (see noctis_pro/settings.py)
+ExecStartPre=/usr/bin/env bash -lc 'if [[ -n "${NGROK_DOMAIN:-}" ]]; then echo -n "https://${NGROK_DOMAIN}" > "%E{APP_DIR}/.tunnel-url"; fi'
+
+# Start ngrok (fallback to /etc/ngrok.yml and PATH if needed)
+ExecStart=/usr/bin/env bash -lc 'BIN="${NGROK_BIN:-/usr/local/bin/ngrok}"; if [[ ! -x "${BIN}" ]]; then BIN="$(command -v ngrok || true)"; fi; if [[ -z "${BIN}" ]]; then echo "ERROR: ngrok binary not found (install ngrok to /usr/local/bin/ngrok or PATH)" >&2; exit 127; fi; CFG="${NGROK_CONFIG:-/etc/noctis-pro/ngrok.yml}"; if [[ ! -f "${CFG}" && -f "/etc/ngrok.yml" ]]; then CFG="/etc/ngrok.yml"; fi; exec "${BIN}" start --config "${CFG}" noctis-web'
 Restart=always
 RestartSec=5
 

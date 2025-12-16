@@ -18,7 +18,12 @@ set -euo pipefail
 DOMAIN=""
 LE_EMAIL=""
 FRESH_INSTALL=0
+# Tunnel provider:
+# - "ngrok": requires NGROK_AUTHTOKEN + NGROK_DOMAIN (reserved domain)
+# - "cloudflare": uses Cloudflare Quick Tunnel (random https://xxxx.trycloudflare.com)
+TUNNEL_PROVIDER="${TUNNEL_PROVIDER:-ngrok}"
 USE_NGROK=1
+USE_CLOUDFLARE=0
 # Track whether values were explicitly provided (vs defaults/prompts).
 DOMAIN_PROVIDED=0
 EMAIL_PROVIDED=0
@@ -101,16 +106,29 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ngrok)
       USE_NGROK=1
+      USE_CLOUDFLARE=0
+      TUNNEL_PROVIDER="ngrok"
+      shift
+      ;;
+    --cloudflare|--cloudflared|--trycloudflare)
+      # Use Cloudflare Quick Tunnel (emergency-friendly, no token/domain needed)
+      USE_NGROK=0
+      USE_CLOUDFLARE=1
+      TUNNEL_PROVIDER="cloudflare"
       shift
       ;;
     --ngrok-domain)
       USE_NGROK=1
+      USE_CLOUDFLARE=0
+      TUNNEL_PROVIDER="ngrok"
       NGROK_DOMAIN="${2:-}"
       NGROK_DOMAIN_PROVIDED=1
       shift 2
       ;;
     --ngrok-token|--ngrok-authtoken)
       USE_NGROK=1
+      USE_CLOUDFLARE=0
+      TUNNEL_PROVIDER="ngrok"
       NGROK_AUTHTOKEN="${2:-}"
       NGROK_TOKEN_PROVIDED=1
       shift 2
@@ -132,6 +150,24 @@ done
 # force re-entry or overwrite/remove it during deployment.
 adopt_existing_ngrok_token_if_missing
 
+# Normalize tunnel provider if provided via env
+case "${TUNNEL_PROVIDER}" in
+  ngrok)
+    USE_NGROK=1
+    USE_CLOUDFLARE=0
+    ;;
+  cloudflare)
+    USE_NGROK=0
+    USE_CLOUDFLARE=1
+    ;;
+  *)
+    echo "[!] Unknown TUNNEL_PROVIDER='${TUNNEL_PROVIDER}', defaulting to cloudflare." >&2
+    TUNNEL_PROVIDER="cloudflare"
+    USE_NGROK=0
+    USE_CLOUDFLARE=1
+    ;;
+esac
+
 # Interactive prompts (TTY only): make the script friendlier when run without args.
 if is_interactive; then
   if [[ "${USE_NGROK}" == "1" ]]; then
@@ -144,14 +180,9 @@ if is_interactive; then
       echo
       NGROK_AUTHTOKEN="${_ngrok_token_in}"
     fi
+  elif [[ "${USE_CLOUDFLARE}" == "1" ]]; then
+    echo "[+] Tunnel provider: Cloudflare Quick Tunnel (no token/domain needed)."
   fi
-fi
-
-# This deployment script supports ONLY ngrok public access.
-# If someone passes legacy flags without --ngrok, we force ngrok mode and require token/domain.
-if [[ "${USE_NGROK}" != "1" ]]; then
-  echo "[!] Non-ngrok deployment paths are suspended; forcing ngrok mode." >&2
-  USE_NGROK=1
 fi
 
 # Default domain if not provided
@@ -183,6 +214,10 @@ if [[ "${USE_NGROK}" == "1" ]]; then
   DOMAIN="${DOMAIN%%/*}"
   DOMAIN="${DOMAIN%.}"
   LE_EMAIL="admin@${DOMAIN}"
+elif [[ "${USE_CLOUDFLARE}" == "1" ]]; then
+  # Cloudflare Quick Tunnel: DOMAIN_NAME is mostly informational; the actual public host
+  # will be captured into ${APP_DIR}/.tunnel-url and auto-detected by Django settings.
+  TUNNEL_PROVIDER="cloudflare"
 fi
 
 # Guard against legacy/incorrect domain value (missing hyphen).
@@ -241,11 +276,15 @@ if [[ "${FRESH_INSTALL}" == "1" ]]; then
   systemctl stop noctis-pro.service 2>/dev/null || true
   systemctl stop noctis-pro-dicom.service 2>/dev/null || true
   systemctl stop noctis-pro-ngrok-tunnel.service 2>/dev/null || true
+  systemctl stop noctis-pro-cloudflared-tunnel.service 2>/dev/null || true
+  systemctl stop noctis-pro-tunnel.service 2>/dev/null || true
   systemctl stop noctispro-web.service 2>/dev/null || true
   systemctl stop noctispro-dicom.service 2>/dev/null || true
   systemctl disable noctis-pro.service 2>/dev/null || true
   systemctl disable noctis-pro-dicom.service 2>/dev/null || true
   systemctl disable noctis-pro-ngrok-tunnel.service 2>/dev/null || true
+  systemctl disable noctis-pro-cloudflared-tunnel.service 2>/dev/null || true
+  systemctl disable noctis-pro-tunnel.service 2>/dev/null || true
   systemctl disable noctispro-web.service 2>/dev/null || true
   systemctl disable noctispro-dicom.service 2>/dev/null || true
 
@@ -253,6 +292,8 @@ if [[ "${FRESH_INSTALL}" == "1" ]]; then
   rm -f "${SYSTEMD_DIR}/noctis-pro.service" || true
   rm -f "${SYSTEMD_DIR}/noctis-pro-dicom.service" || true
   rm -f "${SYSTEMD_DIR}/noctis-pro-ngrok-tunnel.service" || true
+  rm -f "${SYSTEMD_DIR}/noctis-pro-cloudflared-tunnel.service" || true
+  rm -f "${SYSTEMD_DIR}/noctis-pro-tunnel.service" || true
   rm -f "${SYSTEMD_DIR}/noctispro-web.service" || true
   rm -f "${SYSTEMD_DIR}/noctispro-dicom.service" || true
   systemctl daemon-reload || true
@@ -404,6 +445,32 @@ systemctl daemon-reload
 systemctl enable --now noctis-pro.service
 systemctl enable --now noctis-pro-dicom.service
 
+install_cloudflared() {
+  if command -v cloudflared >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "[+] Installing cloudflared (Cloudflare Tunnel)..."
+  local arch platform url
+  arch="$(uname -m)"
+  platform="linux-amd64"
+  case "${arch}" in
+    x86_64|amd64)
+      platform="linux-amd64"
+      ;;
+    aarch64|arm64)
+      platform="linux-arm64"
+      ;;
+    *)
+      echo "[!] Unsupported architecture for cloudflared install: ${arch}" >&2
+      echo "    Please install cloudflared manually and re-run with --cloudflare." >&2
+      exit 2
+      ;;
+  esac
+  url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${platform}.deb"
+  curl -fsSL "${url}" -o /tmp/cloudflared.deb
+  dpkg -i /tmp/cloudflared.deb >/dev/null
+}
+
 install_ngrok() {
   if command -v ngrok >/dev/null 2>&1; then
     return 0
@@ -431,6 +498,54 @@ install_ngrok() {
   tar -xzf /tmp/ngrok.tgz -C /tmp
   install -m 0755 /tmp/ngrok /usr/local/bin/ngrok
 }
+
+if [[ "${USE_CLOUDFLARE}" == "1" ]]; then
+  echo "[+] Setting up Cloudflare Quick Tunnel (HTTPS)..."
+  install_cloudflared
+
+  # Create a dedicated systemd unit for Cloudflare tunnel.
+  # It writes the public URL into ${APP_DIR}/.tunnel-url so Django can auto-detect it.
+  cat > "${SYSTEMD_DIR}/noctis-pro-cloudflared-tunnel.service" <<EOF
+[Unit]
+Description=Noctis Pro Public HTTPS Tunnel (Cloudflare Quick Tunnel)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=APP_DIR=${APP_DIR}
+WorkingDirectory=${APP_DIR}
+
+# Ensure the url file exists early (best-effort)
+ExecStartPre=/usr/bin/env bash -lc 'rm -f "${APP_DIR}/.tunnel-url" || true; install -d -m 0755 /var/log/noctis-pro'
+
+# Start cloudflared and log to a file so we can extract the assigned URL reliably.
+ExecStart=/usr/bin/env bash -lc 'BIN="\$(command -v cloudflared || true)"; if [[ -z "\${BIN}" ]]; then echo "ERROR: cloudflared not found" >&2; exit 127; fi; exec "\${BIN}" tunnel --no-autoupdate --url http://127.0.0.1:8000 --logfile /var/log/noctis-pro/cloudflared.log --loglevel info'
+
+# Capture https://xxxx.trycloudflare.com from the log and persist it for Django.
+ExecStartPost=/usr/bin/env bash -lc 'URL_FILE="${APP_DIR}/.tunnel-url"; LOG="/var/log/noctis-pro/cloudflared.log"; for _ in \$(seq 1 120); do if [[ -f "\${LOG}" ]]; then URL="\$(sed -nE "s/.*(https:\\/\\/[A-Za-z0-9.-]+\\.trycloudflare\\.com).*/\\1/p" "\${LOG}" | tail -n 1)"; if [[ -n "\${URL}" ]]; then echo -n "\${URL}" > "\${URL_FILE}"; break; fi; fi; sleep 0.5; done; [[ -s "\${URL_FILE}" ]] || true'
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now noctis-pro-cloudflared-tunnel.service
+
+  echo "[+] Waiting for Cloudflare tunnel URL..."
+  for _ in $(seq 1 120); do
+    if [[ -s "${APP_DIR}/.tunnel-url" ]]; then
+      break
+    fi
+    sleep 0.5
+  done
+
+  # Restart web service so Django picks up .tunnel-url at import time.
+  systemctl restart noctis-pro.service
+fi
 
 if [[ "${USE_NGROK}" == "1" ]]; then
   echo "[+] Setting up ngrok HTTPS tunnel (skipping nginx/Let's Encrypt)..."
@@ -475,16 +590,19 @@ EOF
   systemctl enable --now noctis-pro-ngrok-tunnel.service
 fi
 
-if [[ "${USE_NGROK}" != "1" ]]; then
-  echo "[!] This deployment script supports ONLY ngrok. Non-ngrok steps are suspended." >&2
-  exit 2
-fi
-
 echo ""
 echo "============================================================"
 echo "DEPLOY COMPLETE"
 echo "============================================================"
-echo "Public URL: https://${DOMAIN}"
+PUBLIC_URL=""
+if [[ -s "${APP_DIR}/.tunnel-url" ]]; then
+  PUBLIC_URL="$(cat "${APP_DIR}/.tunnel-url" 2>/dev/null || true)"
+fi
+if [[ -n "${PUBLIC_URL}" ]]; then
+  echo "Public URL: ${PUBLIC_URL}"
+else
+  echo "Public URL: https://${DOMAIN}"
+fi
 PUBLIC_IP="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
 if [[ -z "${PUBLIC_IP}" ]]; then
   PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
@@ -501,8 +619,14 @@ echo "  password: ${ADMIN_PW}"
 echo ""
 if [[ "${USE_NGROK}" == "1" ]]; then
   echo "ngrok tunnel enabled: ${DOMAIN}"
+elif [[ "${USE_CLOUDFLARE}" == "1" ]]; then
+  if [[ -n "${PUBLIC_URL}" ]]; then
+    echo "Cloudflare tunnel enabled: ${PUBLIC_URL}"
+  else
+    echo "Cloudflare tunnel enabled (URL not captured yet; check ${APP_DIR}/.tunnel-url)"
+  fi
 else
-  echo "[!] Non-ngrok deployment is suspended."
+  echo "[!] No tunnel enabled."
 fi
 echo "============================================================"
 

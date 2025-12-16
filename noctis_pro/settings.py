@@ -27,9 +27,21 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-7x!8k@m$z9h#4p&x3w2v6
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 
-# Ngrok detection for automatic configuration
+# Tunnel / public URL detection for automatic configuration
+#
+# Supported:
+# - ngrok (NGROK_URL or hosts containing "ngrok")
+# - Cloudflare Tunnel quick URL (hosts containing "trycloudflare.com")
+# - localtunnel (hosts containing "loca.lt")
 NGROK_URL = os.environ.get('NGROK_URL', '')
-IS_NGROK = bool(NGROK_URL) or any('ngrok' in host for host in os.environ.get('ALLOWED_HOSTS', '').split(','))
+TUNNEL_URL = os.environ.get('TUNNEL_URL', '')
+
+_allowed_hosts_env = os.environ.get('ALLOWED_HOSTS', '')
+_allowed_hosts_tokens = [h.strip().lower() for h in _allowed_hosts_env.split(',') if h.strip()]
+IS_NGROK = bool(NGROK_URL) or any('ngrok' in host for host in _allowed_hosts_tokens)
+IS_TUNNEL = bool(TUNNEL_URL) or any(
+    any(marker in host for marker in ('ngrok', 'trycloudflare.com', 'loca.lt')) for host in _allowed_hosts_tokens
+)
 
 # Whether HTTPS is actually configured in front of Django (e.g., nginx + Let's Encrypt).
 # This allows safe HTTP-only bootstrapping during first-time certificate issuance.
@@ -60,7 +72,7 @@ DOMAIN_NAME = normalize_domain_name(os.environ.get('DOMAIN_NAME', 'noctis-pro.co
 DOMAIN_HOSTS = [h for h in [DOMAIN_NAME, f"www.{DOMAIN_NAME}", f"dicom.{DOMAIN_NAME}"] if h and h != '.']
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')
-if DEBUG or IS_NGROK:
+if DEBUG or IS_TUNNEL:
     # Keep dev/ngrok frictionless unless explicitly locked down
     ALLOWED_HOSTS.append('*')
 
@@ -78,6 +90,8 @@ LEGACY_ALLOWED_HOSTS = [
     '*.ngrok.io',
     '*.ngrok-free.app',
     '*.ngrok.app',
+    '*.trycloudflare.com',
+    '*.loca.lt',
     '3.222.223.4',
     '172.30.0.2',
 ]
@@ -90,7 +104,7 @@ ALLOWED_HOSTS.extend([
     *EXTRA_ALLOWED_HOSTS,
 ])
 
-if DEBUG or IS_NGROK or ALLOW_LEGACY_HOSTS:
+if DEBUG or IS_TUNNEL or ALLOW_LEGACY_HOSTS:
     ALLOWED_HOSTS.extend(LEGACY_ALLOWED_HOSTS)
 
 # Add specific ngrok URL if provided
@@ -282,7 +296,7 @@ if NGROK_URL:
     ])
 
 # Add ngrok support dynamically
-CORS_ALLOW_ALL_ORIGINS = DEBUG or IS_NGROK  # Allow all origins in debug mode or when using ngrok
+CORS_ALLOW_ALL_ORIGINS = DEBUG or IS_TUNNEL  # Allow all origins in debug mode or when using a tunnel
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -305,6 +319,10 @@ CSRF_TRUSTED_ORIGINS = [
     "https://localhost:8000",
     "https://127.0.0.1:8000",
     "https://*.duckdns.org",
+    "https://*.trycloudflare.com",
+    "http://*.trycloudflare.com",
+    "https://*.loca.lt",
+    "http://*.loca.lt",
     "http://*.duckdns.org",
 ]
 
@@ -350,11 +368,11 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50MB
 # Security settings
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
-X_FRAME_OPTIONS = 'SAMEORIGIN' if DEBUG or IS_NGROK else 'DENY'  # Allow embedding for ngrok
+X_FRAME_OPTIONS = 'SAMEORIGIN' if DEBUG or IS_TUNNEL else 'DENY'  # Allow embedding for tunnels/dev
 
-# Ngrok-specific security adjustments
-if IS_NGROK:
-    # Disable some security features that interfere with ngrok
+# Tunnel-specific security adjustments
+if IS_TUNNEL:
+    # Disable some security features that interfere with tunnels (host/origin changes)
     SECURE_SSL_REDIRECT = False
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False

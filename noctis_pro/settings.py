@@ -126,6 +126,13 @@ ALLOWED_HOSTS.extend([
     *EXTRA_ALLOWED_HOSTS,
 ])
 
+# In some container/preview environments, requests may arrive with a Host header
+# matching the container hostname (e.g., "cursor"). Allow that hostname so the
+# app remains reachable without requiring operators to set ALLOWED_HOSTS.
+_runtime_hostname = (os.environ.get("HOSTNAME") or "").strip().lower()
+if _runtime_hostname:
+    ALLOWED_HOSTS.append(_runtime_hostname)
+
 if DEBUG or IS_TUNNEL or ALLOW_LEGACY_HOSTS:
     ALLOWED_HOSTS.extend(LEGACY_ALLOWED_HOSTS)
 

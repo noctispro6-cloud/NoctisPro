@@ -5,13 +5,15 @@ set -euo pipefail
 # This script is additive and does NOT modify existing deployment scripts.
 #
 # Usage (as root or with sudo):
-#   ./scripts/configure_ngrok_multi.sh <NGROK_AUTHTOKEN> [config_path]
+#   ./scripts/configure_ngrok_multi.sh <NGROK_AUTHTOKEN> [config_path] [reserved_domain]
 #
 # Example:
 #   sudo ./scripts/configure_ngrok_multi.sh YOUR_AUTHTOKEN /etc/ngrok.yml
+#   sudo ./scripts/configure_ngrok_multi.sh YOUR_AUTHTOKEN /etc/ngrok.yml noctis-pro.com.ngrok.app
 
 AUTHTOKEN="${1:-}"
 CONF_PATH="${2:-/etc/ngrok.yml}"
+RESERVED_DOMAIN="${3:-}"
 
 if [[ -z "${AUTHTOKEN}" ]]; then
   echo "ERROR: ngrok authtoken is required" >&2
@@ -20,6 +22,11 @@ fi
 
 TMP_DIR="$(dirname "${CONF_PATH}")"
 mkdir -p "${TMP_DIR}"
+
+WEB_DOMAIN_LINE=""
+if [[ -n "${RESERVED_DOMAIN}" ]]; then
+  WEB_DOMAIN_LINE="    domain: ${RESERVED_DOMAIN}"
+fi
 
 cat > "${CONF_PATH}" <<YAML
 version: 2
@@ -30,6 +37,7 @@ tunnels:
     proto: http
     schemes:
       - https
+${WEB_DOMAIN_LINE}
   # Uncomment the below if you have a paid ngrok plan supporting tcp
   # noctis-dicom:
   #   addr: 11112

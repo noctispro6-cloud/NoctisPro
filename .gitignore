@@ -1,0 +1,6 @@
+# Local tunnel URL written by helper scripts/systemd
+.tunnel-url
+
+# Local saved ngrok credentials/settings (do not commit)
+.ngrok.env
+

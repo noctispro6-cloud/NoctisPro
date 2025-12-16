@@ -31,7 +31,14 @@ DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 NGROK_URL = os.environ.get('NGROK_URL', '')
 IS_NGROK = bool(NGROK_URL) or any('ngrok' in host for host in os.environ.get('ALLOWED_HOSTS', '').split(','))
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',')
+# Primary public domain (can be overridden via env)
+DOMAIN_NAME = os.environ.get('DOMAIN_NAME', 'noctis-pro.com').strip()
+DOMAIN_HOSTS = [h for h in [DOMAIN_NAME, f"www.{DOMAIN_NAME}", f"dicom.{DOMAIN_NAME}"] if h and h != '.']
+
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')
+if DEBUG or IS_NGROK:
+    # Keep dev/ngrok frictionless unless explicitly locked down
+    ALLOWED_HOSTS.append('*')
 
 # Add ngrok and deployment specific hosts
 ALLOWED_HOSTS.extend([
@@ -46,6 +53,7 @@ ALLOWED_HOSTS.extend([
     '*.ngrok.app',
     '3.222.223.4',
     '172.30.0.2',
+    *DOMAIN_HOSTS,
 ])
 
 # Add specific ngrok URL if provided
@@ -223,6 +231,12 @@ CORS_ALLOWED_ORIGINS = [
     "https://127.0.0.1:8000",
 ]
 
+# Add configured domain(s) to CORS
+if DOMAIN_HOSTS:
+    CORS_ALLOWED_ORIGINS.extend(
+        [f"https://{h}" for h in DOMAIN_HOSTS] + [f"http://{h}" for h in DOMAIN_HOSTS]
+    )
+
 # Add specific ngrok URL to CORS if provided
 if NGROK_URL:
     CORS_ALLOWED_ORIGINS.extend([
@@ -256,6 +270,12 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*.duckdns.org",
     "http://*.duckdns.org",
 ]
+
+# Add configured domain(s) to CSRF trusted origins
+if DOMAIN_HOSTS:
+    CSRF_TRUSTED_ORIGINS.extend(
+        [f"https://{h}" for h in DOMAIN_HOSTS] + [f"http://{h}" for h in DOMAIN_HOSTS]
+    )
 
 # Add specific ngrok URL to CSRF trusted origins if provided
 if NGROK_URL:

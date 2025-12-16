@@ -11,10 +11,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: Don't run with debug turned on in production!
 DEBUG = False
 
+# Primary public domain (can be overridden via env)
+DOMAIN_NAME = os.environ.get('DOMAIN_NAME', 'noctis-pro.com').strip()
+DOMAIN_HOSTS = [h for h in [DOMAIN_NAME, f"www.{DOMAIN_NAME}", f"dicom.{DOMAIN_NAME}"] if h and h != '.']
+
 # Hosts/domain names that are valid for this site
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
+    *DOMAIN_HOSTS,
     '*.trycloudflare.com',  # Cloudflare tunnel domains
     '*.ngrok.io',           # Ngrok tunnel domains
     '*.loca.lt',            # LocalTunnel domains
@@ -77,6 +82,7 @@ SESSION_SAVE_EVERY_REQUEST = True
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SECURE = False  # Set to True when using HTTPS in production
 CSRF_TRUSTED_ORIGINS = [
+    *([f'https://{h}' for h in DOMAIN_HOSTS] + [f'http://{h}' for h in DOMAIN_HOSTS]),
     'https://*.trycloudflare.com',
     'https://*.ngrok.io',
     'https://*.loca.lt',
@@ -135,7 +141,7 @@ LOGOUT_REDIRECT_URL = '/login/'
 
 # Email configuration (for notifications)
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-DEFAULT_FROM_EMAIL = 'noctis@yourdomain.com'
+DEFAULT_FROM_EMAIL = f'noctis@{DOMAIN_NAME}' if DOMAIN_NAME else 'noctis@noctis-pro.com'
 
 # Logging configuration
 LOGGING = {

@@ -61,6 +61,13 @@ DOMAIN="${DOMAIN#https://}"
 DOMAIN="${DOMAIN%%/*}"
 DOMAIN="${DOMAIN%.}"
 
+# Guard against legacy/incorrect domain value (missing hyphen).
+# If someone passes "noctispro.com" we always deploy as "noctis-pro.com".
+if [[ "${DOMAIN}" == "noctispro.com" ]]; then
+  echo "[!] Detected legacy domain 'noctispro.com' -> using 'noctis-pro.com' instead" >&2
+  DOMAIN="noctis-pro.com"
+fi
+
 if [[ -z "${DOMAIN}" || "${DOMAIN}" == *" "* ]]; then
   echo "[!] Invalid domain. Provide a hostname like: example.com" >&2
   exit 2

@@ -54,6 +54,8 @@ urlpatterns = [
     path('worklist/', include('worklist.urls')),  # RESTORED
     # Alias endpoints expected by the dashboard UI
     path('dicom-viewer/', include(('dicom_viewer.urls','dicom_viewer'), namespace='dicom_viewer')),  # RESTORED
+    # DICOMweb (STOW-RS) endpoint for internet-friendly uploads
+    path('dicomweb/', include(('dicom_viewer.dicomweb_urls', 'dicomweb'), namespace='dicomweb')),
     # Removed duplicate 'viewer/' include to avoid namespace clash; keep alias via redirect if needed
     path('viewer/', RedirectView.as_view(url='/dicom-viewer/', permanent=False, query_string=True)),  # RESTORED
     path('viewer/<path:subpath>/', RedirectView.as_view(url='/dicom-viewer/%(subpath)s/', permanent=False, query_string=True)),  # RESTORED

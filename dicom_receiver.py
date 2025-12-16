@@ -25,6 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 import json
+import ipaddress
 
 # Resolve project base directory dynamically
 from pathlib import Path
@@ -258,6 +259,12 @@ class DicomReceiver:
         self.max_pdu_size = max_pdu_size
         self.is_running = False
         self.ae = None
+
+        # Optional network allowlist (recommended if exposing port 11112 publicly)
+        # Examples:
+        #   DICOM_ALLOWED_NETS="41.90.0.0/16,102.0.0.0/8"
+        #   DICOM_ALLOWED_NETS="196.201.0.10,196.201.0.11"
+        self.allowed_nets = self._parse_allowed_nets(os.environ.get("DICOM_ALLOWED_NETS", ""))
         
         # Statistics
         self.stats = {
@@ -283,6 +290,37 @@ class DicomReceiver:
         self.image_processor = DicomImageProcessor()
         
         self.logger.info(f"DICOM Receiver initialized - AET: {aet}, Port: {port}, Max PDU: {max_pdu_size}")
+        if self.allowed_nets:
+            self.logger.info(
+                f"DICOM Receiver network allowlist enabled: {', '.join(str(n) for n in self.allowed_nets)}"
+            )
+
+    @staticmethod
+    def _parse_allowed_nets(value: str):
+        nets = []
+        for raw in (value or "").split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                # Accept both IPs and CIDRs
+                if "/" in raw:
+                    nets.append(ipaddress.ip_network(raw, strict=False))
+                else:
+                    nets.append(ipaddress.ip_network(f"{raw}/32", strict=False))
+            except ValueError:
+                # Ignore invalid entries (but don't crash receiver)
+                logging.getLogger('dicom_receiver').warning(f"Ignoring invalid DICOM_ALLOWED_NETS entry: '{raw}'")
+        return nets
+
+    def _peer_allowed(self, peer_ip: str) -> bool:
+        if not self.allowed_nets:
+            return True
+        try:
+            ip = ipaddress.ip_address(peer_ip)
+        except ValueError:
+            return False
+        return any(ip in net for net in self.allowed_nets)
     
     def setup_ae(self):
         """Setup Application Entity with optimized settings"""
@@ -316,6 +354,10 @@ class DicomReceiver:
         try:
             calling_aet = event.assoc.requestor.ae_title.decode(errors='ignore').strip()
             peer_ip = getattr(event.assoc.requestor, 'address', 'unknown')
+
+            if not self._peer_allowed(peer_ip):
+                self.logger.warning(f"C-ECHO rejected (IP not allowed): '{calling_aet}' from {peer_ip}")
+                return 0x0000  # Keep success to avoid noisy connectivity failures; C-STORE will still reject.
             
             # Log the echo request
             self.logger.info(f"C-ECHO received from '{calling_aet}' at {peer_ip}")
@@ -344,6 +386,12 @@ class DicomReceiver:
             # Extract connection information
             calling_aet = event.assoc.requestor.ae_title.decode(errors='ignore').strip()
             peer_ip = getattr(event.assoc.requestor, 'address', 'unknown')
+
+            # Optional network allowlist check
+            if not self._peer_allowed(peer_ip):
+                self.logger.warning(f"C-STORE rejected (IP not allowed): '{calling_aet}' from {peer_ip}")
+                self.stats['total_errors'] += 1
+                return 0xC000
             
             # Validate facility authorization
             facility = Facility.objects.filter(ae_title__iexact=calling_aet, is_active=True).first()

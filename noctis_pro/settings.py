@@ -251,8 +251,8 @@ CORS_ALLOW_CREDENTIALS = True
 
 # CSRF trusted origins - Fix for 403 errors and ngrok support
 CSRF_TRUSTED_ORIGINS = [
-    "http://noctispro",
-    "https://noctispro", 
+    f"http://{DOMAIN_NAME}",
+    f"https://{DOMAIN_NAME}",
     "https://*.ngrok.io",
     "https://*.ngrok-free.app",
     "https://*.ngrok.app",

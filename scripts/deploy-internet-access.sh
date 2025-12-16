@@ -5,12 +5,34 @@
 
 set -e  # Exit on any error
 
-# SUSPENDED: This script configures non-ngrok internet exposure (DNS + Let's Encrypt + nginx).
-# The deployment has been standardized to ngrok-only. Use:
-#   NGROK_AUTHTOKEN="..." NGROK_DOMAIN="your-reserved-domain.ngrok.app" sudo bash scripts/contabo_ubuntu2404_deploy.sh --fresh
-echo "[ERROR] deploy-internet-access.sh is suspended (non-ngrok internet deployment disabled)." >&2
-echo "[HINT] Use ngrok-only deployment: scripts/contabo_ubuntu2404_deploy.sh" >&2
-exit 2
+# Emergency HTTPS viewing helper.
+#
+# Historically this script handled DNS + nginx + Let's Encrypt. For reliability
+# (and to avoid waiting on DNS/ACME), the project now supports HTTPS viewing via
+# a tunnel. This wrapper starts a tunnel and writes `.tunnel-url` so Django can
+# auto-detect the public HTTPS host (see `noctis_pro/settings.py`).
+#
+# Fast usage:
+#   ./scripts/deploy-internet-access.sh
+#   NGROK_AUTHTOKEN=... NGROK_DOMAIN=reserved.ngrok.app ./scripts/deploy-internet-access.sh
+#
+# Full production server deploy (installs systemd units, etc.):
+#   sudo bash scripts/contabo_ubuntu2404_deploy.sh --ngrok --fresh
+#   sudo bash scripts/contabo_ubuntu2404_deploy.sh --cloudflare --fresh
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "[INFO] Starting HTTPS tunnel for Noctis Pro web UI..." >&2
+echo "[INFO] If you have ngrok reserved domain creds, export NGROK_AUTHTOKEN and NGROK_DOMAIN." >&2
+echo "[INFO] Otherwise, this will fall back to a Cloudflare Quick Tunnel." >&2
+echo "" >&2
+
+# Prefer ngrok if creds/domain are provided; otherwise use Cloudflare quick tunnel.
+if [[ -n "${NGROK_DOMAIN:-}" || -n "${NGROK_AUTHTOKEN:-}" ]]; then
+  exec "${SCRIPT_DIR}/quick-ngrok.sh" --addr 8000 --write "/workspace/.tunnel-url" --non-interactive
+else
+  exec "${SCRIPT_DIR}/quick-tunnel.sh" --addr 8000 --write "/workspace/.tunnel-url" --non-interactive
+fi
 
 # Colors for output
 RED='\033[0;31m'

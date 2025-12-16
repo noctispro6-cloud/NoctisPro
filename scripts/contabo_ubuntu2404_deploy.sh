@@ -275,6 +275,7 @@ echo "[+] Configuring nginx reverse proxy..."
 cat > "${NGINX_SITE}" <<EOF
 server {
     listen 80;
+    listen [::]:80;
     server_name ${SERVER_NAMES};
 
     client_max_body_size 6G;
@@ -350,6 +351,27 @@ PREFLIGHT_OK=1
 LOCAL_OK=1
 PUBLIC_OK=1
 
+# Detect common DNS/IPv6 pitfall:
+# If an AAAA record exists but this server has no working IPv6, some clients
+# (and Let's Encrypt validation) may hit the IPv6 address and fail.
+HAS_DNS_AAAA=0
+if getent ahosts "${DOMAIN}" 2>/dev/null | awk '{print $1}' | grep -q ":"; then
+  HAS_DNS_AAAA=1
+fi
+HAS_LOCAL_IPV6=0
+if ip -6 route show default 2>/dev/null | grep -q "default"; then
+  HAS_LOCAL_IPV6=1
+elif ip -6 addr show scope global 2>/dev/null | grep -q "inet6"; then
+  HAS_LOCAL_IPV6=1
+fi
+if [[ "${HAS_DNS_AAAA}" == "1" && "${HAS_LOCAL_IPV6}" == "0" ]]; then
+  echo "[!] Warning: ${DOMAIN} has an AAAA (IPv6) record, but this server does not appear to have working IPv6." >&2
+  echo "    This can break HTTPS access and Let's Encrypt issuance." >&2
+  echo "    Fix options:" >&2
+  echo "      - Remove the AAAA record for ${DOMAIN} (and www.${DOMAIN} if present), OR" >&2
+  echo "      - Enable IPv6 routing on this server and ensure nginx listens on :: (this script enables :: listeners)." >&2
+fi
+
 # 1) Local validation (bypasses DNS): ensure nginx is serving the ACME root.
 # This catches common misconfigurations (nginx not running, wrong root, wrong server_name).
 if ! curl -fsS --max-time 5 -H "Host: ${DOMAIN}" \
@@ -364,14 +386,22 @@ if [[ "${INCLUDE_WWW}" == "1" ]]; then
 fi
 
 # 2) Public validation (uses DNS): ensures the hostname resolves to this server and port 80 is reachable.
-if ! curl -fsS --max-time 8 \
+if ! curl -4 -fsS --max-time 8 \
   "http://${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
   PUBLIC_OK=0
 fi
 if [[ "${INCLUDE_WWW}" == "1" ]]; then
-  if ! curl -fsS --max-time 8 \
+  if ! curl -4 -fsS --max-time 8 \
     "http://www.${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
     PUBLIC_OK=0
+  fi
+fi
+
+# If AAAA exists, also sanity-check IPv6 reachability quickly (best-effort).
+if [[ "${HAS_DNS_AAAA}" == "1" ]]; then
+  if ! curl -6 -fsS --max-time 5 "http://${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
+    echo "[!] IPv6 check failed for ${DOMAIN} (AAAA exists but HTTP over IPv6 is not reachable)." >&2
+    echo "    If users or Let's Encrypt hit IPv6 first, HTTPS may fail. Remove the AAAA record or fix IPv6 routing." >&2
   fi
 fi
 
@@ -424,6 +454,7 @@ if [[ "${CERT_OK}" == "1" ]]; then
   cat > "${NGINX_SITE}" <<EOF
 server {
     listen 80;
+    listen [::]:80;
     server_name ${SERVER_NAMES};
 
     # Allow Let's Encrypt HTTP-01 challenges on plain HTTP.
@@ -440,6 +471,7 @@ server {
 
 server {
     listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name ${SERVER_NAMES};
 
     ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;

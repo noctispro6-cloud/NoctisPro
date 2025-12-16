@@ -5,6 +5,13 @@
 
 set -e  # Exit on any error
 
+# SUSPENDED: This script configures non-ngrok internet exposure (DNS + Let's Encrypt + nginx).
+# The deployment has been standardized to ngrok-only. Use:
+#   NGROK_AUTHTOKEN="..." NGROK_DOMAIN="your-reserved-domain.ngrok.app" sudo bash scripts/contabo_ubuntu2404_deploy.sh --fresh
+echo "[ERROR] deploy-internet-access.sh is suspended (non-ngrok internet deployment disabled)." >&2
+echo "[HINT] Use ngrok-only deployment: scripts/contabo_ubuntu2404_deploy.sh" >&2
+exit 2
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'

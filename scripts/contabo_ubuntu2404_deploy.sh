@@ -8,19 +8,17 @@ set -euo pipefail
 # - Writes env file (/etc/noctispro/noctispro.env)
 # - Migrates DB + collectstatic
 # - Configures systemd (web + dicom receiver)
-# - Configures nginx + Let's Encrypt for the domain
-# - Opens firewall ports (22/80/443/11112)
+# - Configures ngrok tunnel (ONLY supported public access)
+# - Opens firewall ports (22/11112). Web is exposed only via ngrok.
 #
 # Usage:
-#   sudo bash scripts/contabo_ubuntu2404_deploy.sh noctis-pro.com admin@noctis-pro.com
-#   sudo bash scripts/contabo_ubuntu2404_deploy.sh noctis-pro.com admin@noctis-pro.com --fresh
-#   sudo bash scripts/contabo_ubuntu2404_deploy.sh --fresh
-#   sudo bash scripts/contabo_ubuntu2404_deploy.sh --domain noctis-pro.com --email admin@noctis-pro.com --fresh
+#   NGROK_AUTHTOKEN="..." NGROK_DOMAIN="noctis-pro.com.ngrok.app" sudo bash scripts/contabo_ubuntu2404_deploy.sh --fresh
+#   sudo bash scripts/contabo_ubuntu2404_deploy.sh --ngrok-domain noctis-pro.com.ngrok.app --ngrok-token "..." --fresh
 
 DOMAIN=""
 LE_EMAIL=""
 FRESH_INSTALL=0
-USE_NGROK=0
+USE_NGROK=1
 # Track whether values were explicitly provided (vs defaults/prompts).
 DOMAIN_PROVIDED=0
 EMAIL_PROVIDED=0
@@ -85,14 +83,6 @@ done
 
 # Interactive prompts (TTY only): make the script friendlier when run without args.
 if is_interactive; then
-  if [[ "${USE_NGROK}" != "1" && "${DOMAIN_PROVIDED}" == "0" ]]; then
-    read -r -p "Domain for HTTPS (default: noctis-pro.com): " _domain_in
-    DOMAIN="${_domain_in:-noctis-pro.com}"
-  fi
-  if [[ "${USE_NGROK}" != "1" && "${EMAIL_PROVIDED}" == "0" ]]; then
-    read -r -p "Let's Encrypt email (default: admin@${DOMAIN:-noctis-pro.com}): " _email_in
-    LE_EMAIL="${_email_in:-admin@${DOMAIN:-noctis-pro.com}}"
-  fi
   if [[ "${USE_NGROK}" == "1" ]]; then
     if [[ -z "${NGROK_DOMAIN}" ]]; then
       read -r -p "ngrok reserved domain (e.g. noctis-pro.com.ngrok.app): " _ngrok_domain_in
@@ -104,6 +94,13 @@ if is_interactive; then
       NGROK_AUTHTOKEN="${_ngrok_token_in}"
     fi
   fi
+fi
+
+# This deployment script supports ONLY ngrok public access.
+# If someone passes legacy flags without --ngrok, we force ngrok mode and require token/domain.
+if [[ "${USE_NGROK}" != "1" ]]; then
+  echo "[!] Non-ngrok deployment paths are suspended; forcing ngrok mode." >&2
+  USE_NGROK=1
 fi
 
 # Default domain if not provided
@@ -217,8 +214,7 @@ apt-get install -y \
   ca-certificates curl git \
   python3 python3-venv python3-pip \
   build-essential pkg-config \
-  nginx ufw psmisc \
-  certbot python3-certbot-nginx \
+  ufw psmisc \
   libpq-dev \
   libjpeg-dev zlib1g-dev \
   libopenjp2-7 \
@@ -229,8 +225,6 @@ ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp
-ufw allow 80/tcp
-ufw allow 443/tcp
 ufw allow 11112/tcp
 ufw --force enable
 
@@ -425,259 +419,24 @@ EOF
 fi
 
 if [[ "${USE_NGROK}" != "1" ]]; then
-echo "[+] Configuring nginx reverse proxy..."
-cat > "${NGINX_SITE}" <<EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${SERVER_NAMES};
-
-    client_max_body_size 6G;
-
-    # Allow Let's Encrypt HTTP-01 challenges without involving the app.
-    location ^~ /.well-known/acme-challenge/ {
-        root ${ACME_ROOT};
-        default_type "text/plain";
-        try_files \$uri =404;
-    }
-
-    location /static/ {
-        alias ${APP_DIR}/staticfiles/;
-        access_log off;
-        expires 30d;
-    }
-
-    location /media/ {
-        alias ${APP_DIR}/media/;
-        access_log off;
-        expires 30d;
-    }
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        # Preserve upstream scheme from a front proxy (e.g., Cloudflare Flexible),
-        # otherwise fall back to the direct nginx scheme.
-        set \$forwarded_proto \$scheme;
-        if (\$http_x_forwarded_proto != "") { set \$forwarded_proto \$http_x_forwarded_proto; }
-        proxy_set_header X-Forwarded-Proto \$forwarded_proto;
-        proxy_set_header X-Forwarded-Host \$host;
-        proxy_set_header X-Forwarded-Port \$server_port;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 300;
-        proxy_connect_timeout 300;
-        proxy_send_timeout 300;
-    }
-}
-EOF
-
-echo "[+] Ensuring ports 80/443 are free for nginx..."
-# Stop common conflicting web servers if installed/enabled.
-for svc in apache2 httpd caddy lighttpd haproxy; do
-  systemctl stop "${svc}" 2>/dev/null || true
-  systemctl disable "${svc}" 2>/dev/null || true
-  systemctl mask "${svc}" 2>/dev/null || true
-done
-# Kill any remaining listeners on 80/443 (best-effort).
-fuser -k 80/tcp 2>/dev/null || true
-fuser -k 443/tcp 2>/dev/null || true
-
-rm -f /etc/nginx/sites-enabled/default || true
-ln -sf "${NGINX_SITE}" "${NGINX_SITE_LINK}"
-nginx -t
-
-# nginx "reload" fails if nginx isn't running yet; start/enable and fall back to restart.
-systemctl enable --now nginx 2>/dev/null || true
-if systemctl is-active --quiet nginx; then
-  systemctl reload nginx
-else
-  systemctl restart nginx
-fi
-
-echo "[+] Verifying HTTP-01 challenge path is reachable locally..."
-mkdir -p "${ACME_ROOT}/.well-known/acme-challenge"
-echo "noctis-acme-ok" > "${ACME_ROOT}/.well-known/acme-challenge/noctis-acme-test"
-PREFLIGHT_OK=1
-LOCAL_OK=1
-PUBLIC_OK=1
-
-# Detect common DNS/IPv6 pitfall:
-# If an AAAA record exists but this server has no working IPv6, some clients
-# (and Let's Encrypt validation) may hit the IPv6 address and fail.
-HAS_DNS_AAAA=0
-if getent ahosts "${DOMAIN}" 2>/dev/null | awk '{print $1}' | grep -q ":"; then
-  HAS_DNS_AAAA=1
-fi
-HAS_LOCAL_IPV6=0
-if ip -6 route show default 2>/dev/null | grep -q "default"; then
-  HAS_LOCAL_IPV6=1
-elif ip -6 addr show scope global 2>/dev/null | grep -q "inet6"; then
-  HAS_LOCAL_IPV6=1
-fi
-if [[ "${HAS_DNS_AAAA}" == "1" && "${HAS_LOCAL_IPV6}" == "0" ]]; then
-  echo "[!] Warning: ${DOMAIN} has an AAAA (IPv6) record, but this server does not appear to have working IPv6." >&2
-  echo "    This can break HTTPS access and Let's Encrypt issuance." >&2
-  echo "    Fix options:" >&2
-  echo "      - Remove the AAAA record for ${DOMAIN} (and www.${DOMAIN} if present), OR" >&2
-  echo "      - Enable IPv6 routing on this server and ensure nginx listens on :: (this script enables :: listeners)." >&2
-fi
-
-# 1) Local validation (bypasses DNS): ensure nginx is serving the ACME root.
-# This catches common misconfigurations (nginx not running, wrong root, wrong server_name).
-if ! curl -fsS --max-time 5 -H "Host: ${DOMAIN}" \
-  "http://127.0.0.1/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
-  LOCAL_OK=0
-fi
-if [[ "${INCLUDE_WWW}" == "1" ]]; then
-  if ! curl -fsS --max-time 5 -H "Host: www.${DOMAIN}" \
-    "http://127.0.0.1/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
-    LOCAL_OK=0
-  fi
-fi
-
-# 2) Public validation (uses DNS): ensures the hostname resolves to this server and port 80 is reachable.
-if ! curl -4 -fsS --max-time 8 \
-  "http://${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
-  PUBLIC_OK=0
-fi
-if [[ "${INCLUDE_WWW}" == "1" ]]; then
-  if ! curl -4 -fsS --max-time 8 \
-    "http://www.${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
-    PUBLIC_OK=0
-  fi
-fi
-
-# If AAAA exists, also sanity-check IPv6 reachability quickly (best-effort).
-if [[ "${HAS_DNS_AAAA}" == "1" ]]; then
-  if ! curl -6 -fsS --max-time 5 "http://${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
-    echo "[!] IPv6 check failed for ${DOMAIN} (AAAA exists but HTTP over IPv6 is not reachable)." >&2
-    echo "    If users or Let's Encrypt hit IPv6 first, HTTPS may fail. Remove the AAAA record or fix IPv6 routing." >&2
-  fi
-fi
-
-if [[ "${LOCAL_OK}" == "0" || "${PUBLIC_OK}" == "0" ]]; then
-  PREFLIGHT_OK=0
-fi
-
-echo "[+] Issuing Let's Encrypt certificate (requires DNS A record already set)..."
-CERT_OK=0
-CERTBOT_ARGS=(-d "${DOMAIN}")
-if [[ "${INCLUDE_WWW}" == "1" ]]; then
-  CERTBOT_ARGS+=(-d "www.${DOMAIN}")
-fi
-if [[ "${PREFLIGHT_OK}" == "1" ]]; then
-  if certbot certonly --webroot -w "${ACME_ROOT}" \
-    "${CERTBOT_ARGS[@]}" \
-    --non-interactive --agree-tos -m "${LE_EMAIL}"; then
-    CERT_OK=1
-  fi
-else
-  echo "[!] Preflight failed: HTTP-01 challenge URL not reachable." >&2
-  if [[ "${LOCAL_OK}" == "0" ]]; then
-    echo "    Local check failed (nginx -> ACME webroot not serving):" >&2
-    echo "      curl -v -H 'Host: ${DOMAIN}' http://127.0.0.1/.well-known/acme-challenge/noctis-acme-test" >&2
-    echo "    Fix: ensure nginx is running and serving ${ACME_ROOT} for /.well-known/acme-challenge/." >&2
-  fi
-  if [[ "${PUBLIC_OK}" == "0" ]]; then
-    echo "    Public check failed (DNS/Firewall/Proxy):" >&2
-    echo "      curl -v http://${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >&2
-    echo "    Common causes:" >&2
-    echo "      - DNS A record does not point to this server (or not propagated yet)" >&2
-    echo "      - Port 80 blocked by provider firewall / security group" >&2
-    echo "      - Cloudflare proxy enabled (orange cloud) while port 80/HTTP is not reachable" >&2
-    echo "      - AAAA (IPv6) record exists but this server has no working IPv6 routing" >&2
-    echo "    Quick checks:" >&2
-    echo "      getent ahosts ${DOMAIN}" >&2
-    echo "      ss -lntp | awk '\$4 ~ /:80$|:443$/ {print}'" >&2
-    echo "      ufw status verbose" >&2
-  fi
-  echo "    - Re-run cert issuance manually once fixed:" >&2
-  echo "      sudo certbot certonly --webroot -w ${ACME_ROOT} ${CERTBOT_ARGS[*]} -m ${LE_EMAIL} --agree-tos" >&2
-fi
-
-if [[ "${CERT_OK}" == "1" ]]; then
-  echo "[+] Certificate issued successfully; enabling HTTPS nginx config..."
-
-  # Mark HTTPS enabled for Django (optional; nginx already redirects below)
-  perl -0777 -i -pe 's/^SSL_ENABLED=.*$/SSL_ENABLED=True/m; s/^SECURE_SSL_REDIRECT=.*$/SECURE_SSL_REDIRECT=True/m; s/^SECURE_HSTS_SECONDS=.*$/SECURE_HSTS_SECONDS=31536000/m' "${ENV_FILE}" || true
-
-  cat > "${NGINX_SITE}" <<EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${SERVER_NAMES};
-
-    # Allow Let's Encrypt HTTP-01 challenges on plain HTTP.
-    location ^~ /.well-known/acme-challenge/ {
-        root ${ACME_ROOT};
-        default_type "text/plain";
-        try_files \$uri =404;
-    }
-
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name ${SERVER_NAMES};
-
-    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers on;
-
-    client_max_body_size 6G;
-
-    location /static/ {
-        alias ${APP_DIR}/staticfiles/;
-        access_log off;
-        expires 30d;
-    }
-
-    location /media/ {
-        alias ${APP_DIR}/media/;
-        access_log off;
-        expires 30d;
-    }
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host \$host;
-        proxy_set_header X-Forwarded-Port 443;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 300;
-        proxy_connect_timeout 300;
-        proxy_send_timeout 300;
-    }
-}
-EOF
-
-  nginx -t
-  systemctl reload nginx || systemctl restart nginx
-  systemctl restart noctis-pro.service || true
-fi
+  echo "[!] This deployment script supports ONLY ngrok. Non-ngrok steps are suspended." >&2
+  exit 2
 fi
 
 echo ""
 echo "============================================================"
 echo "DEPLOY COMPLETE"
 echo "============================================================"
-echo "Web:   https://${DOMAIN}"
-echo "Admin: https://${DOMAIN}/admin/"
-echo "DICOM: ${DOMAIN}:11112  (Called AE: NOCTIS_SCP)"
+echo "Public URL: https://${DOMAIN}"
+PUBLIC_IP="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+if [[ -z "${PUBLIC_IP}" ]]; then
+  PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+fi
+if [[ -n "${PUBLIC_IP}" ]]; then
+  echo "DICOM: ${PUBLIC_IP}:11112  (Called AE: NOCTIS_SCP)"
+else
+  echo "DICOM: <server-public-ip>:11112  (Called AE: NOCTIS_SCP)"
+fi
 echo ""
 echo "Admin login:"
 echo "  username: admin"
@@ -685,10 +444,8 @@ echo "  password: ${ADMIN_PW}"
 echo ""
 if [[ "${USE_NGROK}" == "1" ]]; then
   echo "ngrok tunnel enabled: ${DOMAIN}"
-  echo "Note: nginx/Let's Encrypt was skipped (ngrok provides HTTPS)."
 else
-  echo "If SSL failed, confirm DNS A record points to this server,"
-  echo "then re-run: sudo certbot certonly --webroot -w ${ACME_ROOT} -d ${DOMAIN} -d www.${DOMAIN}"
+  echo "[!] Non-ngrok deployment is suspended."
 fi
 echo "============================================================"
 

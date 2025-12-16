@@ -543,14 +543,19 @@ print(f"   • Security: {'Development' if DEBUG else 'Production'} profile")
 
 
 # Masterpiece overrides removed to allow dynamic configuration via environment and NGROK_URL
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-
-# If running behind a reverse proxy (nginx/Cloudflare/ELB), trust forwarded host/port
-# so Django builds correct absolute URLs (https://...) and avoids redirect loops.
 #
-# Safe default: enabled outside DEBUG, but can be overridden via env.
-USE_X_FORWARDED_HOST = os.environ.get('USE_X_FORWARDED_HOST', 'False' if DEBUG else 'True').lower() == 'true'
-USE_X_FORWARDED_PORT = os.environ.get('USE_X_FORWARDED_PORT', 'False' if DEBUG else 'True').lower() == 'true'
+# Proxy header handling:
+# - We always *support* a reverse-proxy/TLS-terminator by honoring X-Forwarded-Proto
+#   (this is required for HTTPS links when TLS terminates in front of Django).
+# - But we **do not** trust X-Forwarded-Host/Port by default.
+#   Trusting those headers can make the app "stick" to an ngrok hostname (or any
+#   client-supplied value) and appear like ngrok is overriding everything.
+#
+# If you are behind nginx/Cloudflare/ELB and need forwarded host/port, explicitly
+# set USE_X_FORWARDED_HOST=True and/or USE_X_FORWARDED_PORT=True in the environment.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = os.environ.get('USE_X_FORWARDED_HOST', 'False').lower() == 'true'
+USE_X_FORWARDED_PORT = os.environ.get('USE_X_FORWARDED_PORT', 'False').lower() == 'true'
 
 # DICOM viewer masterpiece settings
 DICOM_VIEWER_SETTINGS = {

@@ -34,6 +34,7 @@ DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 # - Cloudflare Tunnel quick URL (hosts containing "trycloudflare.com")
 # - localtunnel (hosts containing "loca.lt")
 NGROK_URL = os.environ.get('NGROK_URL', '')
+NGROK_DOMAIN = os.environ.get('NGROK_DOMAIN', '')
 TUNNEL_URL = os.environ.get('TUNNEL_URL', '')
 
 # If a tunnel launcher (e.g., scripts/quick-tunnel.sh or scripts/quick-ngrok.sh)
@@ -43,8 +44,15 @@ TUNNEL_URL = os.environ.get('TUNNEL_URL', '')
 # dynamic hostname or generating mixed-scheme links.
 APP_DIR = Path(os.environ.get('APP_DIR', str(BASE_DIR)))
 _tunnel_url_file_candidates = [
+    # Most reliable locations (running app dir)
     APP_DIR / '.tunnel-url',
     BASE_DIR / '.tunnel-url',
+    # Common service/deploy locations (some deployments use /opt/noctis-pro)
+    Path("/opt/noctispro") / ".tunnel-url",
+    Path("/opt/noctis-pro") / ".tunnel-url",
+    # Legacy/ops convenience locations
+    Path("/etc/noctis-pro") / ".tunnel-url",
+    Path("/etc/noctispro") / ".tunnel-url",
 ]
 if not TUNNEL_URL:
     for _p in _tunnel_url_file_candidates:
@@ -58,10 +66,15 @@ if not TUNNEL_URL:
             # Best-effort: if unreadable, continue without tunnel autodetect.
             pass
 
+# If operators use a reserved ngrok domain, treat that as the tunnel URL.
+# This is a common production setup and avoids 400s when the URL file isn't written.
+if not TUNNEL_URL and NGROK_DOMAIN:
+    TUNNEL_URL = f"https://{NGROK_DOMAIN.strip().lstrip('https://').lstrip('http://').strip('/')}"
+
 _allowed_hosts_env = os.environ.get('ALLOWED_HOSTS', '')
 _allowed_hosts_tokens = [h.strip().lower() for h in _allowed_hosts_env.split(',') if h.strip()]
 IS_NGROK = bool(NGROK_URL) or any('ngrok' in host for host in _allowed_hosts_tokens)
-IS_TUNNEL = bool(TUNNEL_URL) or any(
+IS_TUNNEL = bool(TUNNEL_URL) or bool(NGROK_DOMAIN) or any(
     any(marker in host for marker in ('ngrok', 'trycloudflare.com', 'loca.lt')) for host in _allowed_hosts_tokens
 )
 
@@ -149,6 +162,10 @@ if NGROK_URL:
     import re
     ngrok_domain = re.sub(r'^https?://', '', NGROK_URL.strip('/'))
     ALLOWED_HOSTS.append(ngrok_domain)
+
+# Add reserved ngrok domain (host only)
+if NGROK_DOMAIN:
+    ALLOWED_HOSTS.append(NGROK_DOMAIN.strip().rstrip('.').lower())
 
 # Add specific tunnel URL host if provided (e.g., https://xxxx.trycloudflare.com)
 if TUNNEL_URL:

@@ -27,6 +27,10 @@ ExecStartPre=/usr/bin/env bash -lc 'if [[ -n "${NGROK_DOMAIN:-}" ]]; then echo -
 
 # Start ngrok (fallback to /etc/ngrok.yml and PATH if needed)
 ExecStart=/usr/bin/env bash -lc 'BIN="${NGROK_BIN:-/usr/local/bin/ngrok}"; if [[ ! -x "${BIN}" ]]; then BIN="$(command -v ngrok || true)"; fi; if [[ -z "${BIN}" ]]; then echo "ERROR: ngrok binary not found (install ngrok to /usr/local/bin/ngrok or PATH)" >&2; exit 127; fi; CFG="${NGROK_CONFIG:-/etc/noctis-pro/ngrok.yml}"; if [[ ! -f "${CFG}" && -f "/etc/ngrok.yml" ]]; then CFG="/etc/ngrok.yml"; fi; exec "${BIN}" start --config "${CFG}" noctis-web'
+
+# If no reserved domain is provided, capture the randomly assigned public URL
+# from the local ngrok API and persist it for Django.
+ExecStartPost=/usr/bin/env bash -lc 'URL_FILE="%E{APP_DIR}/.tunnel-url"; if [[ -z "${NGROK_DOMAIN:-}" ]]; then for _ in $(seq 1 60); do URL="$(curl -fsS http://127.0.0.1:4040/api/tunnels 2>/dev/null | python3 - <<'"'"'PY'"'"'\nimport json,sys\ntry:\n    data=json.load(sys.stdin)\nexcept Exception:\n    sys.exit(0)\nfor t in data.get(\"tunnels\", []) or []:\n    u=(t.get(\"public_url\") or \"\").strip()\n    if u.startswith(\"https://\"):\n        print(u)\n        break\nPY\n)"; if [[ -n "${URL}" ]]; then echo -n "${URL}" > "${URL_FILE}"; break; fi; sleep 0.5; done; fi'
 Restart=always
 RestartSec=5
 

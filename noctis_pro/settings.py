@@ -36,7 +36,8 @@ DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 NGROK_URL = os.environ.get('NGROK_URL', '')
 TUNNEL_URL = os.environ.get('TUNNEL_URL', '')
 
-# If a tunnel launcher (e.g., scripts/quick-tunnel.sh) is used via systemd, it
+# If a tunnel launcher (e.g., scripts/quick-tunnel.sh or scripts/quick-ngrok.sh)
+# is used via systemd or a dev shell, it
 # typically writes the public URL to a file (default: $APP_DIR/.tunnel-url).
 # Auto-detect that URL so production deployments don't end up rejecting the
 # dynamic hostname or generating mixed-scheme links.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-time systemd override for noctispro-ngrok.service to use a single ngrok
+# One-time systemd override for noctis-pro-tunnel.service to use a single ngrok
 # agent with multiple tunnels. This is additive and doesn't modify existing
 # deployment scripts or units; it writes a drop-in override.
 #
@@ -19,7 +19,7 @@ if [[ ! -f "${CONF_PATH}" ]]; then
   exit 1
 fi
 
-UNIT_NAME="noctispro-ngrok.service"
+UNIT_NAME="noctis-pro-tunnel.service"
 DROPIN_DIR="/etc/systemd/system/${UNIT_NAME}.d"
 mkdir -p "${DROPIN_DIR}"
 

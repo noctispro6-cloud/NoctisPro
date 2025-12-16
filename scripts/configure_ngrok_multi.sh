@@ -5,18 +5,19 @@ set -euo pipefail
 # This script is additive and does NOT modify existing deployment scripts.
 #
 # Usage (as root or with sudo):
+#   NGROK_AUTHTOKEN=... ./scripts/configure_ngrok_multi.sh [config_path] [reserved_domain]
 #   ./scripts/configure_ngrok_multi.sh <NGROK_AUTHTOKEN> [config_path] [reserved_domain]
 #
 # Example:
 #   sudo ./scripts/configure_ngrok_multi.sh YOUR_AUTHTOKEN /etc/ngrok.yml
 #   sudo ./scripts/configure_ngrok_multi.sh YOUR_AUTHTOKEN /etc/ngrok.yml noctis-pro.com.ngrok.app
 
-AUTHTOKEN="${1:-}"
-CONF_PATH="${2:-/etc/ngrok.yml}"
+AUTHTOKEN="${NGROK_AUTHTOKEN:-${1:-}}"
+CONF_PATH="${2:-/etc/noctis-pro/ngrok.yml}"
 RESERVED_DOMAIN="${3:-}"
 
 if [[ -z "${AUTHTOKEN}" ]]; then
-  echo "ERROR: ngrok authtoken is required" >&2
+  echo "ERROR: ngrok authtoken is required (pass as NGROK_AUTHTOKEN env var or first argument)" >&2
   exit 1
 fi
 

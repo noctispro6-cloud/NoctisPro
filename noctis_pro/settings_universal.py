@@ -12,7 +12,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DEBUG = False
 
 # Primary public domain (can be overridden via env)
-DOMAIN_NAME = os.environ.get('DOMAIN_NAME', 'noctis-pro.com').strip()
+# Normalize + keep legacy alias compatibility (see `settings.py`).
+DOMAIN_NAME = normalize_domain_name(os.environ.get('DOMAIN_NAME', 'noctis-pro.com'))
 DOMAIN_HOSTS = [h for h in [DOMAIN_NAME, f"www.{DOMAIN_NAME}", f"dicom.{DOMAIN_NAME}"] if h and h != '.']
 
 # Hosts/domain names that are valid for this site

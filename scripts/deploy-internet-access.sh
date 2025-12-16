@@ -83,6 +83,13 @@ validate_environment() {
         error "DOMAIN_NAME must be configured in .env file"
         exit 1
     fi
+
+    # Prevent accidental missing-hyphen domain during deployment.
+    if [ "$DOMAIN_NAME" = "noctispro.com" ]; then
+        error "DOMAIN_NAME is set to noctispro.com, but the required domain is noctis-pro.com"
+        error "Update your .env: DOMAIN_NAME=noctis-pro.com"
+        exit 1
+    fi
     
     if [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "CHANGE-THIS-TO-A-STRONG-DATABASE-PASSWORD" ]; then
         error "POSTGRES_PASSWORD must be configured in .env file"

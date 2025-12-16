@@ -46,7 +46,7 @@ apt-get install -y \
   ca-certificates curl git \
   python3 python3-venv python3-pip \
   build-essential pkg-config \
-  nginx ufw \
+  nginx ufw psmisc \
   certbot python3-certbot-nginx \
   libpq-dev \
   libjpeg-dev zlib1g-dev \
@@ -205,10 +205,28 @@ server {
 }
 EOF
 
+echo "[+] Ensuring ports 80/443 are free for nginx..."
+# Stop common conflicting web servers if installed/enabled.
+for svc in apache2 httpd caddy lighttpd haproxy; do
+  systemctl stop "${svc}" 2>/dev/null || true
+  systemctl disable "${svc}" 2>/dev/null || true
+  systemctl mask "${svc}" 2>/dev/null || true
+done
+# Kill any remaining listeners on 80/443 (best-effort).
+fuser -k 80/tcp 2>/dev/null || true
+fuser -k 443/tcp 2>/dev/null || true
+
 rm -f /etc/nginx/sites-enabled/default || true
 ln -sf "${NGINX_SITE}" "${NGINX_SITE_LINK}"
 nginx -t
-systemctl reload nginx
+
+# nginx "reload" fails if nginx isn't running yet; start/enable and fall back to restart.
+systemctl enable --now nginx 2>/dev/null || true
+if systemctl is-active --quiet nginx; then
+  systemctl reload nginx
+else
+  systemctl restart nginx
+fi
 
 echo "[+] Issuing Let's Encrypt certificate (requires DNS A record already set)..."
 certbot --nginx -d "${DOMAIN}" -d "www.${DOMAIN}" \

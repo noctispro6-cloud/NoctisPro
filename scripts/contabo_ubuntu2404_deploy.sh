@@ -303,7 +303,16 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        # Preserve upstream scheme from a front proxy (e.g., Cloudflare Flexible),
+        # otherwise fall back to the direct nginx scheme.
+        set \$forwarded_proto \$scheme;
+        if (\$http_x_forwarded_proto != "") { set \$forwarded_proto \$http_x_forwarded_proto; }
+        proxy_set_header X-Forwarded-Proto \$forwarded_proto;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-Port \$server_port;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_read_timeout 300;
         proxy_connect_timeout 300;
         proxy_send_timeout 300;
@@ -458,6 +467,11 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-Port 443;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_read_timeout 300;
         proxy_connect_timeout 300;
         proxy_send_timeout 300;

@@ -503,6 +503,13 @@ print(f"   • Security: {'Development' if DEBUG else 'Production'} profile")
 # Masterpiece overrides removed to allow dynamic configuration via environment and NGROK_URL
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
+# If running behind a reverse proxy (nginx/Cloudflare/ELB), trust forwarded host/port
+# so Django builds correct absolute URLs (https://...) and avoids redirect loops.
+#
+# Safe default: enabled outside DEBUG, but can be overridden via env.
+USE_X_FORWARDED_HOST = os.environ.get('USE_X_FORWARDED_HOST', 'False' if DEBUG else 'True').lower() == 'true'
+USE_X_FORWARDED_PORT = os.environ.get('USE_X_FORWARDED_PORT', 'False' if DEBUG else 'True').lower() == 'true'
+
 # DICOM viewer masterpiece settings
 DICOM_VIEWER_SETTINGS = {
     'MAX_UPLOAD_SIZE': MAX_UPLOAD_SIZE_BYTES,  # 5GB

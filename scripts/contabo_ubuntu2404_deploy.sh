@@ -358,7 +358,24 @@ install_ngrok() {
     return 0
   fi
   echo "[+] Installing ngrok..."
-  local url="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"
+  local arch
+  arch="$(uname -m)"
+  local platform="linux-amd64"
+  case "${arch}" in
+    x86_64|amd64)
+      platform="linux-amd64"
+      ;;
+    aarch64|arm64)
+      platform="linux-arm64"
+      ;;
+    *)
+      echo "[!] Unsupported architecture for ngrok install: ${arch}" >&2
+      echo "    Please install ngrok manually and re-run with --ngrok." >&2
+      exit 2
+      ;;
+  esac
+
+  local url="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-${platform}.tgz"
   curl -fsSL "${url}" -o /tmp/ngrok.tgz
   tar -xzf /tmp/ngrok.tgz -C /tmp
   install -m 0755 /tmp/ngrok /usr/local/bin/ngrok

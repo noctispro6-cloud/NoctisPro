@@ -55,6 +55,17 @@ if [[ -z "${LE_EMAIL}" ]]; then
   LE_EMAIL="admin@${DOMAIN}"
 fi
 
+# Normalize/validate DOMAIN early (accept users pasting full URLs)
+DOMAIN="${DOMAIN#http://}"
+DOMAIN="${DOMAIN#https://}"
+DOMAIN="${DOMAIN%%/*}"
+DOMAIN="${DOMAIN%.}"
+
+if [[ -z "${DOMAIN}" || "${DOMAIN}" == *" "* ]]; then
+  echo "[!] Invalid domain. Provide a hostname like: example.com" >&2
+  exit 2
+fi
+
 APP_DIR="/opt/noctispro"
 ENV_DIR="/etc/noctis-pro"
 ENV_FILE="${ENV_DIR}/noctis-pro.env"
@@ -69,6 +80,22 @@ ACME_ROOT="/var/www/noctis-acme"
 echo "[+] Domain: ${DOMAIN}"
 echo "[+] Email: ${LE_EMAIL}"
 echo "[+] App dir: ${APP_DIR}"
+
+# Detect whether www.<domain> actually resolves; many installs only set the apex A record.
+INCLUDE_WWW=0
+if getent ahosts "www.${DOMAIN}" >/dev/null 2>&1; then
+  INCLUDE_WWW=1
+fi
+
+DOMAINS=("${DOMAIN}")
+if [[ "${INCLUDE_WWW}" == "1" ]]; then
+  DOMAINS+=("www.${DOMAIN}")
+fi
+
+ALLOWED_HOSTS_CSV="$(IFS=,; echo "${DOMAINS[*]}")"
+CSRF_TRUSTED_ORIGINS_CSV="$(printf 'https://%s,' "${DOMAINS[@]}")"
+CSRF_TRUSTED_ORIGINS_CSV="${CSRF_TRUSTED_ORIGINS_CSV%,}"
+SERVER_NAMES="${ALLOWED_HOSTS_CSV//,/ }"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -162,8 +189,8 @@ DEBUG=False
 SECRET_KEY=${SECRET_KEY}
 
 DOMAIN_NAME=${DOMAIN}
-ALLOWED_HOSTS=${DOMAIN},www.${DOMAIN}
-CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://www.${DOMAIN}
+ALLOWED_HOSTS=${ALLOWED_HOSTS_CSV}
+CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS_CSV}
 
 # HTTPS will be enabled after a successful certificate issuance.
 # Nginx will handle redirects; these flags can be tightened later if desired.
@@ -241,7 +268,7 @@ echo "[+] Configuring nginx reverse proxy..."
 cat > "${NGINX_SITE}" <<EOF
 server {
     listen 80;
-    server_name ${DOMAIN} www.${DOMAIN};
+    server_name ${SERVER_NAMES};
 
     client_max_body_size 6G;
 
@@ -300,12 +327,38 @@ else
   systemctl restart nginx
 fi
 
+echo "[+] Verifying HTTP-01 challenge path is reachable locally..."
+mkdir -p "${ACME_ROOT}/.well-known/acme-challenge"
+echo "noctis-acme-ok" > "${ACME_ROOT}/.well-known/acme-challenge/noctis-acme-test"
+PREFLIGHT_OK=1
+if ! curl -fsS "http://${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
+  PREFLIGHT_OK=0
+fi
+if [[ "${INCLUDE_WWW}" == "1" ]]; then
+  if ! curl -fsS "http://www.${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
+    PREFLIGHT_OK=0
+  fi
+fi
+
 echo "[+] Issuing Let's Encrypt certificate (requires DNS A record already set)..."
 CERT_OK=0
-if certbot certonly --webroot -w "${ACME_ROOT}" \
-  -d "${DOMAIN}" -d "www.${DOMAIN}" \
-  --non-interactive --agree-tos -m "${LE_EMAIL}"; then
-  CERT_OK=1
+CERTBOT_ARGS=(-d "${DOMAIN}")
+if [[ "${INCLUDE_WWW}" == "1" ]]; then
+  CERTBOT_ARGS+=(-d "www.${DOMAIN}")
+fi
+if [[ "${PREFLIGHT_OK}" == "1" ]]; then
+  if certbot certonly --webroot -w "${ACME_ROOT}" \
+    "${CERTBOT_ARGS[@]}" \
+    --non-interactive --agree-tos -m "${LE_EMAIL}"; then
+    CERT_OK=1
+  fi
+else
+  echo "[!] Preflight failed: this server could not fetch http://${DOMAIN}/.well-known/acme-challenge/..." >&2
+  echo "    - Confirm DNS A record points to this server" >&2
+  echo "    - Ensure port 80 is reachable from the internet (no provider firewall)" >&2
+  echo "    - If you have an AAAA (IPv6) record, it must also route here" >&2
+  echo "    - Re-run cert issuance manually once fixed:" >&2
+  echo "      sudo certbot certonly --webroot -w ${ACME_ROOT} ${CERTBOT_ARGS[*]} -m ${LE_EMAIL} --agree-tos" >&2
 fi
 
 if [[ "${CERT_OK}" == "1" ]]; then
@@ -317,7 +370,7 @@ if [[ "${CERT_OK}" == "1" ]]; then
   cat > "${NGINX_SITE}" <<EOF
 server {
     listen 80;
-    server_name ${DOMAIN} www.${DOMAIN};
+    server_name ${SERVER_NAMES};
 
     # Allow Let's Encrypt HTTP-01 challenges on plain HTTP.
     location ^~ /.well-known/acme-challenge/ {
@@ -333,7 +386,7 @@ server {
 
 server {
     listen 443 ssl http2;
-    server_name ${DOMAIN} www.${DOMAIN};
+    server_name ${SERVER_NAMES};
 
     ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;

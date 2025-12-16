@@ -44,11 +44,15 @@ if DEBUG or IS_NGROK:
     # Keep dev/ngrok frictionless unless explicitly locked down
     ALLOWED_HOSTS.append('*')
 
-# Add ngrok and deployment specific hosts
-ALLOWED_HOSTS.extend([
-    'localhost',
-    '127.0.0.1',
-    '0.0.0.0',
+# Production-safe host handling:
+# - Default to DOMAIN_NAME (+ www/dicom) and localhost
+# - Allow explicit extras via env
+# - Keep legacy/dev hosts only when explicitly enabled
+EXTRA_ALLOWED_HOSTS = [
+    h.strip() for h in os.environ.get('EXTRA_ALLOWED_HOSTS', '').split(',') if h.strip()
+]
+ALLOW_LEGACY_HOSTS = os.environ.get('ALLOW_LEGACY_HOSTS', '').lower() == 'true'
+LEGACY_ALLOWED_HOSTS = [
     'noctispro',
     'noctispro2.duckdns.org',
     '*.duckdns.org',
@@ -57,8 +61,18 @@ ALLOWED_HOSTS.extend([
     '*.ngrok.app',
     '3.222.223.4',
     '172.30.0.2',
+]
+
+ALLOWED_HOSTS.extend([
+    'localhost',
+    '127.0.0.1',
+    '0.0.0.0',
     *DOMAIN_HOSTS,
+    *EXTRA_ALLOWED_HOSTS,
 ])
+
+if DEBUG or IS_NGROK or ALLOW_LEGACY_HOSTS:
+    ALLOWED_HOSTS.extend(LEGACY_ALLOWED_HOSTS)
 
 # Add specific ngrok URL if provided
 if NGROK_URL:

@@ -95,6 +95,12 @@ fi
 mkdir -p "$(dirname "${URL_FILE}")"
 PID_FILE="${URL_FILE}.pid"
 
+is_local_port_open() {
+  # Best-effort TCP connect check without extra deps.
+  # shellcheck disable=SC2317
+  (echo >"/dev/tcp/127.0.0.1/${ADDR}") >/dev/null 2>&1
+}
+
 load_saved_env() {
   if [[ -f "${ENV_FILE}" ]]; then
     # shellcheck disable=SC1090
@@ -198,6 +204,15 @@ load_saved_env
 prompt_for_config_if_missing
 install_ngrok
 
+# Fail fast if the target app port isn't listening; otherwise you'll see "no traffic"
+# and ngrok may also fail to establish a tunnel depending on your plan/settings.
+if ! is_local_port_open; then
+  echo "[ERROR] Nothing is listening on 127.0.0.1:${ADDR}." >&2
+  echo "[HINT] Start your app first (e.g. Django/daphne on port ${ADDR}), then re-run this script." >&2
+  echo "[HINT] Quick check: curl -v http://127.0.0.1:${ADDR}/" >&2
+  exit 1
+fi
+
 stop_ngrok() {
   # Stop a previously started instance (best-effort).
   if [[ -n "${PID_FILE}" && -f "${PID_FILE}" ]]; then
@@ -271,7 +286,7 @@ done
 if [[ -z "${URL}" ]]; then
   echo "[ERROR] ngrok tunnel URL not detected." >&2
   echo "[HINT] Check logs: ${LOG_OUT}" >&2
-  echo "[HINT] Common causes: port ${ADDR} not listening, wrong NGROK_DOMAIN (not reserved), invalid token, or another ngrok already running." >&2
+  echo "[HINT] Common causes: port ${ADDR} not listening, NGROK_DOMAIN not actually reserved, invalid NGROK_AUTHTOKEN, or another ngrok already running." >&2
   kill "${PID}" 2>/dev/null || true
   rm -f "${PID_FILE}" 2>/dev/null || true
   exit 1

@@ -4,6 +4,7 @@ from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
 from django.db.models import Count, Q
 from django.utils import timezone
+from django.utils.html import escape
 from .models import Report, ReportTemplate
 from worklist.models import Study
 from accounts.models import User
@@ -210,6 +211,22 @@ def print_report_stub(request, study_id):
     qr_report_b64 = _data_url_from_png(_qr_png_bytes(report_url))
 
     letterhead_url = study.facility.letterhead.url if getattr(study.facility, 'letterhead', None) else ''
+    facility_name = escape(getattr(study.facility, 'name', '') or '')
+    facility_address = escape(getattr(study.facility, 'address', '') or '')
+    patient_name = escape(getattr(study.patient, 'full_name', '') or '')
+    patient_id = escape(getattr(study.patient, 'patient_id', '') or '')
+    accession_number = escape(getattr(study, 'accession_number', '') or '')
+    modality_code = escape(getattr(getattr(study, 'modality', None), 'code', '') or '')
+    study_date_display = escape(str(getattr(study, 'study_date', '') or ''))
+
+    clinical_text = escape(((report.clinical_history if report else (study.clinical_info or '')) or '-') or '-')
+    technique_text = escape(((report.technique if report else '') or '-') or '-')
+    comparison_text = escape(((report.comparison if report else '') or '-') or '-')
+    findings_text = escape(((report.findings if report else '') or '-') or '-')
+    impression_text = escape(((report.impression if report else '') or '-') or '-')
+    recommendations_text = escape(((report.recommendations if report else '') or '-') or '-')
+    report_status = escape(getattr(report, 'status', '') or '')
+
     author_name = ''
     author_license = ''
     signed_date = ''
@@ -253,24 +270,26 @@ def print_report_stub(request, study_id):
         </style>
       </head>
       <body>
-        <div class="letterhead">{f'<img src="{letterhead_url}" alt="Letterhead" />' if letterhead_url else f'<h2 style="margin:0">{study.facility.name}</h2><div>{study.facility.address}</div>'}</div>
+        <div class="letterhead">{f'<img src="{letterhead_url}" alt="Letterhead" />' if letterhead_url else f'<h2 style="margin:0">{facility_name}</h2><div>{facility_address}</div>'}</div>
         <div class="header">
           <div style="display:flex; justify-content: space-between;">
             <div>
               <div class="label">Patient:</div>
-              <div>{study.patient.full_name} ({study.patient.patient_id})</div>
+              <div>{patient_name} ({patient_id})</div>
             </div>
             <div style="text-align:right">
-              <div><span class="label">Accession:</span> {study.accession_number}</div>
-              <div><span class="label">Modality:</span> {study.modality.code} &nbsp; <span class="label">Date:</span> {study.study_date}</div>
+              <div><span class="label">Accession:</span> {accession_number}</div>
+              <div><span class="label">Modality:</span> {modality_code} &nbsp; <span class="label">Date:</span> {study_date_display}</div>
+              {f'<div><span class="label">Status:</span> {report_status}</div>' if report_status else ''}
             </div>
           </div>
         </div>
-        <div class="section"><span class="label">Clinical Information:</span><br/><pre>{(report.clinical_history if report else (study.clinical_info or '')) or '-'}</pre></div>
-        <div class="section"><span class="label">Technique:</span><br/><pre>{(report.technique if report else '') or '-'}</pre></div>
-        <div class="section"><span class="label">Comparison:</span><br/><pre>{(report.comparison if report else '') or '-'}</pre></div>
-        {f'<div class="section"><span class="label">Findings:</span><br/><pre>{(report.findings or "").strip()}</pre></div>' if report else ''}
-        {f'<div class="section"><span class="label">Impression:</span><br/><pre>{(report.impression or "").strip()}</pre></div>' if report else ''}
+        <div class="section"><span class="label">Clinical Information:</span><br/><pre>{clinical_text}</pre></div>
+        <div class="section"><span class="label">Technique:</span><br/><pre>{technique_text}</pre></div>
+        <div class="section"><span class="label">Comparison:</span><br/><pre>{comparison_text}</pre></div>
+        <div class="section"><span class="label">Findings:</span><br/><pre>{findings_text}</pre></div>
+        <div class="section"><span class="label">Impression:</span><br/><pre>{impression_text}</pre></div>
+        <div class="section"><span class="label">Recommendations:</span><br/><pre>{recommendations_text}</pre></div>
         <div class="sign">
           <div class="label">Signed by:</div>
           <div>{author_name}{(' - ' + author_license) if author_license else ''}{(' on ' + signed_date) if signed_date else ''}</div>

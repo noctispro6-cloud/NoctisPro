@@ -338,13 +338,36 @@ echo "[+] Verifying HTTP-01 challenge path is reachable locally..."
 mkdir -p "${ACME_ROOT}/.well-known/acme-challenge"
 echo "noctis-acme-ok" > "${ACME_ROOT}/.well-known/acme-challenge/noctis-acme-test"
 PREFLIGHT_OK=1
-if ! curl -fsS "http://${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
-  PREFLIGHT_OK=0
+LOCAL_OK=1
+PUBLIC_OK=1
+
+# 1) Local validation (bypasses DNS): ensure nginx is serving the ACME root.
+# This catches common misconfigurations (nginx not running, wrong root, wrong server_name).
+if ! curl -fsS --max-time 5 -H "Host: ${DOMAIN}" \
+  "http://127.0.0.1/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
+  LOCAL_OK=0
 fi
 if [[ "${INCLUDE_WWW}" == "1" ]]; then
-  if ! curl -fsS "http://www.${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
-    PREFLIGHT_OK=0
+  if ! curl -fsS --max-time 5 -H "Host: www.${DOMAIN}" \
+    "http://127.0.0.1/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
+    LOCAL_OK=0
   fi
+fi
+
+# 2) Public validation (uses DNS): ensures the hostname resolves to this server and port 80 is reachable.
+if ! curl -fsS --max-time 8 \
+  "http://${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
+  PUBLIC_OK=0
+fi
+if [[ "${INCLUDE_WWW}" == "1" ]]; then
+  if ! curl -fsS --max-time 8 \
+    "http://www.${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >/dev/null 2>&1; then
+    PUBLIC_OK=0
+  fi
+fi
+
+if [[ "${LOCAL_OK}" == "0" || "${PUBLIC_OK}" == "0" ]]; then
+  PREFLIGHT_OK=0
 fi
 
 echo "[+] Issuing Let's Encrypt certificate (requires DNS A record already set)..."
@@ -360,10 +383,25 @@ if [[ "${PREFLIGHT_OK}" == "1" ]]; then
     CERT_OK=1
   fi
 else
-  echo "[!] Preflight failed: this server could not fetch http://${DOMAIN}/.well-known/acme-challenge/..." >&2
-  echo "    - Confirm DNS A record points to this server" >&2
-  echo "    - Ensure port 80 is reachable from the internet (no provider firewall)" >&2
-  echo "    - If you have an AAAA (IPv6) record, it must also route here" >&2
+  echo "[!] Preflight failed: HTTP-01 challenge URL not reachable." >&2
+  if [[ "${LOCAL_OK}" == "0" ]]; then
+    echo "    Local check failed (nginx -> ACME webroot not serving):" >&2
+    echo "      curl -v -H 'Host: ${DOMAIN}' http://127.0.0.1/.well-known/acme-challenge/noctis-acme-test" >&2
+    echo "    Fix: ensure nginx is running and serving ${ACME_ROOT} for /.well-known/acme-challenge/." >&2
+  fi
+  if [[ "${PUBLIC_OK}" == "0" ]]; then
+    echo "    Public check failed (DNS/Firewall/Proxy):" >&2
+    echo "      curl -v http://${DOMAIN}/.well-known/acme-challenge/noctis-acme-test" >&2
+    echo "    Common causes:" >&2
+    echo "      - DNS A record does not point to this server (or not propagated yet)" >&2
+    echo "      - Port 80 blocked by provider firewall / security group" >&2
+    echo "      - Cloudflare proxy enabled (orange cloud) while port 80/HTTP is not reachable" >&2
+    echo "      - AAAA (IPv6) record exists but this server has no working IPv6 routing" >&2
+    echo "    Quick checks:" >&2
+    echo "      getent ahosts ${DOMAIN}" >&2
+    echo "      ss -lntp | awk '\$4 ~ /:80$|:443$/ {print}'" >&2
+    echo "      ufw status verbose" >&2
+  fi
   echo "    - Re-run cert issuance manually once fixed:" >&2
   echo "      sudo certbot certonly --webroot -w ${ACME_ROOT} ${CERTBOT_ARGS[*]} -m ${LE_EMAIL} --agree-tos" >&2
 fi

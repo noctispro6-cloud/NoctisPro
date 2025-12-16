@@ -7,9 +7,13 @@ Wants=network-online.target
 Type=simple
 # Use environment variable APP_DIR if set, else default to /opt/noctispro
 Environment=APP_DIR=/opt/noctispro
+# Optional env files used by server deploy scripts
+EnvironmentFile=-/etc/noctis-pro/noctis-pro.env
+EnvironmentFile=-/etc/noctispro/noctispro.env
 WorkingDirectory=%E{APP_DIR}
 Environment=DJANGO_SETTINGS_MODULE=noctis_pro.settings
-ExecStart=%E{APP_DIR}/venv/bin/daphne -b 0.0.0.0 -p 8000 noctis_pro.asgi:application
+# Bind to localhost; expose publicly via a reverse proxy (nginx) on 80/443.
+ExecStart=%E{APP_DIR}/venv/bin/daphne -b 127.0.0.1 -p 8000 noctis_pro.asgi:application
 Restart=always
 RestartSec=5
 

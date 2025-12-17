@@ -950,7 +950,13 @@ def facility_create(request):
                     
                     # Create facility user
                     facility_email = form.cleaned_data.get('facility_email') or ''
-                    raw_password = form.cleaned_data.get('facility_password') or get_random_string(12)
+                    # If left blank (or whitespace-only), auto-generate a usable password.
+                    supplied_pw = (form.cleaned_data.get('facility_password') or '').strip()
+                    generated_pw = ''
+                    raw_password = supplied_pw
+                    if not raw_password:
+                        generated_pw = get_random_string(12)
+                        raw_password = generated_pw
                     
                     user = User.objects.create_user(
                         username=username,
@@ -980,6 +986,13 @@ def facility_create(request):
                         f'Facility user account "{username}" has been created. '
                         f'AE Title: {facility.ae_title}'
                     )
+                    # Show generated password once so the facility can log in.
+                    # (We intentionally do NOT echo admin-supplied passwords.)
+                    if generated_pw:
+                        messages.warning(
+                            request,
+                            f'Facility login password (copy now): {generated_pw}'
+                        )
                 else:
                     messages.success(
                         request,
@@ -1050,7 +1063,12 @@ def facility_edit(request, facility_id):
                     
                     # Create facility user
                     facility_email = form.cleaned_data.get('facility_email') or ''
-                    raw_password = form.cleaned_data.get('facility_password') or get_random_string(12)
+                    supplied_pw = (form.cleaned_data.get('facility_password') or '').strip()
+                    generated_pw = ''
+                    raw_password = supplied_pw
+                    if not raw_password:
+                        generated_pw = get_random_string(12)
+                        raw_password = generated_pw
                     
                     user = User.objects.create_user(
                         username=username,
@@ -1080,6 +1098,11 @@ def facility_edit(request, facility_id):
                         f'Facility user account "{username}" has been created. '
                         f'AE Title: {updated_facility.ae_title}'
                     )
+                    if generated_pw:
+                        messages.warning(
+                            request,
+                            f'Facility login password (copy now): {generated_pw}'
+                        )
                 else:
                     messages.success(
                         request,

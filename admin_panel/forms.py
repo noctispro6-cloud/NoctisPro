@@ -284,7 +284,7 @@ class FacilityForm(forms.ModelForm):
     )
     facility_password = forms.CharField(
         required=False,
-        widget=forms.TextInput(attrs={
+        widget=forms.PasswordInput(attrs={
             'class': 'form-control form-control-medical',
             'placeholder': 'Auto-generates if left blank'
         }),
@@ -413,6 +413,21 @@ class FacilityForm(forms.ModelForm):
                 raise ValidationError("A user with this email address already exists.")
         
         return email
+
+    def clean_facility_password(self):
+        """
+        Normalize facility user passwords.
+
+        Admins sometimes paste passwords with trailing whitespace/newlines.
+        That results in credentials that look right but won't authenticate
+        when the user types the password manually.
+        """
+        pw = self.cleaned_data.get('facility_password', '')
+        # Treat whitespace-only passwords as blank so we auto-generate.
+        if pw is None:
+            return ''
+        pw = str(pw).strip()
+        return pw
 
     def _standardize_aetitle(self, source):
         """Generate a DICOM-compliant AE Title"""

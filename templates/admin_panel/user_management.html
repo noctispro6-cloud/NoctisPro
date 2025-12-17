@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load dicts %}
 
 {% block title %}User Management - Admin Panel{% endblock %}
 
@@ -164,6 +165,7 @@
 {% block content %}
 <div class="container-fluid py-4">
 <div class="py-4">
+    {% user_caps as caps %}
     {% if messages %}
     <div class="mb-3">
         {% for message in messages %}
@@ -203,17 +205,21 @@
                             </a></li>
                         </ul>
                     </div>
+                    {% if user.role == 'admin' or caps.manage_facilities %}
                     <a href="{% url 'admin_panel:facility_create' %}" class="btn-control">
                         <i class="fas fa-hospital me-2"></i>Add Facility
                     </a>
+                    {% endif %}
                     <div class="btn-group">
                         <button type="button" class="btn-control dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" id="addUserDropdown">
                             <i class="fas fa-user-plus me-2"></i>Add User
                         </button>
                         <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="addUserDropdown">
+                            {% if user.role == 'admin' %}
                             <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?role=admin" onclick="console.log('Navigating to admin user creation')">
                                 <i class="fas fa-user-shield me-2"></i>Administrator
                             </a></li>
+                            {% endif %}
                             <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?role=radiologist" onclick="console.log('Navigating to radiologist user creation')">
                                 <i class="fas fa-user-md me-2"></i>Radiologist
                             </a></li>

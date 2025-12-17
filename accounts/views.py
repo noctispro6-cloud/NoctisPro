@@ -10,6 +10,24 @@ from django.conf import settings
 from .models import User, UserSession, Facility
 import json
 
+def _get_or_create_session_key(request) -> str:
+    """
+    Ensure a session key exists for the current request.
+
+    Django may not create/persist a session key until the response cycle,
+    so accessing `request.session.session_key` immediately after `login()`
+    can be None. We best-effort save to force key creation.
+    """
+    try:
+        key = getattr(request, "session", None) and request.session.session_key
+        if key:
+            return key
+        # Force session creation/persistence
+        request.session.save()
+        return request.session.session_key or ""
+    except Exception:
+        return ""
+
 def _should_auto_create_admin_on_first_access() -> bool:
     """
     Historically this project auto-created an admin on visiting the login page.
@@ -101,16 +119,26 @@ def login_view(request):
             ip_address = get_client_ip(request)
             
             # Update user login tracking
-            user.last_login_ip = ip_address
-            user.save()
+            try:
+                user.last_login_ip = ip_address
+                user.save(update_fields=['last_login_ip', 'updated_at'] if hasattr(user, 'updated_at') else ['last_login_ip'])
+            except Exception:
+                # Never block login due to tracking errors
+                pass
             
             # Create session record
-            UserSession.objects.create(
-                user=user,
-                session_key=request.session.session_key,
-                ip_address=ip_address,
-                user_agent=user_agent
-            )
+            try:
+                session_key = _get_or_create_session_key(request)
+                # `session_key` is non-nullable; store an empty string if key creation fails.
+                UserSession.objects.create(
+                    user=user,
+                    session_key=session_key,
+                    ip_address=ip_address,
+                    user_agent=user_agent
+                )
+            except Exception:
+                # Never block login due to session-audit errors
+                pass
             
             # Redirect all users to the worklist dashboard after login
             return redirect('worklist:dashboard')

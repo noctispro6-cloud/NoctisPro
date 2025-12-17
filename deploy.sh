@@ -268,31 +268,67 @@ print(secrets.token_urlsafe(14))
 PY
 )"
 
-  # Create a superuser if none exist.
+  # Ensure a usable admin account exists (idempotent).
+  # - If `admin` does not exist: create it as a superuser and print generated password.
+  # - If `admin` exists but is not a superuser: promote it and reset password (printed).
+  # - If `admin` already is a superuser: do not change password.
   ( set +u
     # shellcheck disable=SC1090
     source "$ENV_FILE"
     set -u
     cd "$APP_DIR"
-    "${APP_DIR}/venv/bin/python" "$APP_DIR/manage.py" shell -c "
+    NOCTIS_ADMIN_PW='${pw}' NOCTIS_ADMIN_EMAIL='admin@${DOMAIN}' "${APP_DIR}/venv/bin/python" "$APP_DIR/manage.py" shell -c "
+import os
 from django.contrib.auth import get_user_model
 User = get_user_model()
-if not User.objects.filter(is_superuser=True).exists():
-    u = User.objects.create_superuser(username='admin', email='admin@${DOMAIN}', password='${pw}')
-    # Some installs rely on role as well.
-    try:
+pw = os.environ.get('NOCTIS_ADMIN_PW') or ''
+email = os.environ.get('NOCTIS_ADMIN_EMAIL') or ''
+
+u, created = User.objects.get_or_create(username='admin', defaults={'email': email})
+
+changed = False
+if created:
+    u.set_password(pw)
+    u.is_staff = True
+    u.is_superuser = True
+    changed = True
+else:
+    # If `admin` exists but isn't privileged, promote it and reset password
+    # so the deploy output provides a known credential.
+    if not getattr(u, 'is_superuser', False):
+        u.set_password(pw)
+        u.is_staff = True
+        u.is_superuser = True
+        changed = True
+
+# Ensure consistent optional fields without assuming they exist on all installs.
+try:
+    if hasattr(u, 'role') and getattr(u, 'role', None) != 'admin':
         u.role = 'admin'
+        changed = True
+    if hasattr(u, 'is_verified') and not getattr(u, 'is_verified', False):
         u.is_verified = True
-        u.save(update_fields=['role','is_verified'])
-    except Exception:
-        pass
+        changed = True
+except Exception:
+    pass
+
+if hasattr(u, 'email') and email and not getattr(u, 'email', ''):
+    u.email = email
+    changed = True
+
+if changed:
+    u.save()
+
+if created:
     print('ADMIN_CREATED')
+elif changed:
+    print('ADMIN_PROMOTED')
 else:
     print('ADMIN_EXISTS')
 " >/tmp/noctis-admin.out
   )
 
-  if grep -q 'ADMIN_CREATED' /tmp/noctis-admin.out 2>/dev/null; then
+  if grep -Eq 'ADMIN_CREATED|ADMIN_PROMOTED' /tmp/noctis-admin.out 2>/dev/null; then
     info "Admin created: username=admin password=${pw}"
   else
     info "Admin already exists (not changing password)."

@@ -150,6 +150,15 @@
 {% block content %}
 <div class="container-fluid py-4">
 <div class="py-4">
+    {% if messages %}
+    <div class="mb-3">
+        {% for message in messages %}
+        <div class="alert {% if message.tags %}alert-{{ message.tags }}{% else %}alert-info{% endif %} mb-2">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
     <!-- Header Section -->
     <div class="row mb-4">
         <div class="col-12">
@@ -205,25 +214,25 @@
     <div class="row mb-4">
         <div class="col-md-3">
             <div class="stats-card text-center">
-                <div class="stats-number">{{ users.paginator.count }}</div>
+                <div class="stats-number">{{ total_users_count }}</div>
                 <div class="text-white">Total Users</div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="stats-card text-center">
-                <div class="stats-number">{{ facilities.count }}</div>
+                <div class="stats-number">{{ facilities_count }}</div>
                 <div class="text-white">Facilities</div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="stats-card text-center">
-                <div class="stats-number">{{ users.paginator.count|add:"-10" }}</div>
+                <div class="stats-number">{{ active_users_count }}</div>
                 <div class="text-white">Active Users</div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="stats-card text-center">
-                <div class="stats-number">3</div>
+                <div class="stats-number">{{ roles_count }}</div>
                 <div class="text-white">User Roles</div>
             </div>
         </div>

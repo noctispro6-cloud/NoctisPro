@@ -188,6 +188,80 @@ def upload_facilities(request):
 def user_management(request):
     """User management interface with search and filtering"""
     users = User.objects.select_related('facility').all()
+
+    # Handle POST actions from the user management UI (bulk actions / status toggles)
+    if request.method == 'POST':
+        try:
+            # Toggle a single user's active status
+            if request.POST.get('toggle_user_status'):
+                target_id = int(request.POST.get('toggle_user_status'))
+                activate = request.POST.get('activate') == '1'
+                target_user = get_object_or_404(User, id=target_id)
+
+                target_user.is_active = activate
+                target_user.save(update_fields=['is_active'])
+
+                AuditLog.objects.create(
+                    user=request.user,
+                    action='update',
+                    model_name='User',
+                    object_id=str(target_user.id),
+                    object_repr=str(target_user),
+                    description=f'Updated user status for {target_user.username}: {"activated" if activate else "deactivated"}',
+                    after_data={
+                        'user_id': target_user.id,
+                        'username': target_user.username,
+                        'is_active': target_user.is_active,
+                        'performed_by': request.user.username,
+                        'timestamp': timezone.now().isoformat(),
+                    },
+                )
+
+                messages.success(request, f'User "{target_user.username}" {"activated" if activate else "deactivated"} successfully.')
+                return redirect('admin_panel:user_management')
+
+            # Bulk actions
+            bulk_action = (request.POST.get('bulk_action') or '').strip()
+            selected_ids = request.POST.getlist('selected_users')
+            if bulk_action and selected_ids:
+                ids = [int(x) for x in selected_ids if str(x).strip().isdigit()]
+                qs = User.objects.filter(id__in=ids)
+
+                if bulk_action == 'activate':
+                    updated = qs.update(is_active=True)
+                    messages.success(request, f'Activated {updated} user(s).')
+                elif bulk_action == 'deactivate':
+                    updated = qs.update(is_active=False)
+                    messages.success(request, f'Deactivated {updated} user(s).')
+                elif bulk_action == 'verify':
+                    updated = qs.update(is_verified=True)
+                    messages.success(request, f'Verified {updated} user(s).')
+                elif bulk_action == 'delete':
+                    count = qs.count()
+                    qs.delete()
+                    messages.success(request, f'Deleted {count} user(s).')
+                else:
+                    messages.error(request, 'Invalid bulk action.')
+
+                AuditLog.objects.create(
+                    user=request.user,
+                    action='update' if bulk_action != 'delete' else 'delete',
+                    model_name='User',
+                    object_id='',
+                    object_repr='',
+                    description=f'Bulk user action: {bulk_action} ({len(ids)} selected)',
+                    after_data={
+                        'action': bulk_action,
+                        'selected_user_ids': ids,
+                        'performed_by': request.user.username,
+                        'timestamp': timezone.now().isoformat(),
+                    },
+                )
+                return redirect('admin_panel:user_management')
+
+        except Exception as e:
+            messages.error(request, f'User action failed: {str(e)}')
+            return redirect('admin_panel:user_management')
     
     # Search functionality
     search_query = request.GET.get('search', '')
@@ -239,6 +313,11 @@ def user_management(request):
     context = {
         'users': users_page,
         'facilities': facilities,
+        'total_users_count': users.count(),
+        'active_users_count': users.filter(is_active=True).count(),
+        'verified_users_count': users.filter(is_verified=True).count(),
+        'facilities_count': facilities.count(),
+        'roles_count': len(User.USER_ROLES),
         'search_query': search_query,
         'role_filter': role_filter,
         'facility_filter': facility_filter,

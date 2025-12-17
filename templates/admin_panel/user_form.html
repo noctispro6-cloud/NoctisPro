@@ -5,6 +5,15 @@
 
 {% block content %}
 <div class="container-fluid py-4">
+  {% if messages %}
+  <div class="mb-3">
+    {% for message in messages %}
+    <div class="alert {% if message.tags %}alert-{{ message.tags }}{% else %}alert-info{% endif %} mb-2">
+      {{ message }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   <div class="row mb-4">
     <div class="col-12 d-flex justify-content-between align-items-center">
       <h1 class="text-white mb-0">
@@ -341,39 +350,23 @@
 
 {% block extra_css %}
 <style>
-        :root {
-            --primary-bg: #0a0a0a;
-            --secondary-bg: #1a1a1a;
-            --card-surface: #252525;
-            --header-bg: #333333;
-            --border-color: #404040;
-            --accent-color: #00d4ff;
-            --text-primary: #ffffff;
-            --text-secondary: #b3b3b3;
-            --text-muted: #666666;
-            --success-color: #00ff88;
-            --warning-color: #ffaa00;
-            --danger-color: #ff4444;
-        }
-
     .navbar-medical {
         background: var(--gradient-primary);
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
     }
 
-    .btn-control {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
-        padding: 8px 16px;
-        font-size: 14px;
-        cursor: pointer;
-        border-radius: 4px;
-        transition: all 0.2s ease;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        text-decoration: none;
+    /* Make the primary submit button visually distinct without redefining base button styles */
+    .btn-control.primary {
+        background: var(--accent-color);
+        border-color: var(--accent-color);
+        color: var(--primary-bg);
+        font-weight: 700;
+    }
+
+    .btn-control.primary:hover {
+        background: #00b8d4;
+        border-color: #00b8d4;
+        color: var(--primary-bg);
     }
 
     /* Multi-step form styles */
@@ -590,7 +583,16 @@
       const selectedRole = roleSelect.value;
       const required = selectedRole === 'facility';
       facilitySelect.required = required;
-      facilityHelp.innerText = required ? 'Facility is required for Facility Users' : 'Assign user to a specific facility (required for Facility Users)';
+
+      // Preserve help markup and just toggle the relevant hint
+      try {
+        const reqEl = facilityHelp.querySelector('.facility-required');
+        const optEl = facilityHelp.querySelector('.facility-optional');
+        if (reqEl && optEl) {
+          reqEl.style.display = required ? '' : 'none';
+          optEl.style.display = required ? 'none' : '';
+        }
+      } catch (e) { /* ignore */ }
       
       // Show/hide role descriptions
       const roleDescriptions = document.querySelectorAll('.role-desc');
@@ -775,7 +777,7 @@
         .then(html => {
           const parser = new DOMParser();
           const doc = parser.parseFromString(html, 'text/html');
-          const newFacilitySelect = doc.getElementById('facility');
+          const newFacilitySelect = doc.getElementById('id_facility') || doc.getElementById('facility');
           
           if (newFacilitySelect) {
             const currentValue = facilitySelect.value;
@@ -797,7 +799,7 @@
     if (roleSelect) roleSelect.addEventListener('change', updateFacilityRequirement);
     if (password) password.addEventListener('input', validatePasswordMatch);
     if (passwordConfirm) passwordConfirm.addEventListener('input', validatePasswordMatch);
-    refreshFacilitiesBtn.addEventListener('click', refreshFacilities);
+    if (refreshFacilitiesBtn) refreshFacilitiesBtn.addEventListener('click', refreshFacilities);
 
     nextBtn.addEventListener('click', function(e) {
       e.preventDefault();

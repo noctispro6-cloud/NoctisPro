@@ -10,41 +10,74 @@ from django.conf import settings
 from .models import User, UserSession, Facility
 import json
 
+def _should_auto_create_admin_on_first_access() -> bool:
+    """
+    Historically this project auto-created an admin on visiting the login page.
+    That's risky (side effects on GET) and can surface confusing "setup" behavior.
+
+    Keep it as an explicit opt-in for demo/dev environments only.
+    """
+    val = str(getattr(settings, "AUTO_CREATE_ADMIN_ON_FIRST_ACCESS", "") or "").strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+def _bootstrap_admin_user_if_enabled() -> None:
+    """
+    Best-effort optional bootstrap of an initial admin user.
+
+    IMPORTANT: This must never raise inside a request handler.
+    """
+    if not _should_auto_create_admin_on_first_access():
+        return
+
+    try:
+        # Only bootstrap if there are no privileged accounts yet.
+        if User.objects.filter(is_superuser=True).exists() or User.objects.filter(is_staff=True).exists():
+            return
+
+        domain = getattr(settings, 'DOMAIN_NAME', '') or 'noctis-pro.com'
+        email = f'admin@{domain}'
+        username = getattr(settings, "BOOTSTRAP_ADMIN_USERNAME", "admin")
+        password = getattr(settings, "BOOTSTRAP_ADMIN_PASSWORD", "") or ""
+
+        # If no password is provided, do NOT create a credentialed account.
+        # This avoids accidentally exposing a predictable default password.
+        if not password:
+            return
+
+        su, created = User.objects.get_or_create(username=username, defaults={'email': email})
+
+        changed = False
+        if created:
+            su.set_password(password)
+            changed = True
+
+        if not getattr(su, 'is_superuser', False):
+            su.is_superuser = True
+            su.is_staff = True
+            changed = True
+
+        # Some installs rely on role/is_verified (custom User model).
+        if hasattr(su, 'role') and getattr(su, 'role', None) != 'admin':
+            su.role = 'admin'
+            changed = True
+        if hasattr(su, 'is_verified') and not getattr(su, 'is_verified', False):
+            su.is_verified = True
+            changed = True
+
+        if hasattr(su, 'email') and email and not getattr(su, 'email', ''):
+            su.email = email
+            changed = True
+
+        if changed:
+            su.save()
+    except Exception:
+        # Silent best-effort by design (never block login page rendering).
+        pass
+
 def login_view(request):
     """Custom login view with enhanced security tracking"""
-    # Auto-create initial superuser on first access if none exists
-    try:
-        if not User.objects.filter(is_superuser=True).exists():
-            domain = getattr(settings, 'DOMAIN_NAME', '') or 'noctis-pro.com'
-            email = f'admin@{domain}'
-            su, created = User.objects.get_or_create(username='admin', defaults={'email': email})
-
-            changed = False
-            if created:
-                su.set_password('admin')
-                changed = True
-
-            if not getattr(su, 'is_superuser', False):
-                su.is_superuser = True
-                su.is_staff = True
-                changed = True
-
-            # Some installs rely on role/is_verified (custom User model).
-            if hasattr(su, 'role') and getattr(su, 'role', None) != 'admin':
-                su.role = 'admin'
-                changed = True
-            if hasattr(su, 'is_verified') and not getattr(su, 'is_verified', False):
-                su.is_verified = True
-                changed = True
-
-            if hasattr(su, 'email') and email and not getattr(su, 'email', ''):
-                su.email = email
-                changed = True
-
-            if changed:
-                su.save()
-    except Exception:
-        pass
+    # Avoid surprising side-effects on the login page; bootstrap is explicit opt-in.
+    _bootstrap_admin_user_if_enabled()
     if request.user.is_authenticated:
         return redirect('worklist:dashboard')
     

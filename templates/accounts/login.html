@@ -347,12 +347,15 @@
             </div>
             <div class="subtitle">Professional Medical Imaging Platform</div>
 
+            {# Only show login-relevant messages here (avoid leaking setup/admin actions). #}
             {% if messages %}
                 {% for message in messages %}
-                    <div class="alert alert-{{ message.tags }}" id="alert-{{ forloop.counter }}">
-                        <i class="fas fa-{% if message.tags == 'error' %}exclamation-triangle{% elif message.tags == 'success' %}check-circle{% else %}info-circle{% endif %}"></i>
-                        {{ message }}
-                    </div>
+                    {% if message.tags == 'error' or message.tags == 'warning' %}
+                        <div class="alert alert-{{ message.tags }}" id="alert-{{ forloop.counter }}">
+                            <i class="fas fa-{% if message.tags == 'error' %}exclamation-triangle{% else %}info-circle{% endif %}"></i>
+                            {{ message }}
+                        </div>
+                    {% endif %}
                 {% endfor %}
             {% endif %}
 

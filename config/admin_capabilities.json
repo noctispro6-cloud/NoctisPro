@@ -1,0 +1,23 @@
+{
+  "__default__": {
+    "manage_users": true,
+    "manage_facilities": true,
+    "view_logs": true,
+    "manage_settings": true,
+    "run_backup": true,
+    "manage_permissions": true,
+    "ai_visible": true,
+    "manage_ai": true
+  },
+  "__roles__": {
+    "admin": {
+      "ai_visible": true
+    },
+    "radiologist": {
+      "ai_visible": true
+    },
+    "facility": {
+      "ai_visible": false
+    }
+  }
+}

@@ -321,6 +321,7 @@ def user_management(request):
         'search_query': search_query,
         'role_filter': role_filter,
         'facility_filter': facility_filter,
+        'status_filter': status_filter,
         'user_roles': User.USER_ROLES,
     }
     

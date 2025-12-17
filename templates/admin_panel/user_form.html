@@ -149,7 +149,7 @@
             </label>
             <div class="input-group">
               {{ form.facility }}
-              <button type="button" class="btn-control" onclick="window.open('{% url 'admin_panel:facility_create' %}', '_blank')" type="button" title="Add new facility">
+              <button type="button" class="btn-control" onclick="window.open('{% url 'admin_panel:facility_create' %}', '_blank')" title="Add new facility">
                 <i class="fas fa-plus"></i>
               </button>
             </div>
@@ -350,6 +350,20 @@
 
 {% block extra_css %}
 <style>
+    /* Messages - align bootstrap alerts with dark UI */
+    .alert {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        border-radius: 8px;
+        font-size: 12px;
+        padding: 10px 12px;
+    }
+    .alert-success { border-left: 4px solid var(--success-color); }
+    .alert-error, .alert-danger { border-left: 4px solid var(--danger-color); }
+    .alert-warning { border-left: 4px solid var(--warning-color); }
+    .alert-info { border-left: 4px solid var(--accent-color); }
+
     .navbar-medical {
         background: var(--gradient-primary);
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -556,6 +570,23 @@
     hr {
         opacity: 0.3;
     }
+
+    @media (max-width: 768px) {
+        .step-indicator {
+            gap: 1rem;
+        }
+        .step-indicator::before {
+            left: 10%;
+            right: 10%;
+        }
+        .step-number {
+            width: 34px;
+            height: 34px;
+        }
+        .step-label {
+            font-size: 11px;
+        }
+    }
 </style>
 {% endblock %}
 
@@ -570,6 +601,7 @@
     const refreshFacilitiesBtn = document.getElementById('refreshFacilities');
     
     // Multi-step form elements
+    const formEl = document.querySelector('form.multi-step-form');
     const nextBtn = document.getElementById('nextBtn');
     const prevBtn = document.getElementById('prevBtn');
     const submitBtn = document.getElementById('submitBtn');
@@ -854,6 +886,26 @@
         showStep(currentStep);
       }
     });
+
+    // Prevent accidental submit before final step (Enter key, etc.)
+    if (formEl) {
+      formEl.addEventListener('submit', function(e) {
+        // If user tries to submit early, treat it like "Next"
+        if (currentStep < totalSteps) {
+          e.preventDefault();
+          if (validateCurrentStep()) {
+            currentStep++;
+            showStep(currentStep);
+          }
+          return;
+        }
+
+        // Final step: validate visible required fields before letting submit proceed
+        if (!validateCurrentStep()) {
+          e.preventDefault();
+        }
+      });
+    }
 
     // Initialize
     if (roleSelect && facilitySelect) updateFacilityRequirement();

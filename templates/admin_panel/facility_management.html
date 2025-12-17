@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load dicts %}
 
 {% block title %}Facility Management - Admin Panel{% endblock %}
 
@@ -374,6 +375,7 @@
 
 {% block content %}
 <div class="container-fluid py-4">
+    {% user_caps as caps %}
     <!-- Header Section -->
     <div class="row mb-4">
         <div class="col-12">
@@ -407,9 +409,11 @@
                     <a href="{% url 'admin_panel:facility_create' %}" class="btn-control">
                         <i class="fas fa-hospital me-2"></i>Add Facility
                     </a>
+                    {% if user.role == 'admin' or caps.manage_users %}
                     <a href="{% url 'admin_panel:user_create' %}?role=radiologist" class="btn-control">
                         <i class="fas fa-user-md me-2"></i>Add Radiologist
                     </a>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -563,9 +567,11 @@
                             <li><a class="dropdown-item" href="#" onclick="viewFacilityAnalytics({{ facility.id }})">
                                 <i class="fas fa-chart-line me-2"></i>View Analytics
                             </a></li>
+                            {% if user.role == 'admin' or caps.manage_users %}
                             <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?facility={{ facility.id }}">
                                 <i class="fas fa-user-plus me-2"></i>Add User
                             </a></li>
+                            {% endif %}
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item text-danger" href="{% url 'admin_panel:facility_delete' facility.id %}">
                                 <i class="fas fa-trash me-2"></i>Delete
@@ -628,9 +634,11 @@
                     <a href="{% url 'admin_panel:facility_edit' facility.id %}" class="btn-control">
                         <i class="fas fa-edit me-1"></i>Edit
                     </a>
+                    {% if user.role == 'admin' or caps.manage_users %}
                     <a href="{% url 'admin_panel:user_create' %}?facility={{ facility.id }}" class="btn-control">
                         <i class="fas fa-user-plus me-1"></i>Add User
                     </a>
+                    {% endif %}
                     <button type="button" class="btn-control" onclick="viewFacilityAnalytics({{ facility.id }})"  >
                         <i class="fas fa-chart-line me-1"></i>Analytics
                     </button>

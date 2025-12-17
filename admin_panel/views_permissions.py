@@ -9,12 +9,20 @@ from .utils import (
 )
 
 
-def is_admin(user):
-    return user.is_authenticated and user.is_admin()
+def can_manage_permissions(user):
+    """Allow admins and explicitly-capable users to manage permissions."""
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_admin():
+        return True
+    try:
+        return bool(get_user_caps(user.username).get('manage_permissions'))
+    except Exception:
+        return False
 
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_permissions)
 def permissions_dashboard(request):
     users = User.objects.order_by('username').all()
     if request.method == 'POST' and request.POST.get('_roles') == '1':
@@ -42,7 +50,7 @@ def permissions_dashboard(request):
 
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_permissions)
 def edit_user_permissions(request, username: str):
     user = get_object_or_404(User, username=username)
     if request.method == 'POST':

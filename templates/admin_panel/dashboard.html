@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load dicts %}
 {% block title %}Admin Panel - Noctis Pro PACS{% endblock %}
 
 {% block content %}
@@ -11,6 +12,7 @@
                 </div>
             </div>
             <div class="card-body">
+        {% user_caps as caps %}
         
         <div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
             <div class="stat-card card" style="text-align:center;padding:16px;">
@@ -33,10 +35,18 @@
         
         <div style="text-align:center;margin-top:16px;">
             <div style="margin-bottom:8px;font-weight:600;">Administrative Functions</div>
+            {% if user.role == 'admin' or caps.manage_users %}
             <a href="{% url 'admin_panel:user_management' %}" class="btn-control"><i class="fas fa-users"></i> User Management</a>
+            {% endif %}
+            {% if user.role == 'admin' or caps.manage_facilities %}
             <a href="{% url 'admin_panel:facility_management' %}" class="btn-control"><i class="fas fa-building"></i> Facility Management</a>
+            {% endif %}
+            {% if user.role == 'admin' or caps.manage_settings %}
             <a href="{% url 'admin_panel:settings' %}" class="btn-control"><i class="fas fa-cog"></i> System Settings</a>
+            {% endif %}
+            {% if user.role == 'admin' or caps.manage_permissions %}
             <a href="{% url 'admin_panel:permissions_dashboard' %}" class="btn-control"><i class="fas fa-user-shield"></i> Permissions</a>
+            {% endif %}
         </div>
 
         {% if recent_studies %}

@@ -1,13 +1,13 @@
 {
   "__default__": {
-    "manage_users": true,
-    "manage_facilities": true,
-    "view_logs": true,
-    "manage_settings": true,
-    "run_backup": true,
-    "manage_permissions": true,
+    "manage_users": false,
+    "manage_facilities": false,
+    "view_logs": false,
+    "manage_settings": false,
+    "run_backup": false,
+    "manage_permissions": false,
     "ai_visible": true,
-    "manage_ai": true
+    "manage_ai": false
   },
   "__roles__": {
     "admin": {

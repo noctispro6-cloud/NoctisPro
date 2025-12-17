@@ -20,6 +20,70 @@ def is_admin(user):
     """Check if user is admin"""
     return user.is_authenticated and user.is_admin()
 
+
+def _get_caps(user) -> dict:
+    """Best-effort capability lookup for non-admin privileged access."""
+    try:
+        if not user or not user.is_authenticated:
+            return {}
+        return get_user_caps(user.username) or {}
+    except Exception:
+        return {}
+
+
+def can_access_admin_panel(user) -> bool:
+    """
+    Allow entry to the admin panel dashboard if:
+    - user is an admin, or
+    - user has at least one admin capability enabled.
+    """
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_admin():
+        return True
+    caps = _get_caps(user)
+    return any(bool(caps.get(k)) for k in (
+        'manage_users',
+        'manage_facilities',
+        'view_logs',
+        'manage_settings',
+        'run_backup',
+        'manage_permissions',
+        'manage_ai',
+    ))
+
+
+def can_manage_users(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_admin():
+        return True
+    return bool(_get_caps(user).get('manage_users'))
+
+
+def can_manage_facilities(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_admin():
+        return True
+    return bool(_get_caps(user).get('manage_facilities'))
+
+
+def can_view_logs(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_admin():
+        return True
+    return bool(_get_caps(user).get('view_logs'))
+
+
+def can_manage_settings(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_admin():
+        return True
+    return bool(_get_caps(user).get('manage_settings'))
+
 def _standardize_aetitle(source: str) -> str:
     """Generate a DICOM-compliant AE Title (<=16 chars, A-Z 0-9 _), ensure uniqueness."""
     base = re.sub(r"[^A-Z0-9 ]+", "", (source or "").upper()).strip().replace(" ", "_") or "FACILITY"
@@ -35,7 +99,7 @@ def _standardize_aetitle(source: str) -> str:
     return aet
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_access_admin_panel)
 def dashboard(request):
     """Admin dashboard with system overview"""
     # Get system statistics
@@ -66,14 +130,14 @@ def dashboard(request):
     return render(request, 'admin_panel/dashboard.html', context)
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_view_logs)
 def system_logs(request):
     """Placeholder: system logs view."""
     messages.info(request, 'System Logs view is under construction.')
     return dashboard(request)
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_settings)
 def settings_view(request):
     """System settings view (integrations & automation)."""
     from django.utils import timezone as _tz
@@ -177,14 +241,14 @@ def settings_view(request):
     )
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_facilities)
 def upload_facilities(request):
     """Placeholder: upload facilities view."""
     messages.info(request, 'Upload facilities view is under construction.')
     return dashboard(request)
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_users)
 def user_management(request):
     """User management interface with search and filtering"""
     users = User.objects.select_related('facility').all()
@@ -328,7 +392,7 @@ def user_management(request):
     return render(request, 'admin_panel/user_management.html', context)
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_users)
 def user_create(request):
     """
     Professional User Creation Backend - Medical Staff Management Excellence
@@ -479,7 +543,7 @@ def user_create(request):
     return render(request, 'admin_panel/user_form.html', context)
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_users)
 def user_edit(request, user_id):
     """Edit existing user with enhanced form validation"""
     from .forms import CustomUserUpdateForm
@@ -550,7 +614,7 @@ def user_edit(request, user_id):
     return render(request, 'admin_panel/user_form.html', context)
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_users)
 def user_delete(request, user_id):
     """Delete user immediately without confirmation"""
     user = get_object_or_404(User, id=user_id)
@@ -571,7 +635,7 @@ def user_delete(request, user_id):
     return redirect('admin_panel:user_management')
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_facilities)
 def facility_management(request):
     """Enhanced facility management interface"""
     facilities = Facility.objects.all()
@@ -785,7 +849,7 @@ def export_facilities_data(facilities, format):
 
 @csrf_exempt
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_users)
 def bulk_user_action(request):
     """Handle bulk user actions"""
     if request.method != 'POST':
@@ -824,7 +888,7 @@ def bulk_user_action(request):
 
 @csrf_exempt
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_facilities)
 def bulk_facility_action(request):
     """Handle bulk facility actions"""
     if request.method != 'POST':
@@ -859,7 +923,7 @@ def bulk_facility_action(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_facilities)
 def facility_create(request):
     """Create new facility with enhanced form validation"""
     from .forms import FacilityForm
@@ -957,7 +1021,7 @@ def facility_create(request):
     return render(request, 'admin_panel/facility_form.html', context)
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_facilities)
 def facility_edit(request, facility_id):
     """Edit existing facility with enhanced form validation"""
     from .forms import FacilityForm
@@ -1058,7 +1122,7 @@ def facility_edit(request, facility_id):
     return render(request, 'admin_panel/facility_form.html', context)
 
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_manage_facilities)
 def facility_delete(request, facility_id):
     """Delete facility"""
     facility = get_object_or_404(Facility, id=facility_id)

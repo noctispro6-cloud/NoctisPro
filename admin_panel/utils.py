@@ -8,14 +8,22 @@ CAPS_FILE = Path(settings.BASE_DIR) / 'config' / 'admin_capabilities.json'
 
 
 DEFAULT_CAPS = {
-    'manage_users': True,
-    'manage_facilities': True,
-    'view_logs': True,
-    'manage_settings': True,
-    'run_backup': True,
-    'manage_permissions': True,
+    # IMPORTANT:
+    # These are *capability defaults* for non-admin users unless overridden in
+    # `config/admin_capabilities.json` for a specific username.
+    #
+    # Keep these restrictive by default so Facility/Radiologist users do not
+    # implicitly inherit admin-like controls.
+    'manage_users': False,
+    'manage_facilities': False,
+    'view_logs': False,
+    'manage_settings': False,
+    'run_backup': False,
+    'manage_permissions': False,
+    # AI visibility is additionally gated by per-role toggles; default to True
+    # here so the role toggle file is the primary control surface.
     'ai_visible': True,
-    'manage_ai': True,
+    'manage_ai': False,
 }
 
 

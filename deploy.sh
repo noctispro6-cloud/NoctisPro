@@ -40,8 +40,8 @@ Optional:
 
 Notes:
 - Domain mode requires DNS A/AAAA records already pointing at this server.
-- Ngrok mode requires an ngrok authtoken. If you omit --ngrok-domain, this script defaults
-  to using the reserved domain "noctis-pro.com.ngrok.app".
+- Ngrok mode requires an ngrok authtoken. If you omit --ngrok-domain, ngrok will assign
+  a random public URL; the tunnel service will persist it to /opt/noctispro/.tunnel-url.
 EOF
 }
 
@@ -477,10 +477,6 @@ else
   # ngrok mode: domain is informational (Django will use tunnel URL), but keep a default.
   DOMAIN="$(normalize_host "${DOMAIN:-noctis-pro.com}")"
   NGROK_DOMAIN="$(normalize_host "$NGROK_DOMAIN")"
-  # Default reserved ngrok domain for this deployment.
-  if [[ -z "$NGROK_DOMAIN" ]]; then
-    NGROK_DOMAIN="noctis-pro.com.ngrok.app"
-  fi
   if [[ -z "$NGROK_AUTHTOKEN" ]]; then
     err "--ngrok-token (or NGROK_AUTHTOKEN env var) is required in ngrok mode"
     usage

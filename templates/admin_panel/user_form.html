@@ -5,6 +5,15 @@
 
 {% block content %}
 <div class="container-fluid py-4">
+  {% if messages %}
+  <div class="mb-3">
+    {% for message in messages %}
+    <div class="alert {% if message.tags %}alert-{{ message.tags }}{% else %}alert-info{% endif %} mb-2">
+      {{ message }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   <div class="row mb-4">
     <div class="col-12 d-flex justify-content-between align-items-center">
       <h1 class="text-white mb-0">
@@ -140,7 +149,7 @@
             </label>
             <div class="input-group">
               {{ form.facility }}
-              <button type="button" class="btn-control" onclick="window.open('{% url 'admin_panel:facility_create' %}', '_blank')" type="button" title="Add new facility">
+              <button type="button" class="btn-control" onclick="window.open('{% url 'admin_panel:facility_create' %}', '_blank')" title="Add new facility">
                 <i class="fas fa-plus"></i>
               </button>
             </div>
@@ -341,39 +350,37 @@
 
 {% block extra_css %}
 <style>
-        :root {
-            --primary-bg: #0a0a0a;
-            --secondary-bg: #1a1a1a;
-            --card-surface: #252525;
-            --header-bg: #333333;
-            --border-color: #404040;
-            --accent-color: #00d4ff;
-            --text-primary: #ffffff;
-            --text-secondary: #b3b3b3;
-            --text-muted: #666666;
-            --success-color: #00ff88;
-            --warning-color: #ffaa00;
-            --danger-color: #ff4444;
-        }
+    /* Messages - align bootstrap alerts with dark UI */
+    .alert {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        border-radius: 8px;
+        font-size: 12px;
+        padding: 10px 12px;
+    }
+    .alert-success { border-left: 4px solid var(--success-color); }
+    .alert-error, .alert-danger { border-left: 4px solid var(--danger-color); }
+    .alert-warning { border-left: 4px solid var(--warning-color); }
+    .alert-info { border-left: 4px solid var(--accent-color); }
 
     .navbar-medical {
         background: var(--gradient-primary);
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
     }
 
-    .btn-control {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
-        padding: 8px 16px;
-        font-size: 14px;
-        cursor: pointer;
-        border-radius: 4px;
-        transition: all 0.2s ease;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        text-decoration: none;
+    /* Make the primary submit button visually distinct without redefining base button styles */
+    .btn-control.primary {
+        background: var(--accent-color);
+        border-color: var(--accent-color);
+        color: var(--primary-bg);
+        font-weight: 700;
+    }
+
+    .btn-control.primary:hover {
+        background: #00b8d4;
+        border-color: #00b8d4;
+        color: var(--primary-bg);
     }
 
     /* Multi-step form styles */
@@ -563,6 +570,23 @@
     hr {
         opacity: 0.3;
     }
+
+    @media (max-width: 768px) {
+        .step-indicator {
+            gap: 1rem;
+        }
+        .step-indicator::before {
+            left: 10%;
+            right: 10%;
+        }
+        .step-number {
+            width: 34px;
+            height: 34px;
+        }
+        .step-label {
+            font-size: 11px;
+        }
+    }
 </style>
 {% endblock %}
 
@@ -577,6 +601,7 @@
     const refreshFacilitiesBtn = document.getElementById('refreshFacilities');
     
     // Multi-step form elements
+    const formEl = document.querySelector('form.multi-step-form');
     const nextBtn = document.getElementById('nextBtn');
     const prevBtn = document.getElementById('prevBtn');
     const submitBtn = document.getElementById('submitBtn');
@@ -590,7 +615,16 @@
       const selectedRole = roleSelect.value;
       const required = selectedRole === 'facility';
       facilitySelect.required = required;
-      facilityHelp.innerText = required ? 'Facility is required for Facility Users' : 'Assign user to a specific facility (required for Facility Users)';
+
+      // Preserve help markup and just toggle the relevant hint
+      try {
+        const reqEl = facilityHelp.querySelector('.facility-required');
+        const optEl = facilityHelp.querySelector('.facility-optional');
+        if (reqEl && optEl) {
+          reqEl.style.display = required ? '' : 'none';
+          optEl.style.display = required ? 'none' : '';
+        }
+      } catch (e) { /* ignore */ }
       
       // Show/hide role descriptions
       const roleDescriptions = document.querySelectorAll('.role-desc');
@@ -775,7 +809,7 @@
         .then(html => {
           const parser = new DOMParser();
           const doc = parser.parseFromString(html, 'text/html');
-          const newFacilitySelect = doc.getElementById('facility');
+          const newFacilitySelect = doc.getElementById('id_facility') || doc.getElementById('facility');
           
           if (newFacilitySelect) {
             const currentValue = facilitySelect.value;
@@ -797,7 +831,7 @@
     if (roleSelect) roleSelect.addEventListener('change', updateFacilityRequirement);
     if (password) password.addEventListener('input', validatePasswordMatch);
     if (passwordConfirm) passwordConfirm.addEventListener('input', validatePasswordMatch);
-    refreshFacilitiesBtn.addEventListener('click', refreshFacilities);
+    if (refreshFacilitiesBtn) refreshFacilitiesBtn.addEventListener('click', refreshFacilities);
 
     nextBtn.addEventListener('click', function(e) {
       e.preventDefault();
@@ -852,6 +886,26 @@
         showStep(currentStep);
       }
     });
+
+    // Prevent accidental submit before final step (Enter key, etc.)
+    if (formEl) {
+      formEl.addEventListener('submit', function(e) {
+        // If user tries to submit early, treat it like "Next"
+        if (currentStep < totalSteps) {
+          e.preventDefault();
+          if (validateCurrentStep()) {
+            currentStep++;
+            showStep(currentStep);
+          }
+          return;
+        }
+
+        // Final step: validate visible required fields before letting submit proceed
+        if (!validateCurrentStep()) {
+          e.preventDefault();
+        }
+      });
+    }
 
     // Initialize
     if (roleSelect && facilitySelect) updateFacilityRequirement();

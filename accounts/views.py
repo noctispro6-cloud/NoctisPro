@@ -16,10 +16,33 @@ def login_view(request):
     try:
         if not User.objects.filter(is_superuser=True).exists():
             domain = getattr(settings, 'DOMAIN_NAME', '') or 'noctis-pro.com'
-            su = User.objects.create_superuser('admin', f'admin@{domain}', 'admin')
-            su.role = 'admin'
-            su.is_verified = True
-            su.save()
+            email = f'admin@{domain}'
+            su, created = User.objects.get_or_create(username='admin', defaults={'email': email})
+
+            changed = False
+            if created:
+                su.set_password('admin')
+                changed = True
+
+            if not getattr(su, 'is_superuser', False):
+                su.is_superuser = True
+                su.is_staff = True
+                changed = True
+
+            # Some installs rely on role/is_verified (custom User model).
+            if hasattr(su, 'role') and getattr(su, 'role', None) != 'admin':
+                su.role = 'admin'
+                changed = True
+            if hasattr(su, 'is_verified') and not getattr(su, 'is_verified', False):
+                su.is_verified = True
+                changed = True
+
+            if hasattr(su, 'email') and email and not getattr(su, 'email', ''):
+                su.email = email
+                changed = True
+
+            if changed:
+                su.save()
     except Exception:
         pass
     if request.user.is_authenticated:

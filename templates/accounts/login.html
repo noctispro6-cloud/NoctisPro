@@ -359,7 +359,7 @@
                 {% endfor %}
             {% endif %}
 
-            <form method="post" id="loginForm" novalidate>
+            <form method="post" id="loginForm" action="{% url 'accounts:login' %}" novalidate>
                 {% csrf_token %}
                 <div class="form-group">
                     <label class="form-label" for="username">Username</label>
@@ -454,7 +454,7 @@
             validateInput(this);
         });
 
-        // Enhanced form submission
+        // Enhanced form submission (use normal POST to ensure session cookie + redirects work reliably)
         loginForm.addEventListener('submit', function(e) {
             e.preventDefault();
             
@@ -483,33 +483,11 @@
             loginButtonText.innerHTML = '<div class="spinner"></div> Authenticating...';
             loadingOverlay.classList.add('active');
             
-            // Submit form after short delay for UX
+            // Submit form after short delay for UX (native submit avoids fetch/cookie issues)
             setTimeout(() => {
-                // Create and submit form data
-                const formData = new FormData(loginForm);
-                
-                fetch(loginForm.action || window.location.href, {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-                    }
-                })
-                .then(response => {
-                    if (response.redirected) {
-                        // Successful login - redirect
-                        window.location.href = response.url;
-                    } else {
-                        // Login failed - reload page to show error
-                        window.location.reload();
-                    }
-                })
-                .catch(error => {
-                    console.error('Login error:', error);
-                    resetLoginForm();
-                    showAlert('Network error. Please try again.', 'danger');
-                });
-            }, 500);
+                // Native submit does not re-trigger this submit handler (prevents loops)
+                loginForm.submit();
+            }, 250);
         });
 
         function showAlert(message, type) {

@@ -2,6 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib import messages
 from django.http import JsonResponse
+from django.db import transaction
 from django.db.models import Q, Count
 from django.core.paginator import Paginator
 from django.views.decorators.csrf import csrf_exempt
@@ -269,58 +270,57 @@ def user_create(request):
                 # Professional user creation with medical standards validation
                 logger.info(f"Professional user creation initiated by {request.user.username}")
                 
-                # Enhanced user creation with comprehensive validation
-                user = form.save(commit=False)
-                
-                # Professional medical staff validation
-                role = user.role
-                facility = user.facility
-                
-                # Medical standards compliance checks
-                validation_results = {
-                    'role_valid': role in ['admin', 'radiologist', 'technologist', 'facility_user'],
-                    'facility_required': role in ['radiologist', 'technologist', 'facility_user'],
-                    'license_required': role in ['radiologist', 'technologist'],
-                    'specialization_recommended': role == 'radiologist',
-                }
-                
-                # Professional validation logging
-                if validation_results['facility_required'] and not facility:
-                    logger.warning(f"User creation: {role} role requires facility assignment")
-                    messages.error(request, f'Medical staff role "{role}" requires facility assignment for professional standards compliance')
-                    raise ValueError(f'Facility required for {role} role')
-                
-                if validation_results['license_required'] and not user.license_number:
-                    logger.warning(f"User creation: {role} role should have license number for medical compliance")
-                    messages.warning(request, f'Medical professional "{role}" should have license number for regulatory compliance')
-                
-                # Professional user activation with medical standards
-                user.is_active = True
-                user.is_verified = True  # Auto-verify for admin-created users
-                # Note: removed non-existent fields that were causing errors
-                user.save()
-                
-                # Professional audit logging with medical precision
-                AuditLog.objects.create(
-                    user=request.user,
-                    action='create',
-                    model_name='User',
-                    object_id=str(user.id),
-                    object_repr=str(user),
-                    description=f'Professional user created: {user.username} ({user.get_role_display()}) - Medical staff management',
-                    details=json.dumps({
-                        'created_user_id': user.id,
-                        'created_username': user.username,
-                        'role': user.role,
-                        'facility': facility.name if facility else None,
-                        'license_number': user.license_number or 'Not provided',
-                        'specialization': user.specialization or 'Not specified',
-                        'validation_results': validation_results,
-                        'creation_time_ms': round((time.time() - creation_start_time) * 1000, 1),
-                        'created_by': request.user.username,
-                        'timestamp': timezone.now().isoformat(),
-                    })
-                )
+                # Save user + audit log atomically (avoids partial writes & supports ATOMIC_REQUESTS)
+                with transaction.atomic():
+                    # Use the form's save() so custom fields (role/facility/etc.) are applied correctly
+                    user = form.save(commit=True)
+
+                    # Enforce admin-created defaults
+                    if not user.is_active or not user.is_verified:
+                        user.is_active = True
+                        user.is_verified = True
+                        user.save(update_fields=['is_active', 'is_verified'])
+
+                    # Professional medical staff validation (aligned with actual role set)
+                    role = user.role
+                    facility = user.facility
+
+                    validation_results = {
+                        'role_valid': role in ['admin', 'radiologist', 'facility'],
+                        'facility_required': role == 'facility',
+                        'license_recommended': role == 'radiologist',
+                    }
+
+                    if validation_results['facility_required'] and not facility:
+                        logger.warning(f"User creation: {role} role requires facility assignment")
+                        raise ValueError('Facility assignment is required for Facility Users')
+
+                    if validation_results['license_recommended'] and not user.license_number:
+                        logger.warning("User creation: radiologist created without license number")
+                        messages.warning(request, 'Radiologist accounts should include a license number for compliance.')
+
+                    # Professional audit logging with medical precision
+                    AuditLog.objects.create(
+                        user=request.user,
+                        action='create',
+                        model_name='User',
+                        object_id=str(user.id),
+                        object_repr=str(user),
+                        description=f'Created user {user.username} ({user.get_role_display()})',
+                        after_data={
+                            'created_user_id': user.id,
+                            'created_username': user.username,
+                            'role': user.role,
+                            'facility_id': facility.id if facility else None,
+                            'facility_name': facility.name if facility else None,
+                            'license_number': user.license_number or '',
+                            'specialization': user.specialization or '',
+                            'validation_results': validation_results,
+                            'creation_time_ms': round((time.time() - creation_start_time) * 1000, 1),
+                            'created_by': request.user.username,
+                            'timestamp': timezone.now().isoformat(),
+                        },
+                    )
                 
                 # Professional success messaging with medical context
                 creation_time = round((time.time() - creation_start_time) * 1000, 1)

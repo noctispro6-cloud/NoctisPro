@@ -370,7 +370,7 @@
                                name="username" 
                                placeholder="Enter your username" 
                                required 
-                               autocomplete="off" 
+                               autocomplete="username" 
                                autocapitalize="none" 
                                autocorrect="off"
                                spellcheck="false">
@@ -412,13 +412,10 @@
         const loadingOverlay = document.getElementById('loadingOverlay');
         const usernameInput = document.getElementById('username');
         const passwordInput = document.getElementById('password');
-
-        // Clear any autofilled credentials on page load
+        // Focus username on load (do NOT wipe browser/password-manager autofill)
         setTimeout(() => {
-            usernameInput.value = '';
-            passwordInput.value = '';
             usernameInput.focus();
-        }, 100);
+        }, 50);
 
         // Auto-clear alerts after 5 seconds
         const alerts = document.querySelectorAll('.alert');

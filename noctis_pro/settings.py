@@ -80,7 +80,11 @@ IS_TUNNEL = bool(TUNNEL_URL) or bool(NGROK_DOMAIN) or any(
 
 # Whether HTTPS is actually configured in front of Django (e.g., nginx + Let's Encrypt).
 # This allows safe HTTP-only bootstrapping during first-time certificate issuance.
-SSL_ENABLED = os.environ.get('SSL_ENABLED', '').lower() == 'true' or os.environ.get('SECURE_SSL_REDIRECT', '').lower() == 'true'
+#
+# IMPORTANT: Do NOT infer HTTPS from SECURE_SSL_REDIRECT.
+# Misconfigured redirects (or proxies) can otherwise force `*_COOKIE_SECURE=True`
+# and break login by preventing the browser from storing the session cookie over HTTP.
+SSL_ENABLED = os.environ.get('SSL_ENABLED', '').lower() == 'true'
 
 # Primary public domain (can be overridden via env)
 #
@@ -467,6 +471,13 @@ if not DEBUG and not IS_NGROK:
     SECURE_HSTS_PRELOAD = SSL_ENABLED and os.environ.get('SECURE_HSTS_PRELOAD', 'True').lower() == 'true'
     SESSION_COOKIE_HTTPONLY = True
     CSRF_COOKIE_HTTPONLY = True
+
+# Emergency escape hatch for deployments that are HTTP-only (or tunnels) where
+# secure cookies cause a post-login redirect loop. Prefer enabling HTTPS and
+# setting SSL_ENABLED=true in production; use this only to restore access.
+if os.environ.get('FORCE_INSECURE_COOKIES', '').lower() in ('1', 'true', 'yes', 'on'):
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
 
 # Database
 # Production database configuration with fallback to SQLite

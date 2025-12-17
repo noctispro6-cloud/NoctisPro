@@ -1,6 +1,5 @@
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
-from accounts.models import Facility
 from django.conf import settings
 
 User = get_user_model()
@@ -22,22 +21,42 @@ class Command(BaseCommand):
         first_name = options['first_name']
         last_name = options['last_name']
 
-        # Check if user already exists
+        # If user already exists, ensure it can actually log into Django admin (/admin/)
+        # and the main app (role/is_verified).
         if User.objects.filter(username=username).exists():
-            self.stdout.write(
-                self.style.WARNING(f'User "{username}" already exists!')
-            )
             user = User.objects.get(username=username)
-            if user.role != 'admin':
+            self.stdout.write(self.style.WARNING(f'User "{username}" already exists! Ensuring admin privileges...'))
+
+            changed = False
+            # Promote for Django admin access
+            if not getattr(user, 'is_staff', False):
+                user.is_staff = True
+                changed = True
+            if not getattr(user, 'is_superuser', False):
+                user.is_superuser = True
+                changed = True
+
+            # Ensure app-level admin role + verification
+            if hasattr(user, 'role') and getattr(user, 'role', None) != 'admin':
                 user.role = 'admin'
+                changed = True
+            if hasattr(user, 'is_verified') and not getattr(user, 'is_verified', False):
+                user.is_verified = True
+                changed = True
+
+            if hasattr(user, 'email') and email and not getattr(user, 'email', ''):
+                user.email = email
+                changed = True
+
+            if changed:
                 user.save()
-                self.stdout.write(
-                    self.style.SUCCESS(f'Updated user "{username}" to admin role!')
-                )
+                self.stdout.write(self.style.SUCCESS(f'Updated "{username}" with admin privileges (staff/superuser/verified).'))
+            else:
+                self.stdout.write(self.style.SUCCESS(f'User "{username}" already has admin privileges.'))
             return
 
-        # Create admin user
-        user = User.objects.create_user(
+        # Create admin user (as a proper Django superuser so /admin/ login works too)
+        user = User.objects.create_superuser(
             username=username,
             email=email,
             password=password,

@@ -249,6 +249,19 @@
             color: var(--success-color);
         }
 
+        /* Django messages use `error`/`warning` tags; map them to visible styles */
+        .alert-error {
+            background: rgba(255, 68, 68, 0.1);
+            border-color: var(--danger-color);
+            color: var(--danger-color);
+        }
+
+        .alert-warning {
+            background: rgba(255, 193, 7, 0.12);
+            border-color: rgba(255, 193, 7, 0.9);
+            color: rgba(255, 193, 7, 0.95);
+        }
+
         .spinner {
             width: 16px;
             height: 16px;
@@ -350,11 +363,22 @@
             {# Only show login-relevant messages here (avoid leaking setup/admin actions). #}
             {% if messages %}
                 {% for message in messages %}
-                    {% if message.tags == 'error' or message.tags == 'warning' %}
-                        <div class="alert alert-{{ message.tags }}" id="alert-{{ forloop.counter }}">
-                            <i class="fas fa-{% if message.tags == 'error' %}exclamation-triangle{% else %}info-circle{% endif %}"></i>
-                            {{ message }}
-                        </div>
+                    {% if 'error' in message.tags or 'warning' in message.tags %}
+                        {% if 'error' in message.tags %}
+                            {% with alert_tag='danger' icon='exclamation-triangle' %}
+                                <div class="alert alert-error" id="alert-{{ forloop.counter }}">
+                                    <i class="fas fa-{{ icon }}"></i>
+                                    {{ message }}
+                                </div>
+                            {% endwith %}
+                        {% else %}
+                            {% with alert_tag='warning' icon='info-circle' %}
+                                <div class="alert alert-warning" id="alert-{{ forloop.counter }}">
+                                    <i class="fas fa-{{ icon }}"></i>
+                                    {{ message }}
+                                </div>
+                            {% endwith %}
+                        {% endif %}
                     {% endif %}
                 {% endfor %}
             {% endif %}

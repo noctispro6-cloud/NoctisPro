@@ -105,12 +105,55 @@ def login_view(request):
         list(messages.get_messages(request))
     
     if request.method == 'POST':
-        username = request.POST.get('username')
-        password = request.POST.get('password')
-        
-        user = authenticate(request, username=username, password=password)
+        identifier = (request.POST.get('username') or '').strip()
+        password = request.POST.get('password') or ''
+
+        # Basic validation (avoid confusing auth failures on blank submits)
+        if not identifier or not password:
+            list(messages.get_messages(request))
+            messages.error(request, 'Please enter your username/email and password')
+            return render(request, 'accounts/login.html', {'hide_navbar': True})
+
+        # Support both username and email login (many users naturally try email).
+        user = authenticate(request, username=identifier, password=password)
+        if not user and '@' in identifier:
+            try:
+                candidate = User.objects.only('username').get(email__iexact=identifier)
+                user = authenticate(request, username=candidate.username, password=password)
+            except User.DoesNotExist:
+                user = None
+            except Exception:
+                user = None
+
+        # If authentication failed, try to provide actionable feedback for common states
+        # (still avoid leaking which accounts exist beyond these coarse categories).
+        if not user:
+            try:
+                candidate = User.objects.only('is_active', 'is_verified').get(username__iexact=identifier)
+            except User.DoesNotExist:
+                candidate = None
+            except Exception:
+                candidate = None
+
+            if not candidate and '@' in identifier:
+                try:
+                    candidate = User.objects.only('is_active', 'is_verified').get(email__iexact=identifier)
+                except User.DoesNotExist:
+                    candidate = None
+                except Exception:
+                    candidate = None
+
+            list(messages.get_messages(request))
+            if candidate and not getattr(candidate, 'is_active', True):
+                messages.error(request, 'Your account is disabled. Please contact an administrator.')
+            elif candidate and hasattr(candidate, 'is_verified') and not getattr(candidate, 'is_verified', True):
+                messages.error(request, 'Your account is not verified yet. Please contact an administrator.')
+            else:
+                messages.error(request, 'Invalid username/email or password')
+            return render(request, 'accounts/login.html', {'hide_navbar': True})
+
         # Allow superusers/staff to bypass verification to prevent lockout on fresh setups
-        if user and user.is_active and (user.is_verified or getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)):
+        if user and user.is_active and (getattr(user, 'is_verified', True) or getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)):
             # Track login session
             login(request, user)
             
@@ -145,8 +188,12 @@ def login_view(request):
         else:
             # Clear any existing messages before adding error
             list(messages.get_messages(request))
-            # Only show a single generic error for any failure
-            messages.error(request, 'Invalid username or password')
+            if not getattr(user, 'is_active', True):
+                messages.error(request, 'Your account is disabled. Please contact an administrator.')
+            elif hasattr(user, 'is_verified') and not getattr(user, 'is_verified', True):
+                messages.error(request, 'Your account is not verified yet. Please contact an administrator.')
+            else:
+                messages.error(request, 'Invalid username/email or password')
     
     return render(request, 'accounts/login.html', {'hide_navbar': True})
 

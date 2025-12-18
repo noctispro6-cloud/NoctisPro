@@ -621,8 +621,11 @@ def api_mpr_reconstruction(request, series_id):
         mpr_views['sagittal'] = _get_encoded_mpr_slice(series.id, volume, 'sagittal', sagittal_idx, window_width, window_level, inverted)
         mpr_views['coronal'] = _get_encoded_mpr_slice(series.id, volume, 'coronal', coronal_idx, window_width, window_level, inverted)
 
+        # NOTE: Frontend templates historically expected `views` while newer code uses `mpr_views`.
+        # Return both for compatibility.
         return JsonResponse({
             'mpr_views': mpr_views,
+            'views': mpr_views,
             'volume_shape': tuple(int(x) for x in volume.shape),
             'counts': counts,
             'series_info': {

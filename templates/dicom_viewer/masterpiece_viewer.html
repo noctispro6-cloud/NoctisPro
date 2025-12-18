@@ -1104,7 +1104,7 @@
             counts: { axial: 0, sagittal: 0, coronal: 0 },
             index: { axial: 0, sagittal: 0, coronal: 0 },
             activePlane: 'axial',
-            maximizedPlane: null, // 'axial' | 'sagittal' | 'coronal' | null
+            maximizedPlane: null, // 'axial' | 'sagittal' | 'coronal' | 'bone3d' | null
             // Mapping from canvas coords -> underlying PNG pixel coords for HU/ROI
             // { w,h, dx,dy, dw,dh }
             renderMeta: { axial: null, sagittal: null, coronal: null },
@@ -1125,6 +1125,7 @@
             mesh: null,
             animRaf: null,
             dragging: false,
+            wasDragged: false,
             lastX: 0,
             lastY: 0,
             rotX: 0,
@@ -1472,6 +1473,15 @@
             // Initialize renderer lazily (only when a mesh is available).
             if (bone3DCanvas) {
                 bone3DCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+                // Allow maximizing the 3D pane (without interfering with drag rotation).
+                bone3DCanvas.addEventListener('click', (e) => {
+                    // If the user was rotating/dragging, suppress the maximize toggle on click.
+                    if (bone3D && bone3D.wasDragged) {
+                        bone3D.wasDragged = false;
+                        return;
+                    }
+                    handleMPRClick(e, 'bone3d');
+                });
             }
         }
 
@@ -1559,8 +1569,15 @@
                     break;
                 case 'crosshair':
                     crosshair = !crosshair;
-                    if (crosshair && crosshairPos && (crosshairPos.x == null || crosshairPos.y == null)) {
-                        crosshairPos = { x: canvas.width / 2, y: canvas.height / 2 };
+                    // Keep crosshair anchored in image space so it stays correct through pan/zoom/rotate/flip.
+                    if (crosshair && (!crosshairImagePx || crosshairImagePx.x == null || crosshairImagePx.y == null)) {
+                        const m = _currentRenderMeta();
+                        if (m && m.imgW && m.imgH) {
+                            crosshairImagePx = { x: m.imgW / 2, y: m.imgH / 2 };
+                        } else {
+                            // Fallback if no image meta available yet (will render centered).
+                            crosshairImagePx = null;
+                        }
                     }
                     redrawCurrentImage();
                     break;
@@ -2076,9 +2093,14 @@
             
             // Handle left-click (button 0)
             if (event.button === 0) {
-                // Alt+click to reposition crosshair when enabled
+                // Alt+click to reposition crosshair when enabled (store in image pixels)
                 if (crosshair && event.altKey) {
-                    crosshairPos = { x: lastMouseX, y: lastMouseY };
+                    const p = canvasPointToImagePx(lastMouseX, lastMouseY);
+                    if (p) {
+                        crosshairImagePx = { x: p.x, y: p.y };
+                    } else {
+                        crosshairImagePx = null;
+                    }
                     redrawCurrentImage();
                     return;
                 }
@@ -2749,11 +2771,13 @@
             });
         }
 
-        let crosshairPos = { x: null, y: null };
+        // Crosshair is stored in image pixel coordinates (not canvas coordinates)
+        let crosshairImagePx = null; // { x, y } in image px
 
         function drawCrosshair() {
-            const centerX = (crosshairPos && crosshairPos.x != null) ? crosshairPos.x : (canvas.width / 2);
-            const centerY = (crosshairPos && crosshairPos.y != null) ? crosshairPos.y : (canvas.height / 2);
+            const pt = crosshairImagePx ? imagePxToCanvasPoint(crosshairImagePx) : null;
+            const centerX = (pt && pt.x != null) ? pt.x : (canvas.width / 2);
+            const centerY = (pt && pt.y != null) ? pt.y : (canvas.height / 2);
             
             ctx.strokeStyle = '#00ffff';
             ctx.lineWidth = 1;
@@ -3324,7 +3348,7 @@
         }
 
         function setActiveMPRPlane(plane) {
-            if (!(plane === 'axial' || plane === 'sagittal' || plane === 'coronal')) return;
+            if (!(plane === 'axial' || plane === 'sagittal' || plane === 'coronal' || plane === 'bone3d')) return;
             mprState.activePlane = plane;
             document.querySelectorAll('#mprView .mpr-view').forEach((el) => {
                 el.classList.toggle('is-active', el.dataset && el.dataset.plane === plane);
@@ -3334,7 +3358,7 @@
         function setMPRMaximizedPlane(planeOrNull) {
             const container = document.getElementById('mprView');
             if (!container) return;
-            const plane = planeOrNull && (planeOrNull === 'axial' || planeOrNull === 'sagittal' || planeOrNull === 'coronal') ? planeOrNull : null;
+            const plane = planeOrNull && (planeOrNull === 'axial' || planeOrNull === 'sagittal' || planeOrNull === 'coronal' || planeOrNull === 'bone3d') ? planeOrNull : null;
             mprState.maximizedPlane = plane;
             container.classList.toggle('maximized', !!plane);
             document.querySelectorAll('#mprView .mpr-view').forEach((el) => {
@@ -3396,7 +3420,19 @@
             }
             // Resize after layout change to keep crisp rendering
             try { resizeCanvas(); } catch (e) {}
-            // Re-render current slice in the active plane to fit new size
+            // Re-render current slice in the active plane to fit new size (2D planes),
+            // or re-render the 3D bone viewport.
+            if (plane === 'bone3d') {
+                // Keep 3D renderer sized correctly; if no mesh yet, try to generate/refresh.
+                try {
+                    if (bone3D && bone3D.renderer && bone3D.scene && bone3D.camera) {
+                        renderBoneFrame();
+                    } else if (currentSeries) {
+                        generateBoneReconstruction().catch(() => {});
+                    }
+                } catch (e) {}
+                return;
+            }
             const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
             fetchMPRPlaneSlice(plane, mprState.index[plane] || 0, qsBase)
                 .then((r) => _renderMPRDataUrl(plane, r.image))
@@ -3631,6 +3667,7 @@
             c.addEventListener('mousedown', (e) => {
                 if (viewMode !== 'mpr') return;
                 bone3D.dragging = true;
+                bone3D.wasDragged = false;
                 bone3D.lastX = e.clientX;
                 bone3D.lastY = e.clientY;
             });
@@ -3643,6 +3680,9 @@
                 const dy = e.clientY - bone3D.lastY;
                 bone3D.lastX = e.clientX;
                 bone3D.lastY = e.clientY;
+                if (Math.abs(dx) + Math.abs(dy) > 2) {
+                    bone3D.wasDragged = true;
+                }
                 bone3D.rotY += dx * 0.01;
                 bone3D.rotX += dy * 0.01;
                 bone3D.mesh.rotation.y = bone3D.rotY;

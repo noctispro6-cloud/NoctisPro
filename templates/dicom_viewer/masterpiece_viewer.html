@@ -196,6 +196,24 @@
         .mpr-container.active {
             display: grid;
         }
+        
+        /* MPR maximize: click a pane to show it full-size */
+        .mpr-container.maximized {
+            grid-template-columns: 1fr;
+            grid-template-rows: 1fr;
+        }
+        .mpr-container.maximized .mpr-view {
+            display: none;
+        }
+        .mpr-container.maximized .mpr-view.maximized {
+            display: block;
+            grid-column: 1 / -1;
+            grid-row: 1 / -1;
+        }
+        .mpr-view.is-active {
+            outline: 2px solid var(--accent-color);
+            outline-offset: -2px;
+        }
 
         .mpr-view {
             position: relative;
@@ -744,6 +762,10 @@
                 <i class="fas fa-vector-square"></i>
                 <span>Area</span>
             </button>
+            <button class="tool-btn" data-tool="roi" title="HU ROI (Ellipse)">
+                <i class="fas fa-bullseye"></i>
+                <span>ROI</span>
+            </button>
             <button class="tool-btn" data-tool="annotate" title="Annotate">
                 <i class="fas fa-comment"></i>
                 <span>Note</span>
@@ -845,19 +867,19 @@
 
                 <!-- MPR Four Window View -->
                 <div class="mpr-container" id="mprView">
-                    <div class="mpr-view">
+                    <div class="mpr-view" data-plane="axial">
                         <div class="mpr-label">Axial</div>
                         <canvas id="axialCanvas"></canvas>
                     </div>
-                    <div class="mpr-view">
+                    <div class="mpr-view" data-plane="sagittal">
                         <div class="mpr-label">Sagittal</div>
                         <canvas id="sagittalCanvas"></canvas>
                     </div>
-                    <div class="mpr-view">
+                    <div class="mpr-view" data-plane="coronal">
                         <div class="mpr-label">Coronal</div>
                         <canvas id="coronalCanvas"></canvas>
                     </div>
-                    <div class="mpr-view">
+                    <div class="mpr-view" data-plane="bone3d">
                         <div class="mpr-label">3D Bone Reconstruction</div>
                         <canvas id="bone3DCanvas"></canvas>
                         <div class="controls-3d" id="controls3D">
@@ -1077,6 +1099,41 @@
         let canvas, ctx;
         let mprCanvases = {};
         
+        // MPR state (per-plane slice index + render mapping info)
+        let mprState = {
+            counts: { axial: 0, sagittal: 0, coronal: 0 },
+            index: { axial: 0, sagittal: 0, coronal: 0 },
+            activePlane: 'axial',
+            maximizedPlane: null, // 'axial' | 'sagittal' | 'coronal' | null
+            // Mapping from canvas coords -> underlying PNG pixel coords for HU/ROI
+            // { w,h, dx,dy, dw,dh }
+            renderMeta: { axial: null, sagittal: null, coronal: null },
+            lastImage: { axial: null, sagittal: null, coronal: null }, // HTMLImageElement (current rendered)
+        };
+        let _mprPlaneAbort = { axial: null, sagittal: null, coronal: null };
+        let _mprHUAbort = null;
+        let _mprHUTimer = null;
+        
+        // ROI tool (ellipse) - live draft while dragging
+        let roiDraft = null;
+        
+        // Bone 3D renderer (Three.js)
+        let bone3D = {
+            renderer: null,
+            scene: null,
+            camera: null,
+            mesh: null,
+            animRaf: null,
+            dragging: false,
+            lastX: 0,
+            lastY: 0,
+            rotX: 0,
+            rotY: 0,
+            zoom: 1.0,
+            vertices: null,
+            faces: null,
+        };
+        
         // Display parameters
         let windowWidth = 400;
         let windowLevel = 40;
@@ -1201,7 +1258,7 @@
             if (_mprRefreshTimer) return;
             _mprRefreshTimer = setTimeout(() => {
                 _mprRefreshTimer = null;
-                generateMPRViews();
+                generateMPRViews({ refreshBone: false, quiet: true, preserveSlices: true });
             }, 80);
         }
 
@@ -1412,8 +1469,10 @@
 
         function setupBone3DCanvas() {
             const bone3DCanvas = mprCanvases.bone3d;
-            // Initialize Three.js or other 3D library here for bone reconstruction
-            console.log('Setting up 3D bone reconstruction canvas');
+            // Initialize renderer lazily (only when a mesh is available).
+            if (bone3DCanvas) {
+                bone3DCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+            }
         }
 
         function resizeCanvas() {
@@ -1430,6 +1489,9 @@
             });
             
             redrawCurrentImage();
+            if (viewMode === 'mpr' && bone3D && bone3D.renderer && bone3D.scene && bone3D.camera) {
+                try { renderBoneFrame(); } catch (e) {}
+            }
         }
 
         function setupEventListeners() {
@@ -1447,6 +1509,18 @@
             canvas.addEventListener('mouseup', handleMouseUp);
             canvas.addEventListener('wheel', handleWheel);
             canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // Prevent default right-click menu
+            
+            // MPR canvases: click-to-activate/maximize, wheel-to-scroll slices, ROI/HU interactions
+            ['axial', 'sagittal', 'coronal'].forEach((plane) => {
+                const c = mprCanvases[plane];
+                if (!c) return;
+                c.addEventListener('mousedown', (e) => handleMPRMouseDown(e, plane));
+                c.addEventListener('mousemove', (e) => handleMPRMouseMove(e, plane));
+                c.addEventListener('mouseup', (e) => handleMPRMouseUp(e, plane));
+                c.addEventListener('wheel', (e) => handleMPRWheel(e, plane), { passive: false });
+                c.addEventListener('contextmenu', (e) => e.preventDefault());
+                c.addEventListener('click', (e) => handleMPRClick(e, plane));
+            });
 
             // Keyboard shortcuts
             document.addEventListener('keydown', handleKeyDown);
@@ -1454,7 +1528,7 @@
 
         function refreshToolButtonStates(primaryTool = activeTool) {
             // Primary (mutually-exclusive) tools
-            const primaryTools = new Set(['windowing', 'zoom', 'pan', 'measure', 'angle', 'area', 'annotate', 'magnify']);
+            const primaryTools = new Set(['windowing', 'zoom', 'pan', 'measure', 'angle', 'area', 'roi', 'annotate', 'magnify']);
             document.querySelectorAll('.tool-btn').forEach(btn => {
                 const t = btn.dataset.tool;
                 if (primaryTools.has(t)) {
@@ -1563,12 +1637,18 @@
                 mprView.classList.add('active');
                 controls3D.style.display = 'block';
                 viewMode = 'mpr';
-                generateMPRViews();
+                // Ensure canvases have non-zero size now that MPR is visible
+                resizeCanvas();
+                setMPRMaximizedPlane(null);
+                setActiveMPRPlane('axial');
+                generateMPRViews({ refreshBone: true, quiet: false, preserveSlices: false });
             } else {
                 singleView.style.display = 'block';
                 mprView.classList.remove('active');
                 controls3D.style.display = 'none';
                 viewMode = 'single';
+                autoRotate = false;
+                stopBoneAnimationLoop();
             }
         }
 
@@ -2006,7 +2086,12 @@
                 isDragging = true;
                 hideContextMenu(); // Hide any open context menu
                 
-                if (activeTool === 'measure') {
+                if (activeTool === 'roi') {
+                    const p = canvasPointToImagePx(lastMouseX, lastMouseY);
+                    if (!p) return;
+                    roiDraft = { mode: 'single', start: { x: p.x, y: p.y }, end: { x: p.x, y: p.y } };
+                    redrawCurrentImage();
+                } else if (activeTool === 'measure') {
                     startMeasurement(lastMouseX, lastMouseY);
                 } else if (activeTool === 'angle') {
                     startAngleMeasurement(lastMouseX, lastMouseY);
@@ -2047,6 +2132,15 @@
             const deltaY = mouseY - lastMouseY;
             
             switch(activeTool) {
+                case 'roi':
+                    if (roiDraft && roiDraft.mode === 'single') {
+                        const p = canvasPointToImagePx(mouseX, mouseY);
+                        if (p) {
+                            roiDraft.end = { x: p.x, y: p.y };
+                            redrawCurrentImage();
+                        }
+                    }
+                    break;
                 case 'windowing':
                     // Drag sensitivity scales with WW so it feels consistent across CT/MR/X-ray ranges.
                     const ww = Math.max(1, Number(windowWidth));
@@ -2132,9 +2226,78 @@
             magnifierCtx.restore();
         }
 
+        function _computeEllipseStatsFromImagePayload(payload, cx, cy, rx, ry) {
+            if (!payload || !payload.pixel_data || !payload.columns || !payload.rows) return null;
+            const w = payload.columns;
+            const h = payload.rows;
+            const data = payload.pixel_data;
+            const icx = Math.round(cx), icy = Math.round(cy);
+            const irx = Math.max(1, Math.round(rx)), iry = Math.max(1, Math.round(ry));
+            const x0 = Math.max(0, icx - irx), x1 = Math.min(w - 1, icx + irx);
+            const y0 = Math.max(0, icy - iry), y1 = Math.min(h - 1, icy + iry);
+            const rx2 = irx * irx;
+            const ry2 = iry * iry;
+
+            let n = 0;
+            let mean = 0;
+            let m2 = 0;
+            let min = Infinity;
+            let max = -Infinity;
+
+            for (let yy = y0; yy <= y1; yy++) {
+                const dy = yy - icy;
+                const dy2 = dy * dy;
+                for (let xx = x0; xx <= x1; xx++) {
+                    const dx = xx - icx;
+                    if ((dx * dx) / rx2 + dy2 / ry2 > 1) continue;
+                    const v = data[yy * w + xx];
+                    if (!isFinite(v)) continue;
+                    n++;
+                    const delta = v - mean;
+                    mean += delta / n;
+                    m2 += delta * (v - mean);
+                    if (v < min) min = v;
+                    if (v > max) max = v;
+                }
+            }
+            if (!n) return null;
+            const variance = n > 1 ? (m2 / (n - 1)) : 0;
+            return { mean, std: Math.sqrt(Math.max(0, variance)), min, max, n };
+        }
+
         function handleMouseUp(event) {
             isDragging = false;
-            
+
+            if (activeTool === 'roi' && roiDraft && roiDraft.mode === 'single') {
+                try {
+                    const payload = lastLoadedImagePayload;
+                    const start = roiDraft.start;
+                    const end = roiDraft.end;
+                    const cx = (start.x + end.x) / 2;
+                    const cy = (start.y + end.y) / 2;
+                    const rx = Math.max(1, Math.abs(end.x - start.x) / 2);
+                    const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
+                    const stats = _computeEllipseStatsFromImagePayload(payload, cx, cy, rx, ry);
+                    if (!stats) throw new Error('Empty ROI');
+                    measurements.push({
+                        type: 'roi',
+                        mode: 'single',
+                        image_id: imageData[currentImageIndex]?.id,
+                        cx, cy, rx, ry,
+                        stats,
+                        createdAt: Date.now(),
+                    });
+                    updateMeasurementsList();
+                    showToast(`ROI mean: ${stats.mean.toFixed(1)} HU`, 'success');
+                } catch (e) {
+                    showToast(`ROI failed: ${e?.message || e}`, 'error');
+                } finally {
+                    roiDraft = null;
+                    redrawCurrentImage();
+                }
+                return;
+            }
+
             if ((activeTool === 'measure' || activeTool === 'angle' || activeTool === 'area') && currentMeasurement) {
                 finalizeMeasurement();
             }
@@ -2190,6 +2353,8 @@
                 case 'Escape':
                     hideContextMenu();
                     currentMeasurement = null;
+                    roiDraft = null;
+                    if (viewMode === 'single') redrawCurrentImage();
                     break;
             }
         }
@@ -2237,7 +2402,11 @@
             boneOpacity = parseFloat(value);
             document.getElementById('boneOpacityValue').textContent = boneOpacity;
             if (viewMode === 'mpr') {
-                generateBoneReconstruction();
+                if (bone3D && bone3D.mesh) {
+                    updateBoneMaterialOpacity();
+                } else {
+                    generateBoneReconstruction();
+                }
             }
         }
 
@@ -2487,11 +2656,68 @@
                         y2: Math.max(...points.map(p => p.y)) + 10,
                         index: index
                     };
+                } else if (measurement.type === 'roi' && (measurement.mode || 'single') === 'single') {
+                    const c0 = imagePxToCanvasPoint({ x: measurement.cx, y: measurement.cy });
+                    const cxPt = imagePxToCanvasPoint({ x: measurement.cx + measurement.rx, y: measurement.cy });
+                    const cyPt = imagePxToCanvasPoint({ x: measurement.cx, y: measurement.cy + measurement.ry });
+                    if (!c0 || !cxPt || !cyPt) return;
+                    const rX = Math.hypot(cxPt.x - c0.x, cxPt.y - c0.y);
+                    const rY = Math.hypot(cyPt.x - c0.x, cyPt.y - c0.y);
+                    const ang = Math.atan2(cxPt.y - c0.y, cxPt.x - c0.x);
+
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(0, 212, 255, 0.95)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.ellipse(c0.x, c0.y, rX, rY, ang, 0, Math.PI * 2);
+                    ctx.stroke();
+                    // Label (mean HU)
+                    if (measurement.stats && typeof measurement.stats.mean === 'number') {
+                        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                        ctx.fillRect(c0.x - 46, c0.y - rY - 24, 92, 16);
+                        ctx.fillStyle = '#ffff00';
+                        ctx.fillText(`${measurement.stats.mean.toFixed(1)} HU`, c0.x, c0.y - rY - 12);
+                    }
+                    ctx.restore();
+
+                    measurement.bounds = {
+                        x1: c0.x - rX - 10,
+                        y1: c0.y - rY - 30,
+                        x2: c0.x + rX + 10,
+                        y2: c0.y + rY + 10,
+                        index: index
+                    };
                 }
             });
         }
 
         function drawCurrentMeasurement() {
+            // ROI tool draft (ellipse)
+            if (roiDraft && roiDraft.mode === 'single') {
+                const start = roiDraft.start;
+                const end = roiDraft.end;
+                const cx = (start.x + end.x) / 2;
+                const cy = (start.y + end.y) / 2;
+                const rx = Math.max(1, Math.abs(end.x - start.x) / 2);
+                const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
+                const c0 = imagePxToCanvasPoint({ x: cx, y: cy });
+                const cxPt = imagePxToCanvasPoint({ x: cx + rx, y: cy });
+                const cyPt = imagePxToCanvasPoint({ x: cx, y: cy + ry });
+                if (c0 && cxPt && cyPt) {
+                    const rX = Math.hypot(cxPt.x - c0.x, cxPt.y - c0.y);
+                    const rY = Math.hypot(cyPt.x - c0.x, cyPt.y - c0.y);
+                    const ang = Math.atan2(cxPt.y - c0.y, cxPt.x - c0.x);
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(0, 212, 255, 0.95)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([6, 4]);
+                    ctx.beginPath();
+                    ctx.ellipse(c0.x, c0.y, rX, rY, ang, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }
+
             if (!currentMeasurement) return;
             
             ctx.strokeStyle = '#ffff00';
@@ -2502,10 +2728,10 @@
                 const a = imagePxToCanvasPoint({ x: currentMeasurement.startX, y: currentMeasurement.startY });
                 const b = imagePxToCanvasPoint({ x: currentMeasurement.endX, y: currentMeasurement.endY });
                 if (a && b) {
-                ctx.beginPath();
-                ctx.moveTo(a.x, a.y);
-                ctx.lineTo(b.x, b.y);
-                ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(a.x, a.y);
+                    ctx.lineTo(b.x, b.y);
+                    ctx.stroke();
                 }
             }
             
@@ -2729,6 +2955,22 @@
                         <strong>Area ${index + 1}</strong><br>
                         Area: ${area.text || 'N/A'}
                     `;
+                } else if (measurement.type === 'roi') {
+                    const s = measurement.stats;
+                    const mean = s && typeof s.mean === 'number' ? s.mean.toFixed(1) : 'N/A';
+                    const std = s && typeof s.std === 'number' ? s.std.toFixed(1) : 'N/A';
+                    const min = s && typeof s.min === 'number' ? s.min.toFixed(1) : 'N/A';
+                    const max = s && typeof s.max === 'number' ? s.max.toFixed(1) : 'N/A';
+                    const n = s && typeof s.n === 'number' ? s.n : 'N/A';
+                    const where = measurement.mode === 'mpr'
+                        ? `MPR ${measurement.plane || ''} (slice ${Number(measurement.slice ?? 0) + 1})`
+                        : 'Single slice';
+                    item.innerHTML = `
+                        <strong>ROI ${index + 1}</strong><br>
+                        ${where}<br>
+                        Mean: ${mean} HU &nbsp; SD: ${std}<br>
+                        Min/Max: ${min} / ${max} &nbsp; N: ${n}
+                    `;
                 }
                 
                 container.appendChild(item);
@@ -2857,6 +3099,9 @@
                 } else if (measurement.type === 'area') {
                     const area = calculateArea(measurement.points || []);
                     value = area.text || 'N/A';
+                } else if (measurement.type === 'roi') {
+                    const s = measurement.stats;
+                    value = (s && typeof s.mean === 'number') ? `${s.mean.toFixed(1)} HU` : 'N/A';
                 }
                 
                 navigator.clipboard.writeText(value).then(() => {
@@ -2897,43 +3142,124 @@
         }
 
         function updateHounsfieldValue(mouseX, mouseY) {
-            // Calculate HU value at mouse position
-            // This would require access to the original pixel data
-            document.getElementById('hounsfield').textContent = '-';
+            // Single-slice mode: compute from loaded float32 pixel buffer (already rescaled on backend for CT).
+            if (viewMode !== 'single') {
+                document.getElementById('hounsfield').textContent = '-';
+                return;
+            }
+            const payload = lastLoadedImagePayload;
+            if (!payload || !payload.pixel_data || !payload.columns || !payload.rows) {
+                document.getElementById('hounsfield').textContent = '-';
+                return;
+            }
+            const p = canvasPointToImagePx(mouseX, mouseY);
+            if (!p) {
+                document.getElementById('hounsfield').textContent = '-';
+                return;
+            }
+            const ix = Math.floor(p.x);
+            const iy = Math.floor(p.y);
+            const w = payload.columns;
+            const h = payload.rows;
+            if (ix < 0 || iy < 0 || ix >= w || iy >= h) {
+                document.getElementById('hounsfield').textContent = '-';
+                return;
+            }
+            const v = payload.pixel_data[iy * w + ix];
+            if (v == null || !isFinite(v)) {
+                document.getElementById('hounsfield').textContent = '-';
+                return;
+            }
+            document.getElementById('hounsfield').textContent = (Math.round(v * 10) / 10).toString();
         }
 
         // MPR and 3D Functions
         // Backwards-compatible alias (some buttons call generateMPR()).
         async function generateMPR() {
-            return generateMPRViews();
+            if (viewMode === 'single') {
+                toggleMPRView();
+                return;
+            }
+            return generateMPRViews({ refreshBone: true, quiet: false, preserveSlices: false });
         }
 
-        async function generateMPRViews() {
+        async function generateMPRViews(opts = {}) {
             if (!currentSeries) return;
+            const { refreshBone = false, quiet = false, preserveSlices = true } = opts || {};
             
             try {
                 showLoading(true);
-                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`);
-                const data = await response.json();
-                
-                const views = data && (data.mpr_views || data.views || data.mprViews);
-                if (views && (views.axial || views.sagittal || views.coronal)) {
+                // MPR canvases might have been hidden at first load (0x0). Resize before rendering.
+                try { resizeCanvas(); } catch (e) {}
+
+                const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
+
+                // Preserve the per-plane slice index whenever possible (wheel scrolling per plane).
+                const canPreserve =
+                    preserveSlices &&
+                    mprState &&
+                    mprState.counts &&
+                    mprState.counts.axial > 0 &&
+                    mprState.counts.sagittal > 0 &&
+                    mprState.counts.coronal > 0;
+
+                if (canPreserve) {
+                    const [ax, sa, co] = await Promise.all([
+                        fetchMPRPlaneSlice('axial', mprState.index.axial, qsBase),
+                        fetchMPRPlaneSlice('sagittal', mprState.index.sagittal, qsBase),
+                        fetchMPRPlaneSlice('coronal', mprState.index.coronal, qsBase),
+                    ]);
+
+                    mprState.counts.axial = ax.count;
+                    mprState.counts.sagittal = sa.count;
+                    mprState.counts.coronal = co.count;
+                    mprState.index.axial = ax.index;
+                    mprState.index.sagittal = sa.index;
+                    mprState.index.coronal = co.index;
+
+                    await Promise.all([
+                        _renderMPRDataUrl('axial', ax.image),
+                        _renderMPRDataUrl('sagittal', sa.image),
+                        _renderMPRDataUrl('coronal', co.image),
+                    ]);
+                } else {
+                    const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?${qsBase}`, { credentials: 'same-origin' });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        const msg = (data && (data.error || data.message)) ? (data.error || data.message) : `HTTP ${response.status}`;
+                        throw new Error(msg);
+                    }
+
+                    const views = data && (data.mpr_views || data.views || data.mprViews);
+                    if (!views || (!views.axial && !views.sagittal && !views.coronal)) {
+                        console.warn('Unexpected MPR response shape:', data);
+                        throw new Error('Unexpected MPR response');
+                    }
+
+                    // Initialize counts + mid-slice indices.
+                    const counts = data.counts || {};
+                    mprState.counts.axial = Number(counts.axial || 0);
+                    mprState.counts.sagittal = Number(counts.sagittal || 0);
+                    mprState.counts.coronal = Number(counts.coronal || 0);
+                    mprState.index.axial = Math.floor((mprState.counts.axial || 1) / 2);
+                    mprState.index.sagittal = Math.floor((mprState.counts.sagittal || 1) / 2);
+                    mprState.index.coronal = Math.floor((mprState.counts.coronal || 1) / 2);
+
                     await Promise.all([
                         _renderMPRDataUrl('axial', views.axial),
                         _renderMPRDataUrl('sagittal', views.sagittal),
                         _renderMPRDataUrl('coronal', views.coronal),
                     ]);
-                    generateBoneReconstruction();
-                    showToast('MPR views generated', 'success');
-                } else {
-                    console.warn('Unexpected MPR response shape:', data);
-                    showToast('Failed to generate MPR views', 'error');
                 }
-                
-                showLoading(false);
+
+                if (refreshBone) {
+                    await generateBoneReconstruction();
+                }
+                if (!quiet) showToast('MPR ready', 'success');
             } catch (error) {
                 console.error('Error generating MPR:', error);
-                showToast('Failed to generate MPR views', 'error');
+                showToast(`Failed to generate MPR: ${error?.message || error}`, 'error');
+            } finally {
                 showLoading(false);
             }
         }
@@ -2963,6 +3289,246 @@
             ctx.imageSmoothingEnabled = scale < 1;
             try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
             ctx.drawImage(img, dx, dy, dw, dh);
+            
+            // Store mapping meta so MPR HU/ROI can convert canvas coords -> slice pixel coords.
+            if (mprState && mprState.renderMeta && (viewType === 'axial' || viewType === 'sagittal' || viewType === 'coronal')) {
+                mprState.renderMeta[viewType] = { w, h, dx, dy, dw, dh };
+                mprState.lastImage[viewType] = img;
+            }
+            
+            // If there is an active ROI draft for this plane, redraw overlay on top.
+            if (roiDraft && roiDraft.mode === 'mpr' && roiDraft.plane === viewType) {
+                drawMPRRoiOverlay(viewType);
+            }
+        }
+
+        async function fetchMPRPlaneSlice(plane, sliceIndex, qsBase) {
+            if (!currentSeries) throw new Error('No series loaded');
+            if (!(plane === 'axial' || plane === 'sagittal' || plane === 'coronal')) throw new Error('Invalid plane');
+            const idx = Math.max(0, Number(sliceIndex) || 0);
+            try { _mprPlaneAbort[plane]?.abort(); } catch (e) {}
+            const ac = new AbortController();
+            _mprPlaneAbort[plane] = ac;
+            const url = `/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(idx)}&${qsBase}`;
+            const resp = await fetch(url, { credentials: 'same-origin', signal: ac.signal });
+            const data = await resp.json();
+            if (!resp.ok) {
+                const msg = (data && (data.error || data.message)) ? (data.error || data.message) : `HTTP ${resp.status}`;
+                throw new Error(msg);
+            }
+            return {
+                image: data.image,
+                index: Number.isFinite(Number(data.index)) ? Number(data.index) : idx,
+                count: Number.isFinite(Number(data.count)) ? Number(data.count) : (data.counts && data.counts[plane]) || 0,
+            };
+        }
+
+        function setActiveMPRPlane(plane) {
+            if (!(plane === 'axial' || plane === 'sagittal' || plane === 'coronal')) return;
+            mprState.activePlane = plane;
+            document.querySelectorAll('#mprView .mpr-view').forEach((el) => {
+                el.classList.toggle('is-active', el.dataset && el.dataset.plane === plane);
+            });
+        }
+
+        function setMPRMaximizedPlane(planeOrNull) {
+            const container = document.getElementById('mprView');
+            if (!container) return;
+            const plane = planeOrNull && (planeOrNull === 'axial' || planeOrNull === 'sagittal' || planeOrNull === 'coronal') ? planeOrNull : null;
+            mprState.maximizedPlane = plane;
+            container.classList.toggle('maximized', !!plane);
+            document.querySelectorAll('#mprView .mpr-view').forEach((el) => {
+                const p = el.dataset && el.dataset.plane;
+                el.classList.toggle('maximized', !!plane && p === plane);
+            });
+        }
+
+        function _mprCanvasToSlicePx(plane, canvasX, canvasY) {
+            const meta = mprState.renderMeta[plane];
+            if (!meta) return null;
+            const { w, h, dx, dy, dw, dh } = meta;
+            if (!dw || !dh) return null;
+            if (canvasX < dx || canvasY < dy || canvasX > dx + dw || canvasY > dy + dh) return null;
+            const x = (canvasX - dx) * (w / dw);
+            const y = (canvasY - dy) * (h / dh);
+            return { x, y, ix: Math.floor(x), iy: Math.floor(y), w, h };
+        }
+
+        function _scheduleMPRHU(plane, canvasX, canvasY) {
+            if (viewMode !== 'mpr' || !currentSeries) return;
+            const p = _mprCanvasToSlicePx(plane, canvasX, canvasY);
+            if (!p) {
+                document.getElementById('hounsfield').textContent = '-';
+                return;
+            }
+            if (p.ix < 0 || p.iy < 0 || p.ix >= p.w || p.iy >= p.h) {
+                document.getElementById('hounsfield').textContent = '-';
+                return;
+            }
+            if (_mprHUTimer) return;
+            _mprHUTimer = setTimeout(async () => {
+                _mprHUTimer = null;
+                try { _mprHUAbort?.abort(); } catch (e) {}
+                const ac = new AbortController();
+                _mprHUAbort = ac;
+                const slice = mprState.index[plane] || 0;
+                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&x=${encodeURIComponent(p.ix)}&y=${encodeURIComponent(p.iy)}`;
+                const resp = await fetch(url, { credentials: 'same-origin', signal: ac.signal });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${resp.status}`);
+                if (data && typeof data.hu === 'number') {
+                    document.getElementById('hounsfield').textContent = (Math.round(data.hu * 10) / 10).toString();
+                } else {
+                    document.getElementById('hounsfield').textContent = '-';
+                }
+            }, 120);
+        }
+
+        function handleMPRClick(event, plane) {
+            if (viewMode !== 'mpr') return;
+            if (activeTool === 'roi' && roiDraft) return; // don't toggle while drawing ROI
+            setActiveMPRPlane(plane);
+            // Click to maximize this pane; click again to restore 4-up.
+            if (mprState.maximizedPlane === plane) {
+                setMPRMaximizedPlane(null);
+            } else {
+                setMPRMaximizedPlane(plane);
+            }
+            // Resize after layout change to keep crisp rendering
+            try { resizeCanvas(); } catch (e) {}
+            // Re-render current slice in the active plane to fit new size
+            const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
+            fetchMPRPlaneSlice(plane, mprState.index[plane] || 0, qsBase)
+                .then((r) => _renderMPRDataUrl(plane, r.image))
+                .catch(() => {});
+        }
+
+        function handleMPRWheel(event, plane) {
+            if (viewMode !== 'mpr') return;
+            event.preventDefault();
+            if (!currentSeries) return;
+            setActiveMPRPlane(plane);
+            const delta = Math.sign(event.deltaY || 0);
+            const step = delta === 0 ? 0 : (delta > 0 ? 1 : -1);
+            const count = mprState.counts[plane] || 0;
+            if (!count) return;
+            const next = Math.max(0, Math.min(count - 1, (mprState.index[plane] || 0) + step));
+            if (next === mprState.index[plane]) return;
+            mprState.index[plane] = next;
+            const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
+            fetchMPRPlaneSlice(plane, next, qsBase)
+                .then((r) => {
+                    mprState.index[plane] = r.index;
+                    mprState.counts[plane] = r.count || mprState.counts[plane];
+                    return _renderMPRDataUrl(plane, r.image);
+                })
+                .catch((e) => console.warn('MPR slice fetch failed:', e));
+        }
+
+        function handleMPRMouseDown(event, plane) {
+            if (viewMode !== 'mpr') return;
+            const rect = mprCanvases[plane].getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+            setActiveMPRPlane(plane);
+            if (activeTool === 'roi' && event.button === 0) {
+                const p = _mprCanvasToSlicePx(plane, x, y);
+                if (!p) return;
+                roiDraft = { mode: 'mpr', plane, start: { x: p.x, y: p.y }, end: { x: p.x, y: p.y } };
+                drawMPRRoiOverlay(plane);
+            }
+        }
+
+        function handleMPRMouseMove(event, plane) {
+            if (viewMode !== 'mpr') return;
+            const rect = mprCanvases[plane].getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+            _scheduleMPRHU(plane, x, y);
+            if (activeTool === 'roi' && roiDraft && roiDraft.mode === 'mpr' && roiDraft.plane === plane) {
+                const p = _mprCanvasToSlicePx(plane, x, y);
+                if (!p) return;
+                roiDraft.end = { x: p.x, y: p.y };
+                drawMPRRoiOverlay(plane);
+            }
+        }
+
+        async function handleMPRMouseUp(event, plane) {
+            if (viewMode !== 'mpr') return;
+            if (!(activeTool === 'roi' && roiDraft && roiDraft.mode === 'mpr' && roiDraft.plane === plane)) return;
+            const start = roiDraft.start;
+            const end = roiDraft.end;
+            // Ellipse parameters in slice pixel coordinates
+            const cx = (start.x + end.x) / 2;
+            const cy = (start.y + end.y) / 2;
+            const rx = Math.max(1, Math.abs(end.x - start.x) / 2);
+            const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
+            const slice = mprState.index[plane] || 0;
+            try {
+                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&shape=ellipse&cx=${encodeURIComponent(Math.round(cx))}&cy=${encodeURIComponent(Math.round(cy))}&rx=${encodeURIComponent(Math.round(rx))}&ry=${encodeURIComponent(Math.round(ry))}`;
+                const resp = await fetch(url, { credentials: 'same-origin' });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${resp.status}`);
+                if (data && data.stats) {
+                    measurements.push({
+                        type: 'roi',
+                        mode: 'mpr',
+                        plane,
+                        slice,
+                        cx, cy, rx, ry,
+                        stats: data.stats,
+                        createdAt: Date.now(),
+                    });
+                    updateMeasurementsList();
+                    showToast(`ROI mean: ${data.stats.mean.toFixed(1)} HU`, 'success');
+                }
+            } catch (e) {
+                showToast(`ROI failed: ${e?.message || e}`, 'error');
+            } finally {
+                // Keep the last ROI outline visible by converting to a saved measurement and clearing draft.
+                roiDraft = null;
+                // Redraw plane without draft overlay
+                const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
+                fetchMPRPlaneSlice(plane, mprState.index[plane] || 0, qsBase)
+                    .then((r) => _renderMPRDataUrl(plane, r.image))
+                    .catch(() => {});
+            }
+        }
+
+        function drawMPRRoiOverlay(plane) {
+            const c = mprCanvases[plane];
+            if (!c) return;
+            const meta = mprState.renderMeta[plane];
+            const img = mprState.lastImage[plane];
+            if (!meta || !img) return;
+            const ctx = c.getContext('2d');
+            const { w, h, dx, dy, dw, dh } = meta;
+            // redraw base image
+            ctx.clearRect(0, 0, c.width, c.height);
+            ctx.imageSmoothingEnabled = (dw < w || dh < h);
+            try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
+            ctx.drawImage(img, dx, dy, dw, dh);
+            if (!roiDraft || roiDraft.mode !== 'mpr' || roiDraft.plane !== plane) return;
+            const sx = dw / w;
+            const sy = dh / h;
+            const start = roiDraft.start;
+            const end = roiDraft.end;
+            const cx = (start.x + end.x) / 2;
+            const cy = (start.y + end.y) / 2;
+            const rx = Math.max(1, Math.abs(end.x - start.x) / 2);
+            const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
+            const ccx = dx + cx * sx;
+            const ccy = dy + cy * sy;
+            const crx = rx * sx;
+            const cry = ry * sy;
+            ctx.save();
+            ctx.strokeStyle = 'rgba(0, 212, 255, 0.95)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            ctx.ellipse(ccx, ccy, crx, cry, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
         }
 
         async function generateBoneReconstruction() {
@@ -2970,19 +3536,228 @@
             
             try {
                 showLoading(true);
-                
-                const canvas = mprCanvases.bone3d;
-                const ctx = canvas.getContext('2d');
-                
-                // For now, render a placeholder 3D bone visualization
-                renderBonePlaceholder(ctx, canvas.width, canvas.height);
-                
-                showLoading(false);
-                showToast('3D reconstruction generated', 'success');
+
+                // Ensure MPR is visible and canvas has real size
+                try { resizeCanvas(); } catch (e) {}
+
+                const threshold = Number.isFinite(Number(boneThreshold)) ? Number(boneThreshold) : 300;
+                const wantMesh = true;
+                const url =
+                    `/dicom-viewer/api/series/${currentSeries.id}/bone/` +
+                    `?threshold=${encodeURIComponent(threshold)}` +
+                    `&mesh=${encodeURIComponent(wantMesh ? 'true' : 'false')}` +
+                    `&quality=${encodeURIComponent('medium')}` +
+                    `&window_width=${encodeURIComponent(2000)}` +
+                    `&window_level=${encodeURIComponent(300)}` +
+                    `&inverted=${encodeURIComponent(inverted ? 'true' : 'false')}`;
+
+                const resp = await fetch(url, { credentials: 'same-origin' });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    const msg = data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${resp.status}`;
+                    throw new Error(msg);
+                }
+
+                // If mesh available + Three.js available, render true 3D.
+                const mesh = data && data.mesh;
+                if (mesh && Array.isArray(mesh.vertices) && Array.isArray(mesh.faces) && typeof THREE !== 'undefined') {
+                    bone3D.vertices = mesh.vertices;
+                    bone3D.faces = mesh.faces;
+                    ensureBone3DInitialized();
+                    renderBoneMesh(mesh.vertices, mesh.faces);
+                    updateBoneMaterialOpacity();
+                } else {
+                    // Fallback: show an axial bone preview as a static image in the 3D pane.
+                    const canvas = mprCanvases.bone3d;
+                    const ctx = canvas.getContext('2d');
+                    const views = data && (data.bone_views || data.views || {});
+                    const imgUrl = views.axial || views.sagittal || views.coronal;
+                    if (imgUrl) {
+                        await _render2DIntoCanvas(canvas, ctx, imgUrl);
+                    } else {
+                        renderBonePlaceholder(ctx, canvas.width, canvas.height);
+                    }
+                }
             } catch (error) {
                 console.error('Error generating bone reconstruction:', error);
-                showToast('Failed to generate 3D reconstruction', 'error');
+                showToast(`Bone reconstruction failed: ${error?.message || error}`, 'error');
+            } finally {
                 showLoading(false);
+            }
+        }
+
+        async function _render2DIntoCanvas(canvas, ctx, dataUrl) {
+            const img = new Image();
+            img.src = dataUrl;
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+            });
+            const w = img.naturalWidth || img.width;
+            const h = img.naturalHeight || img.height;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const scale = Math.min(canvas.width / w, canvas.height / h);
+            const dw = Math.round(w * scale);
+            const dh = Math.round(h * scale);
+            const dx = Math.round((canvas.width - dw) / 2);
+            const dy = Math.round((canvas.height - dh) / 2);
+            ctx.imageSmoothingEnabled = scale < 1;
+            try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
+            ctx.drawImage(img, dx, dy, dw, dh);
+        }
+
+        function ensureBone3DInitialized() {
+            const c = mprCanvases.bone3d;
+            if (!c || typeof THREE === 'undefined') return;
+            if (bone3D.renderer && bone3D.scene && bone3D.camera) return;
+
+            bone3D.renderer = new THREE.WebGLRenderer({ canvas: c, antialias: true, alpha: true });
+            bone3D.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+            bone3D.renderer.setSize(c.width || 1, c.height || 1, false);
+
+            bone3D.scene = new THREE.Scene();
+            bone3D.scene.background = new THREE.Color(0x000000);
+
+            bone3D.camera = new THREE.PerspectiveCamera(45, (c.width || 1) / (c.height || 1), 0.1, 10000);
+            bone3D.camera.position.set(0, 0, 200);
+
+            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+            const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+            dir.position.set(1, 1, 2);
+            bone3D.scene.add(ambient);
+            bone3D.scene.add(dir);
+
+            // Simple mouse drag rotation + wheel zoom
+            c.addEventListener('mousedown', (e) => {
+                if (viewMode !== 'mpr') return;
+                bone3D.dragging = true;
+                bone3D.lastX = e.clientX;
+                bone3D.lastY = e.clientY;
+            });
+            window.addEventListener('mouseup', () => {
+                bone3D.dragging = false;
+            });
+            window.addEventListener('mousemove', (e) => {
+                if (!bone3D.dragging || !bone3D.mesh) return;
+                const dx = e.clientX - bone3D.lastX;
+                const dy = e.clientY - bone3D.lastY;
+                bone3D.lastX = e.clientX;
+                bone3D.lastY = e.clientY;
+                bone3D.rotY += dx * 0.01;
+                bone3D.rotX += dy * 0.01;
+                bone3D.mesh.rotation.y = bone3D.rotY;
+                bone3D.mesh.rotation.x = bone3D.rotX;
+                renderBoneFrame();
+            });
+            c.addEventListener('wheel', (e) => {
+                if (!bone3D.camera) return;
+                e.preventDefault();
+                const d = Math.sign(e.deltaY || 0);
+                bone3D.zoom = Math.max(0.2, Math.min(5.0, bone3D.zoom * (d > 0 ? 1.1 : 0.9)));
+                bone3D.camera.zoom = bone3D.zoom;
+                bone3D.camera.updateProjectionMatrix();
+                renderBoneFrame();
+            }, { passive: false });
+        }
+
+        function renderBoneMesh(vertices, faces) {
+            if (!bone3D.scene || !bone3D.renderer || !bone3D.camera) return;
+
+            // Remove existing mesh
+            if (bone3D.mesh) {
+                bone3D.scene.remove(bone3D.mesh);
+                try { bone3D.mesh.geometry?.dispose?.(); } catch (e) {}
+                try { bone3D.mesh.material?.dispose?.(); } catch (e) {}
+                bone3D.mesh = null;
+            }
+
+            const geom = new THREE.BufferGeometry();
+            const pos = new Float32Array(vertices.length * 3);
+            for (let i = 0; i < vertices.length; i++) {
+                pos[i * 3 + 0] = vertices[i][0];
+                pos[i * 3 + 1] = vertices[i][1];
+                pos[i * 3 + 2] = vertices[i][2];
+            }
+            const idx = new Uint32Array(faces.length * 3);
+            for (let i = 0; i < faces.length; i++) {
+                idx[i * 3 + 0] = faces[i][0];
+                idx[i * 3 + 1] = faces[i][1];
+                idx[i * 3 + 2] = faces[i][2];
+            }
+            geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            geom.setIndex(new THREE.BufferAttribute(idx, 1));
+            geom.computeVertexNormals();
+
+            const mat = new THREE.MeshStandardMaterial({
+                color: 0xf2f2f2,
+                transparent: true,
+                opacity: Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 0.8)),
+                roughness: 0.6,
+                metalness: 0.05,
+                side: THREE.DoubleSide,
+            });
+            const mesh = new THREE.Mesh(geom, mat);
+            bone3D.mesh = mesh;
+            bone3D.scene.add(mesh);
+
+            // Fit camera
+            geom.computeBoundingBox();
+            const bb = geom.boundingBox;
+            const size = new THREE.Vector3();
+            bb.getSize(size);
+            const center = new THREE.Vector3();
+            bb.getCenter(center);
+            mesh.position.sub(center);
+            const maxDim = Math.max(size.x, size.y, size.z) || 1;
+            const dist = maxDim * 1.2;
+            bone3D.camera.position.set(0, 0, dist);
+            bone3D.camera.lookAt(0, 0, 0);
+            bone3D.camera.zoom = bone3D.zoom = 1.0;
+            bone3D.camera.updateProjectionMatrix();
+            bone3D.rotX = 0;
+            bone3D.rotY = 0;
+            mesh.rotation.set(0, 0, 0);
+
+            renderBoneFrame();
+            startBoneAnimationLoop();
+        }
+
+        function updateBoneMaterialOpacity() {
+            if (bone3D.mesh && bone3D.mesh.material) {
+                bone3D.mesh.material.opacity = Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 0.8));
+                bone3D.mesh.material.needsUpdate = true;
+                renderBoneFrame();
+            }
+        }
+
+        function renderBoneFrame() {
+            const c = mprCanvases.bone3d;
+            if (!c || !bone3D.renderer || !bone3D.scene || !bone3D.camera) return;
+            // Keep renderer in sync with canvas size
+            const w = c.width || 1;
+            const h = c.height || 1;
+            bone3D.renderer.setSize(w, h, false);
+            bone3D.camera.aspect = w / h;
+            bone3D.camera.updateProjectionMatrix();
+            bone3D.renderer.render(bone3D.scene, bone3D.camera);
+        }
+
+        function startBoneAnimationLoop() {
+            if (bone3D.animRaf) return;
+            const tick = () => {
+                bone3D.animRaf = requestAnimationFrame(tick);
+                if (autoRotate && bone3D.mesh) {
+                    bone3D.mesh.rotation.y += 0.01;
+                    renderBoneFrame();
+                }
+            };
+            bone3D.animRaf = requestAnimationFrame(tick);
+        }
+
+        function stopBoneAnimationLoop() {
+            if (bone3D.animRaf) {
+                cancelAnimationFrame(bone3D.animRaf);
+                bone3D.animRaf = null;
             }
         }
 
@@ -3033,22 +3808,41 @@
             
             try {
                 showLoading(true);
-                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mip/`);
-                const data = await response.json();
-                
-                if (data.success) {
-                    renderMPRView('axial', data.mip_axial);
-                    renderMPRView('sagittal', data.mip_sagittal);
-                    renderMPRView('coronal', data.mip_coronal);
-                    showToast('MIP views generated', 'success');
-                } else {
-                    showToast('Failed to generate MIP views', 'error');
+                if (viewMode === 'single') {
+                    // Switch layout so results are visible
+                    const singleView = document.getElementById('singleView');
+                    const mprView = document.getElementById('mprView');
+                    const controls3D = document.getElementById('controls3D');
+                    if (singleView) singleView.style.display = 'none';
+                    if (mprView) mprView.classList.add('active');
+                    if (controls3D) controls3D.style.display = 'block';
+                    viewMode = 'mpr';
+                    setMPRMaximizedPlane(null);
+                    setActiveMPRPlane('axial');
                 }
-                
-                showLoading(false);
+                try { resizeCanvas(); } catch (e) {}
+                const qs = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
+                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mip/?${qs}`, { credentials: 'same-origin' });
+                const data = await response.json();
+                if (!response.ok) {
+                    const msg = data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${response.status}`;
+                    throw new Error(msg);
+                }
+
+                const views = data && (data.mip_views || data.views || data.mipViews);
+                if (!views || (!views.axial && !views.sagittal && !views.coronal)) {
+                    throw new Error('Unexpected MIP response');
+                }
+                await Promise.all([
+                    _renderMPRDataUrl('axial', views.axial),
+                    _renderMPRDataUrl('sagittal', views.sagittal),
+                    _renderMPRDataUrl('coronal', views.coronal),
+                ]);
+                showToast('MIP ready', 'success');
             } catch (error) {
                 console.error('Error generating MIP:', error);
-                showToast('Failed to generate MIP views', 'error');
+                showToast(`Failed to generate MIP: ${error?.message || error}`, 'error');
+            } finally {
                 showLoading(false);
             }
         }
@@ -3062,16 +3856,61 @@
 
         // 3D Control Functions
         function reset3DView() {
-            generateBoneReconstruction();
+            if (bone3D && bone3D.mesh) {
+                bone3D.rotX = 0;
+                bone3D.rotY = 0;
+                bone3D.zoom = 1.0;
+                bone3D.mesh.rotation.set(0, 0, 0);
+                if (bone3D.camera) {
+                    bone3D.camera.zoom = 1.0;
+                    bone3D.camera.updateProjectionMatrix();
+                }
+                renderBoneFrame();
+                showToast('3D view reset', 'success');
+            } else {
+                generateBoneReconstruction();
+            }
         }
 
         function toggle3DRotation() {
             autoRotate = !autoRotate;
-            console.log('Auto rotation:', autoRotate ? 'enabled' : 'disabled');
+            if (autoRotate) {
+                startBoneAnimationLoop();
+                showToast('Auto-rotate enabled', 'success');
+            } else {
+                // Stop the loop only if we don't have a mesh; otherwise keep it for responsiveness
+                if (!bone3D || !bone3D.mesh) stopBoneAnimationLoop();
+                showToast('Auto-rotate disabled', 'success');
+            }
         }
 
         function export3DModel() {
-            showToast('3D model export functionality would be implemented here', 'info');
+            try {
+                const verts = bone3D && bone3D.vertices;
+                const faces = bone3D && bone3D.faces;
+                if (!verts || !faces || !Array.isArray(verts) || !Array.isArray(faces) || verts.length === 0 || faces.length === 0) {
+                    showToast('No 3D mesh to export', 'warning');
+                    return;
+                }
+                let obj = `o bone_reconstruction\n`;
+                for (const v of verts) {
+                    obj += `v ${v[0]} ${v[1]} ${v[2]}\n`;
+                }
+                for (const f of faces) {
+                    // OBJ is 1-based indexing
+                    obj += `f ${f[0] + 1} ${f[1] + 1} ${f[2] + 1}\n`;
+                }
+                const blob = new Blob([obj], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `bone_${currentSeries?.id || 'series'}_${Date.now()}.obj`;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('Exported 3D model (.obj)', 'success');
+            } catch (e) {
+                showToast(`Export failed: ${e?.message || e}`, 'error');
+            }
         }
 
         // Print and Export Functions

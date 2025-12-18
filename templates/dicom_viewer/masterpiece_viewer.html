@@ -1696,39 +1696,185 @@
         let lastLoadedImagePayload = null;
         let lastLoadedImageId = null;
         let redrawRaf = null;
+        // Performance: in-memory LRU cache + abortable/coalesced loading for smooth scrolling.
+        const _IMAGE_PAYLOAD_CACHE_MAX = 24; // keep modest; pixel buffers are large
+        const _imagePayloadCache = new Map(); // imageId -> payload (with pixel_data as TypedArray)
+        const _imagePayloadCacheOrder = []; // LRU order of imageIds
+        let _imageLoadAbortController = null;
+        let _imageLoadSeq = 0;
+        let _scheduledLoadRaf = null;
+        let _scheduledLoadIndex = null;
+        let _prefetchTimer = null;
 
-        async function loadCurrentImage() {
-            if (!imageData[currentImageIndex]) return;
-            
-            try {
-                const imageId = imageData[currentImageIndex].id;
-                const response = await fetch(`/dicom-viewer/api/image/${imageId}/data/`);
-                const data = await response.json();
-                
-                // Update window/level from DICOM data - SAME AS YOUR ORIGINAL
-                windowWidth = data.window_width || windowWidth;
-                windowLevel = data.window_center || windowLevel;
-                // Derive WL/WW slider bounds from actual pixel distribution (fast sampled percentiles).
-                currentImageStats = _computeImageStats(data.pixel_data);
-                _applyWindowingBoundsFromStats();
-                // Capture per-image PixelSpacing if present (MultiValue -> array). Fallback to Series field.
-                currentPixelSpacing = _normalizePixelSpacing(data.pixel_spacing) || _normalizePixelSpacing(currentSeries && currentSeries.pixel_spacing);
-                // If Series pixel spacing is missing but the image has it, promote it for UI/measurements.
-                if (currentSeries && !currentSeries.pixel_spacing && currentPixelSpacing) {
-                    currentSeries.pixel_spacing = `${currentPixelSpacing.row}\\${currentPixelSpacing.col}`;
-                    updateImageInfo(currentSeries);
+        function _cacheGetPayload(imageId) {
+            const key = String(imageId);
+            const v = _imagePayloadCache.get(key);
+            if (!v) return null;
+            const idx = _imagePayloadCacheOrder.indexOf(key);
+            if (idx >= 0) {
+                _imagePayloadCacheOrder.splice(idx, 1);
+                _imagePayloadCacheOrder.push(key);
+            }
+            return v;
+        }
+
+        function _cacheSetPayload(imageId, payload) {
+            const key = String(imageId);
+            if (!_imagePayloadCache.has(key)) {
+                while (_imagePayloadCacheOrder.length >= _IMAGE_PAYLOAD_CACHE_MAX) {
+                    const evict = _imagePayloadCacheOrder.shift();
+                    if (evict != null) _imagePayloadCache.delete(evict);
                 }
-                
-                updateSliders();
-                lastLoadedImagePayload = data;
-                lastLoadedImageId = imageId;
-                renderDicomImage(data);
-                _scheduleMPRRefresh();
-                
+                _imagePayloadCacheOrder.push(key);
+            } else {
+                const idx = _imagePayloadCacheOrder.indexOf(key);
+                if (idx >= 0) _imagePayloadCacheOrder.splice(idx, 1);
+                _imagePayloadCacheOrder.push(key);
+            }
+            _imagePayloadCache.set(key, payload);
+        }
+
+        function _decodeB64ToFloat32Array(b64) {
+            // b64 is a base64-encoded little-endian float32 buffer.
+            const binary = atob(b64);
+            const len = binary.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+            return new Float32Array(bytes.buffer);
+        }
+
+        function _applyLoadedImagePayload(data, imageId) {
+            // Update window/level from DICOM data - SAME AS YOUR ORIGINAL
+            windowWidth = data.window_width || windowWidth;
+            windowLevel = data.window_center || windowLevel;
+
+            // Derive WL/WW slider bounds from actual pixel distribution (fast sampled percentiles).
+            if (!data.__stats) {
+                data.__stats = _computeImageStats(data.pixel_data);
+            }
+            currentImageStats = data.__stats;
+            _applyWindowingBoundsFromStats();
+
+            // Capture per-image PixelSpacing if present (MultiValue -> array). Fallback to Series field.
+            if (!data.__pixelSpacing) {
+                data.__pixelSpacing = _normalizePixelSpacing(data.pixel_spacing) || _normalizePixelSpacing(currentSeries && currentSeries.pixel_spacing);
+            }
+            currentPixelSpacing = data.__pixelSpacing;
+
+            // If Series pixel spacing is missing but the image has it, promote it for UI/measurements.
+            if (currentSeries && !currentSeries.pixel_spacing && currentPixelSpacing) {
+                currentSeries.pixel_spacing = `${currentPixelSpacing.row}\\${currentPixelSpacing.col}`;
+                updateImageInfo(currentSeries);
+            }
+
+            updateSliders();
+            lastLoadedImagePayload = data;
+            lastLoadedImageId = imageId;
+            renderDicomImage(data);
+            _scheduleMPRRefresh();
+        }
+
+        function scheduleLoadCurrentImage(index = currentImageIndex) {
+            if (!imageData || !imageData.length) return;
+            const clamped = Math.max(0, Math.min(imageData.length - 1, Number(index) || 0));
+            _scheduledLoadIndex = clamped;
+
+            // Update UI immediately (feels responsive) even if the load is coalesced.
+            currentImageIndex = clamped;
+            const sliceSlider = document.getElementById('sliceSlider');
+            if (sliceSlider) sliceSlider.value = clamped;
+            const sliceValue = document.getElementById('sliceValue');
+            if (sliceValue) sliceValue.textContent = clamped + 1;
+            const currentSliceEl = document.getElementById('currentSlice');
+            if (currentSliceEl) currentSliceEl.textContent = clamped + 1;
+
+            if (_scheduledLoadRaf) return;
+            _scheduledLoadRaf = requestAnimationFrame(async () => {
+                _scheduledLoadRaf = null;
+                const idx = _scheduledLoadIndex;
+                _scheduledLoadIndex = null;
+                await loadCurrentImage(idx);
+            });
+        }
+
+        async function loadCurrentImage(index = currentImageIndex) {
+            if (!imageData || !imageData.length) return;
+            const idx = Math.max(0, Math.min(imageData.length - 1, Number(index) || 0));
+            const entry = imageData[idx];
+            if (!entry) return;
+
+            const imageId = entry.id;
+            const cacheHit = _cacheGetPayload(imageId);
+            if (cacheHit && cacheHit.pixel_data) {
+                _applyLoadedImagePayload(cacheHit, imageId);
+                _schedulePrefetchAround(idx);
+                return;
+            }
+
+            // Abort any in-flight image load (latest-slice-wins during scrolling).
+            try { _imageLoadAbortController?.abort(); } catch (e) {}
+            _imageLoadAbortController = new AbortController();
+            const seq = ++_imageLoadSeq;
+
+            // Avoid flickery loaders during fast wheel scrolls: show only if it takes noticeable time.
+            let loaderTimer = setTimeout(() => showLoading(true), 150);
+            try {
+                const response = await fetch(`/dicom-viewer/api/image/${imageId}/data/?packed=1`, {
+                    signal: _imageLoadAbortController.signal,
+                    credentials: 'same-origin',
+                    cache: 'force-cache'
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                if (seq !== _imageLoadSeq) return; // stale
+
+                if (data && data.pixel_data_b64 && (!data.pixel_data || !data.pixel_data.length)) {
+                    // Decode packed float32 pixels to a TypedArray for faster rendering than JSON lists.
+                    data.pixel_data = _decodeB64ToFloat32Array(data.pixel_data_b64);
+                    data.pixel_data_b64 = null; // reduce memory
+                }
+
+                _cacheSetPayload(imageId, data);
+                _applyLoadedImagePayload(data, imageId);
+                _schedulePrefetchAround(idx);
             } catch (error) {
+                // Ignore aborts (expected during scrolling).
+                if (error && (error.name === 'AbortError' || String(error).includes('AbortError'))) return;
                 console.error('Error loading image:', error);
                 showToast('Failed to load image', 'error');
+            } finally {
+                clearTimeout(loaderTimer);
+                showLoading(false);
             }
+        }
+
+        function _schedulePrefetchAround(centerIdx) {
+            if (_prefetchTimer) clearTimeout(_prefetchTimer);
+            _prefetchTimer = setTimeout(() => {
+                _prefetchTimer = null;
+                // If a new load is already scheduled, don't compete with it.
+                if (_scheduledLoadRaf) return;
+                const offsets = [1, -1, 2, -2];
+                offsets.forEach((d) => {
+                    const idx = centerIdx + d;
+                    if (idx < 0 || idx >= imageData.length) return;
+                    const id = imageData[idx]?.id;
+                    if (!id) return;
+                    if (_imagePayloadCache.has(String(id))) return;
+                    // Fire-and-forget prefetch; browser cache + our LRU cache will make the next scroll instant.
+                    fetch(`/dicom-viewer/api/image/${id}/data/?packed=1`, { credentials: 'same-origin', cache: 'force-cache' })
+                        .then(r => r.ok ? r.json() : null)
+                        .then(d => {
+                            if (!d) return;
+                            if (d.pixel_data_b64 && (!d.pixel_data || !d.pixel_data.length)) {
+                                d.pixel_data = _decodeB64ToFloat32Array(d.pixel_data_b64);
+                                d.pixel_data_b64 = null; // reduce memory
+                            }
+                            _cacheSetPayload(id, d);
+                        })
+                        .catch(() => {});
+                });
+            }, 140);
         }
 
         function renderDicomImage(imageData) {
@@ -2068,10 +2214,8 @@
         }
 
         function updateSlice(value) {
-            currentImageIndex = parseInt(value);
-            document.getElementById('sliceValue').textContent = currentImageIndex + 1;
-            document.getElementById('currentSlice').textContent = currentImageIndex + 1;
-            loadCurrentImage();
+            // Coalesce rapid slider/wheel updates; latest index wins.
+            scheduleLoadCurrentImage(parseInt(value));
         }
 
         function updateZoom(value) {
@@ -2125,9 +2269,7 @@
 
         function changeSlice(newIndex) {
             if (newIndex >= 0 && newIndex < imageData.length) {
-                currentImageIndex = newIndex;
-                document.getElementById('sliceSlider').value = newIndex;
-                updateSlice(newIndex);
+                scheduleLoadCurrentImage(newIndex);
             }
         }
 

@@ -268,7 +268,8 @@
 
         .mpr-grid.mpr-focused.mpr-focus-axial .mpr-viewport[data-plane="axial"],
         .mpr-grid.mpr-focused.mpr-focus-sagittal .mpr-viewport[data-plane="sagittal"],
-        .mpr-grid.mpr-focused.mpr-focus-coronal .mpr-viewport[data-plane="coronal"] {
+        .mpr-grid.mpr-focused.mpr-focus-coronal .mpr-viewport[data-plane="coronal"],
+        .mpr-grid.mpr-focused.mpr-focus-3d .mpr-viewport[data-plane="3d"] {
             display: flex;
             grid-column: 1;
             grid-row: 1;
@@ -508,8 +509,11 @@
         .right-panel {
             grid-column: 3;
             grid-row: 2;
-            background: var(--secondary-bg);
-            border-left: 1px solid var(--border-color);
+            /* Blend in: glassy / transparent, no harsh borders */
+            background: rgba(10, 10, 10, 0.18);
+            border-left: none;
+            backdrop-filter: blur(10px) saturate(1.15);
+            -webkit-backdrop-filter: blur(10px) saturate(1.15);
             padding: 8px;
             overflow: visible;
             display: flex;
@@ -525,10 +529,10 @@
         .control-icon {
             width: 44px;
             height: 44px;
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            color: var(--text-primary);
+            background: rgba(20, 20, 20, 0.22);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 10px;
+            color: rgba(255, 255, 255, 0.85);
             cursor: pointer;
             display: flex;
             align-items: center;
@@ -536,21 +540,23 @@
             font-size: 16px;
             transition: all 0.2s ease;
             position: relative;
+            box-shadow: 0 1px 0 rgba(255,255,255,0.05), 0 10px 22px rgba(0,0,0,0.25);
         }
 
         .control-icon:hover {
-            background: var(--accent-color);
-            color: var(--primary-bg);
-            border-color: var(--accent-color);
+            /* Light green tint (subtle), keep it blended */
+            background: rgba(0, 255, 136, 0.12);
+            color: rgba(220, 255, 240, 0.98);
+            border-color: rgba(0, 255, 136, 0.22);
             transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0, 212, 255, 0.3);
+            box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.10), 0 10px 22px rgba(0, 0, 0, 0.28);
         }
 
         .control-icon.active {
-            background: var(--accent-color);
-            color: var(--primary-bg);
-            border-color: var(--accent-color);
-            box-shadow: 0 0 10px rgba(0, 212, 255, 0.4);
+            background: rgba(0, 255, 136, 0.16);
+            color: rgba(235, 255, 247, 0.98);
+            border-color: rgba(0, 255, 136, 0.28);
+            box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.12), 0 16px 30px rgba(0, 0, 0, 0.32);
         }
 
         /* Popup panels for detailed controls */
@@ -559,8 +565,10 @@
             right: 50px;
             top: 0;
             width: 280px;
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
+            background: rgba(18, 18, 18, 0.78);
+            border: 1px solid rgba(255,255,255,0.08);
+            backdrop-filter: blur(12px) saturate(1.1);
+            -webkit-backdrop-filter: blur(12px) saturate(1.1);
             border-radius: 8px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
             z-index: 1000;
@@ -584,9 +592,9 @@
         }
 
         .popup-header {
-            background: var(--header-bg);
+            background: rgba(0, 0, 0, 0.35);
             padding: 10px 12px;
-            border-bottom: 1px solid var(--border-color);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
             border-radius: 8px 8px 0 0;
             display: flex;
             justify-content: space-between;
@@ -594,7 +602,7 @@
         }
 
         .popup-title {
-            color: var(--accent-color);
+            color: rgba(0, 255, 136, 0.8);
             font-weight: 600;
             font-size: 12px;
             text-transform: uppercase;
@@ -3165,12 +3173,12 @@
 
         function _clearMPRFocusClasses(mprEl) {
             if (!mprEl) return;
-            mprEl.classList.remove('mpr-focused', 'mpr-focus-axial', 'mpr-focus-sagittal', 'mpr-focus-coronal');
+            mprEl.classList.remove('mpr-focused', 'mpr-focus-axial', 'mpr-focus-sagittal', 'mpr-focus-coronal', 'mpr-focus-3d');
         }
 
         function focusMPRPlane(plane) {
             if (!mprMode) return;
-            if (!['axial', 'sagittal', 'coronal'].includes(plane)) return;
+            if (!['axial', 'sagittal', 'coronal', '3d'].includes(plane)) return;
             const mprEl = document.getElementById('mprView');
             if (!mprEl) return;
 
@@ -3179,7 +3187,7 @@
             mprFocusedPlane = plane;
 
             const title = document.getElementById('mprFocusTitle');
-            if (title) title.textContent = `${plane.toUpperCase()} VIEW`;
+            if (title) title.textContent = (plane === '3d') ? '3D VIEW' : `${plane.toUpperCase()} VIEW`;
 
             // Keep active plane consistent for wheel/zoom/pan behavior
             setActivePlane(plane);
@@ -3201,8 +3209,6 @@
             try {
                 if (e) e.stopPropagation();
                 setActivePlane(plane);
-                // Only focus real MPR planes (not 3D).
-                if (plane === '3d') return;
                 // Click to focus that plane; use "Back to MPR" to return.
                 if (mprFocusedPlane !== plane) {
                     focusMPRPlane(plane);

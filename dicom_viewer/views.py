@@ -467,11 +467,17 @@ def api_image_data(request, image_id):
             rows = int(pixel_array.shape[0])
             cols = int(pixel_array.shape[1])
 
-        # Flatten in row-major order as numeric list (expected by JS canvas viewer)
-        data.update({
+        # For performance: the default JSON `pixel_data: [..]` list is extremely large and slow to
+        # serialize/parse for typical CT/MR frames (e.g. 512x512). The main viewer can request a
+        # packed payload via `?packed=1` to receive a base64-encoded little-endian float32 buffer.
+        packed = (request.GET.get('packed', '') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+        # Flatten in row-major order
+        flat = pixel_array.reshape(rows * cols).astype(np.float32, copy=False)
+
+        pixel_payload = {
             'rows': rows,
             'columns': cols,
-            'pixel_data': pixel_array.reshape(rows * cols).tolist(),
             'window_width': float(window_width) if window_width is not None else 400.0,
             'window_center': float(window_center) if window_center is not None else 40.0,
             # Normalize DICOM valuereps/MultiValue to JSON-safe types
@@ -481,7 +487,25 @@ def api_image_data(request, image_id):
             'photometric_interpretation': _jsonify_dicom_value(getattr(ds, 'PhotometricInterpretation', None)) if ds is not None else None,
             'bits_allocated': _jsonify_dicom_value(getattr(ds, 'BitsAllocated', None)) if ds is not None else None,
             'bits_stored': _jsonify_dicom_value(getattr(ds, 'BitsStored', None)) if ds is not None else None,
-        })
+        }
+
+        if packed:
+            pixel_payload.update({
+                'pixel_data': None,
+                'pixel_data_b64': base64.b64encode(flat.tobytes(order='C')).decode('ascii'),
+                'pixel_dtype': 'float32',
+                'pixel_endian': 'little',
+            })
+        else:
+            # Backwards-compatible (but slower) numeric list for legacy clients.
+            pixel_payload.update({
+                'pixel_data': flat.tolist(),
+                'pixel_data_b64': None,
+                'pixel_dtype': None,
+                'pixel_endian': None,
+            })
+
+        data.update(pixel_payload)
     else:
         data.update({
             'rows': int(getattr(ds, 'Rows', 0) or 0) if ds is not None else 0,

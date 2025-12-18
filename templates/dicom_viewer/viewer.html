@@ -1355,6 +1355,60 @@
         let renderingQueue = [];
         let isRendering = false;
         
+        // Slice display pipeline (latest-wins + small in-memory cache + prefetch)
+        const _DISPLAY_CACHE_MAX = 160;
+        const _displayCache = new Map(); // key -> { image_data, image_info }
+        const _displayCacheOrder = []; // LRU keys
+        let _displayAbortController = null;
+        let _displaySeq = 0;
+        let _scheduledDisplayRaf = null;
+        let _scheduledDisplayIndex = null;
+        let _scheduledDisplayReason = 'slice';
+        let _prefetchDisplayTimer = null;
+        
+        function _displayCacheKey(imageId) {
+            return `${imageId}|ww:${Math.round(Number(windowWidth))}|wl:${Math.round(Number(windowLevel))}|inv:${inverted ? 1 : 0}`;
+        }
+        
+        function _displayCacheGet(key) {
+            const v = _displayCache.get(key);
+            if (!v) return null;
+            const idx = _displayCacheOrder.indexOf(key);
+            if (idx >= 0) {
+                _displayCacheOrder.splice(idx, 1);
+                _displayCacheOrder.push(key);
+            }
+            return v;
+        }
+        
+        function _displayCacheSet(key, value) {
+            if (!_displayCache.has(key)) {
+                while (_displayCacheOrder.length >= _DISPLAY_CACHE_MAX) {
+                    const evict = _displayCacheOrder.shift();
+                    if (evict != null) _displayCache.delete(evict);
+                }
+                _displayCacheOrder.push(key);
+            } else {
+                const idx = _displayCacheOrder.indexOf(key);
+                if (idx >= 0) _displayCacheOrder.splice(idx, 1);
+                _displayCacheOrder.push(key);
+            }
+            _displayCache.set(key, value);
+        }
+        
+        function scheduleImageDisplayUpdate(index = currentImageIndex, reason = 'slice') {
+            if (!images.length) return;
+            _scheduledDisplayIndex = Math.max(0, Math.min(images.length - 1, Number(index) || 0));
+            _scheduledDisplayReason = reason;
+            if (_scheduledDisplayRaf) return;
+            _scheduledDisplayRaf = requestAnimationFrame(async () => {
+                _scheduledDisplayRaf = null;
+                const idx = _scheduledDisplayIndex;
+                _scheduledDisplayIndex = null;
+                await updateImageDisplay(idx, _scheduledDisplayReason);
+            });
+        }
+        
         // Professional initialization
         document.addEventListener('DOMContentLoaded', function() {
             initializeViewer();
@@ -1549,13 +1603,13 @@
         function updateWindowWidth(value) {
             windowWidth = parseInt(value);
             document.getElementById('wwValue').textContent = windowWidth;
-            updateImageDisplay();
+            scheduleImageDisplayUpdate(currentImageIndex, 'window');
         }
 
         function updateWindowLevel(value) {
             windowLevel = parseInt(value);
             document.getElementById('wlValue').textContent = windowLevel;
-            updateImageDisplay();
+            scheduleImageDisplayUpdate(currentImageIndex, 'window');
         }
 
         function applyPreset(preset) {
@@ -1568,7 +1622,7 @@
                 document.getElementById('wwValue').textContent = windowWidth;
                 document.getElementById('wlValue').textContent = windowLevel;
                 
-                updateImageDisplay();
+                scheduleImageDisplayUpdate(currentImageIndex, 'window');
                 showToast(`Applied ${preset} preset`, 'success');
             }
         }
@@ -1582,8 +1636,9 @@
             document.getElementById('wlSlider').value = windowLevel;
             document.getElementById('wwValue').textContent = Math.round(windowWidth);
             document.getElementById('wlValue').textContent = Math.round(windowLevel);
-            
-            updateImageDisplay();
+
+            // Window/level drag can fire dozens of events/sec; coalesce to avoid request storms.
+            scheduleImageDisplayUpdate(currentImageIndex, 'window');
         }
 
         // Zoom Management
@@ -1631,7 +1686,7 @@
                 // Handle regular image navigation
                 currentImageIndex = parseInt(value);
                 document.getElementById('sliceValue').textContent = `${currentImageIndex + 1}/${images.length}`;
-                updateImageDisplay();
+                scheduleImageDisplayUpdate(currentImageIndex, 'slice');
             }
         }
 
@@ -1650,70 +1705,121 @@
                     currentImageIndex = newIndex;
                     document.getElementById('sliceSlider').value = currentImageIndex;
                     document.getElementById('sliceValue').textContent = `${currentImageIndex + 1}/${images.length}`;
-                    updateImageDisplay();
+                    scheduleImageDisplayUpdate(currentImageIndex, 'slice');
                 }
             }
         }
 
         // Image Display Management
-        async function updateImageDisplay() {
-            if (!images.length || currentImageIndex < 0 || currentImageIndex >= images.length) {
+        async function updateImageDisplay(index = currentImageIndex, reason = 'slice') {
+            if (!images.length) return;
+            const idx = Math.max(0, Math.min(images.length - 1, Number(index) || 0));
+            const currentImage = images[idx];
+            if (!currentImage) return;
+
+            const cacheKey = _displayCacheKey(currentImage.id);
+            const cached = _displayCacheGet(cacheKey);
+
+            const dicomImage = document.getElementById('dicomImage');
+            const welcomeScreen = document.getElementById('welcomeScreen');
+            const singleView = document.getElementById('singleView');
+            if (welcomeScreen) welcomeScreen.style.display = 'none';
+            if (singleView) singleView.style.display = 'flex';
+
+            const _apply = (payload) => {
+                if (!payload || !payload.image_data) return false;
+                if (payload.image_info) updateImageInfo(payload.image_info);
+                currentImageInfo = payload.image_info || currentImageInfo;
+
+                // Avoid resetting src to the same URL (can trigger unnecessary decodes).
+                if (dicomImage && dicomImage.src !== payload.image_data) {
+                    dicomImage.decoding = 'async';
+                    dicomImage.src = payload.image_data;
+                }
+
+                // Apply high-quality rendering hints
+                if (dicomImage) {
+                    dicomImage.style.imageRendering = 'pixelated';
+                    dicomImage.style.imageRendering = 'crisp-edges';
+                    dicomImage.style.maxWidth = '100%';
+                    dicomImage.style.maxHeight = '100%';
+                }
+
+                // Overlays depend on the current transform/viewport size.
+                updateMeasurementOverlay();
+                updateAnnotationOverlay();
+                return true;
+            };
+
+            if (cached) {
+                _apply(cached);
+                _scheduleDisplayPrefetchAround(idx);
                 return;
             }
-            
-            const currentImage = images[currentImageIndex];
-            if (!currentImage) return;
-            
+
+            // Abort any in-flight request (latest-slice-wins during fast scrolling).
+            try { _displayAbortController?.abort(); } catch (e) {}
+            _displayAbortController = new AbortController();
+            const seq = ++_displaySeq;
+
+            // Avoid flickery loaders on fast wheel scrolling: only show if it takes noticeable time.
+            const loadingDelay = (reason === 'window') ? 220 : 140;
+            let loaderTimer = setTimeout(() => showLoading('Processing image...'), loadingDelay);
             try {
-                // Show loading
-                showLoading('Processing image...');
-                
-                // Get processed image with current window/level settings
-                const url = `/dicom-viewer/api/image/${currentImage.id}/display/?ww=${windowWidth}&wl=${windowLevel}&invert=${inverted}`;
-                
-                const response = await fetch(url);
+                const url = `/dicom-viewer/api/image/${currentImage.id}/display/?ww=${encodeURIComponent(windowWidth)}&wl=${encodeURIComponent(windowLevel)}&invert=${encodeURIComponent(inverted)}`;
+                const response = await fetch(url, {
+                    signal: _displayAbortController.signal,
+                    credentials: 'same-origin',
+                    cache: 'force-cache'
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
-                
-                if (data.image_data) {
-                    const dicomImage = document.getElementById('dicomImage');
-                    
-                    // Hide welcome screen and show image view
-                    const welcomeScreen = document.getElementById('welcomeScreen');
-                    const singleView = document.getElementById('singleView');
-                    if (welcomeScreen) welcomeScreen.style.display = 'none';
-                    if (singleView) singleView.style.display = 'flex';
-                    
-                    dicomImage.src = data.image_data;
-                    dicomImage.onload = function() {
-                        hideLoading();
-                        updateImageInfo(data.image_info);
-                        updateMeasurementOverlay();
-                        updateAnnotationOverlay();
-                        
-                        // Apply high-quality rendering
-                        dicomImage.style.imageRendering = 'pixelated';
-                        dicomImage.style.imageRendering = 'crisp-edges';
-                        dicomImage.style.maxWidth = '100%';
-                        dicomImage.style.maxHeight = '100%';
-                    };
-                    dicomImage.onerror = function() {
-                        hideLoading();
-                        showToast('Failed to load image', 'error');
-                    };
+                if (seq !== _displaySeq) return; // stale
+
+                if (data && data.image_data) {
+                    const payload = { image_data: data.image_data, image_info: data.image_info };
+                    _displayCacheSet(cacheKey, payload);
+                    _apply(payload);
+                    _scheduleDisplayPrefetchAround(idx);
                 } else {
-                    hideLoading();
-                    if (data.warnings?.pixel_decode_error) {
+                    if (data?.warnings?.pixel_decode_error) {
                         showToast('Image format not supported: ' + data.warnings.pixel_decode_error, 'warning');
                     } else {
                         showToast('Failed to load image data', 'error');
                     }
                 }
-                
             } catch (error) {
-                hideLoading();
+                if (error && (error.name === 'AbortError' || String(error).includes('AbortError'))) return;
                 console.error('Error updating image display:', error);
                 showToast('Error loading image', 'error');
+            } finally {
+                clearTimeout(loaderTimer);
+                hideLoading();
             }
+        }
+
+        function _scheduleDisplayPrefetchAround(centerIdx) {
+            if (_prefetchDisplayTimer) clearTimeout(_prefetchDisplayTimer);
+            _prefetchDisplayTimer = setTimeout(() => {
+                _prefetchDisplayTimer = null;
+                const offsets = [1, -1, 2, -2];
+                offsets.forEach((d) => {
+                    const idx = centerIdx + d;
+                    if (idx < 0 || idx >= images.length) return;
+                    const img = images[idx];
+                    if (!img) return;
+                    const key = _displayCacheKey(img.id);
+                    if (_displayCache.has(key)) return;
+                    const url = `/dicom-viewer/api/image/${img.id}/display/?ww=${encodeURIComponent(windowWidth)}&wl=${encodeURIComponent(windowLevel)}&invert=${encodeURIComponent(inverted)}`;
+                    fetch(url, { credentials: 'same-origin', cache: 'force-cache' })
+                        .then(r => r.ok ? r.json() : null)
+                        .then(data => {
+                            if (!data || !data.image_data) return;
+                            _displayCacheSet(key, { image_data: data.image_data, image_info: data.image_info });
+                        })
+                        .catch(() => {});
+                });
+            }, 160);
         }
 
         function updateImageInfo(info) {
@@ -1896,7 +2002,7 @@
                     await loadModalityReconstructionOptions(seriesId);
                     
                     // Load first image
-                    await updateImageDisplay();
+                    await updateImageDisplay(currentImageIndex, 'slice');
                     
                     hideLoading();
                     showToast(`Loaded ${images.length} images`, 'success');
@@ -2115,7 +2221,7 @@
 
         function toggleInvert() {
             inverted = !inverted;
-            updateImageDisplay();
+            scheduleImageDisplayUpdate(currentImageIndex, 'invert');
             
             // Update tool visual state
             const tool = document.querySelector('[data-tool="invert"]');
@@ -3360,6 +3466,14 @@
         }
 
         // MPR Crosshair functionality
+        let _mprCrosshairRaf = null;
+        let _mprCrosshairPending = null;
+        const _mprViewportRectCache = new Map();
+        window.addEventListener('resize', () => {
+            // Invalidate cached rects on resize to keep math correct
+            _mprViewportRectCache.clear();
+        });
+
         function enableMPRCrosshairs() {
             const crosshairs = ['crosshairAxial', 'crosshairSagittal', 'crosshairCoronal'];
             crosshairs.forEach(id => {
@@ -3382,20 +3496,33 @@
                 if (plane === '3d') return;
                 
                 viewport.addEventListener('mousemove', function(e) {
-                    updateMPRCrosshairPosition(e, plane);
+                    _queueMPRCrosshairUpdate(viewport, plane, e.clientX, e.clientY, false);
                 });
                 
                 viewport.addEventListener('click', function(e) {
                     setActivePlane(plane);
-                    updateMPRCrosshairPosition(e, plane, true);
+                    _queueMPRCrosshairUpdate(viewport, plane, e.clientX, e.clientY, true);
                 });
             });
         }
 
-        function updateMPRCrosshairPosition(event, plane, lock = false) {
-            const rect = event.target.getBoundingClientRect();
-            const x = ((event.clientX - rect.left) / rect.width) * 100;
-            const y = ((event.clientY - rect.top) / rect.height) * 100;
+        function _queueMPRCrosshairUpdate(viewportEl, plane, clientX, clientY, lock) {
+            _mprCrosshairPending = { viewportEl, plane, clientX, clientY, lock };
+            if (_mprCrosshairRaf) return;
+            _mprCrosshairRaf = requestAnimationFrame(() => {
+                _mprCrosshairRaf = null;
+                const p = _mprCrosshairPending;
+                _mprCrosshairPending = null;
+                if (!p) return;
+                updateMPRCrosshairPosition(p.viewportEl, p.plane, p.clientX, p.clientY, p.lock);
+            });
+        }
+
+        function updateMPRCrosshairPosition(viewportEl, plane, clientX, clientY, lock = false) {
+            const rect = _mprViewportRectCache.get(viewportEl) || viewportEl.getBoundingClientRect();
+            _mprViewportRectCache.set(viewportEl, rect);
+            const x = ((clientX - rect.left) / rect.width) * 100;
+            const y = ((clientY - rect.top) / rect.height) * 100;
             
             // Update crosshair position
             const crosshairId = `crosshair${plane.charAt(0).toUpperCase() + plane.slice(1)}`;
@@ -3405,8 +3532,11 @@
                 const hLine = crosshair.querySelector('.crosshair-line-h-mpr');
                 const vLine = crosshair.querySelector('.crosshair-line-v-mpr');
                 
-                if (hLine) hLine.style.top = `${y}%`;
-                if (vLine) vLine.style.left = `${x}%`;
+                // Round to reduce style churn during fast mouse moves.
+                const yy = `${Math.max(0, Math.min(100, y)).toFixed(2)}%`;
+                const xx = `${Math.max(0, Math.min(100, x)).toFixed(2)}%`;
+                if (hLine && hLine.style.top !== yy) hLine.style.top = yy;
+                if (vLine && vLine.style.left !== xx) vLine.style.left = xx;
             }
             
             if (lock) {

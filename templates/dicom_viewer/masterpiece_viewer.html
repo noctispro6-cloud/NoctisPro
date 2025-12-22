@@ -1650,19 +1650,27 @@
             const controls3D = document.getElementById('controls3D');
             
             if (viewMode === 'single') {
+                // Don't switch to MPR if there's no series loaded (otherwise panes look "blank").
+                if (!currentSeries || currentSeries.id == null) {
+                    showToast('Load a series first to use MPR', 'warning');
+                    return;
+                }
                 singleView.style.display = 'none';
                 mprView.classList.add('active');
-                controls3D.style.display = 'block';
+                if (controls3D) controls3D.style.display = 'block';
                 viewMode = 'mpr';
-                // Ensure canvases have non-zero size now that MPR is visible
-                resizeCanvas();
-                setMPRMaximizedPlane(null);
-                setActiveMPRPlane('axial');
-                generateMPRViews({ refreshBone: true, quiet: false, preserveSlices: false });
+                // Ensure canvases have non-zero size now that MPR is visible.
+                // Use rAF so layout has applied the new grid before reading client sizes.
+                requestAnimationFrame(() => {
+                    try { resizeCanvas(); } catch (e) {}
+                    setMPRMaximizedPlane(null);
+                    setActiveMPRPlane('axial');
+                    generateMPRViews({ refreshBone: true, quiet: false, preserveSlices: false });
+                });
             } else {
                 singleView.style.display = 'block';
                 mprView.classList.remove('active');
-                controls3D.style.display = 'none';
+                if (controls3D) controls3D.style.display = 'none';
                 viewMode = 'single';
                 autoRotate = false;
                 stopBoneAnimationLoop();
@@ -3208,7 +3216,10 @@
         }
 
         async function generateMPRViews(opts = {}) {
-            if (!currentSeries) return;
+            if (!currentSeries || currentSeries.id == null) {
+                showToast('No series loaded for MPR', 'warning');
+                return;
+            }
             const { refreshBone = false, quiet = false, preserveSlices = true } = opts || {};
             
             try {
@@ -3293,7 +3304,12 @@
             if (!canvas || !dataUrl) return;
             const ctx = canvas.getContext('2d');
             const img = new Image();
-            img.src = dataUrl;
+            // Backend normally returns a data URL (data:image/png;base64,...).
+            // Guard older/alternate payloads that return raw base64 only.
+            const src = (typeof dataUrl === 'string' && dataUrl.startsWith('data:image'))
+                ? dataUrl
+                : `data:image/png;base64,${dataUrl}`;
+            img.src = src;
             await new Promise((resolve, reject) => {
                 img.onload = resolve;
                 img.onerror = reject;

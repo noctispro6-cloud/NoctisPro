@@ -374,6 +374,36 @@ def upload_study(request):
 					except Exception:
 						pass
 
+			def _stable_synth_sop_uid(fobj) -> str:
+				"""
+				Create a stable SOP-like identifier when SOPInstanceUID is missing.
+
+				We deliberately avoid random UUIDs here because they break idempotency:
+				re-uploading the same bytes would create "new" images each time.
+				"""
+				import hashlib
+				try:
+					pos = fobj.tell()
+				except Exception:
+					pos = None
+				try:
+					fobj.seek(0)
+					data = fobj.read()
+					digest = hashlib.sha1(data).hexdigest()
+					return f"SYN-SOP-SHA1-{digest}"
+				except Exception:
+					# Last resort: fall back to random value (should be extremely rare)
+					import uuid as _uuid
+					return f"SYN-SOP-{_uuid.uuid4()}"
+				finally:
+					try:
+						if pos is not None:
+							fobj.seek(pos)
+						else:
+							fobj.seek(0)
+					except Exception:
+						pass
+
 			for file_index, in_file in enumerate(uploaded_files):
 				file_start_time = time.time()
 				file_size_mb = in_file.size / (1024 * 1024)  # Convert to MB
@@ -431,20 +461,22 @@ def upload_study(request):
 					series_uid = getattr(ds, 'SeriesInstanceUID', None)
 					sop_uid = getattr(ds, 'SOPInstanceUID', None)
 					modality = getattr(ds, 'Modality', 'OT')
-					
-					# Relaxed validation: synthesize missing UIDs for valid files
-					if not study_uid:
-						import uuid as _uuid
-						study_uid = f"SYN-{_uuid.uuid4()}"
-						logger.warning(f"File {file_index + 1}: Missing StudyInstanceUID, synthesized {study_uid}")
-					if not series_uid:
-						import uuid as _uuid
-						series_uid = f"SYN-SER-{_uuid.uuid4()}"
-						logger.warning(f"File {file_index + 1}: Missing SeriesInstanceUID, synthesized {series_uid}")
+
+					# Validation strategy:
+					# - StudyInstanceUID and SeriesInstanceUID are required to group files correctly.
+					#   Synthesizing them per-file causes uncontrolled duplication and random series splits.
+					# - SOPInstanceUID is required for deduplication; if it's missing, synthesize a STABLE
+					#   identifier from the file bytes so re-uploads remain idempotent.
+					if not study_uid or not series_uid:
+						invalid_files += 1
+						logger.warning(
+							f"File {file_index + 1}: Missing required UID(s) "
+							f"(StudyInstanceUID={bool(study_uid)}, SeriesInstanceUID={bool(series_uid)}); skipping"
+						)
+						continue
 					if not sop_uid:
-						import uuid as _uuid
-						sop_uid = f"SYN-SOP-{_uuid.uuid4()}"
-						logger.warning(f"File {file_index + 1}: Missing SOPInstanceUID, synthesized {sop_uid}")
+						sop_uid = _stable_synth_sop_uid(in_file)
+						logger.warning(f"File {file_index + 1}: Missing SOPInstanceUID, synthesized stable {sop_uid}")
 						setattr(ds, 'SOPInstanceUID', sop_uid)
 					
 					# Enhanced series grouping with medical imaging intelligence

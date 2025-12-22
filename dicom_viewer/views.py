@@ -2096,22 +2096,49 @@ def upload_dicom(request):
             studies_map = {}
             invalid_files = 0
             rep_ds = None
+            def _stable_synth_sop_uid(fobj) -> str:
+                """
+                Stable SOP-like identifier fallback when SOPInstanceUID is missing.
+                Avoids random UUIDs so re-uploads remain idempotent.
+                """
+                import hashlib
+                try:
+                    pos = fobj.tell()
+                except Exception:
+                    pos = None
+                try:
+                    try:
+                        fobj.seek(0)
+                    except Exception:
+                        pass
+                    data = fobj.read()
+                    digest = hashlib.sha1(data).hexdigest()
+                    return f"SYN-SOP-SHA1-{digest}"
+                except Exception:
+                    import uuid as _uuid
+                    return f"SYN-SOP-{_uuid.uuid4()}"
+                finally:
+                    try:
+                        if pos is not None:
+                            fobj.seek(pos)
+                        else:
+                            fobj.seek(0)
+                    except Exception:
+                        pass
+
             for in_file in uploaded_files:
                 try:
                     ds = pydicom.dcmread(in_file, force=True)
                     study_uid = getattr(ds, 'StudyInstanceUID', None)
                     series_uid = getattr(ds, 'SeriesInstanceUID', None)
                     sop_uid = getattr(ds, 'SOPInstanceUID', None)
-                    # Relaxed validation: synthesize missing values
-                    if not study_uid:
-                        import uuid as _uuid
-                        study_uid = f"SYN-{_uuid.uuid4()}"
-                    if not series_uid:
-                        import uuid as _uuid
-                        series_uid = f"SYN-SER-{_uuid.uuid4()}"
+                    # Require Study/Series UIDs for correct grouping.
+                    # If SOP UID is missing, synthesize a STABLE identifier from file bytes.
+                    if not study_uid or not series_uid:
+                        invalid_files += 1
+                        continue
                     if not sop_uid:
-                        import uuid as _uuid
-                        sop_uid = f"SYN-SOP-{_uuid.uuid4()}"
+                        sop_uid = _stable_synth_sop_uid(in_file)
                         setattr(ds, 'SOPInstanceUID', sop_uid)
                     if rep_ds is None:
                         rep_ds = ds
@@ -2233,8 +2260,7 @@ def upload_dicom(request):
                     try:
                         sop_uid = getattr(ds, 'SOPInstanceUID', None)
                         if not sop_uid:
-                            import uuid as _uuid
-                            sop_uid = f"SYN-SOP-{_uuid.uuid4()}"
+                            sop_uid = _stable_synth_sop_uid(fobj)
                             setattr(ds, 'SOPInstanceUID', sop_uid)
                         instance_number = getattr(ds, 'InstanceNumber', 1) or 1
                         rel_path = f"dicom/images/{study_uid}/{series_uid}/{sop_uid}.dcm"

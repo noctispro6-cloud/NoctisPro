@@ -2404,14 +2404,21 @@
                 const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`);
                 const data = await response.json();
                 
-                if (data.views) {
+                const views = data && (data.mpr_views || data.views || data.mprViews);
+                if (views && (views.axial || views.sagittal || views.coronal)) {
                     // Switch to MPR mode and show views
                     document.getElementById('singleView').style.display = 'none';
                     document.getElementById('mprView').style.display = 'grid';
                     
-                    document.getElementById('mprAxial').src = data.views.axial;
-                    document.getElementById('mprSagittal').src = data.views.sagittal;
-                    document.getElementById('mprCoronal').src = data.views.coronal;
+                    // Backend returns data URLs (data:image/png;base64,...). Guard older payloads.
+                    const ensureDataUrl = (v) => {
+                        if (!v) return '';
+                        if (typeof v !== 'string') return '';
+                        return v.startsWith('data:image') ? v : `data:image/png;base64,${v}`;
+                    };
+                    document.getElementById('mprAxial').src = ensureDataUrl(views.axial);
+                    document.getElementById('mprSagittal').src = ensureDataUrl(views.sagittal);
+                    document.getElementById('mprCoronal').src = ensureDataUrl(views.coronal);
                     
                     // Enable crosshairs for MPR views
                     enableMPRCrosshairs();
@@ -2420,7 +2427,7 @@
                     showToast('MPR views generated successfully', 'success');
                 } else {
                     hideLoading();
-                    showToast('Failed to generate MPR views', 'error');
+                    showToast(data?.error ? `Failed to generate MPR views: ${data.error}` : 'Failed to generate MPR views', 'error');
                 }
                 
             } catch (error) {

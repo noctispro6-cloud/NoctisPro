@@ -14,7 +14,9 @@
     
     {% load static %}
     {% load dicts %}
+    <link rel="stylesheet" href="{% static 'css/noctis-app.css' %}">
     <link rel="stylesheet" href="{% static 'css/noctis-dashboard-style.css' %}">
+    <link rel="stylesheet" href="{% static 'css/noctis-global.css' %}">
     <link href="{% static 'css/dicom-viewer-buttons.css' %}" rel="stylesheet">
     <link href="{% static 'css/enhanced-buttons.css' %}" rel="stylesheet">
     <script src="{% static 'js/dicom-viewer-utils.js' %}" defer></script>
@@ -78,7 +80,11 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            height: 50px;
+            /* Responsive: allow wrap + scrolling rows */
+            flex-wrap: wrap;
+            height: auto;
+            min-height: 50px;
+            gap: 8px;
         }
 
         .nav-left {
@@ -96,6 +102,12 @@
         .nav-tabs {
             display: flex;
             gap: 2px;
+            /* Responsive: many tabs -> horizontal scroll on small screens */
+            overflow-x: auto;
+            overflow-y: hidden;
+            white-space: nowrap;
+            -webkit-overflow-scrolling: touch;
+            max-width: 100%;
         }
 
         .nav-tab {
@@ -124,6 +136,11 @@
             align-items: center;
             gap: 15px;
             font-size: 11px;
+            /* Responsive: allow right controls to scroll instead of overflowing */
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+            max-width: 100%;
         }
 
         .user-info {
@@ -639,6 +656,14 @@
                 font-size: 8px;
                 padding: 3px 6px;
             }
+        }
+
+        @media (max-width: 768px) {
+            .top-navbar { padding: 10px 12px; }
+            .logo { font-size: 14px; }
+            .nav-left { gap: 10px; }
+            .nav-tab { padding: 6px 10px; font-size: 10px; }
+            .btn-control, .admin-btn { padding: 6px 10px; font-size: 10px; }
         }
     </style>
     {% block extra_css %}{% endblock %}

@@ -5,6 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=noctispro
+Group=noctispro
+# Keep secrets readable by the service user (deploy.sh sets 0640 root:noctispro)
 # Optional env files used by server deploy scripts
 EnvironmentFile=-/etc/noctis-pro/noctis-pro.env
 EnvironmentFile=-/etc/noctispro/noctispro.env
@@ -17,6 +20,22 @@ WorkingDirectory=/
 ExecStart=/usr/bin/env bash -lc 'APP_DIR="${APP_DIR:-/opt/noctispro}"; cd "${APP_DIR}"; exec "${APP_DIR}/venv/bin/daphne" -b 127.0.0.1 -p 8000 noctis_pro.asgi:application'
 Restart=always
 RestartSec=5
+
+# --- systemd hardening (baseline) ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+LockPersonality=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target

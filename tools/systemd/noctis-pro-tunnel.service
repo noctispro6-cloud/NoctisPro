@@ -5,6 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=noctispro
+Group=noctispro
 Environment=APP_DIR=/opt/noctispro
 # Avoid relying on newer systemd specifiers for env expansion here; we will `cd`
 # inside the shell commands so this unit works across more distros.
@@ -23,9 +25,8 @@ EnvironmentFile=-/etc/noctispro/noctispro.env
 Environment=NGROK_CONFIG=/etc/noctis-pro/ngrok.yml
 Environment=NGROK_BIN=/usr/local/bin/ngrok
 
-# If NGROK_AUTHTOKEN is set (in /etc/noctis-pro/noctis-pro.env), ensure the ngrok
-# config exists. This keeps the token out of git while making setup one-step.
-ExecStartPre=/usr/bin/env bash -lc 'CFG="$${NGROK_CONFIG:-/etc/noctis-pro/ngrok.yml}"; if [[ ! -f "$${CFG}" ]]; then if [[ -z "$${NGROK_AUTHTOKEN:-}" ]]; then echo "ERROR: $${CFG} missing and NGROK_AUTHTOKEN not set. Put NGROK_AUTHTOKEN in /etc/noctis-pro/noctis-pro.env or create $${CFG}." >&2; exit 1; fi; install -d -m 0755 "$$(dirname "$${CFG}")" || exit 1; umask 077; { echo "version: 2"; echo "authtoken: $${NGROK_AUTHTOKEN}"; echo "tunnels:"; echo "  noctis-web:"; echo "    proto: http"; echo "    addr: 8000"; echo "    schemes:"; echo "      - https"; if [[ -n "$${NGROK_DOMAIN:-}" ]]; then echo "    domain: $${NGROK_DOMAIN}"; fi; } > "$${CFG}" || exit 1; chmod 600 "$${CFG}" || exit 1; fi'
+# Require a pre-created ngrok config file (deploy.sh writes it with safe perms).
+ExecStartPre=/usr/bin/env bash -lc 'CFG="$${NGROK_CONFIG:-/etc/noctis-pro/ngrok.yml}"; if [[ ! -f "$${CFG}" ]]; then echo "ERROR: Missing $${CFG}. Create it (or re-run deploy.sh in ngrok mode)." >&2; exit 1; fi'
 
 # Persist tunnel URL so Django can auto-detect it (see noctis_pro/settings.py)
 ExecStartPre=/usr/bin/env bash -lc 'cd "$${APP_DIR:-/opt/noctispro}" 2>/dev/null || exit 0; if [[ -n "$${NGROK_DOMAIN:-}" ]]; then printf "%s" "https://$${NGROK_DOMAIN}" > ".tunnel-url" 2>/dev/null || true; fi; exit 0'
@@ -38,6 +39,22 @@ ExecStart=/usr/bin/env bash -lc 'BIN="$${NGROK_BIN:-/usr/local/bin/ngrok}"; if [
 ExecStartPost=/usr/bin/env bash -lc 'cd "$${APP_DIR:-/opt/noctispro}" 2>/dev/null || exit 0; if [[ -z "$${NGROK_DOMAIN:-}" ]]; then if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then exit 0; fi; for _ in $$(seq 1 60); do URL="$$(curl -fsS http://127.0.0.1:4040/api/tunnels 2>/dev/null | python3 - <<'"'"'PY'"'"'\nimport json,sys\ntry:\n    data=json.load(sys.stdin)\nexcept Exception:\n    sys.exit(0)\nfor t in data.get(\"tunnels\", []) or []:\n    u=(t.get(\"public_url\") or \"\").strip()\n    if u.startswith(\"https://\"):\n        print(u)\n        break\nPY\n)"; if [[ -n "$${URL}" ]]; then printf "%s" "$${URL}" > ".tunnel-url" 2>/dev/null || true; break; fi; sleep 0.5; done; fi; exit 0'
 Restart=always
 RestartSec=5
+
+# --- systemd hardening (baseline) ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+LockPersonality=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target

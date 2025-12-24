@@ -23,6 +23,12 @@ FRESH=0
 DB_MODE="sqlite"
 SKIP_ADMIN=0
 
+# Security baseline: enabled by default. SSH hardening is opt-in to avoid lockout.
+HARDEN=1
+HARDEN_SSH=0
+SSH_ALLOW_CIDRS=""
+DICOM_ALLOW_CIDRS=""
+
 NGROK_AUTHTOKEN="${NGROK_AUTHTOKEN:-}"
 NGROK_DOMAIN="${NGROK_DOMAIN:-}"
 
@@ -41,6 +47,10 @@ Optional:
   --skip-admin             Skip auto-creating/promoting admin user (useful for DB migration)
   --fresh                 Wipe existing /opt/noctispro and /etc/noctis-pro first
   --app-dir /opt/noctispro Override install dir (must match systemd units if you change them)
+  --no-harden              Skip server baseline hardening (not recommended)
+  --ssh-allow-cidrs "A,B"  Restrict SSH (22/tcp) to CIDRs (comma-separated)
+  --dicom-allow-cidrs "A,B" Restrict DICOM (11112/tcp) to CIDRs (comma-separated)
+  --harden-ssh             Apply SSH daemon hardening (opt-in; can lock you out if misused)
 
 Notes:
 - Domain mode requires DNS A/AAAA records already pointing at this server.
@@ -96,6 +106,7 @@ install_os_packages() {
     python3 python3-venv python3-pip \
     build-essential pkg-config \
     ufw psmisc \
+    fail2ban unattended-upgrades apt-listchanges \
     libpq-dev \
     libjpeg-dev zlib1g-dev \
     libopenjp2-7 \
@@ -110,13 +121,131 @@ install_os_packages() {
   fi
 }
 
+create_service_user() {
+  # Run the app as an unprivileged user to reduce blast radius.
+  if ! id -u noctispro >/dev/null 2>&1; then
+    info "Creating system user 'noctispro'..."
+    useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin --user-group noctispro
+  fi
+}
+
+configure_sysctl_hardening() {
+  [[ "$HARDEN" == "1" ]] || return 0
+  info "Applying sysctl hardening..."
+  cat > /etc/sysctl.d/99-noctis-pro-hardening.conf <<'EOF'
+# Noctis Pro - baseline kernel/network hardening
+kernel.kptr_restrict = 2
+kernel.dmesg_restrict = 1
+fs.protected_hardlinks = 1
+fs.protected_symlinks = 1
+
+net.ipv4.tcp_syncookies = 1
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+EOF
+  sysctl --system >/dev/null 2>&1 || true
+}
+
+configure_unattended_upgrades() {
+  [[ "$HARDEN" == "1" ]] || return 0
+  info "Enabling unattended security upgrades..."
+  cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
+  systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
+}
+
+configure_fail2ban() {
+  [[ "$HARDEN" == "1" ]] || return 0
+  info "Configuring fail2ban (SSHD + basic nginx scan protection)..."
+
+  cat > /etc/fail2ban/jail.d/noctis-pro.conf <<'EOF'
+[DEFAULT]
+bantime  = 1h
+findtime = 10m
+maxretry = 5
+
+[sshd]
+enabled = true
+port = ssh
+logpath = %(sshd_log)s
+
+[nginx-botsearch]
+enabled = true
+logpath = /var/log/nginx/access.log
+EOF
+
+  systemctl enable --now fail2ban >/dev/null 2>&1 || true
+}
+
+maybe_harden_ssh() {
+  [[ "$HARDEN" == "1" ]] || return 0
+  [[ "$HARDEN_SSH" == "1" ]] || return 0
+  info "Applying SSH daemon hardening (opt-in)..."
+
+  local f="/etc/ssh/sshd_config.d/99-noctis-pro-hardening.conf"
+  cat > "$f" <<'EOF'
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+MaxAuthTries 4
+ClientAliveInterval 300
+ClientAliveCountMax 2
+EOF
+
+  systemctl reload ssh >/dev/null 2>&1 || systemctl restart ssh || true
+}
+
+apply_security_baseline() {
+  [[ "$HARDEN" == "1" ]] || return 0
+  configure_sysctl_hardening
+  configure_unattended_upgrades
+  configure_fail2ban
+  # SSH hardening is opt-in to avoid lockouts (especially when using VNC as fallback).
+  maybe_harden_ssh
+}
+
 configure_firewall() {
   info "Configuring firewall (UFW)..."
   ufw --force reset
   ufw default deny incoming
   ufw default allow outgoing
-  ufw allow 22/tcp
-  ufw allow 11112/tcp
+
+  # Keep SSH reachable by default (user requested no lockout).
+  # Optional: restrict to CIDRs via --ssh-allow-cidrs.
+  if [[ -n "$SSH_ALLOW_CIDRS" ]]; then
+    IFS=',' read -r -a _ssh_cidrs <<< "$SSH_ALLOW_CIDRS"
+    for c in "${_ssh_cidrs[@]}"; do
+      c="$(echo "$c" | xargs)"
+      [[ -n "$c" ]] || continue
+      ufw allow from "$c" to any port 22 proto tcp
+    done
+  else
+    ufw allow OpenSSH
+  fi
+
+  # DICOM: optionally restrict to CIDRs, otherwise open (current behavior).
+  if [[ -n "$DICOM_ALLOW_CIDRS" ]]; then
+    IFS=',' read -r -a _dicom_cidrs <<< "$DICOM_ALLOW_CIDRS"
+    for c in "${_dicom_cidrs[@]}"; do
+      c="$(echo "$c" | xargs)"
+      [[ -n "$c" ]] || continue
+      ufw allow from "$c" to any port 11112 proto tcp
+    done
+  else
+    ufw allow 11112/tcp
+  fi
   if [[ "$MODE" == "domain" ]]; then
     ufw allow 80/tcp
     ufw allow 443/tcp
@@ -179,6 +308,10 @@ sync_app_code() {
     --exclude 'logs' \
     --exclude '.tunnel-url' \
     "$src/" "$APP_DIR/"
+
+  # Ensure runtime user owns the tree (services run as `noctispro`).
+  chown -R noctispro:noctispro "$APP_DIR" || true
+  install -d -m 0750 -o noctispro -g noctispro "${APP_DIR}/logs"
 }
 
 setup_venv_and_deps() {
@@ -191,11 +324,14 @@ setup_venv_and_deps() {
     req="${APP_DIR}/requirements.optimized.txt"
   fi
   "${APP_DIR}/venv/bin/pip" install --no-cache-dir -r "$req"
+
+  # Make the environment writable for runtime bytecode caches, etc.
+  chown -R noctispro:noctispro "${APP_DIR}/venv" || true
 }
 
 write_env_file() {
-  mkdir -p "$ENV_DIR"
-  chmod 755 "$ENV_DIR"
+  # Keep secrets readable by the service user, but not world-readable.
+  install -d -m 0750 -o root -g noctispro "$ENV_DIR"
 
   local secret
   secret="$(read_env_kv SECRET_KEY "$ENV_FILE")"
@@ -210,8 +346,7 @@ write_env_file() {
   if [[ -z "$data_dir" ]]; then
     data_dir="/var/lib/noctis-pro"
   fi
-  mkdir -p "${data_dir}/media"
-  chmod 755 "${data_dir}" "${data_dir}/media" || true
+  install -d -m 0750 -o noctispro -g noctispro "${data_dir}" "${data_dir}/media"
 
   local domain_hosts_csv csrf_csv
   domain_hosts_csv="${DOMAIN}"
@@ -270,7 +405,32 @@ EOF
     fi
   fi
 
-  chmod 600 "$ENV_FILE"
+  chown root:noctispro "$ENV_FILE"
+  chmod 0640 "$ENV_FILE"
+}
+
+write_ngrok_config() {
+  [[ "$MODE" == "ngrok" ]] || return 0
+  info "Writing ngrok config (kept out of git)..."
+
+  local cfg="/etc/noctis-pro/ngrok.yml"
+  install -d -m 0750 -o root -g noctispro /etc/noctis-pro
+  umask 077
+  cat > "$cfg" <<EOF
+version: 2
+authtoken: ${NGROK_AUTHTOKEN}
+tunnels:
+  noctis-web:
+    proto: http
+    addr: 8000
+    schemes:
+      - https
+EOF
+  if [[ -n "$NGROK_DOMAIN" ]]; then
+    echo "    domain: ${NGROK_DOMAIN}" >> "$cfg"
+  fi
+  chown root:noctispro "$cfg"
+  chmod 0640 "$cfg"
 }
 
 ensure_postgres() {
@@ -508,6 +668,27 @@ configure_nginx_for_domain() {
   local site_avail="/etc/nginx/sites-available/noctis-pro"
   local site_enabled="/etc/nginx/sites-enabled/noctis-pro"
 
+  # http-level hardening (nginx.conf includes conf.d/*.conf by default on Ubuntu)
+  cat > /etc/nginx/conf.d/noctis-pro-security.conf <<'EOF'
+server_tokens off;
+
+# Basic DoS/scan mitigation
+limit_req_zone $binary_remote_addr zone=noctis_ratelimit:10m rate=10r/s;
+limit_conn_zone $binary_remote_addr zone=noctis_connlimit:10m;
+
+client_header_timeout 15s;
+client_body_timeout 60s;
+send_timeout 60s;
+keepalive_timeout 65s;
+EOF
+
+  install -d -m 0755 /etc/nginx/snippets
+  cat > /etc/nginx/snippets/noctis-pro-security-headers.conf <<'EOF'
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+EOF
+
   cat > "$site_avail" <<EOF
 server {
     listen 80;
@@ -517,10 +698,21 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:8000;
+        include /etc/nginx/snippets/noctis-pro-security-headers.conf;
+        limit_req zone=noctis_ratelimit burst=30 nodelay;
+        limit_conn noctis_connlimit 30;
+
+        proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location ~ /\.(?!well-known) {
+        deny all;
     }
 }
 EOF
@@ -593,6 +785,10 @@ while [[ $# -gt 0 ]]; do
     --db) DB_MODE="${2:-}"; shift 2 ;;
     --skip-admin) SKIP_ADMIN=1; shift ;;
     --fresh) FRESH=1; shift ;;
+    --no-harden) HARDEN=0; shift ;;
+    --harden-ssh) HARDEN_SSH=1; shift ;;
+    --ssh-allow-cidrs) SSH_ALLOW_CIDRS="${2:-}"; shift 2 ;;
+    --dicom-allow-cidrs) DICOM_ALLOW_CIDRS="${2:-}"; shift 2 ;;
     --ngrok-token|--ngrok-authtoken) NGROK_AUTHTOKEN="${2:-}"; shift 2 ;;
     --ngrok-domain) NGROK_DOMAIN="${2:-}"; shift 2 ;;
     --app-dir) APP_DIR="${2:-}"; shift 2 ;;
@@ -638,11 +834,14 @@ fi
 
 # ---------------------- execution ----------------------
 install_os_packages
+create_service_user
+apply_security_baseline
 fresh_wipe
 configure_firewall
 sync_app_code
 setup_venv_and_deps
 write_env_file
+write_ngrok_config
 ensure_postgres
 migrate_and_collectstatic
 ensure_admin_user

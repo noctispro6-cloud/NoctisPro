@@ -1944,6 +1944,10 @@
                 if (mprState && mprState.renderMeta) {
                     mprState.renderMeta = { axial: null, sagittal: null, coronal: null };
                 }
+                // Also clear base meta so new series can't inherit stale fit-to-pane geometry.
+                if (mprState && mprState.baseMeta) {
+                    mprState.baseMeta = { axial: null, sagittal: null, coronal: null };
+                }
                 if (mprState && mprState.lastImage) {
                     mprState.lastImage = { axial: null, sagittal: null, coronal: null };
                 }
@@ -3686,7 +3690,12 @@
                 throw new Error(`MPR canvas has zero size (${viewType})`);
             }
 
+            // Ensure canvas is actually paintable/visible.
+            canvas.style.display = 'block';
             const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                throw new Error(`Unable to acquire 2D context for MPR canvas (${viewType})`);
+            }
             const img = new Image();
             // Backend normally returns a data URL (data:image/png;base64,...).
             // Guard older/alternate payloads that return raw base64 only.
@@ -3702,6 +3711,9 @@
 
             const w = img.naturalWidth || img.width;
             const h = img.naturalHeight || img.height;
+            if (!w || !h) {
+                throw new Error(`MPR image decoded with invalid dimensions (${viewType}): ${w}x${h}`);
+            }
 
             // Fit-to-canvas (allow upscaling so MPR fills the pane on large screens).
             const scaleFit = Math.min(canvas.width / w, canvas.height / h);
@@ -3712,14 +3724,39 @@
             const dy = Math.round((canvas.height - dh) / 2);
 
             // Store mapping meta so MPR HU/ROI can convert canvas coords -> slice pixel coords.
-            if (mprState && mprState.renderMeta && (viewType === 'axial' || viewType === 'sagittal' || viewType === 'coronal')) {
+            if (mprState && (viewType === 'axial' || viewType === 'sagittal' || viewType === 'coronal')) {
+                // Ensure required sub-objects exist (defensive: avoids "blank canvases" if state was clobbered).
+                if (!mprState.baseMeta) mprState.baseMeta = { axial: null, sagittal: null, coronal: null };
+                if (!mprState.renderMeta) mprState.renderMeta = { axial: null, sagittal: null, coronal: null };
+                if (!mprState.lastImage) mprState.lastImage = { axial: null, sagittal: null, coronal: null };
+
                 // baseMeta is the fit-to-pane rect (prior to user pan/zoom); redrawMPRPlane applies transforms.
                 mprState.baseMeta[viewType] = { w, h, dx, dy, dw, dh };
                 mprState.lastImage[viewType] = img;
             }
 
-            // Draw base + overlays (ROI + crosshair) in a single pass.
-            redrawMPRPlane(viewType);
+            // Always draw *something* to the canvas, even if overlay code errors.
+            // This prevents the "all MPR canvases are blank" failure mode.
+            try {
+                // Draw base + overlays (ROI + crosshair) in a single pass.
+                redrawMPRPlane(viewType);
+            } catch (e) {
+                try {
+                    // Fallback: direct draw without overlays.
+                    if (mprState && mprState.renderMeta && (viewType === 'axial' || viewType === 'sagittal' || viewType === 'coronal')) {
+                        mprState.renderMeta[viewType] = { w, h, dx, dy, dw, dh };
+                    }
+                    ctx.setTransform(1, 0, 0, 1, 0, 0);
+                    ctx.globalAlpha = 1;
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.imageSmoothingEnabled = true;
+                    try { ctx.imageSmoothingQuality = 'high'; } catch (err) {}
+                    ctx.drawImage(img, dx, dy, dw, dh);
+                } catch (e2) {
+                    throw e; // surface the original error
+                }
+            }
         }
 
         function redrawAllMPRPlanes() {

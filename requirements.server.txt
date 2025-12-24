@@ -25,6 +25,9 @@ dj-database-url
 
 # DICOM
 pydicom
+pylibjpeg
+pylibjpeg-libjpeg
+pylibjpeg-openjpeg
 pynetdicom
 highdicom
 

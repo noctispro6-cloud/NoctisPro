@@ -3149,7 +3149,9 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
     # Gather slice positions first (lightweight), then stream pixel data in sorted order.
     # This avoids holding all slices in memory twice (list-of-arrays + stacked volume),
     # which can stall/hang on large series.
-    slices = []  # (pos_along_normal, dicom_path)
+    # Keep thumbnail path as an emergency fallback if pixel data cannot be decoded
+    # (e.g., missing JPEG2000/JPEG-LS handlers in pydicom runtime).
+    slices = []  # (pos_along_normal, dicom_path, thumb_path_or_None)
     first_ps = (1.0, 1.0)
     st = None
     normal = None
@@ -3205,7 +3207,15 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
                 except Exception:
                     first_ps = (1.0, 1.0)
 
-            slices.append((d, dicom_path))
+            thumb_path = None
+            try:
+                # ImageField may be unset or missing on disk; treat as best-effort.
+                if getattr(img, 'thumbnail', None) and getattr(img.thumbnail, 'name', None):
+                    thumb_path = getattr(img.thumbnail, 'path', None)
+            except Exception:
+                thumb_path = None
+
+            slices.append((d, dicom_path, thumb_path))
         except Exception:
             continue
 
@@ -3270,7 +3280,9 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
 
     # Stream pixel data in sorted order with striding downsample.
     out_i = 0
-    for _d, dicom_path in slices[::z_step]:
+    decode_failures = 0
+    thumb_fallback_used = 0
+    for _d, dicom_path, thumb_path in slices[::z_step]:
         try:
             ds = _pydicom.dcmread(dicom_path, stop_before_pixels=False)
             try:
@@ -3285,11 +3297,31 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
                         px = px[0]
                     arr = px.astype(_np.float32)
                 except Exception:
-                    continue
+                    # Last-resort fallback: use pre-generated thumbnail (not HU-correct, but displays).
+                    # This prevents "blank MPR" when the server lacks pixel decoders (JPEG2000/JPEG-LS).
+                    try:
+                        if thumb_path:
+                            from PIL import Image as _PILImage
+                            im = _PILImage.open(thumb_path).convert('L')
+                            if (im.size[0] != dx) or (im.size[1] != dy):
+                                im = im.resize((int(dx), int(dy)))
+                            arr = _np.asarray(im, dtype=_np.float32)
+                            thumb_fallback_used += 1
+                        else:
+                            decode_failures += 1
+                            continue
+                    except Exception:
+                        decode_failures += 1
+                        continue
 
             slope = float(getattr(ds, 'RescaleSlope', 1.0) or 1.0)
             intercept = float(getattr(ds, 'RescaleIntercept', 0.0) or 0.0)
-            arr = arr * slope + intercept
+            # If we used a thumbnail fallback, the data is already display-space (0..255),
+            # not calibrated modality units (HU). Avoid applying slope/intercept in that case.
+            if thumb_fallback_used > 0 and arr.dtype == _np.float32 and (arr.max() <= 255.0 and arr.min() >= 0.0):
+                pass
+            else:
+                arr = arr * slope + intercept
 
             if y_step > 1 or x_step > 1:
                 arr = arr[::y_step, ::x_step]
@@ -3306,7 +3338,12 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
 
     # If we couldn't decode enough slices, fail fast (prevents "blank" MPR views).
     if out_i < 2:
-        raise ValueError('Could not decode enough images for MPR')
+        raise ValueError(
+            'Could not decode enough images for MPR. '
+            'This often happens with compressed DICOM (e.g., JPEG2000/JPEG-LS) when the server '
+            'is missing pixel decoders. Install pydicom pixel handlers (pylibjpeg + pylibjpeg-openjpeg) '
+            'or SimpleITK, then retry.'
+        )
     # If some slices failed to decode, trim unused tail so counts match what we can render.
     if out_i != dz:
         volume = volume[:out_i, :, :].copy()

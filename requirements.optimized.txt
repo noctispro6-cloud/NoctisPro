@@ -28,6 +28,9 @@ requests
 
 # DICOM processing
 pydicom
+pylibjpeg
+pylibjpeg-libjpeg
+pylibjpeg-openjpeg
 pynetdicom
 highdicom
 numpy

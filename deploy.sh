@@ -20,8 +20,6 @@ MODE=""
 DOMAIN=""
 EMAIL=""
 FRESH=0
-DB_MODE="sqlite"
-SKIP_ADMIN=0
 
 NGROK_AUTHTOKEN="${NGROK_AUTHTOKEN:-}"
 NGROK_DOMAIN="${NGROK_DOMAIN:-}"
@@ -37,8 +35,6 @@ Usage (run from repo root after clone):
   sudo ./deploy.sh --mode ngrok --ngrok-token "YOUR_TOKEN" [--ngrok-domain reserved.ngrok.app]
 
 Optional:
-  --db sqlite|postgres     Database backend for production (default: sqlite)
-  --skip-admin             Skip auto-creating/promoting admin user (useful for DB migration)
   --fresh                 Wipe existing /opt/noctispro and /etc/noctis-pro first
   --app-dir /opt/noctispro Override install dir (must match systemd units if you change them)
 
@@ -46,10 +42,6 @@ Notes:
 - Domain mode requires DNS A/AAAA records already pointing at this server.
 - Ngrok mode requires an ngrok authtoken. If you omit --ngrok-domain, ngrok will assign
   a random public URL; the tunnel service will persist it to /opt/noctispro/.tunnel-url.
-
-Database persistence:
-- Postgres mode stores patient data outside the code directory and survives redeploys.
-- Never run: docker compose down -v (not used here) or rm -rf /var/lib/postgresql (would delete DB).
 EOF
 }
 
@@ -100,10 +92,6 @@ install_os_packages() {
     libjpeg-dev zlib1g-dev \
     libopenjp2-7 \
     libmagic1
-
-  if [[ "$DB_MODE" == "postgres" ]]; then
-    apt-get install -y postgresql postgresql-contrib
-  fi
 
   if [[ "$MODE" == "domain" ]]; then
     apt-get install -y nginx certbot python3-certbot-nginx
@@ -173,11 +161,6 @@ sync_app_code() {
     --exclude '.venv' \
     --exclude 'venv' \
     --exclude '*.pyc' \
-    --exclude 'db.sqlite3' \
-    --exclude 'media' \
-    --exclude 'staticfiles' \
-    --exclude 'logs' \
-    --exclude '.tunnel-url' \
     "$src/" "$APP_DIR/"
 }
 
@@ -203,24 +186,14 @@ write_env_file() {
     secret="$(gen_secret_key)"
   fi
 
-  # Persistent data location (uploads/DICOM) must NOT live inside APP_DIR
-  # because sync_app_code uses rsync --delete.
-  local data_dir
-  data_dir="$(read_env_kv NOCTIS_DATA_DIR "$ENV_FILE")"
-  if [[ -z "$data_dir" ]]; then
-    data_dir="/var/lib/noctis-pro"
-  fi
-  mkdir -p "${data_dir}/media"
-  chmod 755 "${data_dir}" "${data_dir}/media" || true
-
   local domain_hosts_csv csrf_csv
   domain_hosts_csv="${DOMAIN}"
   csrf_csv="https://${DOMAIN}"
 
   # Add www.<domain> automatically if it resolves (domain mode only)
   if [[ "$MODE" == "domain" ]] && getent ahosts "www.${DOMAIN}" >/dev/null 2>&1; then
-    domain_hosts_csv+=",www.${DOMAIN}"
-    csrf_csv+=",https://www.${DOMAIN}"
+    domain_hosts_csv+="",www.${DOMAIN}"
+    csrf_csv+="",https://www.${DOMAIN}"
   fi
 
   info "Writing ${ENV_FILE}..."
@@ -240,11 +213,7 @@ CSRF_TRUSTED_ORIGINS=${csrf_csv}
 # Serve media/static via Django (app already has views for this)
 SERVE_MEDIA_FILES=True
 
-# Persist uploads/DICOM outside the code directory so redeploys never delete patient data.
-NOCTIS_DATA_DIR=${data_dir}
-MEDIA_ROOT=${data_dir}/media
-
-# Database
+# SQLite default (works out-of-the-box). Override with DB_* for Postgres.
 DB_ENGINE=django.db.backends.sqlite3
 DB_NAME=${APP_DIR}/db.sqlite3
 
@@ -273,79 +242,6 @@ EOF
   chmod 600 "$ENV_FILE"
 }
 
-ensure_postgres() {
-  [[ "$DB_MODE" == "postgres" ]] || return 0
-  info "Configuring PostgreSQL (persistent across redeploys)..."
-
-  systemctl enable --now postgresql
-
-  local db_name db_user db_pass
-  db_name="$(read_env_kv DB_NAME "$ENV_FILE")"
-  db_user="$(read_env_kv DB_USER "$ENV_FILE")"
-  db_pass="$(read_env_kv DB_PASSWORD "$ENV_FILE")"
-
-  if [[ -z "$db_name" || "$db_name" == "${APP_DIR}/db.sqlite3" ]]; then
-    db_name="noctispro"
-  fi
-  if [[ -z "$db_user" ]]; then
-    db_user="noctispro"
-  fi
-  if [[ -z "$db_pass" ]]; then
-    db_pass="$(python3 - <<'PY'
-import secrets
-print(secrets.token_urlsafe(24))
-PY
-)"
-  fi
-
-  # Create role/db idempotently
-  sudo -u postgres psql -v ON_ERROR_STOP=1 <<SQL
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${db_user}') THEN
-    CREATE ROLE ${db_user} LOGIN PASSWORD '${db_pass}';
-  END IF;
-END
-\$\$;
-SQL
-
-  sudo -u postgres psql -v ON_ERROR_STOP=1 <<SQL
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${db_name}') THEN
-    CREATE DATABASE ${db_name} OWNER ${db_user};
-  END IF;
-END
-\$\$;
-SQL
-
-  # Update env file to use Postgres (keep existing SECRET_KEY/etc)
-  info "Updating env to use Postgres..."
-  umask 077
-  local tmp
-  tmp="$(mktemp)"
-  cp "$ENV_FILE" "$tmp"
-  sed -i \
-    -e 's/^DB_ENGINE=.*/DB_ENGINE=django.db.backends.postgresql/' \
-    -e "s|^DB_NAME=.*|DB_NAME=${db_name}|" \
-    -e "s|^DB_USER=.*|DB_USER=${db_user}|" \
-    -e "s|^DB_PASSWORD=.*|DB_PASSWORD=${db_pass}|" \
-    -e 's|^DB_HOST=.*|DB_HOST=127.0.0.1|' \
-    -e 's|^DB_PORT=.*|DB_PORT=5432|' \
-    "$tmp"
-
-  # Ensure keys exist even if they weren't present previously
-  grep -q '^DB_ENGINE=' "$tmp" || echo 'DB_ENGINE=django.db.backends.postgresql' >> "$tmp"
-  grep -q '^DB_NAME=' "$tmp" || echo "DB_NAME=${db_name}" >> "$tmp"
-  grep -q '^DB_USER=' "$tmp" || echo "DB_USER=${db_user}" >> "$tmp"
-  grep -q '^DB_PASSWORD=' "$tmp" || echo "DB_PASSWORD=${db_pass}" >> "$tmp"
-  grep -q '^DB_HOST=' "$tmp" || echo 'DB_HOST=127.0.0.1' >> "$tmp"
-  grep -q '^DB_PORT=' "$tmp" || echo 'DB_PORT=5432' >> "$tmp"
-
-  mv "$tmp" "$ENV_FILE"
-  chmod 600 "$ENV_FILE"
-}
-
 django_manage() {
   ( set +u
     # shellcheck disable=SC1090
@@ -363,10 +259,6 @@ migrate_and_collectstatic() {
 }
 
 ensure_admin_user() {
-  if [[ "$SKIP_ADMIN" == "1" ]]; then
-    info "Skipping admin creation (--skip-admin)."
-    return 0
-  fi
   info "Ensuring an admin login exists..."
 
   local pw
@@ -590,8 +482,6 @@ while [[ $# -gt 0 ]]; do
     --mode) MODE="${2:-}"; shift 2 ;;
     --domain) DOMAIN="${2:-}"; shift 2 ;;
     --email) EMAIL="${2:-}"; shift 2 ;;
-    --db) DB_MODE="${2:-}"; shift 2 ;;
-    --skip-admin) SKIP_ADMIN=1; shift ;;
     --fresh) FRESH=1; shift ;;
     --ngrok-token|--ngrok-authtoken) NGROK_AUTHTOKEN="${2:-}"; shift 2 ;;
     --ngrok-domain) NGROK_DOMAIN="${2:-}"; shift 2 ;;
@@ -605,12 +495,6 @@ MODE="$(normalize_host "$MODE")"
 
 if [[ "$MODE" != "domain" && "$MODE" != "ngrok" ]]; then
   err "--mode must be 'domain' or 'ngrok'"
-  usage
-  exit 2
-fi
-
-if [[ "$DB_MODE" != "sqlite" && "$DB_MODE" != "postgres" ]]; then
-  err "--db must be 'sqlite' or 'postgres'"
   usage
   exit 2
 fi
@@ -643,7 +527,6 @@ configure_firewall
 sync_app_code
 setup_venv_and_deps
 write_env_file
-ensure_postgres
 migrate_and_collectstatic
 ensure_admin_user
 install_systemd_units

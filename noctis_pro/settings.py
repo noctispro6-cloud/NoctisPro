@@ -314,11 +314,8 @@ mimetypes.add_type('text/css', '.css')
 mimetypes.add_type('application/json', '.json')
 
 # Media files (uploads)
-#
-# IMPORTANT (production): keep uploads outside the code directory so redeploys
-# never delete patient/DICOM data. Override via MEDIA_ROOT env var.
-MEDIA_URL = os.environ.get('MEDIA_URL', '/media/')
-MEDIA_ROOT = os.environ.get('MEDIA_ROOT', os.path.join(BASE_DIR, 'media'))
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # DICOM files storage
 DICOM_ROOT = os.path.join(MEDIA_ROOT, 'dicom')

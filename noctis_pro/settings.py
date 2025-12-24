@@ -336,6 +336,14 @@ REST_FRAMEWORK = {
     ],
 }
 
+# Local web port (used for docker-compose host publishing).
+# When running behind a reverse proxy, this may differ, but having it here
+# avoids CSRF/CORS breakage when operators change WEB_PORT to avoid conflicts.
+try:
+    WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))
+except Exception:
+    WEB_PORT = 8000
+
 # CORS settings for ngrok and deployment
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -345,6 +353,23 @@ CORS_ALLOWED_ORIGINS = [
     "https://localhost:8000",
     "https://127.0.0.1:8000",
 ]
+
+# Allow overriding/adding CORS origins via env (comma-separated).
+_cors_allowed_origins_env = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+if _cors_allowed_origins_env.strip():
+    CORS_ALLOWED_ORIGINS.extend(
+        [o.strip() for o in _cors_allowed_origins_env.split(",") if o.strip()]
+    )
+
+# Ensure the configured local web port is permitted (common when WEB_PORT != 8000).
+for _origin in (
+    f"http://localhost:{WEB_PORT}",
+    f"http://127.0.0.1:{WEB_PORT}",
+    f"https://localhost:{WEB_PORT}",
+    f"https://127.0.0.1:{WEB_PORT}",
+):
+    if _origin not in CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS.append(_origin)
 
 # Add configured domain(s) to CORS
 if DOMAIN_HOSTS:
@@ -396,6 +421,23 @@ CSRF_TRUSTED_ORIGINS = [
     "http://*.loca.lt",
     "http://*.duckdns.org",
 ]
+
+# Allow overriding/adding CSRF trusted origins via env (comma-separated).
+_csrf_trusted_origins_env = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+if _csrf_trusted_origins_env.strip():
+    CSRF_TRUSTED_ORIGINS.extend(
+        [o.strip() for o in _csrf_trusted_origins_env.split(",") if o.strip()]
+    )
+
+# Ensure the configured local web port is trusted (common when WEB_PORT != 8000).
+for _origin in (
+    f"http://localhost:{WEB_PORT}",
+    f"http://127.0.0.1:{WEB_PORT}",
+    f"https://localhost:{WEB_PORT}",
+    f"https://127.0.0.1:{WEB_PORT}",
+):
+    if _origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(_origin)
 
 # Add configured domain(s) to CSRF trusted origins
 if DOMAIN_HOSTS:

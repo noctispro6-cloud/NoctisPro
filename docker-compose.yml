@@ -39,7 +39,9 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      # Host port is configurable to avoid conflicts with other services.
+      # Set WEB_PORT in .env.docker (defaults to 8000).
+      - "${WEB_PORT:-8000}:8000"
     volumes:
       - noctis_media:/data/media
       - noctis_static:/data/staticfiles

@@ -3347,18 +3347,28 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
             volume = ndimage.zoom(volume, (factor, 1, 1), order=1)
             st = st / factor
 
-    # Resample along Z to approximate isotropic voxels using in-plane pixel spacing average
-    # Keep in-plane resolution; only resample depth for quality MPR
+    # Resample along Z to approximate isotropic voxels using in-plane pixel spacing average.
+    # Keep in-plane resolution; only resample depth for quality MPR.
+    #
+    # IMPORTANT: Always enforce the same memory budget after any resampling.
+    # Large series are first downsampled by striding to fit `_MAX_MPR_VOLUME_BYTES`,
+    # but a later Z-upsample (to approximate isotropic voxels) can otherwise expand the
+    # volume back into multi-GB territory and stall/hang the request (blank MPR in UI).
     try:
         py, px = float(first_ps[0]), float(first_ps[1])
         target_xy = (py + px) / 2.0
         if st and target_xy and st > 0 and target_xy > 0:
             z_factor = max(1e-6, float(st) / float(target_xy))
             # If z_factor > 1, we need to upsample Z to match XY spacing
-            # Cap the target depth to avoid memory blow-ups
-            max_depth = 2048
-            target_depth = int(min(max_depth, round(volume.shape[0] * z_factor)))
-            if target_depth > volume.shape[0] + 1 or z_factor > 1.05:
+            # Cap the target depth to avoid memory blow-ups. The cap MUST consider the
+            # in-memory size of the full (z,y,x) volume, not just an arbitrary max depth.
+            itemsize = _np.dtype(_np.float32).itemsize
+            yz = int(volume.shape[1]) * int(volume.shape[2])
+            max_depth_by_budget = int(max(2, (_MAX_MPR_VOLUME_BYTES // max(1, (yz * itemsize)))))
+            target_depth = int(round(volume.shape[0] * z_factor))
+            target_depth = int(min(target_depth, max_depth_by_budget))
+
+            if target_depth > volume.shape[0] + 1 and z_factor > 1.05:
                 # Prefer higher-order interpolation for sharper MPR reformats
                 try:
                     volume = ndimage.zoom(volume, (float(target_depth) / volume.shape[0], 1, 1), order=3, prefilter=True)

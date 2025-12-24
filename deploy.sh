@@ -21,6 +21,7 @@ DOMAIN=""
 EMAIL=""
 FRESH=0
 DB_MODE="sqlite"
+SKIP_ADMIN=0
 
 NGROK_AUTHTOKEN="${NGROK_AUTHTOKEN:-}"
 NGROK_DOMAIN="${NGROK_DOMAIN:-}"
@@ -37,6 +38,7 @@ Usage (run from repo root after clone):
 
 Optional:
   --db sqlite|postgres     Database backend for production (default: sqlite)
+  --skip-admin             Skip auto-creating/promoting admin user (useful for DB migration)
   --fresh                 Wipe existing /opt/noctispro and /etc/noctis-pro first
   --app-dir /opt/noctispro Override install dir (must match systemd units if you change them)
 
@@ -217,8 +219,8 @@ write_env_file() {
 
   # Add www.<domain> automatically if it resolves (domain mode only)
   if [[ "$MODE" == "domain" ]] && getent ahosts "www.${DOMAIN}" >/dev/null 2>&1; then
-    domain_hosts_csv+="",www.${DOMAIN}"
-    csrf_csv+="",https://www.${DOMAIN}"
+    domain_hosts_csv+=",www.${DOMAIN}"
+    csrf_csv+=",https://www.${DOMAIN}"
   fi
 
   info "Writing ${ENV_FILE}..."
@@ -320,6 +322,7 @@ SQL
   # Update env file to use Postgres (keep existing SECRET_KEY/etc)
   info "Updating env to use Postgres..."
   umask 077
+  local tmp
   tmp="$(mktemp)"
   cp "$ENV_FILE" "$tmp"
   sed -i \
@@ -360,6 +363,10 @@ migrate_and_collectstatic() {
 }
 
 ensure_admin_user() {
+  if [[ "$SKIP_ADMIN" == "1" ]]; then
+    info "Skipping admin creation (--skip-admin)."
+    return 0
+  fi
   info "Ensuring an admin login exists..."
 
   local pw
@@ -584,6 +591,7 @@ while [[ $# -gt 0 ]]; do
     --domain) DOMAIN="${2:-}"; shift 2 ;;
     --email) EMAIL="${2:-}"; shift 2 ;;
     --db) DB_MODE="${2:-}"; shift 2 ;;
+    --skip-admin) SKIP_ADMIN=1; shift ;;
     --fresh) FRESH=1; shift ;;
     --ngrok-token|--ngrok-authtoken) NGROK_AUTHTOKEN="${2:-}"; shift 2 ;;
     --ngrok-domain) NGROK_DOMAIN="${2:-}"; shift 2 ;;

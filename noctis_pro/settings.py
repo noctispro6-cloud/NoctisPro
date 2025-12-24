@@ -298,9 +298,10 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
-
+#
+# Allow deployments (systemd/docker) to persist static/media outside the code directory.
 STATIC_URL = os.environ.get('STATIC_URL', '/static/')
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATIC_ROOT = os.environ.get('STATIC_ROOT', os.path.join(BASE_DIR, 'staticfiles'))
 _extra_static_dir = os.path.join(BASE_DIR, 'static')
 os.makedirs(_extra_static_dir, exist_ok=True)
 STATICFILES_DIRS = [_extra_static_dir]
@@ -315,7 +316,7 @@ mimetypes.add_type('application/json', '.json')
 
 # Media files (uploads)
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_ROOT = os.environ.get('MEDIA_ROOT', os.path.join(BASE_DIR, 'media'))
 
 # DICOM files storage
 DICOM_ROOT = os.path.join(MEDIA_ROOT, 'dicom')

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.git/
+.venv/
+venv/
+staticfiles/
+media/
+logs/
+.tunnel-url
+*.log

@@ -71,16 +71,17 @@ services:
       - web
     environment:
       NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
-    entrypoint: ["bash", "-lc"]
+      NGROK_DOMAIN: ${NGROK_DOMAIN:-}
+    entrypoint: ["sh", "-lc"]
     command: >
-      if [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
+      if [ -z "$${NGROK_AUTHTOKEN:-}" ]; then
         echo "ERROR: NGROK_AUTHTOKEN is required (set it in .env.docker)" >&2;
         exit 2;
       fi;
-      if [[ -n "${NGROK_DOMAIN:-}" ]]; then
+      if [ -n "$${NGROK_DOMAIN:-}" ]; then
         # Accept either a bare hostname (reserved.ngrok.app) or a pasted URL (https://reserved.ngrok.app).
-        domain="${NGROK_DOMAIN#http://}"; domain="${domain#https://}"; domain="${domain%%/*}"; domain="${domain%.}";
-        exec ngrok http web:8000 --domain="${domain}";
+        domain="$${NGROK_DOMAIN#http://}"; domain="$${domain#https://}"; domain="$${domain%%/*}"; domain="$${domain%.}";
+        exec ngrok http web:8000 --domain="$${domain}";
       else
         exec ngrok http web:8000;
       fi

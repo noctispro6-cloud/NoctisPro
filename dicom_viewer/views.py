@@ -15,7 +15,7 @@ import numpy as np
 import pydicom
 from io import BytesIO
 # import cv2  # Optional for advanced image processing
-from PIL import Image
+from PIL import Image, ImageFilter
 from django.utils import timezone
 import uuid
 
@@ -24,7 +24,7 @@ from django.core.paginator import Paginator
 from django.db.models import Q, Count
 from django.conf import settings
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageFilter
 import base64
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 import scipy.ndimage as ndimage
@@ -98,7 +98,26 @@ _MAX_MPR_IMG_CACHE = 800
 _MAX_MPR_VOLUME_BYTES = 256 * 1024 * 1024  # 256MB
 
 def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted):
-    return f"{series_id}|{plane}|{int(slice_index)}|{int(round(float(ww)))}|{int(round(float(wl)))}|{1 if inverted else 0}"
+    """
+    Build a stable cache key for an encoded MPR slice.
+
+    Some call sites (or malformed requests) may provide None/NaN/empty strings for WW/WL.
+    Never let that crash the request path (users otherwise see: "must be real number, not NoneType").
+    """
+    def _safe_round_int(v, fallback):
+        try:
+            if v is None:
+                return int(round(float(fallback)))
+            f = float(v)
+            if not np.isfinite(f):
+                return int(round(float(fallback)))
+            return int(round(f))
+        except Exception:
+            return int(round(float(fallback)))
+
+    ww_i = _safe_round_int(ww, 400.0)
+    wl_i = _safe_round_int(wl, 40.0)
+    return f"{series_id}|{plane}|{int(slice_index)}|{ww_i}|{wl_i}|{1 if inverted else 0}"
 
 def _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted):
     key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted)
@@ -156,7 +175,8 @@ def _get_encoded_mpr_slice(series_id, volume, plane, slice_index, ww, wl, invert
         # Display convention: superior at top, so flip the z axis for display.
         slice_array = np.flipud(volume[:, slice_index, :])
     
-    img_b64 = _array_to_base64_image(slice_array, ww, wl, inverted)
+    # MPR benefits from mild sharpening to counteract scaling softness.
+    img_b64 = _array_to_base64_image(slice_array, ww, wl, inverted, sharpen=True)
     if img_b64:
         _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64)
     else:
@@ -749,7 +769,9 @@ def api_bone_reconstruction(request, series_id):
     
     try:
         # Parameters
-        threshold = int(request.GET.get('threshold', 300))
+        # NOTE: despite the historical name "bone reconstruction", this endpoint effectively generates an
+        # isosurface of all voxels >= threshold. Using a lower threshold can bring back soft tissue/skin.
+        threshold = int(float(request.GET.get('threshold', 300)))
         want_mesh = (request.GET.get('mesh','false').lower() == 'true')
         quality = (request.GET.get('quality','').lower())
         
@@ -786,35 +808,63 @@ def api_bone_reconstruction(request, series_id):
             volume = ndimage.zoom(volume, (factor, 1, 1), order=3, prefilter=True)
             logger.info(f"Bone enhanced interpolation: {volume.shape[0]} slices (factor: {factor:.2f})")
         
-        # Threshold to bone
-        bone_mask = volume >= threshold
-        bone_volume = volume * bone_mask
+        # Threshold mask for isosurface extraction
+        iso_mask = (volume >= float(threshold))
         
         # Windowing defaults for bone
         window_width = float(request.GET.get('window_width', 2000))
         window_level = float(request.GET.get('window_level', 300))
         inverted = request.GET.get('inverted', 'false').lower() == 'true'
+
+        # For previews, push voxels below threshold to the window minimum so they render as background.
+        try:
+            bg = float(window_level) - float(window_width) / 2.0
+        except Exception:
+            bg = -700.0
+        preview_volume = volume.copy()
+        preview_volume[~iso_mask] = bg
         
         # 3-plane orthogonal previews
         bone_views = {}
-        axial_idx = bone_volume.shape[0] // 2
-        sag_idx = bone_volume.shape[2] // 2
-        cor_idx = bone_volume.shape[1] // 2
-        bone_views['axial'] = _array_to_base64_image(bone_volume[axial_idx], window_width, window_level, inverted)
+        axial_idx = preview_volume.shape[0] // 2
+        sag_idx = preview_volume.shape[2] // 2
+        cor_idx = preview_volume.shape[1] // 2
+        bone_views['axial'] = _array_to_base64_image(preview_volume[axial_idx], window_width, window_level, inverted)
         # Match MPR display convention: superior at top (flip Z vertically)
-        bone_views['sagittal'] = _array_to_base64_image(np.flipud(bone_volume[:, :, sag_idx]), window_width, window_level, inverted)
-        bone_views['coronal'] = _array_to_base64_image(np.flipud(bone_volume[:, cor_idx, :]), window_width, window_level, inverted)
+        bone_views['sagittal'] = _array_to_base64_image(np.flipud(preview_volume[:, :, sag_idx]), window_width, window_level, inverted)
+        bone_views['coronal'] = _array_to_base64_image(np.flipud(preview_volume[:, cor_idx, :]), window_width, window_level, inverted)
         
         mesh_payload = None
         if want_mesh:
             try:
                 from skimage import measure as _measure
-                if quality == 'high':
-                    vol_for_mesh = (bone_volume > 0).astype(np.float32)
-                else:
-                    ds_factor = max(1, int(np.ceil(max(1, bone_volume.shape[0]) / 128)))
-                    vol_for_mesh = (bone_volume[::ds_factor, ::2, ::2] > 0).astype(np.float32)
-                verts, faces, normals, values = _measure.marching_cubes(vol_for_mesh, level=0.5)
+                vol_for_mesh = iso_mask.astype(np.float32)
+
+                # Adaptive downsampling: keep the mesh responsive to rotate/pan/zoom while staying detailed.
+                # - "high": target ~192 voxels on the longest axis, step_size=1
+                # - otherwise: target ~128 voxels on the longest axis, step_size=2
+                target = 192 if quality == 'high' else 128
+                step_size = 1 if quality == 'high' else 2
+
+                z, y, x = vol_for_mesh.shape
+                max_dim = max(z, y, x, 1)
+                ds = max(1, int(np.ceil(max_dim / float(target))))
+                # Downsample more aggressively in-plane to keep triangle counts reasonable.
+                dsz = ds
+                dsy = max(1, ds)
+                dsx = max(1, ds)
+
+                vol_ds = vol_for_mesh[::dsz, ::dsy, ::dsx]
+                verts, faces, normals, values = _measure.marching_cubes(vol_ds, level=0.5, step_size=step_size)
+
+                # Re-scale verts back to the (downsampled) voxel space.
+                # Frontend only needs a consistent shape; absolute mm scaling is not currently applied.
+                try:
+                    verts[:, 0] *= float(dsz)
+                    verts[:, 1] *= float(dsy)
+                    verts[:, 2] *= float(dsx)
+                except Exception:
+                    pass
                 mesh_payload = {
                     'vertices': verts.tolist(),
                     'faces': faces.tolist(),
@@ -824,11 +874,11 @@ def api_bone_reconstruction(request, series_id):
         
         return JsonResponse({
             'bone_views': bone_views,
-            'volume_shape': tuple(int(x) for x in bone_volume.shape),
+            'volume_shape': tuple(int(x) for x in preview_volume.shape),
             'counts': {
-                'axial': int(bone_volume.shape[0]),
-                'sagittal': int(bone_volume.shape[2]),
-                'coronal': int(bone_volume.shape[1]),
+                'axial': int(preview_volume.shape[0]),
+                'sagittal': int(preview_volume.shape[2]),
+                'coronal': int(preview_volume.shape[1]),
             },
             'series_info': {
                 'id': series.id,
@@ -956,8 +1006,12 @@ def api_study_progress(request, study_id):
         'last_updated': study.last_updated.isoformat()
     })
 
-def _array_to_base64_image(array, window_width=None, window_level=None, inverted=False):
-    """Convert numpy array to base64 encoded image with proper windowing"""
+def _array_to_base64_image(array, window_width=None, window_level=None, inverted=False, sharpen=False):
+    """Convert numpy array to base64 encoded image with proper windowing.
+
+    `sharpen=True` applies a mild unsharp mask after windowing to improve perceived crispness
+    (useful for MPR reformats where browser scaling can look soft).
+    """
     try:
         # Validate input
         if array is None or array.size == 0:
@@ -1014,6 +1068,14 @@ def _array_to_base64_image(array, window_width=None, window_level=None, inverted
         
         # Convert to PIL Image
         img = Image.fromarray(normalized, mode='L')
+
+        # Optional post-processing: mild sharpening for perceived clarity.
+        if sharpen:
+            try:
+                # Conservative defaults: enhance edges without creating halos.
+                img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=140, threshold=3))
+            except Exception:
+                pass
         
         # Convert to base64
         buffer = BytesIO()

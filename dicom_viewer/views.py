@@ -15,7 +15,7 @@ import numpy as np
 import pydicom
 from io import BytesIO
 # import cv2  # Optional for advanced image processing
-from PIL import Image
+from PIL import Image, ImageFilter
 from django.utils import timezone
 import uuid
 
@@ -24,7 +24,7 @@ from django.core.paginator import Paginator
 from django.db.models import Q, Count
 from django.conf import settings
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageFilter
 import base64
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 import scipy.ndimage as ndimage
@@ -175,7 +175,8 @@ def _get_encoded_mpr_slice(series_id, volume, plane, slice_index, ww, wl, invert
         # Display convention: superior at top, so flip the z axis for display.
         slice_array = np.flipud(volume[:, slice_index, :])
     
-    img_b64 = _array_to_base64_image(slice_array, ww, wl, inverted)
+    # MPR benefits from mild sharpening to counteract scaling softness.
+    img_b64 = _array_to_base64_image(slice_array, ww, wl, inverted, sharpen=True)
     if img_b64:
         _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64)
     else:
@@ -1005,8 +1006,12 @@ def api_study_progress(request, study_id):
         'last_updated': study.last_updated.isoformat()
     })
 
-def _array_to_base64_image(array, window_width=None, window_level=None, inverted=False):
-    """Convert numpy array to base64 encoded image with proper windowing"""
+def _array_to_base64_image(array, window_width=None, window_level=None, inverted=False, sharpen=False):
+    """Convert numpy array to base64 encoded image with proper windowing.
+
+    `sharpen=True` applies a mild unsharp mask after windowing to improve perceived crispness
+    (useful for MPR reformats where browser scaling can look soft).
+    """
     try:
         # Validate input
         if array is None or array.size == 0:
@@ -1063,6 +1068,14 @@ def _array_to_base64_image(array, window_width=None, window_level=None, inverted
         
         # Convert to PIL Image
         img = Image.fromarray(normalized, mode='L')
+
+        # Optional post-processing: mild sharpening for perceived clarity.
+        if sharpen:
+            try:
+                # Conservative defaults: enhance edges without creating halos.
+                img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=140, threshold=3))
+            except Exception:
+                pass
         
         # Convert to base64
         buffer = BytesIO()

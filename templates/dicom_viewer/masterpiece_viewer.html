@@ -666,6 +666,38 @@
             font-weight: bold;
         }
 
+        /* Series quick navigation (helps MPR workflow) */
+        .series-nav {
+            display: flex;
+            gap: 8px;
+            margin: 10px 0 12px 0;
+        }
+        .series-nav .series-nav-btn {
+            flex: 1;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(0, 0, 0, 0.25);
+            color: var(--text-primary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .series-nav .series-nav-btn:hover {
+            background: rgba(0, 212, 255, 0.12);
+            border-color: rgba(0, 212, 255, 0.35);
+            transform: translateY(-1px);
+        }
+        .series-nav .series-nav-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         /* Responsive Design */
         @media (max-width: 768px) {
             .viewer-container {
@@ -905,6 +937,16 @@
                     <i class="fas fa-list"></i>
                     Series
                 </div>
+                <div class="series-nav">
+                    <button class="series-nav-btn" id="prevSeriesBtn" type="button" title="Previous series ([)">
+                        <i class="fas fa-chevron-left"></i>
+                        Prev
+                    </button>
+                    <button class="series-nav-btn" id="nextSeriesBtn" type="button" title="Next series (])">
+                        Next
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
                 <div class="series-list" id="seriesList">
                     <div class="series-item">
                         <div class="series-title">No series loaded</div>
@@ -1086,6 +1128,7 @@
         // Global Variables
         let currentStudy = null;
         let currentSeries = null;
+        let studySeriesList = [];
         let currentImageIndex = 0;
         let imageData = [];
         let activeTool = 'windowing';
@@ -1122,6 +1165,8 @@
         
         // ROI tool (ellipse) - live draft while dragging
         let roiDraft = null;
+        // MPR ROI: capture mouseup/move on window so ROI works even if cursor leaves small panes.
+        let _mprRoiCapture = null; // { plane, onMove, onUp }
         
         // Bone 3D renderer (Three.js)
         let bone3D = {
@@ -1552,6 +1597,10 @@
                 });
             });
 
+            // Series navigation (useful during MPR)
+            document.getElementById('prevSeriesBtn')?.addEventListener('click', () => { prevSeries().catch(() => {}); });
+            document.getElementById('nextSeriesBtn')?.addEventListener('click', () => { nextSeries().catch(() => {}); });
+
             // Canvas mouse events
             canvas.addEventListener('mousedown', handleMouseDown);
             canvas.addEventListener('mousemove', handleMouseMove);
@@ -1601,7 +1650,7 @@
             // Handle specific tools
             switch(tool) {
                 case 'reset':
-                    resetView();
+                    resetAllDefaults();
                     break;
                 case 'invert':
                     inverted = !inverted;
@@ -1823,6 +1872,13 @@
         function displaySeriesList(series) {
             const container = document.getElementById('seriesList');
             container.innerHTML = '';
+            studySeriesList = Array.isArray(series) ? series.slice() : [];
+
+            const prevBtn = document.getElementById('prevSeriesBtn');
+            const nextBtn = document.getElementById('nextSeriesBtn');
+            const hasList = studySeriesList.length > 0;
+            if (prevBtn) prevBtn.disabled = !hasList;
+            if (nextBtn) nextBtn.disabled = !hasList;
             
             series.forEach((s, index) => {
                 const item = document.createElement('div');
@@ -1844,9 +1900,40 @@
             });
         }
 
+        function _setActiveSeriesListItem(seriesId) {
+            try {
+                const id = Number(seriesId);
+                const items = Array.from(document.querySelectorAll('#seriesList .series-item'));
+                items.forEach((el) => el.classList.remove('active'));
+                const idx = (studySeriesList || []).findIndex((s) => Number(s && s.id) === id);
+                if (idx >= 0 && items[idx]) items[idx].classList.add('active');
+            } catch (e) {}
+        }
+
+        function _abortMPRRequestsAndTimers() {
+            try {
+                Object.keys(_mprPlaneAbort || {}).forEach((p) => {
+                    try { _mprPlaneAbort[p]?.abort?.(); } catch (e) {}
+                });
+            } catch (e) {}
+            try { _mprHUAbort?.abort?.(); } catch (e) {}
+            try { if (_mprHUTimer) { clearTimeout(_mprHUTimer); _mprHUTimer = null; } } catch (e) {}
+            try { if (_mprSyncTimer) { clearTimeout(_mprSyncTimer); _mprSyncTimer = null; } } catch (e) {}
+            try { if (_mprRefreshTimer) { clearTimeout(_mprRefreshTimer); _mprRefreshTimer = null; } } catch (e) {}
+        }
+
         async function loadSeries(seriesId) {
             try {
                 showLoading(true);
+                // Switching series during MPR should not leave stale requests running.
+                _abortMPRRequestsAndTimers();
+                roiDraft = null;
+                if (mprState && mprState.renderMeta) {
+                    mprState.renderMeta = { axial: null, sagittal: null, coronal: null };
+                }
+                if (mprState && mprState.lastImage) {
+                    mprState.lastImage = { axial: null, sagittal: null, coronal: null };
+                }
                 const response = await fetch(`/dicom-viewer/series/${seriesId}/images/`);
                 const data = await response.json();
                 
@@ -1855,11 +1942,19 @@
                 currentImageIndex = 0;
                 
                 // Update UI
+                _setActiveSeriesListItem(seriesId);
                 document.getElementById('sliceSlider').max = imageData.length - 1;
                 document.getElementById('totalSlices').textContent = imageData.length;
                 
                 updateImageInfo(currentSeries);
                 await loadCurrentImage();
+
+                // If already in MPR mode, refresh MPR views for the new series automatically.
+                if (viewMode === 'mpr') {
+                    try { resizeCanvas(); } catch (e) {}
+                    await generateMPRViews({ refreshBone: false, quiet: true, preserveSlices: false });
+                    try { generateBoneReconstruction(); } catch (e) {}
+                }
                 
                 showLoading(false);
                 showToast(`Loaded ${imageData.length} images`, 'success');
@@ -1867,6 +1962,26 @@
                 console.error('Error loading series:', error);
                 showToast('Failed to load series', 'error');
                 showLoading(false);
+            }
+        }
+
+        async function nextSeries() {
+            if (!Array.isArray(studySeriesList) || studySeriesList.length === 0) return;
+            if (!currentSeries || currentSeries.id == null) return;
+            const idx = studySeriesList.findIndex((s) => Number(s && s.id) === Number(currentSeries.id));
+            const next = idx >= 0 ? studySeriesList[Math.min(studySeriesList.length - 1, idx + 1)] : studySeriesList[0];
+            if (next && next.id != null && Number(next.id) !== Number(currentSeries.id)) {
+                await loadSeries(next.id);
+            }
+        }
+
+        async function prevSeries() {
+            if (!Array.isArray(studySeriesList) || studySeriesList.length === 0) return;
+            if (!currentSeries || currentSeries.id == null) return;
+            const idx = studySeriesList.findIndex((s) => Number(s && s.id) === Number(currentSeries.id));
+            const prev = idx >= 0 ? studySeriesList[Math.max(0, idx - 1)] : studySeriesList[0];
+            if (prev && prev.id != null && Number(prev.id) !== Number(currentSeries.id)) {
+                await loadSeries(prev.id);
             }
         }
 
@@ -2439,6 +2554,18 @@
 
         function handleKeyDown(event) {
             switch(event.key) {
+                case '[':
+                    if (viewMode === 'mpr') {
+                        event.preventDefault();
+                        prevSeries().catch(() => {});
+                    }
+                    break;
+                case ']':
+                    if (viewMode === 'mpr') {
+                        event.preventDefault();
+                        nextSeries().catch(() => {});
+                    }
+                    break;
                 case 'ArrowUp':
                 case 'ArrowLeft':
                     changeSlice(currentImageIndex - 1);
@@ -2448,7 +2575,7 @@
                     changeSlice(currentImageIndex + 1);
                     break;
                 case 'r':
-                    resetView();
+                    resetAllDefaults();
                     break;
                 case 'i':
                     inverted = !inverted;
@@ -2472,6 +2599,11 @@
                     hideContextMenu();
                     currentMeasurement = null;
                     roiDraft = null;
+                    if (_mprRoiCapture) {
+                        try { window.removeEventListener('mousemove', _mprRoiCapture.onMove); } catch (e) {}
+                        try { window.removeEventListener('mouseup', _mprRoiCapture.onUp); } catch (e) {}
+                        _mprRoiCapture = null;
+                    }
                     if (viewMode === 'single') redrawCurrentImage();
                     break;
             }
@@ -2570,6 +2702,97 @@
             updateZoomSlider();
             redrawCurrentImage();
             showToast('View reset', 'success');
+        }
+
+        function resetAllDefaults() {
+            // Stop any continuous modes / in-flight interactions
+            try { stopCine(); } catch (e) {}
+            cineMode = false;
+
+            // Abort MPR timers/requests to avoid stale updates after reset
+            try { _abortMPRRequestsAndTimers(); } catch (e) {}
+
+            // Cancel ROI/measurement drafts
+            currentMeasurement = null;
+            roiDraft = null;
+            if (_mprRoiCapture) {
+                try { window.removeEventListener('mousemove', _mprRoiCapture.onMove); } catch (e) {}
+                try { window.removeEventListener('mouseup', _mprRoiCapture.onUp); } catch (e) {}
+                _mprRoiCapture = null;
+            }
+
+            // Clear overlays + lists
+            measurements = [];
+            annotations = [];
+            try { updateMeasurementsList(); } catch (e) {}
+
+            // Reset primary tools/state toggles
+            activeTool = 'windowing';
+            inverted = false;
+            crosshair = false;
+            crosshairImagePx = null;
+
+            // Reset basic view transform
+            zoom = 1.0;
+            panX = 0;
+            panY = 0;
+            rotation = 0;
+            flipH = false;
+            flipV = false;
+
+            // Reset window/level to app defaults
+            windowWidth = 400;
+            windowLevel = 40;
+            currentImageStats = null;
+            try { updateSliders(); } catch (e) {}
+            try { updateZoomSlider(); } catch (e) {}
+
+            // Reset MPR state to defaults and return to single-view default layout
+            mprCrosshairVoxel = null;
+            mprCrosshairSync = true;
+            if (mprState) {
+                mprState.counts = { axial: 0, sagittal: 0, coronal: 0 };
+                mprState.index = { axial: 0, sagittal: 0, coronal: 0 };
+                mprState.activePlane = 'axial';
+                mprState.maximizedPlane = null;
+                mprState.renderMeta = { axial: null, sagittal: null, coronal: null };
+                mprState.lastImage = { axial: null, sagittal: null, coronal: null };
+            }
+            try { setMPRMaximizedPlane(null); } catch (e) {}
+            try { setActiveMPRPlane('axial'); } catch (e) {}
+
+            // Reset 3D defaults
+            boneThreshold = 200;
+            boneOpacity = 0.8;
+            smoothSurface = true;
+            autoRotate = false;
+            try { stopBoneAnimationLoop(); } catch (e) {}
+            try { reset3DView(); } catch (e) {}
+            // Sync UI widgets if present
+            try {
+                const t = document.getElementById('boneThresholdSlider');
+                if (t) t.value = String(boneThreshold);
+                const o = document.getElementById('boneOpacitySlider');
+                if (o) o.value = String(boneOpacity);
+                const tv = document.getElementById('boneThresholdValue');
+                if (tv) tv.textContent = String(boneThreshold);
+                const ov = document.getElementById('boneOpacityValue');
+                if (ov) ov.textContent = String(boneOpacity);
+            } catch (e) {}
+
+            // Return to default single view UI (do not change the loaded series/slice)
+            const singleView = document.getElementById('singleView');
+            const mprView = document.getElementById('mprView');
+            const controls3D = document.getElementById('controls3D');
+            if (singleView) singleView.style.display = 'block';
+            if (mprView) mprView.classList.remove('active');
+            if (controls3D) controls3D.style.display = 'none';
+            viewMode = 'single';
+
+            // Re-render
+            try { redrawCurrentImage(); } catch (e) {}
+            refreshToolButtonStates(activeTool);
+            showToast('Reset to defaults', 'success');
         }
 
         function redrawCurrentImage() {
@@ -3448,7 +3671,9 @@
             const w = img.naturalWidth || img.width;
             const h = img.naturalHeight || img.height;
 
-            const scale = Math.min(canvas.width / w, canvas.height / h);
+            // Fit-to-canvas without upscaling (prevents “zoomed-in” look on large/high-DPI screens).
+            const scaleFit = Math.min(canvas.width / w, canvas.height / h);
+            const scale = Math.min(1, scaleFit);
             const dw = Math.round(w * scale);
             const dh = Math.round(h * scale);
             const dx = Math.round((canvas.width - dw) / 2);
@@ -3481,7 +3706,9 @@
             ctx.clearRect(0, 0, c.width, c.height);
             // Render MPR with high-quality interpolation for better perceived clarity.
             // (The backend already resamples along Z; this improves browser-side scaling quality.)
-            ctx.imageSmoothingEnabled = true;
+            // Only smooth when downscaling; for 1:1 (or larger) keep crisp edges.
+            const s = Math.min(dw / Math.max(1, w), dh / Math.max(1, h));
+            ctx.imageSmoothingEnabled = s < 1;
             try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
             ctx.drawImage(img, dx, dy, dw, dh);
 
@@ -3849,6 +4076,32 @@
                 if (!p) return;
                 roiDraft = { mode: 'mpr', plane, start: { x: p.x, y: p.y }, end: { x: p.x, y: p.y } };
                 redrawMPRPlane(plane);
+
+                // Capture mousemove/mouseup on window so ROI finalizes even if user releases outside pane.
+                if (_mprRoiCapture) {
+                    try { window.removeEventListener('mousemove', _mprRoiCapture.onMove); } catch (e) {}
+                    try { window.removeEventListener('mouseup', _mprRoiCapture.onUp); } catch (e) {}
+                    _mprRoiCapture = null;
+                }
+                const onMove = (ev) => {
+                    if (!(roiDraft && roiDraft.mode === 'mpr' && roiDraft.plane === plane)) return;
+                    const cc = mprCanvases[plane];
+                    if (!cc) return;
+                    const pt = _canvasClientToCanvasPx(cc, ev.clientX, ev.clientY);
+                    const pp = _mprCanvasToSlicePx(plane, pt.x, pt.y);
+                    if (!pp) return;
+                    roiDraft.end = { x: pp.x, y: pp.y };
+                    redrawMPRPlane(plane);
+                };
+                const onUp = async () => {
+                    try { await handleMPRMouseUp({}, plane); } catch (e) {}
+                    try { window.removeEventListener('mousemove', onMove); } catch (e) {}
+                    try { window.removeEventListener('mouseup', onUp); } catch (e) {}
+                    _mprRoiCapture = null;
+                };
+                _mprRoiCapture = { plane, onMove, onUp };
+                window.addEventListener('mousemove', onMove, { passive: true });
+                window.addEventListener('mouseup', onUp, { passive: true });
             }
         }
 
@@ -3983,7 +4236,9 @@
             const w = img.naturalWidth || img.width;
             const h = img.naturalHeight || img.height;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const scale = Math.min(canvas.width / w, canvas.height / h);
+            // Avoid upscaling 2D fallbacks (prevents “zoomed” look on large panes).
+            const scaleFit = Math.min(canvas.width / w, canvas.height / h);
+            const scale = Math.min(1, scaleFit);
             const dw = Math.round(w * scale);
             const dh = Math.round(h * scale);
             const dx = Math.round((canvas.width - dw) / 2);
@@ -4005,8 +4260,11 @@
                 powerPreference: 'high-performance',
                 preserveDrawingBuffer: true, // enables clean screenshots/exports
             });
-            // Higher pixel ratio improves edge clarity (cap to keep it responsive).
-            bone3D.renderer.setPixelRatio(Math.min(3, window.devicePixelRatio || 1));
+            // IMPORTANT: our canvases are already sized in device pixels (backing store) using DPR.
+            // So Three.js should render at pixelRatio=1, otherwise it double-applies DPR and looks “zoomed”/slow.
+            bone3D.renderer.setPixelRatio(1);
+            bone3D._lastW = 0;
+            bone3D._lastH = 0;
             bone3D.renderer.setSize(c.width || 1, c.height || 1, false);
             try { bone3D.renderer.outputEncoding = THREE.sRGBEncoding; } catch (e) {}
             try { bone3D.renderer.toneMapping = THREE.ACESFilmicToneMapping; } catch (e) {}
@@ -4191,9 +4449,13 @@
             // Keep renderer in sync with canvas size
             const w = c.width || 1;
             const h = c.height || 1;
-            bone3D.renderer.setSize(w, h, false);
-            bone3D.camera.aspect = w / h;
-            bone3D.camera.updateProjectionMatrix();
+            if (bone3D._lastW !== w || bone3D._lastH !== h) {
+                bone3D._lastW = w;
+                bone3D._lastH = h;
+                bone3D.renderer.setSize(w, h, false);
+                bone3D.camera.aspect = w / h;
+                bone3D.camera.updateProjectionMatrix();
+            }
             bone3D.renderer.render(bone3D.scene, bone3D.camera);
         }
 

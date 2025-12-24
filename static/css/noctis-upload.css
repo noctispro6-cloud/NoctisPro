@@ -1,0 +1,312 @@
+/* Noctis Pro - Upload page styling (Worklist + Admin)
+   Professional, uniform, responsive from phones to desktops. */
+
+.upload-page {
+  min-height: 100vh;
+  background: var(--primary-bg);
+}
+
+.upload-shell {
+  padding: clamp(12px, 2.2vw, 24px);
+  display: flex;
+  justify-content: center;
+}
+
+.upload-card {
+  width: min(960px, 100%);
+  background: var(--card-bg, var(--card-surface));
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.upload-card__bar {
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent-color), #00b8d4, var(--success-color));
+}
+
+.upload-card__body {
+  padding: clamp(16px, 2.4vw, 28px);
+}
+
+.upload-header {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.upload-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-color);
+  color: var(--primary-bg);
+  font-size: 22px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+  margin-bottom: 10px;
+}
+
+.upload-title {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  font-size: 18px;
+}
+
+.upload-subtitle {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* Metadata grid */
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin: 16px 0 18px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(64, 64, 64, 0.6);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.meta-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.meta-field--span {
+  grid-column: 1 / -1;
+}
+
+.meta-label {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.meta-input,
+.meta-select,
+.meta-textarea {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.meta-input:focus,
+.meta-select:focus,
+.meta-textarea:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.meta-textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.meta-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.meta-checkbox input[type="checkbox"] {
+  transform: translateY(1px);
+}
+
+/* Drop zone */
+.drop-zone {
+  border: 2px dashed rgba(64, 64, 64, 0.9);
+  border-radius: 14px;
+  padding: clamp(18px, 3vw, 28px);
+  text-align: center;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.02);
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+  user-select: none;
+}
+
+.drop-zone:hover {
+  border-color: var(--accent-color);
+  background: rgba(0, 212, 255, 0.06);
+  transform: translateY(-1px);
+}
+
+.drop-zone.dragover {
+  border-color: var(--accent-color);
+  background: rgba(0, 212, 255, 0.08);
+}
+
+.drop-zone.uploading {
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.drop-zone__icon {
+  font-size: 34px;
+  color: var(--accent-color);
+  margin-bottom: 10px;
+}
+
+.drop-zone__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.drop-zone__hint {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.file-input {
+  display: none;
+}
+
+/* Actions */
+.upload-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+/* Ensure primary action styling even outside Bootstrap */
+.btn-control.primary {
+  background: linear-gradient(135deg, var(--accent-color), #00b8d4) !important;
+  color: var(--primary-bg) !important;
+  border-color: var(--accent-color) !important;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.btn-control.primary:hover {
+  background: linear-gradient(135deg, #33e0ff, var(--accent-color)) !important;
+  color: var(--primary-bg) !important;
+}
+
+/* Stats & info panels */
+.upload-stats,
+.folder-info,
+.series-preview,
+.upload-success {
+  margin-top: 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(64, 64, 64, 0.7);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 14px;
+}
+
+.upload-stats {
+  border-color: rgba(0, 212, 255, 0.8);
+  display: none;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.stat-item {
+  border: 1px solid rgba(64, 64, 64, 0.6);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  padding: 10px;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--accent-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  margin-top: 4px;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.folder-info,
+.series-preview,
+.upload-success {
+  display: none;
+}
+
+.series-preview {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.series-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 6px;
+  border-bottom: 1px solid rgba(64, 64, 64, 0.5);
+}
+.series-item:last-child {
+  border-bottom: 0;
+}
+
+/* Progress */
+.progress-section {
+  margin-top: 16px;
+  display: none;
+}
+
+.progress {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(64, 64, 64, 0.7);
+}
+
+.progress-bar {
+  background: linear-gradient(90deg, var(--accent-color), #00b8d4, var(--success-color)) !important;
+}
+
+/* Notifications (bootstrap alert positioning tweak for small screens) */
+.alert {
+  max-width: min(520px, calc(100vw - 24px));
+}
+
+@media (max-width: 480px) {
+  .meta-grid {
+    padding: 12px;
+  }
+  .upload-title {
+    font-size: 16px;
+  }
+}
+

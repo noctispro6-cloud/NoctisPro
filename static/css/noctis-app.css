@@ -1,0 +1,152 @@
+/* Noctis Pro - Shared responsive UI layer
+   This file intentionally focuses on layout + responsiveness across devices. */
+
+:root {
+  /* Spacing + sizing tokens (mobile-first) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --radius-1: 8px;
+  --radius-2: 12px;
+  --radius-3: 16px;
+
+  /* Typography */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+
+  /* Layout */
+  --page-max: 1200px;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, Arial, sans-serif !important;
+  /* A11y-friendly default that scales across screens */
+  font-size: clamp(12px, 1.6vw, 14px);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Prevent overly small tap targets on touch devices */
+button,
+.btn,
+.btn-control,
+.btn-viewer,
+.admin-btn,
+.nav-tab {
+  min-height: 34px;
+}
+
+/* Links */
+a {
+  color: var(--accent-color);
+  text-decoration: none;
+}
+a:hover {
+  color: #33e0ff;
+  text-decoration: none;
+}
+
+/* Shared page container */
+.page {
+  width: 100%;
+  padding: clamp(12px, 2.2vw, 24px);
+}
+.page--center {
+  display: flex;
+  justify-content: center;
+}
+.page__inner {
+  width: min(var(--page-max), 100%);
+}
+
+/* ---------- Navbar responsiveness ---------- */
+.top-navbar {
+  /* Allow wrap on small screens without breaking layout */
+  flex-wrap: wrap;
+  height: auto;
+  gap: var(--space-2);
+}
+
+.nav-left,
+.nav-right {
+  flex: 1 1 auto;
+  min-width: 0; /* enables overflow scrolling children */
+}
+
+.nav-tabs {
+  /* Many tabs -> allow horizontal scroll on phones */
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+  max-width: 100%;
+}
+
+.nav-tabs::-webkit-scrollbar {
+  height: 6px;
+}
+.nav-tabs::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+}
+
+.nav-right {
+  /* Right controls can also overflow on small screens */
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+.nav-right::-webkit-scrollbar {
+  height: 6px;
+}
+.nav-right::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+}
+
+@media (max-width: 768px) {
+  .top-navbar {
+    padding: 10px 12px;
+  }
+
+  .logo {
+    font-size: 14px !important;
+  }
+
+  .nav-left {
+    gap: 10px !important;
+  }
+
+  .nav-tab {
+    padding: 6px 10px !important;
+    font-size: 10px !important;
+  }
+
+  .btn-control,
+  .admin-btn {
+    padding: 6px 10px !important;
+    font-size: 10px !important;
+  }
+
+  .user-info {
+    font-size: 10px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .user-info > div {
+    display: none; /* keep avatar only on very small screens */
+  }
+}
+

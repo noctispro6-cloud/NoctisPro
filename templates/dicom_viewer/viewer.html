@@ -1308,6 +1308,8 @@
     <script src="{% static 'js/delete-button-fix.js' %}" type="text/javascript"></script>
     <script src="{% static 'js/unified-button-handlers.js' %}" type="text/javascript"></script>
     <script src="{% static 'js/dicom-viewer-enhanced.js' %}" type="text/javascript"></script>
+    <script src="{% static 'js/vendor/three/three.min.js' %}" type="text/javascript"></script>
+    <script src="{% static 'js/masterpiece_3d_reconstruction.js' %}" type="text/javascript"></script>
 
     <script>
         // Global variables - Based on PyQt implementation
@@ -1330,6 +1332,65 @@
         let panY = 0;
         let inverted = false;
         let showCrosshair = false;
+
+        // Auto-initialize WW/WL + invert from the first displayed slice of each series
+        // so MPR and other recon views match the "initial axial" defaults.
+        let windowingInitializedForSeries = false;
+        let windowingLockedByUser = false;
+        let inversionLockedByUser = false;
+
+        // MPR interaction state (zoom/pan + active plane)
+        let activeMprPlane = 'axial';
+        let _mprDrag = { down: false, lastX: 0, lastY: 0 };
+        let _mprRefreshTimer = null;
+        let _mprLastCounts = null;
+        let _bone3dViewerInstance = null;
+
+        function _isMprVisible() {
+            const mprView = document.getElementById('mprView');
+            return !!(mprView && mprView.style.display !== 'none');
+        }
+
+        function _scheduleMprRefresh(reason = 'window') {
+            if (!_isMprVisible()) return;
+            if (_mprRefreshTimer) clearTimeout(_mprRefreshTimer);
+            // Coalesce fast drags into a single regeneration.
+            _mprRefreshTimer = setTimeout(() => {
+                _mprRefreshTimer = null;
+                generateMPR();
+            }, reason === 'window' ? 260 : 180);
+        }
+
+        function _syncWindowingFromPayload(data) {
+            // Prefer explicit windowing from API; fall back to image_info defaults.
+            const ww = Number(data?.windowing?.window_width ?? data?.image_info?.default_window_width);
+            const wl = Number(data?.windowing?.window_level ?? data?.image_info?.default_window_level);
+            const inv = (data?.windowing?.inverted ?? null);
+
+            if (!windowingLockedByUser && isFinite(ww) && isFinite(wl) && ww > 0) {
+                windowWidth = Math.round(ww);
+                windowLevel = Math.round(wl);
+                defaultWindowWidth = windowWidth;
+                defaultWindowLevel = windowLevel;
+
+                const wwSlider = document.getElementById('wwSlider');
+                const wlSlider = document.getElementById('wlSlider');
+                if (wwSlider) wwSlider.value = windowWidth;
+                if (wlSlider) wlSlider.value = windowLevel;
+                const wwValue = document.getElementById('wwValue');
+                const wlValue = document.getElementById('wlValue');
+                if (wwValue) wwValue.textContent = windowWidth;
+                if (wlValue) wlValue.textContent = windowLevel;
+            }
+
+            if (!inversionLockedByUser && typeof inv === 'boolean') {
+                inverted = inv;
+                const tool = document.querySelector('[data-tool="invert"]');
+                if (tool) tool.classList.toggle('active', inverted);
+            }
+
+            windowingInitializedForSeries = true;
+        }
         
         // Tools and interaction
         let activeTool = 'window';
@@ -1603,19 +1664,24 @@
         function updateWindowWidth(value) {
             windowWidth = parseInt(value);
             document.getElementById('wwValue').textContent = windowWidth;
+            windowingLockedByUser = true;
             scheduleImageDisplayUpdate(currentImageIndex, 'window');
+            _scheduleMprRefresh('window');
         }
 
         function updateWindowLevel(value) {
             windowLevel = parseInt(value);
             document.getElementById('wlValue').textContent = windowLevel;
+            windowingLockedByUser = true;
             scheduleImageDisplayUpdate(currentImageIndex, 'window');
+            _scheduleMprRefresh('window');
         }
 
         function applyPreset(preset) {
             if (windowPresets[preset]) {
                 windowWidth = windowPresets[preset].ww;
                 windowLevel = windowPresets[preset].wl;
+                windowingLockedByUser = true;
                 
                 document.getElementById('wwSlider').value = windowWidth;
                 document.getElementById('wlSlider').value = windowLevel;
@@ -1623,6 +1689,7 @@
                 document.getElementById('wlValue').textContent = windowLevel;
                 
                 scheduleImageDisplayUpdate(currentImageIndex, 'window');
+                _scheduleMprRefresh('window');
                 showToast(`Applied ${preset} preset`, 'success');
             }
         }
@@ -1631,6 +1698,7 @@
             const sensitivity = 2;
             windowWidth = Math.max(1, windowWidth + deltaX * sensitivity);
             windowLevel = Math.max(-1000, Math.min(1000, windowLevel + deltaY * sensitivity));
+            windowingLockedByUser = true;
             
             document.getElementById('wwSlider').value = windowWidth;
             document.getElementById('wlSlider').value = windowLevel;
@@ -1639,6 +1707,7 @@
 
             // Window/level drag can fire dozens of events/sec; coalesce to avoid request storms.
             scheduleImageDisplayUpdate(currentImageIndex, 'window');
+            _scheduleMprRefresh('window');
         }
 
         // Zoom Management
@@ -1670,9 +1739,25 @@
         }
 
         function applyTransform() {
+            const tfm = `scale(${zoomFactor}) translate(${panX/zoomFactor}px, ${panY/zoomFactor}px)`;
+
+            // If we're in MPR mode, apply zoom/pan to the active plane image (images are server-rendered).
+            if (_isMprVisible() && (activeMprPlane === 'axial' || activeMprPlane === 'sagittal' || activeMprPlane === 'coronal')) {
+                const imgId = activeMprPlane === 'axial' ? 'mprAxial' : activeMprPlane === 'sagittal' ? 'mprSagittal' : 'mprCoronal';
+                const mprImg = document.getElementById(imgId);
+                if (mprImg) {
+                    mprImg.style.transformOrigin = 'center center';
+                    mprImg.style.willChange = 'transform';
+                    mprImg.style.transform = tfm;
+                }
+                return;
+            }
+
             const dicomImage = document.getElementById('dicomImage');
             if (dicomImage) {
-                dicomImage.style.transform = `scale(${zoomFactor}) translate(${panX/zoomFactor}px, ${panY/zoomFactor}px)`;
+                dicomImage.style.transformOrigin = 'center center';
+                dicomImage.style.willChange = 'transform';
+                dicomImage.style.transform = tfm;
             }
         }
 
@@ -1717,14 +1802,19 @@
             const currentImage = images[idx];
             if (!currentImage) return;
 
-            const cacheKey = _displayCacheKey(currentImage.id);
-            const cached = _displayCacheGet(cacheKey);
+            // For each new series, first slice should establish the default windowing/inversion.
+            // During that one "auto-init" request, bypass cache and omit ww/wl/invert so backend
+            // applies modality-appropriate defaults (CT window presets, MONOCHROME1 auto-invert, etc).
+            const needsAutoInit = !windowingInitializedForSeries;
+            const cacheKey = needsAutoInit ? null : _displayCacheKey(currentImage.id);
+            const cached = cacheKey ? _displayCacheGet(cacheKey) : null;
 
             const dicomImage = document.getElementById('dicomImage');
             const welcomeScreen = document.getElementById('welcomeScreen');
             const singleView = document.getElementById('singleView');
             if (welcomeScreen) welcomeScreen.style.display = 'none';
-            if (singleView) singleView.style.display = 'flex';
+            // Don't force switching out of MPR mode when updating the cached axial image.
+            if (singleView && !_isMprVisible()) singleView.style.display = 'flex';
 
             const _apply = (payload) => {
                 if (!payload || !payload.image_data) return false;
@@ -1766,7 +1856,16 @@
             const loadingDelay = (reason === 'window') ? 220 : 140;
             let loaderTimer = setTimeout(() => showLoading('Processing image...'), loadingDelay);
             try {
-                const url = `/dicom-viewer/api/image/${currentImage.id}/display/?ww=${encodeURIComponent(windowWidth)}&wl=${encodeURIComponent(windowLevel)}&invert=${encodeURIComponent(inverted)}`;
+                const params = new URLSearchParams();
+                if (!needsAutoInit || windowingLockedByUser) {
+                    params.set('ww', String(windowWidth));
+                    params.set('wl', String(windowLevel));
+                }
+                if (!needsAutoInit || inversionLockedByUser) {
+                    params.set('invert', String(!!inverted));
+                }
+                const qs = params.toString();
+                const url = `/dicom-viewer/api/image/${currentImage.id}/display/${qs ? `?${qs}` : ''}`;
                 const response = await fetch(url, {
                     signal: _displayAbortController.signal,
                     credentials: 'same-origin',
@@ -1777,8 +1876,12 @@
                 if (seq !== _displaySeq) return; // stale
 
                 if (data && data.image_data) {
+                    if (needsAutoInit) {
+                        _syncWindowingFromPayload(data);
+                    }
                     const payload = { image_data: data.image_data, image_info: data.image_info };
-                    _displayCacheSet(cacheKey, payload);
+                    const key = _displayCacheKey(currentImage.id);
+                    _displayCacheSet(key, payload);
                     _apply(payload);
                     _scheduleDisplayPrefetchAround(idx);
                 } else {
@@ -1799,6 +1902,8 @@
         }
 
         function _scheduleDisplayPrefetchAround(centerIdx) {
+            // Don't prefetch until WW/WL/invert has been auto-initialized for this series.
+            if (!windowingInitializedForSeries) return;
             if (_prefetchDisplayTimer) clearTimeout(_prefetchDisplayTimer);
             _prefetchDisplayTimer = setTimeout(() => {
                 _prefetchDisplayTimer = null;
@@ -1980,6 +2085,28 @@
                     currentSeries = data.series;
                     images = data.images;
                     currentImageIndex = 0;
+
+                    // Reset per-series auto windowing so "initial axial" and MPR start identical.
+                    windowingInitializedForSeries = false;
+                    windowingLockedByUser = false;
+                    inversionLockedByUser = false;
+
+                    // Reset view transforms when switching series
+                    zoomFactor = 1.0;
+                    panX = 0;
+                    panY = 0;
+                    const zoomSlider = document.getElementById('zoomSlider');
+                    const zoomValue = document.getElementById('zoomValue');
+                    if (zoomSlider) zoomSlider.value = 100;
+                    if (zoomValue) zoomValue.textContent = '100%';
+                    applyTransform();
+
+                    // Ensure we start in single-view (axial) on series change
+                    const mprView = document.getElementById('mprView');
+                    const singleView = document.getElementById('singleView');
+                    if (mprView) mprView.style.display = 'none';
+                    if (singleView) singleView.style.display = 'flex';
+                    activeMprPlane = 'axial';
                     
                     // Update series status
                     document.getElementById('seriesStatus').textContent = 
@@ -2221,7 +2348,9 @@
 
         function toggleInvert() {
             inverted = !inverted;
+            inversionLockedByUser = true;
             scheduleImageDisplayUpdate(currentImageIndex, 'invert');
+            _scheduleMprRefresh('invert');
             
             // Update tool visual state
             const tool = document.querySelector('[data-tool="invert"]');
@@ -2516,6 +2645,27 @@
                 
                 const views = data && (data.mpr_views || data.views || data.mprViews);
                 if (views && (views.axial || views.sagittal || views.coronal)) {
+                    _mprLastCounts = data.counts || _mprLastCounts;
+
+                    // Make MPR axial match the currently displayed axial slice position (as closely as possible).
+                    // The MPR volume may be resampled, so map by relative index.
+                    try {
+                        const counts = data.counts || {};
+                        const axialCount = Number(counts.axial || 0);
+                        const srcCount = Number(images?.length || 0);
+                        if (axialCount > 1 && srcCount > 1) {
+                            const t = Math.max(0, Math.min(1, (Number(currentImageIndex) || 0) / (srcCount - 1)));
+                            const axialSlice = Math.round(t * (axialCount - 1));
+                            const axialResp = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=axial&slice=${axialSlice}&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`);
+                            const axialData = await axialResp.json();
+                            if (axialData && axialData.image) {
+                                views.axial = axialData.image;
+                            }
+                        }
+                    } catch (e) {
+                        // Non-fatal; keep mid-slice.
+                    }
+
                     // Switch to MPR mode and show views
                     document.getElementById('singleView').style.display = 'none';
                     document.getElementById('mprView').style.display = 'grid';
@@ -2532,6 +2682,8 @@
                     
                     // Enable crosshairs for MPR views
                     enableMPRCrosshairs();
+                    setActivePlane('axial');
+                    applyTransform();
                     
                     hideLoading();
                     showToast('MPR views generated successfully', 'success');
@@ -3315,6 +3467,7 @@
 
         // Missing functions that buttons are calling - URGENT FIX
         function setActivePlane(plane) {
+            activeMprPlane = plane;
             // Update active plane visually
             document.querySelectorAll('.mpr-viewport').forEach(vp => {
                 vp.classList.remove('active');
@@ -3328,6 +3481,11 @@
             const planeSelect = document.getElementById('planeSelect');
             if (planeSelect) {
                 planeSelect.value = plane;
+            }
+
+            // Ensure current zoom/pan is applied to the active MPR plane when in MPR mode.
+            if (_isMprVisible()) {
+                applyTransform();
             }
             
             showToast(`Switched to ${plane} plane`, 'info');
@@ -3420,7 +3578,7 @@
             try {
                 showLoading('Generating bone 3D reconstruction...');
                 
-                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/bone/?threshold=200&mesh=true`);
+                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/bone/?threshold=200&mesh=true&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`);
                 const data = await response.json();
                 
                 if (data.bone_views) {
@@ -3501,6 +3659,8 @@
             viewports.forEach(viewport => {
                 const plane = viewport.getAttribute('data-plane');
                 if (plane === '3d') return;
+                if (viewport.hasAttribute('data-mpr-interactions')) return;
+                viewport.setAttribute('data-mpr-interactions', 'true');
                 
                 viewport.addEventListener('mousemove', function(e) {
                     _queueMPRCrosshairUpdate(viewport, plane, e.clientX, e.clientY, false);
@@ -3510,7 +3670,52 @@
                     setActivePlane(plane);
                     _queueMPRCrosshairUpdate(viewport, plane, e.clientX, e.clientY, true);
                 });
+
+                // MPR zoom/pan interactions (server-rendered images, client-side transform)
+                viewport.addEventListener('wheel', function(e) {
+                    e.preventDefault();
+                    setActivePlane(plane);
+                    const zoomDirection = e.deltaY > 0 ? 0.9 : 1.1;
+                    setZoom(zoomFactor * zoomDirection);
+                }, { passive: false });
+
+                viewport.addEventListener('mousedown', function(e) {
+                    // Left button only
+                    if (e.button !== 0) return;
+                    setActivePlane(plane);
+                    _mprDrag.down = true;
+                    _mprDrag.lastX = e.clientX;
+                    _mprDrag.lastY = e.clientY;
+                });
             });
+
+            // One global mouseup to finish MPR drags
+            if (!document.body.hasAttribute('data-mpr-mouseup')) {
+                document.body.setAttribute('data-mpr-mouseup', 'true');
+                document.addEventListener('mouseup', function() {
+                    _mprDrag.down = false;
+                });
+                document.addEventListener('mousemove', function(e) {
+                    if (!_mprDrag.down || !_isMprVisible()) return;
+                    if (!(activeMprPlane === 'axial' || activeMprPlane === 'sagittal' || activeMprPlane === 'coronal')) return;
+                    const dx = e.clientX - _mprDrag.lastX;
+                    const dy = e.clientY - _mprDrag.lastY;
+                    _mprDrag.lastX = e.clientX;
+                    _mprDrag.lastY = e.clientY;
+
+                    // Mirror single-view tool semantics for MPR images.
+                    if (activeTool === 'pan') {
+                        handlePanning(dx, dy);
+                    } else if (activeTool === 'zoom') {
+                        handleZooming(dy);
+                    } else if (activeTool === 'window') {
+                        // Window/level changes require re-rendering from backend; debounce it.
+                        handleWindowing(dx, dy);
+                        // (handleWindowing already schedules refresh; just ensure MPR refresh too)
+                        _scheduleMprRefresh('window');
+                    }
+                });
+            }
         }
 
         function _queueMPRCrosshairUpdate(viewportEl, plane, clientX, clientY, lock) {
@@ -3635,23 +3840,42 @@
                 
                 // Clear existing content
                 viewport.innerHTML = '';
-                
-                // Create 3D visualization placeholder (would integrate with Three.js in production)
-                const meshInfo = document.createElement('div');
-                meshInfo.style.cssText = `
-                    color: var(--accent-color);
-                    text-align: center;
-                    padding: 20px;
-                    font-size: 12px;
-                `;
-                meshInfo.innerHTML = `
-                    <i class="fas fa-cube" style="font-size: 48px; margin-bottom: 16px; display: block;"></i>
-                    <div>3D Mesh Generated</div>
-                    <div>Vertices: ${meshData.vertices ? meshData.vertices.length : 'N/A'}</div>
-                    <div>Faces: ${meshData.faces ? meshData.faces.length : 'N/A'}</div>
-                `;
-                
-                viewport.appendChild(meshInfo);
+
+                // Real 3D renderer (Three.js) with proper rotate/pan/zoom.
+                if (typeof THREE === 'undefined' || typeof window.MasterpieceBoneReconstruction3D === 'undefined') {
+                    const fallback = document.createElement('div');
+                    fallback.style.cssText = `
+                        color: var(--accent-color);
+                        text-align: center;
+                        padding: 20px;
+                        font-size: 12px;
+                    `;
+                    fallback.textContent = '3D renderer not available in this build.';
+                    viewport.appendChild(fallback);
+                    return;
+                }
+
+                // Create canvas for WebGL
+                const canvasId = 'bone3dCanvas';
+                const canvas = document.createElement('canvas');
+                canvas.id = canvasId;
+                canvas.style.cssText = 'width: 100%; height: 100%; display: block; cursor: grab;';
+                viewport.appendChild(canvas);
+
+                // Dispose prior instance (if any)
+                try { _bone3dViewerInstance?.dispose?.(); } catch (e) {}
+                _bone3dViewerInstance = null;
+
+                _bone3dViewerInstance = new window.MasterpieceBoneReconstruction3D(canvasId, {
+                    autoRotate: false,
+                    smoothShading: true,
+                    enableShadows: true,
+                    enableLighting: true
+                });
+
+                // Render mesh
+                Promise.resolve(_bone3dViewerInstance.createBoneMesh(meshData)).catch(() => {});
+                setActivePlane('3d');
                 
             } catch (error) {
                 console.error('Error displaying 3D mesh:', error);

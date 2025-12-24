@@ -587,29 +587,39 @@ document.addEventListener('DOMContentLoaded', function() {
     window.noctisProButtonManager = noctisProButtonManager;
     window.noctisProActions = noctisProActions;
     
-    // Global function aliases for backward compatibility
-    window.launchDicomViewer = () => noctisProActions.launchDicomViewer();
-    window.loadFromDirectory = () => noctisProActions.loadFromDirectory();
-    window.uploadStudies = () => noctisProActions.uploadStudies();
-    window.refreshData = (event) => {
+    // Global function aliases for backward compatibility.
+    // IMPORTANT: Do not override viewer pages that already define these functions
+    // (e.g. the DICOM viewer templates implement their own rendering pipeline).
+    const defineIfMissing = (name, fn) => {
+        try {
+            if (typeof window[name] !== 'function') {
+                window[name] = fn;
+            }
+        } catch (_) { /* ignore */ }
+    };
+
+    defineIfMissing('launchDicomViewer', () => noctisProActions.launchDicomViewer());
+    defineIfMissing('loadFromDirectory', () => noctisProActions.loadFromDirectory());
+    defineIfMissing('uploadStudies', () => noctisProActions.uploadStudies());
+    defineIfMissing('refreshData', (event) => {
         const button = event?.target?.closest('button');
         return noctisProActions.refreshData(button);
-    };
-    window.resetFilters = () => noctisProActions.resetFilters();
-    window.openStudyInViewer = (studyId, event) => {
+    });
+    defineIfMissing('resetFilters', () => noctisProActions.resetFilters());
+    defineIfMissing('openStudyInViewer', (studyId, event) => {
         const button = event?.target?.closest('button, a');
         return noctisProActions.openStudyInViewer(studyId, button);
-    };
-    window.deleteStudy = (studyId, accessionNumber, event) => {
+    });
+    defineIfMissing('deleteStudy', (studyId, accessionNumber, event) => {
         const button = event?.target?.closest('button');
         return noctisProActions.deleteStudy(studyId, accessionNumber, button);
-    };
-    window.openReport = (studyId) => noctisProActions.openReport(studyId);
-    window.printStudy = (studyId) => noctisProActions.printStudy(studyId);
-    window.setTool = (toolName) => noctisProActions.setTool(toolName);
-    window.resetView = () => noctisProActions.resetView();
-    window.loadFromLocalFiles = () => noctisProActions.loadFromLocalFiles();
-    window.exportImage = () => noctisProActions.exportImage();
+    });
+    defineIfMissing('openReport', (studyId) => noctisProActions.openReport(studyId));
+    defineIfMissing('printStudy', (studyId) => noctisProActions.printStudy(studyId));
+    defineIfMissing('setTool', (toolName) => noctisProActions.setTool(toolName));
+    defineIfMissing('resetView', () => noctisProActions.resetView());
+    defineIfMissing('loadFromLocalFiles', () => noctisProActions.loadFromLocalFiles());
+    defineIfMissing('exportImage', () => noctisProActions.exportImage());
     
     // Re-enhance buttons when new content is added
     const observer = new MutationObserver((mutations) => {

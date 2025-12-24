@@ -142,12 +142,15 @@ EXTRA_ALLOWED_HOSTS = [
 ALLOW_LEGACY_HOSTS = os.environ.get('ALLOW_LEGACY_HOSTS', '').lower() == 'true'
 LEGACY_ALLOWED_HOSTS = [
     'noctis-pro.com',
-    '*.duckdns.org',
-    '*.ngrok.io',
-    '*.ngrok-free.app',
-    '*.ngrok.app',
-    '*.trycloudflare.com',
-    '*.loca.lt',
+    # Django's ALLOWED_HOSTS does not support "*." wildcards.
+    # Use leading-dot patterns to allow subdomains (and the root domain).
+    # See: https://docs.djangoproject.com/en/stable/ref/settings/#allowed-hosts
+    '.duckdns.org',
+    '.ngrok.io',
+    '.ngrok-free.app',
+    '.ngrok.app',
+    '.trycloudflare.com',
+    '.loca.lt',
     '3.222.223.4',
     '172.30.0.2',
 ]

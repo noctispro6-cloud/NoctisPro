@@ -2402,7 +2402,7 @@
                 showLoading('Generating MPR views...');
                 
                 const response = await fetch(
-                    `/dicom-viewer/api/series/${currentSeries.id}/mpr/?window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`,
+                    `/dicom-viewer/api/series/${currentSeries.id}/mpr/?window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}&quality=fast`,
                     { credentials: 'same-origin' }
                 );
                 let data = null;

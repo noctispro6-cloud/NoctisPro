@@ -3565,7 +3565,9 @@
                 // MPR canvases might have been hidden at first load (0x0). Resize before rendering.
                 try { resizeCanvas(); } catch (e) {}
 
-                const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
+                // 'quality=fast' speeds up the *initial* MPR images by skipping expensive Z upsampling.
+                // The backend still supports 'quality=high' if we want a user-facing toggle later.
+                const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}&quality=fast`;
 
                 // Preserve the per-plane slice index whenever possible (wheel scrolling per plane).
                 const canPreserve =
@@ -4212,7 +4214,7 @@
                 const ac = new AbortController();
                 _mprHUAbort = ac;
                 const slice = mprState.index[plane] || 0;
-                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&x=${encodeURIComponent(p.ix)}&y=${encodeURIComponent(p.iy)}`;
+                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&x=${encodeURIComponent(p.ix)}&y=${encodeURIComponent(p.iy)}&quality=fast`;
                 const resp = await fetch(url, { credentials: 'same-origin', signal: ac.signal });
                 const data = await resp.json();
                 if (!resp.ok) throw new Error(data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${resp.status}`);
@@ -4530,7 +4532,7 @@
             const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
             const slice = mprState.index[plane] || 0;
             try {
-                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&shape=ellipse&cx=${encodeURIComponent(Math.round(cx))}&cy=${encodeURIComponent(Math.round(cy))}&rx=${encodeURIComponent(Math.round(rx))}&ry=${encodeURIComponent(Math.round(ry))}`;
+                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&shape=ellipse&cx=${encodeURIComponent(Math.round(cx))}&cy=${encodeURIComponent(Math.round(cy))}&rx=${encodeURIComponent(Math.round(rx))}&ry=${encodeURIComponent(Math.round(ry))}&quality=fast`;
                 const resp = await fetch(url, { credentials: 'same-origin' });
                 const data = await resp.json();
                 if (!resp.ok) throw new Error(data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${resp.status}`);

@@ -87,6 +87,28 @@ _MPR_CACHE = {}  # series_id -> { 'volume': np.ndarray, 'spacing': tuple, 'times
 _MPR_CACHE_ORDER = []
 _MAX_MPR_CACHE = 6  # Increased cache size for better performance
 
+# Prevent duplicate expensive volume builds when the frontend requests all 3 planes in parallel.
+# Without this, the first axial/sagittal/coronal requests can each rebuild the volume concurrently.
+_MPR_BUILD_LOCKS_LOCK = Lock()
+_MPR_BUILD_LOCKS = {}  # series_id -> Lock()
+
+# Cap Z upsampling to keep MPR responsive on thick-slice stacks (e.g. CT 5mm / 0.7mm px spacing).
+# Full isotropic upsampling can explode depth and stall the request.
+_MAX_Z_RESAMPLE_FACTOR = 2.0
+
+
+def _get_mpr_build_lock(series_id: int) -> Lock:
+    """Return (and create if needed) a per-series build lock.
+
+    This ensures only one request builds a series volume at a time; others wait and reuse the result.
+    """
+    with _MPR_BUILD_LOCKS_LOCK:
+        lk = _MPR_BUILD_LOCKS.get(series_id)
+        if lk is None:
+            lk = Lock()
+            _MPR_BUILD_LOCKS[series_id] = lk
+        return lk
+
 # Encoded MPR slice cache (LRU) to avoid repeated windowing+encoding per slice/plane/WW/WL
 _MPR_IMG_CACHE_LOCK = Lock()
 _MPR_IMG_CACHE = {}  # key -> base64 data URL
@@ -3133,7 +3155,7 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
     import pydicom as _pydicom
     import os as _os
 
-    # Try cache first
+    # Fast path: try cache first (do NOT hold this lock while waiting for the build lock)
     with _MPR_CACHE_LOCK:
         entry = _MPR_CACHE.get(series.id)
         if entry is not None and isinstance(entry.get('volume'), _np.ndarray) and not force_rebuild:
@@ -3142,254 +3164,272 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
             if sp is not None:
                 return vol, tuple(sp)
 
-    images_qs = series.images.all().order_by('instance_number')
-    if images_qs.count() < 2:
-        raise ValueError('Not enough images for MPR')
+    # Slow path: build once per series (frontends request 3 planes in parallel).
+    build_lock = _get_mpr_build_lock(series.id)
+    with build_lock:
+        # Double-check cache in case another request built it while we waited.
+        with _MPR_CACHE_LOCK:
+            entry = _MPR_CACHE.get(series.id)
+            if entry is not None and isinstance(entry.get('volume'), _np.ndarray) and not force_rebuild:
+                vol = entry['volume']
+                sp = entry.get('spacing')
+                if sp is not None:
+                    return vol, tuple(sp)
 
-    # Gather slice positions first (lightweight), then stream pixel data in sorted order.
-    # This avoids holding all slices in memory twice (list-of-arrays + stacked volume),
-    # which can stall/hang on large series.
-    slices = []  # (pos_along_normal, dicom_path)
-    first_ps = (1.0, 1.0)
-    st = None
-    normal = None
-    rows = None
-    cols = None
-    # Read only metadata (no pixels) to compute ordering + spacing.
-    tags = [
-        'ImagePositionPatient', 'ImageOrientationPatient', 'SliceLocation', 'InstanceNumber',
-        'PixelSpacing', 'SpacingBetweenSlices', 'SliceThickness', 'Rows', 'Columns'
-    ]
-    for img in images_qs:
-        try:
-            dicom_path = _os.path.join(settings.MEDIA_ROOT, str(img.file_path))
-            ds = _pydicom.dcmread(dicom_path, stop_before_pixels=True, specific_tags=tags)
+        images_qs = series.images.all().order_by('instance_number')
+        if images_qs.count() < 2:
+            raise ValueError('Not enough images for MPR')
 
-            pos = getattr(ds, 'ImagePositionPatient', None)
-            iop = getattr(ds, 'ImageOrientationPatient', None)
-            if iop is not None and len(iop) == 6:
-                r = _np.array([float(iop[0]), float(iop[1]), float(iop[2])], dtype=_np.float64)
-                c = _np.array([float(iop[3]), float(iop[4]), float(iop[5])], dtype=_np.float64)
-                n = _np.cross(r, c)
-                if normal is None:
-                    normal = n / (_np.linalg.norm(n) + 1e-8)
-            else:
-                n = _np.array([0.0, 0.0, 1.0], dtype=_np.float64)
-                if normal is None:
-                    normal = n
+        # Gather slice positions first (lightweight), then stream pixel data in sorted order.
+        # This avoids holding all slices in memory twice (list-of-arrays + stacked volume),
+        # which can stall/hang on large series.
+        slices = []  # (pos_along_normal, dicom_path)
+        first_ps = (1.0, 1.0)
+        st = None
+        normal = None
+        rows = None
+        cols = None
+        # Read only metadata (no pixels) to compute ordering + spacing.
+        tags = [
+            'ImagePositionPatient', 'ImageOrientationPatient', 'SliceLocation', 'InstanceNumber',
+            'PixelSpacing', 'SpacingBetweenSlices', 'SliceThickness', 'Rows', 'Columns'
+        ]
+        for img in images_qs:
+            try:
+                dicom_path = _os.path.join(settings.MEDIA_ROOT, str(img.file_path))
+                ds = _pydicom.dcmread(dicom_path, stop_before_pixels=True, specific_tags=tags)
 
-            if pos is not None and len(pos) == 3:
-                p = _np.array([float(pos[0]), float(pos[1]), float(pos[2])], dtype=_np.float64)
-                d = float(_np.dot(p, normal))
-            else:
-                d = float(getattr(ds, 'SliceLocation', getattr(ds, 'InstanceNumber', 0)) or 0)
+                pos = getattr(ds, 'ImagePositionPatient', None)
+                iop = getattr(ds, 'ImageOrientationPatient', None)
+                if iop is not None and len(iop) == 6:
+                    r = _np.array([float(iop[0]), float(iop[1]), float(iop[2])], dtype=_np.float64)
+                    c = _np.array([float(iop[3]), float(iop[4]), float(iop[5])], dtype=_np.float64)
+                    n = _np.cross(r, c)
+                    if normal is None:
+                        normal = n / (_np.linalg.norm(n) + 1e-8)
+                else:
+                    n = _np.array([0.0, 0.0, 1.0], dtype=_np.float64)
+                    if normal is None:
+                        normal = n
 
-            if rows is None:
-                try:
-                    rows = int(getattr(ds, 'Rows', 0) or 0)
-                    cols = int(getattr(ds, 'Columns', 0) or 0)
-                except Exception:
-                    rows, cols = None, None
+                if pos is not None and len(pos) == 3:
+                    p = _np.array([float(pos[0]), float(pos[1]), float(pos[2])], dtype=_np.float64)
+                    d = float(_np.dot(p, normal))
+                else:
+                    d = float(getattr(ds, 'SliceLocation', getattr(ds, 'InstanceNumber', 0)) or 0)
 
-            if st is None:
-                st = getattr(ds, 'SpacingBetweenSlices', None)
+                if rows is None:
+                    try:
+                        rows = int(getattr(ds, 'Rows', 0) or 0)
+                        cols = int(getattr(ds, 'Columns', 0) or 0)
+                    except Exception:
+                        rows, cols = None, None
+
                 if st is None:
-                    st = getattr(ds, 'SliceThickness', 1.0)
-                try:
-                    st = float(st)
-                except Exception:
-                    st = 1.0
-                ps_attr = getattr(ds, 'PixelSpacing', [1.0, 1.0])
-                try:
-                    first_ps = (float(ps_attr[0]), float(ps_attr[1]))
-                except Exception:
-                    first_ps = (1.0, 1.0)
+                    st = getattr(ds, 'SpacingBetweenSlices', None)
+                    if st is None:
+                        st = getattr(ds, 'SliceThickness', 1.0)
+                    try:
+                        st = float(st)
+                    except Exception:
+                        st = 1.0
+                    ps_attr = getattr(ds, 'PixelSpacing', [1.0, 1.0])
+                    try:
+                        first_ps = (float(ps_attr[0]), float(ps_attr[1]))
+                    except Exception:
+                        first_ps = (1.0, 1.0)
 
-            slices.append((d, dicom_path))
-        except Exception:
-            continue
-
-    if len(slices) < 2:
-        raise ValueError('Could not read enough images for MPR')
-    if not rows or not cols:
-        raise ValueError('Missing image dimensions for MPR')
-
-    # Sort by position along normal
-    slices.sort(key=lambda x: x[0])
-
-    # Compute integer downsample steps to fit within memory budget (keeps requests responsive).
-    # We downsample using simple striding for speed and predictability.
-    z = len(slices)
-    y = int(rows)
-    x = int(cols)
-    itemsize = _np.dtype(_np.float32).itemsize
-    z_step = 1
-    y_step = 1
-    x_step = 1
-
-    def _ceil_div(a, b):
-        return (a + b - 1) // b
-
-    def _bytes_for_steps(_zs, _ys, _xs):
-        dz = _ceil_div(z, _zs)
-        dy = _ceil_div(y, _ys)
-        dx = _ceil_div(x, _xs)
-        return int(dz) * int(dy) * int(dx) * int(itemsize)
-
-    # Reduce memory footprint while preserving perceived MPR resolution.
-    #
-    # Priority is to preserve in-plane resolution (X/Y) because that is what users judge as "sharp".
-    # Downsampling X/Y makes axial views blurry immediately. It's preferable to reduce Z first
-    # (slice direction) which is often lower resolution and later can be interpolated for reformats.
-    #
-    # This loop is bounded by dimensions and typically runs only a few iterations.
-    while _bytes_for_steps(z_step, y_step, x_step) > _MAX_MPR_VOLUME_BYTES and (z_step < z or y_step < y or x_step < x):
-        if z_step < z:
-            z_step += 1
-            continue
-        if y_step < y:
-            y_step += 1
-            continue
-        if x_step < x:
-            x_step += 1
-            continue
-        break
-
-    if z_step > 1 or y_step > 1 or x_step > 1:
-        logger.info(
-            f"MPR downsample for series {series.id}: "
-            f"orig=({z},{y},{x}) float32 -> "
-            f"step=({z_step},{y_step},{x_step}) "
-            f"est_bytes={_bytes_for_steps(z_step,y_step,x_step)/1024/1024:.1f}MB"
-        )
-
-    dz = _ceil_div(z, z_step)
-    dy = _ceil_div(y, y_step)
-    dx = _ceil_div(x, x_step)
-    volume = _np.zeros((dz, dy, dx), dtype=_np.float32)
-
-    # Stream pixel data in sorted order with striding downsample.
-    out_i = 0
-    for _d, dicom_path in slices[::z_step]:
-        try:
-            ds = _pydicom.dcmread(dicom_path, stop_before_pixels=False)
-            try:
-                arr = ds.pixel_array.astype(_np.float32)
+                slices.append((d, dicom_path))
             except Exception:
-                # Fallback to SimpleITK for compressed/transcoded pixel data
-                try:
-                    import SimpleITK as _sitk
-                    sitk_image = _sitk.ReadImage(dicom_path)
-                    px = _sitk.GetArrayFromImage(sitk_image)
-                    if px.ndim == 3 and px.shape[0] == 1:
-                        px = px[0]
-                    arr = px.astype(_np.float32)
-                except Exception:
-                    continue
+                continue
 
-            slope = float(getattr(ds, 'RescaleSlope', 1.0) or 1.0)
-            intercept = float(getattr(ds, 'RescaleIntercept', 0.0) or 0.0)
-            arr = arr * slope + intercept
+        if len(slices) < 2:
+            raise ValueError('Could not read enough images for MPR')
+        if not rows or not cols:
+            raise ValueError('Missing image dimensions for MPR')
 
-            if y_step > 1 or x_step > 1:
-                arr = arr[::y_step, ::x_step]
+        # Sort by position along normal
+        slices.sort(key=lambda x: x[0])
 
-            # Crop/pad defensively in case of odd sizes.
-            h = min(arr.shape[0], dy)
-            w = min(arr.shape[1], dx)
-            volume[out_i, :h, :w] = arr[:h, :w]
-            out_i += 1
-            if out_i >= dz:
-                break
-        except Exception:
-            continue
+        # Compute integer downsample steps to fit within memory budget (keeps requests responsive).
+        # We downsample using simple striding for speed and predictability.
+        z = len(slices)
+        y = int(rows)
+        x = int(cols)
+        itemsize = _np.dtype(_np.float32).itemsize
+        z_step = 1
+        y_step = 1
+        x_step = 1
 
-    # If we couldn't decode enough slices, fail fast (prevents "blank" MPR views).
-    if out_i < 2:
-        raise ValueError('Could not decode enough images for MPR')
-    # If some slices failed to decode, trim unused tail so counts match what we can render.
-    if out_i != dz:
-        volume = volume[:out_i, :, :].copy()
+        def _ceil_div(a, b):
+            return (a + b - 1) // b
 
-    # Adjust spacing for downsampling-by-stride.
-    # Skipping slices increases effective slice spacing; in-plane stride increases pixel spacing.
-    try:
-        st = float(st or 1.0) * float(z_step)
-    except Exception:
-        st = 1.0 * float(z_step)
-    try:
-        first_ps = (float(first_ps[0] or 1.0) * float(y_step), float(first_ps[1] or 1.0) * float(x_step))
-    except Exception:
-        first_ps = (1.0 * float(y_step), 1.0 * float(x_step))
+        def _bytes_for_steps(_zs, _ys, _xs):
+            dz = _ceil_div(z, _zs)
+            dy = _ceil_div(y, _ys)
+            dx = _ceil_div(x, _xs)
+            return int(dz) * int(dy) * int(dx) * int(itemsize)
 
-    # Enhanced interpolation for thin stacks - optimized for minimal images
-    # Use high-quality interpolation for better 3D reconstruction
-    original_depth = volume.shape[0]
-    if volume.shape[0] < 32:  # Increased threshold for better quality
-        # Calculate optimal interpolation factor for minimal images
-        if volume.shape[0] < 8:
-            # Very few images - use maximum interpolation
-            target_slices = max(64, volume.shape[0] * 8)
-        else:
-            # Moderate number of images
-            target_slices = max(32, volume.shape[0] * 4)
-        
-        factor = target_slices / volume.shape[0]
-        
-        # Use high-quality spline interpolation for better results
-        try:
-            volume = ndimage.zoom(volume, (factor, 1, 1), order=3, prefilter=True)
-            st = st / factor
-            logger.info(f"Enhanced interpolation: {original_depth} -> {volume.shape[0]} slices (factor: {factor:.2f})")
-        except Exception as e:
-            logger.warning(f"High-quality interpolation failed, using linear: {e}")
-            # Fallback to linear interpolation
-            volume = ndimage.zoom(volume, (factor, 1, 1), order=1)
-            st = st / factor
+        # Reduce memory footprint while preserving perceived MPR resolution.
+        #
+        # Priority is to preserve in-plane resolution (X/Y) because that is what users judge as "sharp".
+        # Downsampling X/Y makes axial views blurry immediately. It's preferable to reduce Z first
+        # (slice direction) which is often lower resolution and later can be interpolated for reformats.
+        #
+        # This loop is bounded by dimensions and typically runs only a few iterations.
+        while _bytes_for_steps(z_step, y_step, x_step) > _MAX_MPR_VOLUME_BYTES and (z_step < z or y_step < y or x_step < x):
+            if z_step < z:
+                z_step += 1
+                continue
+            if y_step < y:
+                y_step += 1
+                continue
+            if x_step < x:
+                x_step += 1
+                continue
+            break
 
-    # Resample along Z to approximate isotropic voxels using in-plane pixel spacing average
-    # Keep in-plane resolution; only resample depth for quality MPR
-    try:
-        py, px = float(first_ps[0]), float(first_ps[1])
-        target_xy = (py + px) / 2.0
-        if st and target_xy and st > 0 and target_xy > 0:
-            z_factor = max(1e-6, float(st) / float(target_xy))
-            # If z_factor > 1, we need to upsample Z to match XY spacing
-            # Cap the target depth to avoid memory blow-ups
-            max_depth = 2048
-            target_depth = int(min(max_depth, round(volume.shape[0] * z_factor)))
-            if target_depth > volume.shape[0] + 1 or z_factor > 1.05:
-                # Prefer higher-order interpolation for sharper MPR reformats
-                try:
-                    volume = ndimage.zoom(volume, (float(target_depth) / volume.shape[0], 1, 1), order=3, prefilter=True)
-                except Exception as _e:
-                    logger.warning(f"Z resample (order=3) failed, falling back to linear: {_e}")
-                    volume = ndimage.zoom(volume, (float(target_depth) / volume.shape[0], 1, 1), order=1)
-                st = target_xy
-    except Exception:
-        pass
+        if z_step > 1 or y_step > 1 or x_step > 1:
+            logger.info(
+                f"MPR downsample for series {series.id}: "
+                f"orig=({z},{y},{x}) float32 -> "
+                f"step=({z_step},{y_step},{x_step}) "
+                f"est_bytes={_bytes_for_steps(z_step,y_step,x_step)/1024/1024:.1f}MB"
+            )
 
-    spacing = (float(st or 1.0), float(first_ps[0] or 1.0), float(first_ps[1] or 1.0))
+        dz = _ceil_div(z, z_step)
+        dy = _ceil_div(y, y_step)
+        dx = _ceil_div(x, x_step)
+        volume = _np.zeros((dz, dy, dx), dtype=_np.float32)
 
-    with _MPR_CACHE_LOCK:
-        # Store/refresh cache and attach spacing for future calls
-        entry = _MPR_CACHE.get(series.id)
-        if entry is None:
-            while len(_MPR_CACHE_ORDER) >= _MAX_MPR_CACHE:
-                evict_id = _MPR_CACHE_ORDER.pop(0)
-                _MPR_CACHE.pop(evict_id, None)
-            _MPR_CACHE[series.id] = { 'volume': volume, 'spacing': spacing }
-            _MPR_CACHE_ORDER.append(series.id)
-        else:
-            entry['volume'] = volume
-            entry['spacing'] = spacing
+        # Stream pixel data in sorted order with striding downsample.
+        out_i = 0
+        for _d, dicom_path in slices[::z_step]:
             try:
-                _MPR_CACHE_ORDER.remove(series.id)
-            except ValueError:
-                pass
-            _MPR_CACHE_ORDER.append(series.id)
+                ds = _pydicom.dcmread(dicom_path, stop_before_pixels=False)
+                try:
+                    arr = ds.pixel_array.astype(_np.float32)
+                except Exception:
+                    # Fallback to SimpleITK for compressed/transcoded pixel data
+                    try:
+                        import SimpleITK as _sitk
+                        sitk_image = _sitk.ReadImage(dicom_path)
+                        px = _sitk.GetArrayFromImage(sitk_image)
+                        if px.ndim == 3 and px.shape[0] == 1:
+                            px = px[0]
+                        arr = px.astype(_np.float32)
+                    except Exception:
+                        continue
 
-    return volume, spacing
+                slope = float(getattr(ds, 'RescaleSlope', 1.0) or 1.0)
+                intercept = float(getattr(ds, 'RescaleIntercept', 0.0) or 0.0)
+                arr = arr * slope + intercept
+
+                if y_step > 1 or x_step > 1:
+                    arr = arr[::y_step, ::x_step]
+
+                # Crop/pad defensively in case of odd sizes.
+                h = min(arr.shape[0], dy)
+                w = min(arr.shape[1], dx)
+                volume[out_i, :h, :w] = arr[:h, :w]
+                out_i += 1
+                if out_i >= dz:
+                    break
+            except Exception:
+                continue
+
+        # If we couldn't decode enough slices, fail fast (prevents "blank" MPR views).
+        if out_i < 2:
+            raise ValueError('Could not decode enough images for MPR')
+        # If some slices failed to decode, trim unused tail so counts match what we can render.
+        if out_i != dz:
+            volume = volume[:out_i, :, :].copy()
+
+        # Adjust spacing for downsampling-by-stride.
+        # Skipping slices increases effective slice spacing; in-plane stride increases pixel spacing.
+        try:
+            st = float(st or 1.0) * float(z_step)
+        except Exception:
+            st = 1.0 * float(z_step)
+        try:
+            first_ps = (float(first_ps[0] or 1.0) * float(y_step), float(first_ps[1] or 1.0) * float(x_step))
+        except Exception:
+            first_ps = (1.0 * float(y_step), 1.0 * float(x_step))
+
+        # Enhanced interpolation for thin stacks - optimized for minimal images
+        # Use high-quality interpolation for better 3D reconstruction
+        original_depth = volume.shape[0]
+        if volume.shape[0] < 32:  # Increased threshold for better quality
+            # Calculate optimal interpolation factor for minimal images
+            if volume.shape[0] < 8:
+                # Very few images - use maximum interpolation
+                target_slices = max(64, volume.shape[0] * 8)
+            else:
+                # Moderate number of images
+                target_slices = max(32, volume.shape[0] * 4)
+
+            factor = target_slices / volume.shape[0]
+
+            # Use high-quality spline interpolation for better results
+            try:
+                volume = ndimage.zoom(volume, (factor, 1, 1), order=3, prefilter=True)
+                st = st / factor
+                logger.info(f"Enhanced interpolation: {original_depth} -> {volume.shape[0]} slices (factor: {factor:.2f})")
+            except Exception as e:
+                logger.warning(f"High-quality interpolation failed, using linear: {e}")
+                # Fallback to linear interpolation
+                volume = ndimage.zoom(volume, (factor, 1, 1), order=1)
+                st = st / factor
+
+        # Resample along Z to approximate isotropic voxels using in-plane pixel spacing average.
+        # Keep in-plane resolution; only resample depth for quality MPR.
+        #
+        # IMPORTANT: fully upsampling thick-slice stacks to isotropic can create enormous depth
+        # and make the request appear "hung". Cap the Z upsample factor for responsiveness.
+        try:
+            py, px = float(first_ps[0]), float(first_ps[1])
+            target_xy = (py + px) / 2.0
+            if st and target_xy and st > 0 and target_xy > 0:
+                z_factor = max(1e-6, float(st) / float(target_xy))
+                max_depth = 2048
+                applied_factor = min(float(z_factor), float(_MAX_Z_RESAMPLE_FACTOR))
+                old_depth = int(volume.shape[0])
+                target_depth = int(min(max_depth, round(old_depth * applied_factor)))
+                if target_depth > old_depth + 1 and applied_factor > 1.05:
+                    try:
+                        volume = ndimage.zoom(volume, (float(target_depth) / float(old_depth), 1, 1), order=3, prefilter=True)
+                    except Exception as _e:
+                        logger.warning(f"Z resample (order=3) failed, falling back to linear: {_e}")
+                        volume = ndimage.zoom(volume, (float(target_depth) / float(old_depth), 1, 1), order=1)
+                    # Adjust slice spacing based on the actual factor applied.
+                    try:
+                        st = float(st) / (float(target_depth) / float(max(1, old_depth)))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        spacing = (float(st or 1.0), float(first_ps[0] or 1.0), float(first_ps[1] or 1.0))
+
+        with _MPR_CACHE_LOCK:
+            # Store/refresh cache and attach spacing for future calls
+            entry = _MPR_CACHE.get(series.id)
+            if entry is None:
+                while len(_MPR_CACHE_ORDER) >= _MAX_MPR_CACHE:
+                    evict_id = _MPR_CACHE_ORDER.pop(0)
+                    _MPR_CACHE.pop(evict_id, None)
+                _MPR_CACHE[series.id] = {'volume': volume, 'spacing': spacing}
+                _MPR_CACHE_ORDER.append(series.id)
+            else:
+                entry['volume'] = volume
+                entry['spacing'] = spacing
+                try:
+                    _MPR_CACHE_ORDER.remove(series.id)
+                except ValueError:
+                    pass
+                _MPR_CACHE_ORDER.append(series.id)
+
+        return volume, spacing
 
 @login_required
 @csrf_exempt
@@ -4673,26 +4713,66 @@ def mpr_slice_api(request, series_id, plane, slice_index):
     """
     try:
         series = get_object_or_404(Series, id=series_id)
-        
-        # Get the MPR slice using existing optimized function
-        slice_index = int(slice_index)
-        
-        # Use existing MPR cache system
-        cached_slice = _mpr_cache_get(series_id, plane, slice_index, 400, 40, False)
+
+        plane = (plane or '').lower()
+        if plane not in ('axial', 'sagittal', 'coronal'):
+            from django.http import Http404
+            raise Http404("Invalid MPR plane")
+
+        # Params (support both new and legacy names)
+        ww_param = request.GET.get('window_width') or request.GET.get('ww') or 400
+        wl_param = request.GET.get('window_level') or request.GET.get('wl') or 40
+        inverted_param = request.GET.get('inverted')
+        if inverted_param is None:
+            inverted_param = request.GET.get('invert')
+        inverted = (inverted_param or 'false').lower() == 'true'
+
+        try:
+            window_width = float(ww_param)
+        except Exception:
+            window_width = 400.0
+        try:
+            window_level = float(wl_param)
+        except Exception:
+            window_level = 40.0
+
+        try:
+            slice_index = int(slice_index)
+        except Exception:
+            slice_index = 0
+
+        # Serve from encoded slice cache if present
+        cached_slice = _mpr_cache_get(series_id, plane, slice_index, window_width, window_level, inverted)
         if cached_slice:
-            # Return cached slice as image response
-            import base64
-            from django.http import HttpResponse
-            
             image_data = base64.b64decode(cached_slice.split(',')[1])
-            return HttpResponse(image_data, content_type='image/png')
-        
-        # Generate new slice if not cached
-        # This would use the existing MPR generation system
-        # For now, return a placeholder
-        from django.http import Http404
-        raise Http404("MPR slice not available")
-        
+            resp = HttpResponse(image_data, content_type='image/png')
+            resp['Cache-Control'] = 'private, max-age=30'
+            return resp
+
+        # Build/reuse volume (single-build guarded by per-series lock in _get_mpr_volume_and_spacing)
+        volume, _spacing = _get_mpr_volume_and_spacing(series)
+        if volume is None or volume.size == 0:
+            from django.http import Http404
+            raise Http404("MPR volume not available")
+
+        # Clamp slice index to plane bounds
+        if plane == 'axial':
+            slice_index = max(0, min(int(volume.shape[0]) - 1, slice_index))
+        elif plane == 'sagittal':
+            slice_index = max(0, min(int(volume.shape[2]) - 1, slice_index))
+        else:  # coronal
+            slice_index = max(0, min(int(volume.shape[1]) - 1, slice_index))
+
+        img_b64 = _get_encoded_mpr_slice(series.id, volume, plane, slice_index, window_width, window_level, inverted)
+        if not img_b64:
+            from django.http import Http404
+            raise Http404("MPR slice not available")
+
+        image_data = base64.b64decode(img_b64.split(',')[1])
+        resp = HttpResponse(image_data, content_type='image/png')
+        resp['Cache-Control'] = 'private, max-age=30'
+        return resp
+
     except Exception as e:
         logger.error(f"MPR slice error: {e}")
         from django.http import Http404

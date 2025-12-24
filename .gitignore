@@ -4,3 +4,6 @@
 # Local saved ngrok credentials/settings (do not commit)
 .ngrok.env
 
+# Docker env file (contains secrets)
+.env.docker
+

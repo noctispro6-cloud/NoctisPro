@@ -3243,14 +3243,33 @@
             try {
                 showLoading('Generating MPR views...');
                 
-                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`);
-                const data = await response.json();
+                const response = await fetch(
+                    `/dicom-viewer/api/series/${currentSeries.id}/mpr/?window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`,
+                    { credentials: 'same-origin' }
+                );
+                let data = null;
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    const text = await response.text().catch(() => '');
+                    throw new Error(text || `Failed to load MPR response (HTTP ${response.status})`);
+                }
+                if (!response.ok) {
+                    throw new Error((data && data.error) ? data.error : `Failed to generate MPR (HTTP ${response.status})`);
+                }
+
+                // Backend returns data URLs. Guard older payloads just in case.
+                const ensureDataUrl = (v) => {
+                    if (!v) return '';
+                    if (typeof v !== 'string') return '';
+                    return v.startsWith('data:image') ? v : `data:image/png;base64,${v}`;
+                };
                 
                 if (data.mpr_views) {
                     // Load initial views
-                    document.getElementById('mprAxial').src = data.mpr_views.axial;
-                    document.getElementById('mprSagittal').src = data.mpr_views.sagittal;
-                    document.getElementById('mprCoronal').src = data.mpr_views.coronal;
+                    document.getElementById('mprAxial').src = ensureDataUrl(data.mpr_views.axial);
+                    document.getElementById('mprSagittal').src = ensureDataUrl(data.mpr_views.sagittal);
+                    document.getElementById('mprCoronal').src = ensureDataUrl(data.mpr_views.coronal);
                     
                     mprImages = data.mpr_views;
                     volumeMetadata = data;
@@ -3270,9 +3289,9 @@
                     
                 } else if (data.views) {
                     // Fallback for old API response format
-                    document.getElementById('mprAxial').src = data.views.axial;
-                    document.getElementById('mprSagittal').src = data.views.sagittal;
-                    document.getElementById('mprCoronal').src = data.views.coronal;
+                    document.getElementById('mprAxial').src = ensureDataUrl(data.views.axial);
+                    document.getElementById('mprSagittal').src = ensureDataUrl(data.views.sagittal);
+                    document.getElementById('mprCoronal').src = ensureDataUrl(data.views.coronal);
                     
                     mprImages = data.views;
                     volumeMetadata = data.metadata || data;

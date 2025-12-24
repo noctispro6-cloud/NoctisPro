@@ -475,6 +475,21 @@ if TUNNEL_URL:
 # Custom user model
 AUTH_USER_MODEL = 'accounts.User'
 
+# Optional first-run bootstrap admin (primarily for Docker/dev)
+#
+# This is consumed by `accounts.views._bootstrap_admin_user_if_enabled()` and is
+# intentionally opt-in via environment variables.
+def _env_bool(name: str, default: bool = False) -> bool:
+    try:
+        return str(os.environ.get(name, str(default))).strip().lower() in {"1", "true", "yes", "on"}
+    except Exception:
+        return bool(default)
+
+AUTO_CREATE_ADMIN_ON_FIRST_ACCESS = _env_bool("AUTO_CREATE_ADMIN_ON_FIRST_ACCESS", False)
+BOOTSTRAP_ADMIN_USERNAME = (os.environ.get("BOOTSTRAP_ADMIN_USERNAME") or "admin").strip() or "admin"
+# IMPORTANT: leave blank in production; when set, a privileged admin can be created.
+BOOTSTRAP_ADMIN_PASSWORD = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "")
+
 # Login URLs
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/worklist/'

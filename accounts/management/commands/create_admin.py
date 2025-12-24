@@ -11,6 +11,11 @@ class Command(BaseCommand):
         parser.add_argument('--username', type=str, help='Username for the admin user', default='admin')
         parser.add_argument('--email', type=str, help='Email for the admin user (defaults to admin@<DOMAIN_NAME>)', default='')
         parser.add_argument('--password', type=str, help='Password for the admin user', default='admin123')
+        parser.add_argument(
+            '--reset-password',
+            action='store_true',
+            help='If the user already exists, reset its password to --password.',
+        )
         parser.add_argument('--first-name', type=str, help='First name', default='System')
         parser.add_argument('--last-name', type=str, help='Last name', default='Administrator')
 
@@ -18,6 +23,7 @@ class Command(BaseCommand):
         username = options['username']
         email = options['email'] or f"admin@{getattr(settings, 'DOMAIN_NAME', '') or 'noctis-pro.com'}"
         password = options['password']
+        reset_password = bool(options.get('reset_password'))
         first_name = options['first_name']
         last_name = options['last_name']
 
@@ -28,6 +34,9 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(f'User "{username}" already exists! Ensuring admin privileges...'))
 
             changed = False
+            if reset_password:
+                user.set_password(password)
+                changed = True
             # Promote for Django admin access
             if not getattr(user, 'is_staff', False):
                 user.is_staff = True
@@ -50,7 +59,10 @@ class Command(BaseCommand):
 
             if changed:
                 user.save()
-                self.stdout.write(self.style.SUCCESS(f'Updated "{username}" with admin privileges (staff/superuser/verified).'))
+                msg = f'Updated "{username}" with admin privileges (staff/superuser/verified).'
+                if reset_password:
+                    msg += ' Password was reset.'
+                self.stdout.write(self.style.SUCCESS(msg))
             else:
                 self.stdout.write(self.style.SUCCESS(f'User "{username}" already has admin privileges.'))
             return

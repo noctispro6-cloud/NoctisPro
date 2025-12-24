@@ -98,7 +98,26 @@ _MAX_MPR_IMG_CACHE = 800
 _MAX_MPR_VOLUME_BYTES = 256 * 1024 * 1024  # 256MB
 
 def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted):
-    return f"{series_id}|{plane}|{int(slice_index)}|{int(round(float(ww)))}|{int(round(float(wl)))}|{1 if inverted else 0}"
+    """
+    Build a stable cache key for an encoded MPR slice.
+
+    Some call sites (or malformed requests) may provide None/NaN/empty strings for WW/WL.
+    Never let that crash the request path (users otherwise see: "must be real number, not NoneType").
+    """
+    def _safe_round_int(v, fallback):
+        try:
+            if v is None:
+                return int(round(float(fallback)))
+            f = float(v)
+            if not np.isfinite(f):
+                return int(round(float(fallback)))
+            return int(round(f))
+        except Exception:
+            return int(round(float(fallback)))
+
+    ww_i = _safe_round_int(ww, 400.0)
+    wl_i = _safe_round_int(wl, 40.0)
+    return f"{series_id}|{plane}|{int(slice_index)}|{ww_i}|{wl_i}|{1 if inverted else 0}"
 
 def _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted):
     key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted)

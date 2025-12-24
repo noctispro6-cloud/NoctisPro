@@ -2347,7 +2347,7 @@
             return { mean, std: Math.sqrt(Math.max(0, variance)), min, max, n };
         }
 
-        function handleMouseUp(event) {
+        async function handleMouseUp(event) {
             isDragging = false;
 
             if (activeTool === 'roi' && roiDraft && roiDraft.mode === 'single') {
@@ -2359,7 +2359,18 @@
                     const cy = (start.y + end.y) / 2;
                     const rx = Math.max(1, Math.abs(end.x - start.x) / 2);
                     const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
-                    const stats = _computeEllipseStatsFromImagePayload(payload, cx, cy, rx, ry);
+                    let stats = _computeEllipseStatsFromImagePayload(payload, cx, cy, rx, ry);
+                    // Fallback: compute ROI server-side if pixel payload isn't available (e.g. compressed DICOM decode).
+                    if (!stats) {
+                        const imageId = imageData[currentImageIndex]?.id;
+                        if (imageId != null) {
+                            const url = `/dicom-viewer/api/hu/?mode=series&image_id=${encodeURIComponent(imageId)}&shape=ellipse&cx=${encodeURIComponent(Math.round(cx))}&cy=${encodeURIComponent(Math.round(cy))}&rx=${encodeURIComponent(Math.round(rx))}&ry=${encodeURIComponent(Math.round(ry))}`;
+                            const resp = await fetch(url, { credentials: 'same-origin' });
+                            const data = await resp.json();
+                            if (!resp.ok) throw new Error(data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${resp.status}`);
+                            stats = data && data.stats ? data.stats : null;
+                        }
+                    }
                     if (!stats) throw new Error('Empty ROI');
                     measurements.push({
                         type: 'roi',
@@ -2375,6 +2386,9 @@
                     showToast(`ROI failed: ${e?.message || e}`, 'error');
                 } finally {
                     roiDraft = null;
+                    // Deactivate ROI tool after completion.
+                    activeTool = 'windowing';
+                    refreshToolButtonStates(activeTool);
                     redrawCurrentImage();
                 }
                 return;
@@ -3443,8 +3457,9 @@
             const ctx = c.getContext('2d');
             const { w, h, dx, dy, dw, dh } = meta;
             ctx.clearRect(0, 0, c.width, c.height);
-            // Smooth downscale only (avoid blurry zoom-in).
-            ctx.imageSmoothingEnabled = (dw < w || dh < h);
+            // Render MPR with high-quality interpolation for better perceived clarity.
+            // (The backend already resamples along Z; this improves browser-side scaling quality.)
+            ctx.imageSmoothingEnabled = true;
             try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
             ctx.drawImage(img, dx, dy, dw, dh);
 
@@ -3864,6 +3879,9 @@
             } finally {
                 // Keep the last ROI outline visible by converting to a saved measurement and clearing draft.
                 roiDraft = null;
+                // Deactivate ROI tool after completion.
+                activeTool = 'windowing';
+                refreshToolButtonStates(activeTool);
                 // Redraw plane without draft overlay
                 const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
                 fetchMPRPlaneSlice(plane, mprState.index[plane] || 0, qsBase)

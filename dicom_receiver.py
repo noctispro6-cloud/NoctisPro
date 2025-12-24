@@ -40,6 +40,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'noctis_pro.settings')
 import django
 django.setup()
 
+from django.conf import settings
 from pynetdicom import AE, evt, AllStoragePresentationContexts, VerificationPresentationContexts
 from pynetdicom.sop_class import Verification
 from pydicom import dcmread
@@ -275,12 +276,13 @@ class DicomReceiver:
             'last_received': None
         }
         
-        # Storage directory rooted at project base directory
-        self.storage_dir = BASE_DIR / 'media' / 'dicom' / 'received'
+        # Storage directory rooted at Django MEDIA_ROOT (supports persistent storage in production)
+        media_root = Path(getattr(settings, "MEDIA_ROOT", BASE_DIR / "media"))
+        self.storage_dir = media_root / 'dicom' / 'received'
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         
-        # Thumbnail directory rooted at project base directory
-        self.thumbnail_dir = BASE_DIR / 'media' / 'dicom' / 'thumbnails'
+        # Thumbnail directory rooted at Django MEDIA_ROOT (supports persistent storage in production)
+        self.thumbnail_dir = media_root / 'dicom' / 'thumbnails'
         self.thumbnail_dir.mkdir(parents=True, exist_ok=True)
         
         # Setup logging
@@ -664,7 +666,8 @@ class DicomReceiver:
         """Create DICOM image database record"""
         try:
             # Create relative path for database storage
-            relative_path = str(file_path.relative_to(BASE_DIR / 'media'))
+            media_root = Path(getattr(settings, "MEDIA_ROOT", BASE_DIR / "media"))
+            relative_path = str(file_path.relative_to(media_root))
             file_size = file_path.stat().st_size
             
             # Create DICOM image record

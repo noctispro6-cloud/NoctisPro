@@ -1,0 +1,99 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-noctispro}
+      POSTGRES_USER: ${POSTGRES_USER:-noctispro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-noctispro} -d ${POSTGRES_DB:-noctispro}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  web:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DJANGO_SETTINGS_MODULE: noctis_pro.settings
+      DEBUG: "False"
+      SECRET_KEY: ${SECRET_KEY:-change-me}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
+      SERVE_MEDIA_FILES: "True"
+      SSL_ENABLED: "False"
+      SECURE_SSL_REDIRECT: "False"
+
+      # Persistent uploads/DICOM
+      MEDIA_ROOT: /data/media
+
+      # Database -> Postgres container
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${POSTGRES_DB:-noctispro}
+      DB_USER: ${POSTGRES_USER:-noctispro}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      DB_HOST: db
+      DB_PORT: "5432"
+
+      # Make tunnel usage permissive
+      ALLOW_LEGACY_HOSTS: "True"
+    volumes:
+      - noctis_media:/data/media
+    ports:
+      - "8000:8000"
+
+  dicom:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DJANGO_SETTINGS_MODULE: noctis_pro.settings
+      DEBUG: "False"
+      SECRET_KEY: ${SECRET_KEY:-change-me}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
+      MEDIA_ROOT: /data/media
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${POSTGRES_DB:-noctispro}
+      DB_USER: ${POSTGRES_USER:-noctispro}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      DB_HOST: db
+      DB_PORT: "5432"
+      ALLOW_LEGACY_HOSTS: "True"
+    volumes:
+      - noctis_media:/data/media
+    command: ["/usr/bin/env", "bash", "-lc", "python dicom_receiver.py --port 11112 --aet NOCTIS_SCP"]
+    ports:
+      - "11112:11112"
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    restart: unless-stopped
+    depends_on:
+      - web
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+      NGROK_DOMAIN: ${NGROK_DOMAIN:-}
+    command:
+      - sh
+      - -c
+      - |
+        if [ -z "$${NGROK_AUTHTOKEN}" ]; then
+          echo "ERROR: NGROK_AUTHTOKEN is not set" >&2
+          exit 1
+        fi
+        if [ -n "$${NGROK_DOMAIN}" ]; then
+          exec ngrok http http://web:8000 --domain="$${NGROK_DOMAIN}" --log=stdout
+        else
+          exec ngrok http http://web:8000 --log=stdout
+        fi
+
+volumes:
+  pgdata:
+  noctis_media:

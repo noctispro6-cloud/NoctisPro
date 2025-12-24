@@ -1173,6 +1173,11 @@
         let _mprPlaneAbort = { axial: null, sagittal: null, coronal: null };
         let _mprHUAbort = null;
         let _mprHUTimer = null;
+
+        // Progressive MPR quality:
+        // - Start in 'fast' so the first 3 images appear quickly.
+        // - Upgrade to 'high' asynchronously (no quality compromise in final image).
+        let mprQuality = 'fast';
         let _mprSyncTimer = null;
         
         // ROI tool (ellipse) - live draft while dragging
@@ -3565,9 +3570,9 @@
                 // MPR canvases might have been hidden at first load (0x0). Resize before rendering.
                 try { resizeCanvas(); } catch (e) {}
 
-                // 'quality=fast' speeds up the *initial* MPR images by skipping expensive Z upsampling.
-                // The backend still supports 'quality=high' if we want a user-facing toggle later.
-                const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}&quality=fast`;
+                const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
+                // Always start with fast for initial responsiveness; we'll upgrade after first paint.
+                mprQuality = 'fast';
 
                 // Preserve the per-plane slice index whenever possible (wheel scrolling per plane).
                 const canPreserve =
@@ -3598,7 +3603,7 @@
                         _renderMPRDataUrl('coronal', co.image),
                     ]);
                 } else {
-                    const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?${qsBase}`, { credentials: 'same-origin' });
+                    const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?${qsBase}&quality=${encodeURIComponent(mprQuality)}`, { credentials: 'same-origin' });
                     const data = await response.json();
                     if (!response.ok) {
                         const msg = (data && (data.error || data.message)) ? (data.error || data.message) : `HTTP ${response.status}`;
@@ -3652,11 +3657,46 @@
                     await generateBoneReconstruction();
                 }
                 if (!quiet) showToast('MPR ready', 'success');
+
+                // Progressive upgrade to high quality (non-blocking).
+                // The server is already prewarming in the background; this will swap images as soon as ready.
+                _upgradeMPRQualityToHigh(qsBase);
             } catch (error) {
                 console.error('Error generating MPR:', error);
                 showToast(`Failed to generate MPR: ${error?.message || error}`, 'error');
             } finally {
                 showLoading(false);
+            }
+        }
+
+        async function _upgradeMPRQualityToHigh(qsBase) {
+            try {
+                // Don't spam; if already high, nothing to do.
+                if (mprQuality === 'high') return;
+                if (!currentSeries || !mprState) return;
+
+                const target = {
+                    axial: mprState.index.axial || 0,
+                    sagittal: mprState.index.sagittal || 0,
+                    coronal: mprState.index.coronal || 0,
+                };
+
+                // Fetch the same slices in high quality.
+                // Only swap if the user hasn't moved away from the target slice.
+                const prevQuality = mprQuality;
+                mprQuality = 'high';
+                const [ax, sa, co] = await Promise.all([
+                    fetchMPRPlaneSlice('axial', target.axial, qsBase),
+                    fetchMPRPlaneSlice('sagittal', target.sagittal, qsBase),
+                    fetchMPRPlaneSlice('coronal', target.coronal, qsBase),
+                ]);
+
+                if ((mprState.index.axial || 0) === target.axial) await _renderMPRDataUrl('axial', ax.image);
+                if ((mprState.index.sagittal || 0) === target.sagittal) await _renderMPRDataUrl('sagittal', sa.image);
+                if ((mprState.index.coronal || 0) === target.coronal) await _renderMPRDataUrl('coronal', co.image);
+            } catch (e) {
+                // If upgrade fails, keep fast mode; user still has a working MPR.
+                try { mprQuality = 'fast'; } catch (_) {}
             }
         }
 
@@ -4065,7 +4105,8 @@
             try { _mprPlaneAbort[plane]?.abort(); } catch (e) {}
             const ac = new AbortController();
             _mprPlaneAbort[plane] = ac;
-            const url = `/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(idx)}&${qsBase}`;
+            const q = (mprQuality === 'high') ? 'high' : 'fast';
+            const url = `/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(idx)}&${qsBase}&quality=${encodeURIComponent(q)}`;
             const resp = await fetch(url, { credentials: 'same-origin', signal: ac.signal });
             const data = await resp.json();
             if (!resp.ok) {
@@ -4214,7 +4255,7 @@
                 const ac = new AbortController();
                 _mprHUAbort = ac;
                 const slice = mprState.index[plane] || 0;
-                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&x=${encodeURIComponent(p.ix)}&y=${encodeURIComponent(p.iy)}&quality=fast`;
+                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&x=${encodeURIComponent(p.ix)}&y=${encodeURIComponent(p.iy)}&quality=${encodeURIComponent((mprQuality === 'high') ? 'high' : 'fast')}`;
                 const resp = await fetch(url, { credentials: 'same-origin', signal: ac.signal });
                 const data = await resp.json();
                 if (!resp.ok) throw new Error(data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${resp.status}`);
@@ -4532,7 +4573,7 @@
             const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
             const slice = mprState.index[plane] || 0;
             try {
-                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&shape=ellipse&cx=${encodeURIComponent(Math.round(cx))}&cy=${encodeURIComponent(Math.round(cy))}&rx=${encodeURIComponent(Math.round(rx))}&ry=${encodeURIComponent(Math.round(ry))}&quality=fast`;
+                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&shape=ellipse&cx=${encodeURIComponent(Math.round(cx))}&cy=${encodeURIComponent(Math.round(cy))}&rx=${encodeURIComponent(Math.round(rx))}&ry=${encodeURIComponent(Math.round(ry))}&quality=${encodeURIComponent((mprQuality === 'high') ? 'high' : 'fast')}`;
                 const resp = await fetch(url, { credentials: 'same-origin' });
                 const data = await resp.json();
                 if (!resp.ok) throw new Error(data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${resp.status}`);

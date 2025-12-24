@@ -3243,8 +3243,9 @@
             try {
                 showLoading('Generating MPR views...');
                 
+                const qs = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
                 const response = await fetch(
-                    `/dicom-viewer/api/series/${currentSeries.id}/mpr/?window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}&quality=fast`,
+                    `/dicom-viewer/api/series/${currentSeries.id}/mpr/?${qs}&quality=fast`,
                     { credentials: 'same-origin' }
                 );
                 let data = null;
@@ -3270,6 +3271,21 @@
                     document.getElementById('mprAxial').src = ensureDataUrl(data.mpr_views.axial);
                     document.getElementById('mprSagittal').src = ensureDataUrl(data.mpr_views.sagittal);
                     document.getElementById('mprCoronal').src = ensureDataUrl(data.mpr_views.coronal);
+
+                    // Progressive upgrade to full quality (non-blocking).
+                    // The backend prewarms the high-quality volume after the fast request.
+                    (async () => {
+                        try {
+                            const hiResp = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?${qs}&quality=high`, { credentials: 'same-origin' });
+                            const hiData = await hiResp.json();
+                            if (!hiResp.ok) return;
+                            const views = hiData && (hiData.mpr_views || hiData.views);
+                            if (!views) return;
+                            document.getElementById('mprAxial').src = ensureDataUrl(views.axial);
+                            document.getElementById('mprSagittal').src = ensureDataUrl(views.sagittal);
+                            document.getElementById('mprCoronal').src = ensureDataUrl(views.coronal);
+                        } catch (_) { /* ignore */ }
+                    })();
                     
                     mprImages = data.mpr_views;
                     volumeMetadata = data;

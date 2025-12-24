@@ -80,7 +80,9 @@ def _jsonify_dicom_value(v):
 
 # MPR volume small LRU cache (per-process) - optimized for 3D performance
 from threading import Lock
+from threading import Thread
 import gc
+from django.db import close_old_connections
 
 _MPR_CACHE_LOCK = Lock()
 # Cache key includes quality mode to avoid mixing fast vs high-quality volumes.
@@ -120,6 +122,62 @@ _MAX_MPR_IMG_CACHE = 800
 # Safety budget for in-memory MPR volumes (per-request/build). Large CT stacks can otherwise
 # allocate multiple GB and stall/hang the request under ASGI.
 _MAX_MPR_VOLUME_BYTES = 256 * 1024 * 1024  # 256MB
+
+# Background prewarm so "fast" initial MPR can upgrade to high-quality without user waiting.
+_MPR_PREWARM_LOCK = Lock()
+_MPR_PREWARM_INFLIGHT = set()  # {(series_id, quality)}
+
+def _schedule_mpr_prewarm(series_id: int, quality: str = 'high') -> None:
+    """Best-effort background build of MPR volume for a series.
+
+    This does not change output quality; it just moves the expensive work off the user's
+    initial MPR request so that subsequent high-quality requests are instant.
+    """
+    try:
+        q = (quality or 'high').strip().lower()
+        if q not in ('high', 'fast'):
+            q = 'high'
+        key = (int(series_id), q)
+    except Exception:
+        return
+
+    # If volume already cached, nothing to do.
+    try:
+        with _MPR_CACHE_LOCK:
+            entry = _MPR_CACHE.get(key)
+            if entry is not None and isinstance(entry.get('volume'), np.ndarray) and entry.get('volume').size:
+                return
+    except Exception:
+        # Cache issues shouldn't break request path.
+        pass
+
+    with _MPR_PREWARM_LOCK:
+        if key in _MPR_PREWARM_INFLIGHT:
+            return
+        _MPR_PREWARM_INFLIGHT.add(key)
+
+    def _run():
+        try:
+            close_old_connections()
+            # Re-fetch within thread to avoid sharing ORM objects across threads.
+            s = Series.objects.get(id=int(series_id))
+            _get_mpr_volume_and_spacing(s, quality=q)
+        except Exception:
+            pass
+        finally:
+            try:
+                close_old_connections()
+            except Exception:
+                pass
+            with _MPR_PREWARM_LOCK:
+                _MPR_PREWARM_INFLIGHT.discard(key)
+
+    try:
+        t = Thread(target=_run, daemon=True)
+        t.start()
+    except Exception:
+        with _MPR_PREWARM_LOCK:
+            _MPR_PREWARM_INFLIGHT.discard(key)
 
 def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=None):
     """
@@ -592,6 +650,11 @@ def api_mpr_reconstruction(request, series_id):
         quality = (request.GET.get('quality') or 'high').strip().lower()
         if quality not in ('fast', 'high'):
             quality = 'high'
+
+        # If the client asks for fast, immediately schedule a background prewarm of high quality
+        # so we can upgrade to full-quality images without the user waiting.
+        if quality == 'fast':
+            _schedule_mpr_prewarm(series.id, quality='high')
 
         # Load volume from cache or build once (quality-specific)
         volume, _spacing = _get_mpr_volume_and_spacing(series, quality=quality)

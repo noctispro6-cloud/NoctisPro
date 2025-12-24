@@ -7,6 +7,7 @@
     let currentTool = 'window';
     let isMouseDown = false;
     let lastMousePos = {x: 0, y: 0};
+    let _wrappedSetTool = false;
     
     // Fix mouse controls to only work when tool is selected and mouse is pressed
     function initializeMouseControls() {
@@ -46,6 +47,13 @@
     }
     
     function handleMouseMove(e) {
+        // If the main viewer is currently in MPR mode, don't try to apply single-view tools.
+        try {
+            if (typeof window._isMprVisible === 'function' && window._isMprVisible()) {
+                return;
+            }
+        } catch (_) {}
+
         // Only apply windowing if mouse is pressed AND window tool is active
         if (isMouseDown && currentTool === 'window') {
             const deltaX = e.clientX - lastMousePos.x;
@@ -72,6 +80,13 @@
     
     function handleMouseWheel(e) {
         e.preventDefault();
+
+        // If the main viewer is currently in MPR mode, single-view slice navigation should not run.
+        try {
+            if (typeof window._isMprVisible === 'function' && window._isMprVisible()) {
+                return;
+            }
+        } catch (_) {}
         
         // Slice navigation with mouse wheel
         if (typeof navigateSlice === 'function') {
@@ -108,8 +123,29 @@
         console.log('Tool changed to:', tool);
     }
     
-    // Make functions globally available
-    window.setTool = setTool;
+    // Make functions globally available WITHOUT clobbering the viewer's own implementations.
+    // If the page already defines setTool (the main viewer does), wrap it so our local
+    // state stays in sync while preserving the original behavior.
+    try {
+        const existingSetTool = window.setTool;
+        if (typeof existingSetTool === 'function') {
+            if (!existingSetTool.__noctis_mouse_fix_wrapped) {
+                const wrapped = function(tool) {
+                    try { currentTool = tool; } catch (_) {}
+                    return existingSetTool.call(this, tool);
+                };
+                wrapped.__noctis_mouse_fix_wrapped = true;
+                window.setTool = wrapped;
+                _wrappedSetTool = true;
+            }
+        } else {
+            window.setTool = setTool;
+        }
+    } catch (_) {
+        // As a last resort, define if possible.
+        try { if (typeof window.setTool !== 'function') window.setTool = setTool; } catch (_) {}
+    }
+
     window.initializeMouseControls = initializeMouseControls;
     
     // Initialize when DOM is ready

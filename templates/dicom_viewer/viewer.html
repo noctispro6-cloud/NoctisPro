@@ -2715,8 +2715,21 @@
             try {
                 showLoading('Generating MPR views...');
                 
-                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`);
-                const data = await response.json();
+                const response = await fetch(
+                    `/dicom-viewer/api/series/${currentSeries.id}/mpr/?window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`,
+                    { credentials: 'same-origin' }
+                );
+                let data = null;
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    // If we got HTML (e.g. auth redirect) or a proxy error, surface a useful error.
+                    const text = await response.text().catch(() => '');
+                    throw new Error(text || `Failed to load MPR response (HTTP ${response.status})`);
+                }
+                if (!response.ok) {
+                    throw new Error((data && data.error) ? data.error : `Failed to generate MPR (HTTP ${response.status})`);
+                }
                 
                 const views = data && (data.mpr_views || data.views || data.mprViews);
                 if (views && (views.axial || views.sagittal || views.coronal)) {
@@ -2744,8 +2757,16 @@
                             const t = Math.max(0, Math.min(1, (Number(currentImageIndex) || 0) / (srcCount - 1)));
                             const axialSlice = Math.round(t * (axialCount - 1));
                             _mprState.sliceIndex.axial = axialSlice;
-                            const axialResp = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=axial&slice=${axialSlice}&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`);
-                            const axialData = await axialResp.json();
+                            const axialResp = await fetch(
+                                `/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=axial&slice=${axialSlice}&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`,
+                                { credentials: 'same-origin' }
+                            );
+                            let axialData = null;
+                            try {
+                                axialData = await axialResp.json();
+                            } catch (e) {
+                                axialData = null;
+                            }
                             if (axialData && axialData.image) {
                                 views.axial = axialData.image;
                             }
@@ -2822,7 +2843,9 @@
             const mprView = document.getElementById('mprView');
             const singleView = document.getElementById('singleView');
             
-            if (mprView.style.display === 'none') {
+            if (!mprView || !singleView) return;
+            const hidden = (mprView.style.display === 'none') || (window.getComputedStyle && window.getComputedStyle(mprView).display === 'none');
+            if (hidden) {
                 generateMPR();
             } else {
                 mprView.style.display = 'none';

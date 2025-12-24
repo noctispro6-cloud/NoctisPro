@@ -113,8 +113,16 @@ fi
 dicom_port="$(read_env_kv DICOM_PORT .env.docker)"
 dicom_port="${dicom_port:-11112}"
 
+web_port="$(read_env_kv WEB_PORT .env.docker)"
+web_port="${web_port:-8000}"
+
 info "Cleaning up old compose resources (safe; volumes persist)..."
 docker compose down --remove-orphans >/dev/null 2>&1 || true
+
+info "Ensuring host port ${web_port} is available..."
+# Stop the known host-level web service if it is running (to avoid port conflicts).
+stop_systemd_if_running "noctis-pro.service"
+ensure_port_free "${web_port}"
 
 info "Ensuring host port ${dicom_port} is available..."
 ensure_port_free "${dicom_port}"
@@ -131,7 +139,7 @@ info "Running a quick health check (web logs tail)..."
 docker compose logs --tail=30 web || true
 
 info "Done."
-info "Web:   http://localhost:8000"
+info "Web:   http://localhost:${web_port}"
 info "DICOM: <server-ip>:${dicom_port} (AE: NOCTIS_SCP)"
 if [[ "$want_ngrok" == "1" ]]; then
   info "Ngrok: check: docker compose logs --tail=200 ngrok"

@@ -59,7 +59,7 @@ The desktop viewer integrates with the main system through lightweight REST endp
 ### Troubleshooting
 
 - If the launcher reports the C++ binary is missing, build it under `cpp_viewer/build`.
-- Ensure the server is running at `http://localhost:8000` (or set `DICOM_VIEWER_BASE_URL`).
+- Ensure the server is running locally (default `http://localhost:8000`). If you run Docker with a different host port (e.g. `WEB_PORT=8001`), set `DICOM_VIEWER_BASE_URL` accordingly.
 
 ### File Structure
 ```

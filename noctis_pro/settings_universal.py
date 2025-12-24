@@ -87,8 +87,8 @@ CSRF_TRUSTED_ORIGINS = [
     'https://*.trycloudflare.com',
     'https://*.ngrok.io',
     'https://*.loca.lt',
-    'http://localhost:8000',
-    'http://127.0.0.1:8000'
+    f'http://localhost:{WEB_PORT}',
+    f'http://127.0.0.1:{WEB_PORT}',
 ]
 
 # CORS settings for API access

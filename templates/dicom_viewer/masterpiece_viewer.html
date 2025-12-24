@@ -3448,7 +3448,9 @@
             const w = img.naturalWidth || img.width;
             const h = img.naturalHeight || img.height;
 
-            const scale = Math.min(canvas.width / w, canvas.height / h);
+            // Fit-to-canvas without upscaling (prevents “zoomed-in” look on large/high-DPI screens).
+            const scaleFit = Math.min(canvas.width / w, canvas.height / h);
+            const scale = Math.min(1, scaleFit);
             const dw = Math.round(w * scale);
             const dh = Math.round(h * scale);
             const dx = Math.round((canvas.width - dw) / 2);
@@ -3481,7 +3483,9 @@
             ctx.clearRect(0, 0, c.width, c.height);
             // Render MPR with high-quality interpolation for better perceived clarity.
             // (The backend already resamples along Z; this improves browser-side scaling quality.)
-            ctx.imageSmoothingEnabled = true;
+            // Only smooth when downscaling; for 1:1 (or larger) keep crisp edges.
+            const s = Math.min(dw / Math.max(1, w), dh / Math.max(1, h));
+            ctx.imageSmoothingEnabled = s < 1;
             try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
             ctx.drawImage(img, dx, dy, dw, dh);
 
@@ -3983,7 +3987,9 @@
             const w = img.naturalWidth || img.width;
             const h = img.naturalHeight || img.height;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const scale = Math.min(canvas.width / w, canvas.height / h);
+            // Avoid upscaling 2D fallbacks (prevents “zoomed” look on large panes).
+            const scaleFit = Math.min(canvas.width / w, canvas.height / h);
+            const scale = Math.min(1, scaleFit);
             const dw = Math.round(w * scale);
             const dh = Math.round(h * scale);
             const dx = Math.round((canvas.width - dw) / 2);
@@ -4005,8 +4011,11 @@
                 powerPreference: 'high-performance',
                 preserveDrawingBuffer: true, // enables clean screenshots/exports
             });
-            // Higher pixel ratio improves edge clarity (cap to keep it responsive).
-            bone3D.renderer.setPixelRatio(Math.min(3, window.devicePixelRatio || 1));
+            // IMPORTANT: our canvases are already sized in device pixels (backing store) using DPR.
+            // So Three.js should render at pixelRatio=1, otherwise it double-applies DPR and looks “zoomed”/slow.
+            bone3D.renderer.setPixelRatio(1);
+            bone3D._lastW = 0;
+            bone3D._lastH = 0;
             bone3D.renderer.setSize(c.width || 1, c.height || 1, false);
             try { bone3D.renderer.outputEncoding = THREE.sRGBEncoding; } catch (e) {}
             try { bone3D.renderer.toneMapping = THREE.ACESFilmicToneMapping; } catch (e) {}
@@ -4191,9 +4200,13 @@
             // Keep renderer in sync with canvas size
             const w = c.width || 1;
             const h = c.height || 1;
-            bone3D.renderer.setSize(w, h, false);
-            bone3D.camera.aspect = w / h;
-            bone3D.camera.updateProjectionMatrix();
+            if (bone3D._lastW !== w || bone3D._lastH !== h) {
+                bone3D._lastW = w;
+                bone3D._lastH = h;
+                bone3D.renderer.setSize(w, h, false);
+                bone3D.camera.aspect = w / h;
+                bone3D.camera.updateProjectionMatrix();
+            }
             bone3D.renderer.render(bone3D.scene, bone3D.camera);
         }
 

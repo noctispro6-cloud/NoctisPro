@@ -28,6 +28,10 @@ services:
       SERVE_MEDIA_FILES: "True"
       SSL_ENABLED: "False"
       SECURE_SSL_REDIRECT: "False"
+      NOCTIS_CREATE_SUPERUSER: "1"
+      NOCTIS_ADMIN_USERNAME: ${NOCTIS_ADMIN_USERNAME:-admin}
+      NOCTIS_ADMIN_EMAIL: ${NOCTIS_ADMIN_EMAIL:-noctis-pro6@gmail.com}
+      NOCTIS_ADMIN_PASSWORD: ${NOCTIS_ADMIN_PASSWORD:-}
 
       # Persistent uploads/DICOM
       MEDIA_ROOT: /data/media

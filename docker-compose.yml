@@ -55,7 +55,9 @@ services:
       STATIC_ROOT: /data/staticfiles
     command: ["bash", "-lc", "exec python dicom_receiver.py --port 11112 --aet NOCTIS_SCP"]
     ports:
-      - "11112:11112"
+      # Host port is configurable to avoid conflicts with systemd or other stacks.
+      # Set DICOM_PORT in .env.docker (defaults to 11112).
+      - "${DICOM_PORT:-11112}:11112"
     volumes:
       - noctis_media:/data/media
     restart: unless-stopped

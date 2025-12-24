@@ -3236,20 +3236,24 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
         dx = _ceil_div(x, _xs)
         return int(dz) * int(dy) * int(dx) * int(itemsize)
 
-    # Increase the step along the largest dimension until within budget.
+    # Reduce memory footprint while preserving perceived MPR resolution.
+    #
+    # Priority is to preserve in-plane resolution (X/Y) because that is what users judge as "sharp".
+    # Downsampling X/Y makes axial views blurry immediately. It's preferable to reduce Z first
+    # (slice direction) which is often lower resolution and later can be interpolated for reformats.
+    #
     # This loop is bounded by dimensions and typically runs only a few iterations.
     while _bytes_for_steps(z_step, y_step, x_step) > _MAX_MPR_VOLUME_BYTES and (z_step < z or y_step < y or x_step < x):
-        dz = _ceil_div(z, z_step)
-        dy = _ceil_div(y, y_step)
-        dx = _ceil_div(x, x_step)
-        if dz >= dy and dz >= dx and z_step < z:
+        if z_step < z:
             z_step += 1
-        elif dy >= dx and y_step < y:
+            continue
+        if y_step < y:
             y_step += 1
-        elif x_step < x:
+            continue
+        if x_step < x:
             x_step += 1
-        else:
-            break
+            continue
+        break
 
     if z_step > 1 or y_step > 1 or x_step > 1:
         logger.info(

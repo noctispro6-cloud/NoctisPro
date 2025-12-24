@@ -616,8 +616,15 @@ class MasterpieceBoneReconstruction3D {
             // Create geometry from mesh data
             const geometry = new THREE.BufferGeometry();
             
-            // Convert vertices and faces to Three.js format
-            // Backend vertices are in (z, y, x) voxel order. Re-map to (x, y, z) and make Z(up)->Y to start upright.
+            // Convert vertices and faces to Three.js format.
+            // Backend vertices are in (z, y, x) voxel order.
+            //
+            // For a "professional" initial view we want the long (slice) axis to be vertical (Y-up),
+            // similar to how reformats are displayed with superior at the top.
+            // So we map:
+            // - x_voxel -> X
+            // - z_voxel -> Y (up), with a flip so superior appears "up" by default
+            // - y_voxel -> Z
             const srcVerts = Array.isArray(meshData.vertices) ? meshData.vertices : [];
             const vertices = new Float32Array(srcVerts.length * 3);
             for (let i = 0; i < srcVerts.length; i++) {
@@ -625,9 +632,8 @@ class MasterpieceBoneReconstruction3D {
                 const z = Number(v[0]) || 0;
                 const y = Number(v[1]) || 0;
                 const x = Number(v[2]) || 0;
-                // x -> x, z -> y (up), y -> z
                 vertices[i * 3] = x;
-                vertices[i * 3 + 1] = z;
+                vertices[i * 3 + 1] = -z; // flip to make initial orientation upright (superior towards +Y)
                 vertices[i * 3 + 2] = y;
             }
             const indices = new Uint32Array(meshData.faces.flat());
@@ -845,8 +851,10 @@ class MasterpieceBoneReconstruction3D {
         const maxSize = Math.max(size.x, size.y, size.z);
         const distance = maxSize * 2.5;
         
-        // Position camera for optimal viewing angle
-        this.camera.position.set(distance, distance * 0.7, distance * 0.7);
+        // Position camera for an upright, "clinical" first view:
+        // look slightly down from the front, keeping Y as up.
+        this.camera.up.set(0, 1, 0);
+        this.camera.position.set(0, maxSize * 0.35, distance);
         this.camera.lookAt(center);
         
         // Update controls
@@ -857,6 +865,23 @@ class MasterpieceBoneReconstruction3D {
         this.controls.minDistance = maxSize * 0.5;
         this.controls.maxDistance = maxSize * 8;
         
+        // Optional: subtle ground plane for depth perception (looks more professional with shadows).
+        try {
+            if (!this.groundPlane) {
+                const planeGeo = new THREE.PlaneGeometry(1, 1);
+                const planeMat = this.options.enableShadows
+                    ? new THREE.ShadowMaterial({ opacity: 0.18 })
+                    : new THREE.MeshBasicMaterial({ color: 0x0a0a0a, transparent: true, opacity: 0.0 });
+                this.groundPlane = new THREE.Mesh(planeGeo, planeMat);
+                this.groundPlane.rotation.x = -Math.PI / 2;
+                this.groundPlane.receiveShadow = !!this.options.enableShadows;
+                this.scene.add(this.groundPlane);
+            }
+            const planeSize = maxSize * 4;
+            this.groundPlane.scale.set(planeSize, planeSize, 1);
+            this.groundPlane.position.set(center.x, center.y - (size.y / 2) - (maxSize * 0.08), center.z);
+        } catch (_) { /* ignore */ }
+
         console.log(`📐 Camera fitted to model (size: ${maxSize.toFixed(1)})`);
     }
     

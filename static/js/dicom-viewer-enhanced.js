@@ -654,22 +654,31 @@ document.addEventListener('DOMContentLoaded', function() {
     // Make globally available
     window.dicomViewerEnhanced = dicomViewerEnhanced;
     
-    // Global function aliases for DICOM viewer
-    window.setTool = (toolName) => dicomViewerEnhanced.setTool(toolName);
-    window.resetView = () => dicomViewerEnhanced.resetView();
-    window.toggleCrosshair = () => dicomViewerEnhanced.toggleCrosshair();
-    window.toggleInvert = () => dicomViewerEnhanced.toggleInvert();
-    window.applyPreset = (presetName) => dicomViewerEnhanced.applyPreset(presetName);
-    window.loadFromLocalFiles = () => dicomViewerEnhanced.loadFromLocalFiles();
-    window.loadFromExternalMedia = () => dicomViewerEnhanced.loadFromExternalMedia();
-    window.exportImage = () => dicomViewerEnhanced.exportImage();
-    window.saveMeasurements = () => dicomViewerEnhanced.saveMeasurements();
-    window.clearMeasurements = () => dicomViewerEnhanced.clearMeasurements();
-    window.showPrintDialog = () => dicomViewerEnhanced.showPrintDialog();
-    window.show3DReconstruction = () => dicomViewerEnhanced.show3DReconstruction();
-    window.toggleMPR = () => dicomViewerEnhanced.toggleMPR();
-    window.toggleAIPanel = () => dicomViewerEnhanced.toggleAIPanel();
-    window.runQuickAI = () => dicomViewerEnhanced.runQuickAI();
+    // Global function aliases for DICOM viewer.
+    // IMPORTANT: do not override pages that provide their own implementations.
+    const defineIfMissing = (name, fn) => {
+        try {
+            if (typeof window[name] !== 'function') {
+                window[name] = fn;
+            }
+        } catch (_) { /* ignore */ }
+    };
+
+    defineIfMissing('setTool', (toolName) => dicomViewerEnhanced.setTool(toolName));
+    defineIfMissing('resetView', () => dicomViewerEnhanced.resetView());
+    defineIfMissing('toggleCrosshair', () => dicomViewerEnhanced.toggleCrosshair());
+    defineIfMissing('toggleInvert', () => dicomViewerEnhanced.toggleInvert());
+    defineIfMissing('applyPreset', (presetName) => dicomViewerEnhanced.applyPreset(presetName));
+    defineIfMissing('loadFromLocalFiles', () => dicomViewerEnhanced.loadFromLocalFiles());
+    defineIfMissing('loadFromExternalMedia', () => dicomViewerEnhanced.loadFromExternalMedia());
+    defineIfMissing('exportImage', () => dicomViewerEnhanced.exportImage());
+    defineIfMissing('saveMeasurements', () => dicomViewerEnhanced.saveMeasurements());
+    defineIfMissing('clearMeasurements', () => dicomViewerEnhanced.clearMeasurements());
+    defineIfMissing('showPrintDialog', () => dicomViewerEnhanced.showPrintDialog());
+    defineIfMissing('show3DReconstruction', () => dicomViewerEnhanced.show3DReconstruction());
+    defineIfMissing('toggleMPR', () => dicomViewerEnhanced.toggleMPR());
+    defineIfMissing('toggleAIPanel', () => dicomViewerEnhanced.toggleAIPanel());
+    defineIfMissing('runQuickAI', () => dicomViewerEnhanced.runQuickAI());
 });
 
 // Export for module systems

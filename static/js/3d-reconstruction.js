@@ -10,6 +10,7 @@
     let volumeMesh = null;
     let mprPlanes = { axial: null, sagittal: null, coronal: null };
     let currentReconType = 'volume';
+    let resizeObserver = null;
     
     window.Reconstruction3D = {
         
@@ -365,14 +366,30 @@
             const canvas = document.getElementById('recon-canvas');
             if (!canvas) return;
             
+            const resizeViewport = () => {
+                try {
+                    if (!renderer) return;
+                    // Use the canvas CSS pixel size (drawing buffer scaled via DPR).
+                    const rect = canvas.getBoundingClientRect();
+                    const w = Math.max(1, Math.round(rect.width));
+                    const h = Math.max(1, Math.round(rect.height));
+                    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+                    renderer.setSize(w, h, false);
+                    if (camera) {
+                        camera.aspect = w / h;
+                        camera.updateProjectionMatrix();
+                    }
+                } catch (_) { /* ignore */ }
+            };
+
             // Create renderer
             renderer = new THREE.WebGLRenderer({ 
                 canvas: canvas, 
                 antialias: true,
                 alpha: true 
             });
-            renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
+            // Configure DPR and size for crisp rendering.
+            resizeViewport();
             
             // Create scene
             scene = new THREE.Scene();
@@ -381,16 +398,19 @@
             // Create camera
             camera = new THREE.PerspectiveCamera(
                 75, 
-                canvas.clientWidth / canvas.clientHeight, 
+                (canvas.clientWidth || 1) / (canvas.clientHeight || 1), 
                 0.1, 
                 1000
             );
             camera.position.set(0, 0, 5);
+            camera.up.set(0, 1, 0);
             
             // Create controls
             controls = new THREE.OrbitControls(camera, canvas);
             controls.enableDamping = true;
             controls.dampingFactor = 0.05;
+            controls.target.set(0, 0, 0);
+            controls.update();
             
             // Add lights
             const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
@@ -402,6 +422,16 @@
             
             // Start render loop
             this.animate();
+
+            // Keep renderer resolution correct on resize / panel show
+            window.addEventListener('resize', resizeViewport);
+            try {
+                resizeObserver?.disconnect?.();
+                resizeObserver = new ResizeObserver(() => resizeViewport());
+                resizeObserver.observe(canvas);
+                const container = document.getElementById('reconstruction-viewport');
+                if (container) resizeObserver.observe(container);
+            } catch (_) { /* ignore */ }
         },
         
         animate: function() {
@@ -422,6 +452,8 @@
                 content.style.display = 'block';
                 viewport.style.display = 'block';
                 toggleBtn.textContent = '−';
+                // Ensure canvas is resized after becoming visible.
+                try { window.dispatchEvent(new Event('resize')); } catch (_) {}
             } else {
                 content.style.display = 'none';
                 viewport.style.display = 'none';

@@ -80,10 +80,14 @@ def _jsonify_dicom_value(v):
 
 # MPR volume small LRU cache (per-process) - optimized for 3D performance
 from threading import Lock
+from threading import Thread
 import gc
+from django.db import close_old_connections
 
 _MPR_CACHE_LOCK = Lock()
-_MPR_CACHE = {}  # series_id -> { 'volume': np.ndarray, 'spacing': tuple, 'timestamp': float }
+# Cache key includes quality mode to avoid mixing fast vs high-quality volumes.
+# key: (series_id, quality) -> { 'volume': np.ndarray, 'spacing': tuple }
+_MPR_CACHE = {}
 _MPR_CACHE_ORDER = []
 _MAX_MPR_CACHE = 6  # Increased cache size for better performance
 
@@ -119,7 +123,63 @@ _MAX_MPR_IMG_CACHE = 800
 # allocate multiple GB and stall/hang the request under ASGI.
 _MAX_MPR_VOLUME_BYTES = 256 * 1024 * 1024  # 256MB
 
-def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted):
+# Background prewarm so "fast" initial MPR can upgrade to high-quality without user waiting.
+_MPR_PREWARM_LOCK = Lock()
+_MPR_PREWARM_INFLIGHT = set()  # {(series_id, quality)}
+
+def _schedule_mpr_prewarm(series_id: int, quality: str = 'high') -> None:
+    """Best-effort background build of MPR volume for a series.
+
+    This does not change output quality; it just moves the expensive work off the user's
+    initial MPR request so that subsequent high-quality requests are instant.
+    """
+    try:
+        q = (quality or 'high').strip().lower()
+        if q not in ('high', 'fast'):
+            q = 'high'
+        key = (int(series_id), q)
+    except Exception:
+        return
+
+    # If volume already cached, nothing to do.
+    try:
+        with _MPR_CACHE_LOCK:
+            entry = _MPR_CACHE.get(key)
+            if entry is not None and isinstance(entry.get('volume'), np.ndarray) and entry.get('volume').size:
+                return
+    except Exception:
+        # Cache issues shouldn't break request path.
+        pass
+
+    with _MPR_PREWARM_LOCK:
+        if key in _MPR_PREWARM_INFLIGHT:
+            return
+        _MPR_PREWARM_INFLIGHT.add(key)
+
+    def _run():
+        try:
+            close_old_connections()
+            # Re-fetch within thread to avoid sharing ORM objects across threads.
+            s = Series.objects.get(id=int(series_id))
+            _get_mpr_volume_and_spacing(s, quality=q)
+        except Exception:
+            pass
+        finally:
+            try:
+                close_old_connections()
+            except Exception:
+                pass
+            with _MPR_PREWARM_LOCK:
+                _MPR_PREWARM_INFLIGHT.discard(key)
+
+    try:
+        t = Thread(target=_run, daemon=True)
+        t.start()
+    except Exception:
+        with _MPR_PREWARM_LOCK:
+            _MPR_PREWARM_INFLIGHT.discard(key)
+
+def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=None):
     """
     Build a stable cache key for an encoded MPR slice.
 
@@ -139,10 +199,11 @@ def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted):
 
     ww_i = _safe_round_int(ww, 400.0)
     wl_i = _safe_round_int(wl, 40.0)
-    return f"{series_id}|{plane}|{int(slice_index)}|{ww_i}|{wl_i}|{1 if inverted else 0}"
+    q = (quality or 'high').strip().lower()
+    return f"{series_id}|{q}|{plane}|{int(slice_index)}|{ww_i}|{wl_i}|{1 if inverted else 0}"
 
-def _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted):
-    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted)
+def _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=None):
+    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
     with _MPR_IMG_CACHE_LOCK:
         val = _MPR_IMG_CACHE.get(key)
         if val is not None:
@@ -153,8 +214,8 @@ def _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted):
             _MPR_IMG_CACHE_ORDER.append(key)
         return val
 
-def _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64):
-    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted)
+def _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64, quality=None):
+    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
     with _MPR_IMG_CACHE_LOCK:
         if key not in _MPR_IMG_CACHE:
             while len(_MPR_IMG_CACHE_ORDER) >= _MAX_MPR_IMG_CACHE:
@@ -167,11 +228,11 @@ def _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64):
             pass
         _MPR_IMG_CACHE_ORDER.append(key)
 
-def _get_encoded_mpr_slice(series_id, volume, plane, slice_index, ww, wl, inverted):
+def _get_encoded_mpr_slice(series_id, volume, plane, slice_index, ww, wl, inverted, quality=None):
     """Get encoded base64 PNG for given MPR slice, using cache if possible.
     volume is a numpy array (depth,height,width).
     """
-    cached = _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted)
+    cached = _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
     if cached is not None:
         return cached
     
@@ -200,7 +261,7 @@ def _get_encoded_mpr_slice(series_id, volume, plane, slice_index, ww, wl, invert
     # MPR benefits from mild sharpening to counteract scaling softness.
     img_b64 = _array_to_base64_image(slice_array, ww, wl, inverted, sharpen=True)
     if img_b64:
-        _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64)
+        _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64, quality=quality)
     else:
         logger.error(f"Failed to generate base64 image for MPR slice: series={series_id}, plane={plane}, slice={slice_index}")
     return img_b64
@@ -214,15 +275,17 @@ def _get_mpr_volume_for_series(series):
     import pydicom as _pydicom
     import os as _os
 
+    # This helper is not quality-aware (legacy). Store under a dedicated cache key.
+    cache_key = (int(series.id), 'raw')
     with _MPR_CACHE_LOCK:
-        entry = _MPR_CACHE.get(series.id)
+        entry = _MPR_CACHE.get(cache_key)
         if entry is not None and isinstance(entry.get('volume'), _np.ndarray):
             # touch LRU order
             try:
-                _MPR_CACHE_ORDER.remove(series.id)
+                _MPR_CACHE_ORDER.remove(cache_key)
             except ValueError:
                 pass
-            _MPR_CACHE_ORDER.append(series.id)
+            _MPR_CACHE_ORDER.append(cache_key)
             return entry['volume']
 
     # Build the volume (read from disk once)
@@ -264,21 +327,21 @@ def _get_mpr_volume_for_series(series):
         volume = ndimage.zoom(volume, (factor, 1, 1), order=1)
 
     with _MPR_CACHE_LOCK:
-        if series.id not in _MPR_CACHE:
+        if cache_key not in _MPR_CACHE:
             # Enforce tiny LRU size
             while len(_MPR_CACHE_ORDER) >= _MAX_MPR_CACHE:
-                evict_id = _MPR_CACHE_ORDER.pop(0)
-                _MPR_CACHE.pop(evict_id, None)
-            _MPR_CACHE[series.id] = { 'volume': volume }
-            _MPR_CACHE_ORDER.append(series.id)
+                evict_key = _MPR_CACHE_ORDER.pop(0)
+                _MPR_CACHE.pop(evict_key, None)
+            _MPR_CACHE[cache_key] = { 'volume': volume }
+            _MPR_CACHE_ORDER.append(cache_key)
         else:
             # Update existing
-            _MPR_CACHE[series.id]['volume'] = volume
+            _MPR_CACHE[cache_key]['volume'] = volume
             try:
-                _MPR_CACHE_ORDER.remove(series.id)
+                _MPR_CACHE_ORDER.remove(cache_key)
             except ValueError:
                 pass
-            _MPR_CACHE_ORDER.append(series.id)
+            _MPR_CACHE_ORDER.append(cache_key)
 
     return volume
 
@@ -581,8 +644,20 @@ def api_mpr_reconstruction(request, series_id):
         return JsonResponse({'error': 'Permission denied'}, status=403)
 
     try:
-        # Load isotropically-resampled volume from cache or build once
-        volume, _spacing = _get_mpr_volume_and_spacing(series)
+        # Quality control:
+        # - high: preserves current behavior (may do expensive Z resampling for nicer reformats)
+        # - fast: skips expensive Z upsampling so the initial MPR images appear sooner
+        quality = (request.GET.get('quality') or 'high').strip().lower()
+        if quality not in ('fast', 'high'):
+            quality = 'high'
+
+        # If the client asks for fast, immediately schedule a background prewarm of high quality
+        # so we can upgrade to full-quality images without the user waiting.
+        if quality == 'fast':
+            _schedule_mpr_prewarm(series.id, quality='high')
+
+        # Load volume from cache or build once (quality-specific)
+        volume, _spacing = _get_mpr_volume_and_spacing(series, quality=quality)
         
         # Validate volume data
         if volume is None or volume.size == 0:
@@ -643,7 +718,7 @@ def api_mpr_reconstruction(request, series_id):
             slice_index = max(0, min(counts[plane] - 1, slice_index))
 
             # Get encoded slice via cache
-            img_b64 = _get_encoded_mpr_slice(series.id, volume, plane, slice_index, window_width, window_level, inverted)
+            img_b64 = _get_encoded_mpr_slice(series.id, volume, plane, slice_index, window_width, window_level, inverted, quality=quality)
             return JsonResponse({
                 'plane': plane,
                 'index': slice_index,
@@ -651,6 +726,7 @@ def api_mpr_reconstruction(request, series_id):
                 'image': img_b64,
                 'counts': counts,
                 'volume_shape': tuple(int(x) for x in volume.shape),
+                'quality': quality,
                 'series_info': {
                     'id': series.id,
                     'description': series.series_description,
@@ -663,14 +739,15 @@ def api_mpr_reconstruction(request, series_id):
         axial_idx = volume.shape[0] // 2
         sagittal_idx = volume.shape[2] // 2
         coronal_idx = volume.shape[1] // 2
-        mpr_views['axial'] = _get_encoded_mpr_slice(series.id, volume, 'axial', axial_idx, window_width, window_level, inverted)
-        mpr_views['sagittal'] = _get_encoded_mpr_slice(series.id, volume, 'sagittal', sagittal_idx, window_width, window_level, inverted)
-        mpr_views['coronal'] = _get_encoded_mpr_slice(series.id, volume, 'coronal', coronal_idx, window_width, window_level, inverted)
+        mpr_views['axial'] = _get_encoded_mpr_slice(series.id, volume, 'axial', axial_idx, window_width, window_level, inverted, quality=quality)
+        mpr_views['sagittal'] = _get_encoded_mpr_slice(series.id, volume, 'sagittal', sagittal_idx, window_width, window_level, inverted, quality=quality)
+        mpr_views['coronal'] = _get_encoded_mpr_slice(series.id, volume, 'coronal', coronal_idx, window_width, window_level, inverted, quality=quality)
 
         return JsonResponse({
             'mpr_views': mpr_views,
             'volume_shape': tuple(int(x) for x in volume.shape),
             'counts': counts,
+            'quality': quality,
             'series_info': {
                 'id': series.id,
                 'description': series.series_description,
@@ -3089,11 +3166,14 @@ def api_hu_value(request):
             slice_index = int(float(request.GET.get('slice', '0')))
             x = int(float(request.GET.get('x')))
             y = int(float(request.GET.get('y')))
+            quality = (request.GET.get('quality') or 'high').strip().lower()
+            if quality not in ('fast', 'high'):
+                quality = 'high'
             series = get_object_or_404(Series, id=series_id)
             if user.is_facility_user() and getattr(user, 'facility', None) and series.study.facility != user.facility:
                 return JsonResponse({'error': 'Permission denied'}, status=403)
             # Reuse the same orientation-aware cached volume as the MPR renderer.
-            volume, _spacing = _get_mpr_volume_and_spacing(series)
+            volume, _spacing = _get_mpr_volume_and_spacing(series, quality=quality)
             counts = {
                 'axial': int(volume.shape[0]),
                 'sagittal': int(volume.shape[2]),
@@ -3143,7 +3223,7 @@ def api_hu_value(request):
     except Exception as e:
         return JsonResponse({'error': f'Failed to compute HU: {str(e)}'}, status=500)
 
-def _get_mpr_volume_and_spacing(series, force_rebuild=False):
+def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
     """Return (volume, spacing) where spacing is (z,y,x) in mm.
     - Sorts slices using ImageOrientationPatient/ImagePositionPatient when available
     - Applies rescale slope/intercept
@@ -3154,10 +3234,12 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
     import numpy as _np
     import pydicom as _pydicom
     import os as _os
+    q = (quality or 'high').strip().lower()
+    cache_key = (int(series.id), q)
 
     # Fast path: try cache first (do NOT hold this lock while waiting for the build lock)
     with _MPR_CACHE_LOCK:
-        entry = _MPR_CACHE.get(series.id)
+        entry = _MPR_CACHE.get(cache_key)
         if entry is not None and isinstance(entry.get('volume'), _np.ndarray) and not force_rebuild:
             vol = entry['volume']
             sp = entry.get('spacing')
@@ -3169,7 +3251,7 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
     with build_lock:
         # Double-check cache in case another request built it while we waited.
         with _MPR_CACHE_LOCK:
-            entry = _MPR_CACHE.get(series.id)
+            entry = _MPR_CACHE.get(cache_key)
             if entry is not None and isinstance(entry.get('volume'), _np.ndarray) and not force_rebuild:
                 vol = entry['volume']
                 sp = entry.get('spacing')
@@ -3356,78 +3438,81 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False):
         except Exception:
             first_ps = (1.0 * float(y_step), 1.0 * float(x_step))
 
-        # Enhanced interpolation for thin stacks - optimized for minimal images
-        # Use high-quality interpolation for better 3D reconstruction
-        original_depth = volume.shape[0]
-        if volume.shape[0] < 32:  # Increased threshold for better quality
-            # Calculate optimal interpolation factor for minimal images
-            if volume.shape[0] < 8:
-                # Very few images - use maximum interpolation
-                target_slices = max(64, volume.shape[0] * 8)
-            else:
-                # Moderate number of images
-                target_slices = max(32, volume.shape[0] * 4)
+        # Enhanced interpolation for thin stacks can be expensive; allow a fast mode for initial MPR.
+        # In fast mode we keep native slice count to get the first images on screen quickly.
+        if q != 'fast':
+            # Use high-quality interpolation for better 3D reconstruction / smoother reformats.
+            original_depth = volume.shape[0]
+            if volume.shape[0] < 32:  # Increased threshold for better quality
+                # Calculate optimal interpolation factor for minimal images
+                if volume.shape[0] < 8:
+                    # Very few images - use maximum interpolation
+                    target_slices = max(64, volume.shape[0] * 8)
+                else:
+                    # Moderate number of images
+                    target_slices = max(32, volume.shape[0] * 4)
 
-            factor = target_slices / volume.shape[0]
+                factor = target_slices / volume.shape[0]
 
-            # Use high-quality spline interpolation for better results
-            try:
-                volume = ndimage.zoom(volume, (factor, 1, 1), order=3, prefilter=True)
-                st = st / factor
-                logger.info(f"Enhanced interpolation: {original_depth} -> {volume.shape[0]} slices (factor: {factor:.2f})")
-            except Exception as e:
-                logger.warning(f"High-quality interpolation failed, using linear: {e}")
-                # Fallback to linear interpolation
-                volume = ndimage.zoom(volume, (factor, 1, 1), order=1)
-                st = st / factor
+                # Use high-quality spline interpolation for better results
+                try:
+                    volume = ndimage.zoom(volume, (factor, 1, 1), order=3, prefilter=True)
+                    st = st / factor
+                    logger.info(f"Enhanced interpolation: {original_depth} -> {volume.shape[0]} slices (factor: {factor:.2f})")
+                except Exception as e:
+                    logger.warning(f"High-quality interpolation failed, using linear: {e}")
+                    # Fallback to linear interpolation
+                    volume = ndimage.zoom(volume, (factor, 1, 1), order=1)
+                    st = st / factor
 
         # Resample along Z to approximate isotropic voxels using in-plane pixel spacing average.
         # Keep in-plane resolution; only resample depth for quality MPR.
         #
         # IMPORTANT: fully upsampling thick-slice stacks to isotropic can create enormous depth
         # and make the request appear "hung". Cap the Z upsample factor for responsiveness.
-        try:
-            py, px = float(first_ps[0]), float(first_ps[1])
-            target_xy = (py + px) / 2.0
-            if st and target_xy and st > 0 and target_xy > 0:
-                z_factor = max(1e-6, float(st) / float(target_xy))
-                max_depth = 2048
-                applied_factor = min(float(z_factor), float(_MAX_Z_RESAMPLE_FACTOR))
-                old_depth = int(volume.shape[0])
-                target_depth = int(min(max_depth, round(old_depth * applied_factor)))
-                if target_depth > old_depth + 1 and applied_factor > 1.05:
-                    try:
-                        volume = ndimage.zoom(volume, (float(target_depth) / float(old_depth), 1, 1), order=3, prefilter=True)
-                    except Exception as _e:
-                        logger.warning(f"Z resample (order=3) failed, falling back to linear: {_e}")
-                        volume = ndimage.zoom(volume, (float(target_depth) / float(old_depth), 1, 1), order=1)
-                    # Adjust slice spacing based on the actual factor applied.
-                    try:
-                        st = float(st) / (float(target_depth) / float(max(1, old_depth)))
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        if q != 'fast':
+            try:
+                py, px = float(first_ps[0]), float(first_ps[1])
+                target_xy = (py + px) / 2.0
+                if st and target_xy and st > 0 and target_xy > 0:
+                    z_factor = max(1e-6, float(st) / float(target_xy))
+                    max_depth = 2048
+                    applied_factor = min(float(z_factor), float(_MAX_Z_RESAMPLE_FACTOR))
+                    old_depth = int(volume.shape[0])
+                    target_depth = int(min(max_depth, round(old_depth * applied_factor)))
+                    if target_depth > old_depth + 1 and applied_factor > 1.05:
+                        try:
+                            volume = ndimage.zoom(volume, (float(target_depth) / float(old_depth), 1, 1), order=3, prefilter=True)
+                        except Exception as _e:
+                            logger.warning(f"Z resample (order=3) failed, falling back to linear: {_e}")
+                            volume = ndimage.zoom(volume, (float(target_depth) / float(old_depth), 1, 1), order=1)
+                        # Adjust slice spacing based on the actual factor applied.
+                        try:
+                            st = float(st) / (float(target_depth) / float(max(1, old_depth)))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
         spacing = (float(st or 1.0), float(first_ps[0] or 1.0), float(first_ps[1] or 1.0))
 
         with _MPR_CACHE_LOCK:
             # Store/refresh cache and attach spacing for future calls
-            entry = _MPR_CACHE.get(series.id)
+            entry = _MPR_CACHE.get(cache_key)
             if entry is None:
                 while len(_MPR_CACHE_ORDER) >= _MAX_MPR_CACHE:
-                    evict_id = _MPR_CACHE_ORDER.pop(0)
-                    _MPR_CACHE.pop(evict_id, None)
-                _MPR_CACHE[series.id] = {'volume': volume, 'spacing': spacing}
-                _MPR_CACHE_ORDER.append(series.id)
+                    evict_key = _MPR_CACHE_ORDER.pop(0)
+                    _MPR_CACHE.pop(evict_key, None)
+                _MPR_CACHE[cache_key] = {'volume': volume, 'spacing': spacing}
+                _MPR_CACHE_ORDER.append(cache_key)
             else:
                 entry['volume'] = volume
                 entry['spacing'] = spacing
                 try:
-                    _MPR_CACHE_ORDER.remove(series.id)
+                    _MPR_CACHE_ORDER.remove(cache_key)
                 except ValueError:
                     pass
-                _MPR_CACHE_ORDER.append(series.id)
+                _MPR_CACHE_ORDER.append(cache_key)
 
         return volume, spacing
 
@@ -4741,8 +4826,13 @@ def mpr_slice_api(request, series_id, plane, slice_index):
         except Exception:
             slice_index = 0
 
+        # Quality control (matches api_mpr_reconstruction): fast skips expensive Z upsampling.
+        quality = (request.GET.get('quality') or 'high').strip().lower()
+        if quality not in ('fast', 'high'):
+            quality = 'high'
+
         # Serve from encoded slice cache if present
-        cached_slice = _mpr_cache_get(series_id, plane, slice_index, window_width, window_level, inverted)
+        cached_slice = _mpr_cache_get(series_id, plane, slice_index, window_width, window_level, inverted, quality=quality)
         if cached_slice:
             image_data = base64.b64decode(cached_slice.split(',')[1])
             resp = HttpResponse(image_data, content_type='image/png')
@@ -4750,7 +4840,7 @@ def mpr_slice_api(request, series_id, plane, slice_index):
             return resp
 
         # Build/reuse volume (single-build guarded by per-series lock in _get_mpr_volume_and_spacing)
-        volume, _spacing = _get_mpr_volume_and_spacing(series)
+        volume, _spacing = _get_mpr_volume_and_spacing(series, quality=quality)
         if volume is None or volume.size == 0:
             from django.http import Http404
             raise Http404("MPR volume not available")
@@ -4763,7 +4853,7 @@ def mpr_slice_api(request, series_id, plane, slice_index):
         else:  # coronal
             slice_index = max(0, min(int(volume.shape[1]) - 1, slice_index))
 
-        img_b64 = _get_encoded_mpr_slice(series.id, volume, plane, slice_index, window_width, window_level, inverted)
+        img_b64 = _get_encoded_mpr_slice(series.id, volume, plane, slice_index, window_width, window_level, inverted, quality=quality)
         if not img_b64:
             from django.http import Http404
             raise Http404("MPR slice not available")

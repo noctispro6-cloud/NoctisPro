@@ -3302,13 +3302,40 @@
         async function _renderMPRDataUrl(viewType, dataUrl) {
             const canvas = mprCanvases[viewType];
             if (!canvas || !dataUrl) return;
+
+            // Ensure the canvas backing store has a real size.
+            // When MPR is toggled on, the grid can take a frame to layout; without this,
+            // drawing succeeds but nothing is visible (0x0 canvas).
+            const _ensureCanvasSize = () => {
+                if (canvas.width > 2 && canvas.height > 2) return;
+                const host = canvas.parentElement;
+                const rect = host ? host.getBoundingClientRect() : null;
+                const cw = rect ? Math.floor(rect.width) : 0;
+                const ch = rect ? Math.floor(rect.height) : 0;
+                if (cw > 2 && ch > 2) {
+                    canvas.width = cw;
+                    canvas.height = ch;
+                }
+            };
+
+            _ensureCanvasSize();
+            if (canvas.width <= 2 || canvas.height <= 2) {
+                // Give layout a frame to apply, then re-measure.
+                await new Promise((r) => requestAnimationFrame(r));
+                _ensureCanvasSize();
+            }
+            if (canvas.width <= 2 || canvas.height <= 2) {
+                throw new Error(`MPR canvas has zero size (${viewType})`);
+            }
+
             const ctx = canvas.getContext('2d');
             const img = new Image();
             // Backend normally returns a data URL (data:image/png;base64,...).
             // Guard older/alternate payloads that return raw base64 only.
-            const src = (typeof dataUrl === 'string' && dataUrl.startsWith('data:image'))
-                ? dataUrl
-                : `data:image/png;base64,${dataUrl}`;
+            const v = (typeof dataUrl === 'string') ? dataUrl.trim() : dataUrl;
+            const src = (typeof v === 'string' && v.startsWith('data:image'))
+                ? v
+                : `data:image/png;base64,${v}`;
             img.src = src;
             await new Promise((resolve, reject) => {
                 img.onload = resolve;

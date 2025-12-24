@@ -1650,7 +1650,7 @@
             // Handle specific tools
             switch(tool) {
                 case 'reset':
-                    resetView();
+                    resetAllDefaults();
                     break;
                 case 'invert':
                     inverted = !inverted;
@@ -2575,7 +2575,7 @@
                     changeSlice(currentImageIndex + 1);
                     break;
                 case 'r':
-                    resetView();
+                    resetAllDefaults();
                     break;
                 case 'i':
                     inverted = !inverted;
@@ -2702,6 +2702,97 @@
             updateZoomSlider();
             redrawCurrentImage();
             showToast('View reset', 'success');
+        }
+
+        function resetAllDefaults() {
+            // Stop any continuous modes / in-flight interactions
+            try { stopCine(); } catch (e) {}
+            cineMode = false;
+
+            // Abort MPR timers/requests to avoid stale updates after reset
+            try { _abortMPRRequestsAndTimers(); } catch (e) {}
+
+            // Cancel ROI/measurement drafts
+            currentMeasurement = null;
+            roiDraft = null;
+            if (_mprRoiCapture) {
+                try { window.removeEventListener('mousemove', _mprRoiCapture.onMove); } catch (e) {}
+                try { window.removeEventListener('mouseup', _mprRoiCapture.onUp); } catch (e) {}
+                _mprRoiCapture = null;
+            }
+
+            // Clear overlays + lists
+            measurements = [];
+            annotations = [];
+            try { updateMeasurementsList(); } catch (e) {}
+
+            // Reset primary tools/state toggles
+            activeTool = 'windowing';
+            inverted = false;
+            crosshair = false;
+            crosshairImagePx = null;
+
+            // Reset basic view transform
+            zoom = 1.0;
+            panX = 0;
+            panY = 0;
+            rotation = 0;
+            flipH = false;
+            flipV = false;
+
+            // Reset window/level to app defaults
+            windowWidth = 400;
+            windowLevel = 40;
+            currentImageStats = null;
+            try { updateSliders(); } catch (e) {}
+            try { updateZoomSlider(); } catch (e) {}
+
+            // Reset MPR state to defaults and return to single-view default layout
+            mprCrosshairVoxel = null;
+            mprCrosshairSync = true;
+            if (mprState) {
+                mprState.counts = { axial: 0, sagittal: 0, coronal: 0 };
+                mprState.index = { axial: 0, sagittal: 0, coronal: 0 };
+                mprState.activePlane = 'axial';
+                mprState.maximizedPlane = null;
+                mprState.renderMeta = { axial: null, sagittal: null, coronal: null };
+                mprState.lastImage = { axial: null, sagittal: null, coronal: null };
+            }
+            try { setMPRMaximizedPlane(null); } catch (e) {}
+            try { setActiveMPRPlane('axial'); } catch (e) {}
+
+            // Reset 3D defaults
+            boneThreshold = 200;
+            boneOpacity = 0.8;
+            smoothSurface = true;
+            autoRotate = false;
+            try { stopBoneAnimationLoop(); } catch (e) {}
+            try { reset3DView(); } catch (e) {}
+            // Sync UI widgets if present
+            try {
+                const t = document.getElementById('boneThresholdSlider');
+                if (t) t.value = String(boneThreshold);
+                const o = document.getElementById('boneOpacitySlider');
+                if (o) o.value = String(boneOpacity);
+                const tv = document.getElementById('boneThresholdValue');
+                if (tv) tv.textContent = String(boneThreshold);
+                const ov = document.getElementById('boneOpacityValue');
+                if (ov) ov.textContent = String(boneOpacity);
+            } catch (e) {}
+
+            // Return to default single view UI (do not change the loaded series/slice)
+            const singleView = document.getElementById('singleView');
+            const mprView = document.getElementById('mprView');
+            const controls3D = document.getElementById('controls3D');
+            if (singleView) singleView.style.display = 'block';
+            if (mprView) mprView.classList.remove('active');
+            if (controls3D) controls3D.style.display = 'none';
+            viewMode = 'single';
+
+            // Re-render
+            try { redrawCurrentImage(); } catch (e) {}
+            refreshToolButtonStates(activeTool);
+            showToast('Reset to defaults', 'success');
         }
 
         function redrawCurrentImage() {

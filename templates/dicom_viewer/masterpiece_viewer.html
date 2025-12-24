@@ -990,14 +990,14 @@
                     </button>
                 </div>
 
-                <div class="bone-settings">
+                    <div class="bone-settings">
                     <div class="threshold-group">
                         <div class="threshold-label">
-                            <span>Bone Threshold</span>
+                            <span>Iso Threshold (HU)</span>
                             <span class="threshold-value" id="boneThresholdValue">200</span>
                         </div>
                         <input type="range" class="custom-slider" id="boneThresholdSlider" 
-                               min="50" max="1000" value="200" oninput="updateBoneThreshold(this.value)">
+                               min="-1000" max="2000" value="200" oninput="updateBoneThreshold(this.value)">
                     </div>
 
                     <div class="threshold-group">
@@ -1730,7 +1730,29 @@
         }
 
         function toggle3DView() {
-            // Toggle 3D reconstruction view
+            // Ensure the 3D pane is visible, then (re)generate mesh.
+            const singleView = document.getElementById('singleView');
+            const mprView = document.getElementById('mprView');
+            const controls3D = document.getElementById('controls3D');
+
+            if (viewMode === 'single') {
+                if (!currentSeries || currentSeries.id == null) {
+                    showToast('Load a series first to use 3D', 'warning');
+                    return;
+                }
+                if (singleView) singleView.style.display = 'none';
+                if (mprView) mprView.classList.add('active');
+                if (controls3D) controls3D.style.display = 'block';
+                viewMode = 'mpr';
+                // Make the 3D pane the focus for interaction.
+                setActiveMPRPlane('bone3d');
+                setMPRMaximizedPlane('bone3d');
+                requestAnimationFrame(() => {
+                    try { resizeCanvas(); } catch (e) {}
+                });
+            } else {
+                setActiveMPRPlane('bone3d');
+            }
             generateBoneReconstruction();
         }
 
@@ -3983,7 +4005,8 @@
                 powerPreference: 'high-performance',
                 preserveDrawingBuffer: true, // enables clean screenshots/exports
             });
-            bone3D.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+            // Higher pixel ratio improves edge clarity (cap to keep it responsive).
+            bone3D.renderer.setPixelRatio(Math.min(3, window.devicePixelRatio || 1));
             bone3D.renderer.setSize(c.width || 1, c.height || 1, false);
             try { bone3D.renderer.outputEncoding = THREE.sRGBEncoding; } catch (e) {}
             try { bone3D.renderer.toneMapping = THREE.ACESFilmicToneMapping; } catch (e) {}
@@ -4033,16 +4056,27 @@
             shadowPlane.receiveShadow = true;
             bone3D.scene.add(shadowPlane);
 
-            // Simple mouse drag rotation + wheel zoom
+            // Smooth rotate/pan/zoom controls (no external OrbitControls dependency).
+            bone3D.dragMode = null; // 'rotate' | 'pan'
+            bone3D.targetRotX = 0;
+            bone3D.targetRotY = 0;
+            bone3D.targetZoom = 1.0;
+            bone3D.panX = 0;
+            bone3D.panY = 0;
+
+            const _isPanGesture = (e) => (e.button === 1 || e.button === 2 || e.shiftKey);
+
             c.addEventListener('mousedown', (e) => {
                 if (viewMode !== 'mpr') return;
                 bone3D.dragging = true;
                 bone3D.wasDragged = false;
+                bone3D.dragMode = _isPanGesture(e) ? 'pan' : 'rotate';
                 bone3D.lastX = e.clientX;
                 bone3D.lastY = e.clientY;
             });
             window.addEventListener('mouseup', () => {
                 bone3D.dragging = false;
+                bone3D.dragMode = null;
             });
             window.addEventListener('mousemove', (e) => {
                 if (!bone3D.dragging || !bone3D.mesh) return;
@@ -4053,20 +4087,20 @@
                 if (Math.abs(dx) + Math.abs(dy) > 2) {
                     bone3D.wasDragged = true;
                 }
-                bone3D.rotY += dx * 0.01;
-                bone3D.rotX += dy * 0.01;
-                bone3D.mesh.rotation.y = bone3D.rotY;
-                bone3D.mesh.rotation.x = bone3D.rotX;
-                renderBoneFrame();
+                if (bone3D.dragMode === 'pan') {
+                    // Pan in screen pixels; scaled to model size in render loop.
+                    bone3D.panX += dx;
+                    bone3D.panY -= dy;
+                } else {
+                    bone3D.targetRotY += dx * 0.01;
+                    bone3D.targetRotX += dy * 0.01;
+                }
             });
             c.addEventListener('wheel', (e) => {
                 if (!bone3D.camera) return;
                 e.preventDefault();
                 const d = Math.sign(e.deltaY || 0);
-                bone3D.zoom = Math.max(0.2, Math.min(5.0, bone3D.zoom * (d > 0 ? 1.1 : 0.9)));
-                bone3D.camera.zoom = bone3D.zoom;
-                bone3D.camera.updateProjectionMatrix();
-                renderBoneFrame();
+                bone3D.targetZoom = Math.max(0.25, Math.min(6.0, (bone3D.targetZoom || 1.0) * (d > 0 ? 1.1 : 0.9)));
             }, { passive: false });
         }
 
@@ -4103,7 +4137,7 @@
                 color: 0xf4f0e6, // warm bone
                 transparent: true,
                 opacity: Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 0.8)),
-                roughness: 0.45,
+                roughness: 0.38, // slightly crisper highlights to read surfaces
                 metalness: 0.02,
                 side: THREE.FrontSide,
             });
@@ -4127,11 +4161,17 @@
             bone3D.camera.far = dist * 20;
             bone3D.camera.position.set(dist * 0.15, dist * 0.12, dist);
             bone3D.camera.lookAt(0, 0, 0);
-            bone3D.camera.zoom = bone3D.zoom = 1.0;
+            bone3D.camera.zoom = bone3D.zoom = bone3D.targetZoom = 1.0;
             bone3D.camera.updateProjectionMatrix();
             bone3D.rotX = 0;
             bone3D.rotY = 0;
+            bone3D.targetRotX = 0;
+            bone3D.targetRotY = 0;
+            bone3D.panX = 0;
+            bone3D.panY = 0;
             mesh.rotation.set(0, 0, 0);
+            // Store fit for resets
+            bone3D.fitDist = dist;
 
             renderBoneFrame();
             startBoneAnimationLoop();
@@ -4161,10 +4201,35 @@
             if (bone3D.animRaf) return;
             const tick = () => {
                 bone3D.animRaf = requestAnimationFrame(tick);
-                if (autoRotate && bone3D.mesh) {
-                    bone3D.mesh.rotation.y += 0.01;
-                    renderBoneFrame();
+                if (!bone3D.mesh) return;
+
+                // Apply damping for smooth interaction
+                const damp = 0.18;
+                bone3D.rotX += (Number(bone3D.targetRotX || 0) - Number(bone3D.rotX || 0)) * damp;
+                bone3D.rotY += (Number(bone3D.targetRotY || 0) - Number(bone3D.rotY || 0)) * damp;
+                bone3D.zoom += (Number(bone3D.targetZoom || 1.0) - Number(bone3D.zoom || 1.0)) * damp;
+
+                bone3D.mesh.rotation.y = bone3D.rotY;
+                bone3D.mesh.rotation.x = bone3D.rotX;
+
+                // Pan: map pixels -> world units based on fitted model distance.
+                const c = mprCanvases.bone3d;
+                const w = (c && c.width) ? c.width : 1;
+                const h = (c && c.height) ? c.height : 1;
+                const dist = Number(bone3D.fitDist || 200);
+                const panScale = dist / 800; // heuristic
+                bone3D.mesh.position.x = (Number(bone3D.panX || 0) / w) * (dist * panScale);
+                bone3D.mesh.position.y = (Number(bone3D.panY || 0) / h) * (dist * panScale);
+
+                if (bone3D.camera) {
+                    bone3D.camera.zoom = Math.max(0.25, Math.min(6.0, Number(bone3D.zoom || 1.0)));
+                    bone3D.camera.updateProjectionMatrix();
                 }
+
+                if (autoRotate) {
+                    bone3D.targetRotY += 0.01;
+                }
+                renderBoneFrame();
             };
             bone3D.animRaf = requestAnimationFrame(tick);
         }
@@ -4274,7 +4339,12 @@
             if (bone3D && bone3D.mesh) {
                 bone3D.rotX = 0;
                 bone3D.rotY = 0;
-                bone3D.zoom = 1.0;
+                bone3D.targetRotX = 0;
+                bone3D.targetRotY = 0;
+                bone3D.zoom = bone3D.targetZoom = 1.0;
+                bone3D.panX = 0;
+                bone3D.panY = 0;
+                bone3D.mesh.position.set(0, 0, 0);
                 bone3D.mesh.rotation.set(0, 0, 0);
                 if (bone3D.camera) {
                     bone3D.camera.zoom = 1.0;

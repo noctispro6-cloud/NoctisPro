@@ -1,0 +1,89 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${DB_NAME:-noctispro}
+      POSTGRES_USER: ${DB_USER:-noctispro}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}
+    volumes:
+      - noctis_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-noctispro} -d ${DB_NAME:-noctispro}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+    env_file:
+      - .env.docker
+    environment:
+      # Ensure Postgres is used (app already supports env-based DATABASES).
+      DB_ENGINE: django.db.backends.postgresql
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-noctispro}
+      DB_USER: ${DB_USER:-noctispro}
+      DB_PASSWORD: ${DB_PASSWORD:-change-me}
+
+      # Persist uploads/static outside the image so rebuilds never delete patient data.
+      MEDIA_ROOT: /data/media
+      STATIC_ROOT: /data/staticfiles
+
+      # If you run the optional ngrok service, set these in .env.docker:
+      # NGROK_AUTHTOKEN=...
+      # NGROK_DOMAIN=reserved.ngrok.app
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - noctis_media:/data/media
+      - noctis_static:/data/staticfiles
+    restart: unless-stopped
+
+  dicom:
+    build:
+      context: .
+    env_file:
+      - .env.docker
+    environment:
+      MEDIA_ROOT: /data/media
+      STATIC_ROOT: /data/staticfiles
+    command: ["bash", "-lc", "exec python dicom_receiver.py --port 11112 --aet NOCTIS_SCP"]
+    ports:
+      - "11112:11112"
+    volumes:
+      - noctis_media:/data/media
+    restart: unless-stopped
+
+  ngrok:
+    profiles: ["ngrok"]
+    image: ngrok/ngrok:latest
+    depends_on:
+      - web
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    entrypoint: ["bash", "-lc"]
+    command: >
+      if [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
+        echo "ERROR: NGROK_AUTHTOKEN is required (set it in .env.docker)" >&2;
+        exit 2;
+      fi;
+      if [[ -n "${NGROK_DOMAIN:-}" ]]; then
+        exec ngrok http web:8000 --domain="${NGROK_DOMAIN}";
+      else
+        exec ngrok http web:8000;
+      fi
+    ports:
+      # Local ngrok API (optional; helpful for debugging)
+      - "4040:4040"
+    restart: unless-stopped
+
+volumes:
+  noctis_pgdata:
+  noctis_media:
+  noctis_static:

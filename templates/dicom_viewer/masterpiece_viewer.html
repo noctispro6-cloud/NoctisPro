@@ -1110,9 +1110,15 @@
             renderMeta: { axial: null, sagittal: null, coronal: null },
             lastImage: { axial: null, sagittal: null, coronal: null }, // HTMLImageElement (current rendered)
         };
+        // MPR crosshair (volume voxel indices; volume is (z,y,x) so store as {x,y,z}).
+        // x = sagittal slice index, y = coronal slice index, z = axial slice index.
+        let mprCrosshairVoxel = null;
+        // Linked MPR: when crosshair moves, keep all planes synced to the intersection.
+        let mprCrosshairSync = true;
         let _mprPlaneAbort = { axial: null, sagittal: null, coronal: null };
         let _mprHUAbort = null;
         let _mprHUTimer = null;
+        let _mprSyncTimer = null;
         
         // ROI tool (ellipse) - live draft while dragging
         let roiDraft = null;
@@ -1475,30 +1481,63 @@
                 bone3DCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
                 // Allow maximizing the 3D pane (without interfering with drag rotation).
                 bone3DCanvas.addEventListener('click', (e) => {
-                    // If the user was rotating/dragging, suppress the maximize toggle on click.
+                    // If the user was rotating/dragging, suppress any click actions.
                     if (bone3D && bone3D.wasDragged) {
                         bone3D.wasDragged = false;
                         return;
                     }
                     handleMPRClick(e, 'bone3d');
                 });
+                bone3DCanvas.addEventListener('dblclick', (e) => {
+                    if (bone3D && bone3D.wasDragged) {
+                        bone3D.wasDragged = false;
+                        return;
+                    }
+                    handleMPRDoubleClick(e, 'bone3d');
+                });
             }
         }
 
         function resizeCanvas() {
             const container = canvas.parentElement;
-            canvas.width = container.clientWidth;
-            canvas.height = container.clientHeight;
+            const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+            canvas.width = Math.floor(container.clientWidth * dpr);
+            canvas.height = Math.floor(container.clientHeight * dpr);
+            canvas.style.width = container.clientWidth + 'px';
+            canvas.style.height = container.clientHeight + 'px';
             
             // Resize MPR canvases
             Object.values(mprCanvases).forEach(c => {
                 if (c && c.parentElement) {
-                    c.width = c.parentElement.clientWidth;
-                    c.height = c.parentElement.clientHeight;
+                    const w = c.parentElement.clientWidth;
+                    const h = c.parentElement.clientHeight;
+                    c.width = Math.floor(w * dpr);
+                    c.height = Math.floor(h * dpr);
+                    c.style.width = w + 'px';
+                    c.style.height = h + 'px';
                 }
             });
             
             redrawCurrentImage();
+            if (viewMode === 'mpr') {
+                // Recompute per-plane render meta after resize (keeps HU/ROI/crosshair aligned).
+                ['axial', 'sagittal', 'coronal'].forEach((p) => {
+                    try {
+                        const c = mprCanvases[p];
+                        const img = mprState.lastImage[p];
+                        if (!c || !img) return;
+                        const iw = img.naturalWidth || img.width;
+                        const ih = img.naturalHeight || img.height;
+                        const scale = Math.min(c.width / iw, c.height / ih);
+                        const dw = Math.round(iw * scale);
+                        const dh = Math.round(ih * scale);
+                        const dx = Math.round((c.width - dw) / 2);
+                        const dy = Math.round((c.height - dh) / 2);
+                        mprState.renderMeta[p] = { w: iw, h: ih, dx, dy, dw, dh };
+                        redrawMPRPlane(p);
+                    } catch (e) {}
+                });
+            }
             if (viewMode === 'mpr' && bone3D && bone3D.renderer && bone3D.scene && bone3D.camera) {
                 try { renderBoneFrame(); } catch (e) {}
             }
@@ -1530,6 +1569,7 @@
                 c.addEventListener('wheel', (e) => handleMPRWheel(e, plane), { passive: false });
                 c.addEventListener('contextmenu', (e) => e.preventDefault());
                 c.addEventListener('click', (e) => handleMPRClick(e, plane));
+                c.addEventListener('dblclick', (e) => handleMPRDoubleClick(e, plane));
             });
 
             // Keyboard shortcuts
@@ -1569,17 +1609,29 @@
                     break;
                 case 'crosshair':
                     crosshair = !crosshair;
-                    // Keep crosshair anchored in image space so it stays correct through pan/zoom/rotate/flip.
-                    if (crosshair && (!crosshairImagePx || crosshairImagePx.x == null || crosshairImagePx.y == null)) {
-                        const m = _currentRenderMeta();
-                        if (m && m.imgW && m.imgH) {
-                            crosshairImagePx = { x: m.imgW / 2, y: m.imgH / 2 };
-                        } else {
-                            // Fallback if no image meta available yet (will render centered).
-                            crosshairImagePx = null;
+                    if (viewMode === 'mpr') {
+                        // In MPR, crosshair is the linked intersection across planes.
+                        if (crosshair && !mprCrosshairVoxel) {
+                            mprCrosshairVoxel = {
+                                x: Math.max(0, Math.min((mprState.counts.sagittal || 1) - 1, mprState.index.sagittal || 0)),
+                                y: Math.max(0, Math.min((mprState.counts.coronal || 1) - 1, mprState.index.coronal || 0)),
+                                z: Math.max(0, Math.min((mprState.counts.axial || 1) - 1, mprState.index.axial || 0)),
+                            };
                         }
+                        redrawAllMPRPlanes();
+                    } else {
+                        // Single view: keep crosshair anchored in image space so it stays correct through pan/zoom/rotate/flip.
+                        if (crosshair && (!crosshairImagePx || crosshairImagePx.x == null || crosshairImagePx.y == null)) {
+                            const m = _currentRenderMeta();
+                            if (m && m.imgW && m.imgH) {
+                                crosshairImagePx = { x: m.imgW / 2, y: m.imgH / 2 };
+                            } else {
+                                // Fallback if no image meta available yet (will render centered).
+                                crosshairImagePx = null;
+                            }
+                        }
+                        redrawCurrentImage();
                     }
-                    redrawCurrentImage();
                     break;
                 case 'rotate':
                     rotation = (rotation + 90) % 360;
@@ -2078,9 +2130,9 @@
         let currentMeasurement = null;
 
         function handleMouseDown(event) {
-            const rect = canvas.getBoundingClientRect();
-            lastMouseX = event.clientX - rect.left;
-            lastMouseY = event.clientY - rect.top;
+            const pxy = _canvasClientToCanvasPx(canvas, event.clientX, event.clientY);
+            lastMouseX = pxy.x;
+            lastMouseY = pxy.y;
             
             // Handle right-click for context menu
             if (event.button === 2) {
@@ -2146,9 +2198,9 @@
         }
 
         function handleMouseMove(event) {
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = event.clientX - rect.left;
-            const mouseY = event.clientY - rect.top;
+            const pxy = _canvasClientToCanvasPx(canvas, event.clientX, event.clientY);
+            const mouseX = pxy.x;
+            const mouseY = pxy.y;
             
             // Update Hounsfield value display
             updateHounsfieldValue(mouseX, mouseY);
@@ -3287,6 +3339,18 @@
                     ]);
                 }
 
+                // Initialize/refresh crosshair to the current intersection.
+                // This makes the crosshair immediately usable when the user enables it in MPR mode.
+                mprCrosshairVoxel = {
+                    x: Math.max(0, Math.min((mprState.counts.sagittal || 1) - 1, mprState.index.sagittal || 0)),
+                    y: Math.max(0, Math.min((mprState.counts.coronal || 1) - 1, mprState.index.coronal || 0)),
+                    z: Math.max(0, Math.min((mprState.counts.axial || 1) - 1, mprState.index.axial || 0)),
+                };
+                if (crosshair) {
+                    // Ensure overlays show immediately after (re)generation.
+                    redrawAllMPRPlanes();
+                }
+
                 if (refreshBone) {
                     await generateBoneReconstruction();
                 }
@@ -3313,8 +3377,11 @@
                 const cw = rect ? Math.floor(rect.width) : 0;
                 const ch = rect ? Math.floor(rect.height) : 0;
                 if (cw > 2 && ch > 2) {
-                    canvas.width = cw;
-                    canvas.height = ch;
+                    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+                    canvas.width = Math.floor(cw * dpr);
+                    canvas.height = Math.floor(ch * dpr);
+                    canvas.style.width = cw + 'px';
+                    canvas.style.height = ch + 'px';
                 }
             };
 
@@ -3344,7 +3411,6 @@
 
             const w = img.naturalWidth || img.width;
             const h = img.naturalHeight || img.height;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             const scale = Math.min(canvas.width / w, canvas.height / h);
             const dw = Math.round(w * scale);
@@ -3352,21 +3418,138 @@
             const dx = Math.round((canvas.width - dw) / 2);
             const dy = Math.round((canvas.height - dh) / 2);
 
-            // Smooth downscale only (avoid blurry zoom-in).
-            ctx.imageSmoothingEnabled = scale < 1;
-            try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
-            ctx.drawImage(img, dx, dy, dw, dh);
-            
             // Store mapping meta so MPR HU/ROI can convert canvas coords -> slice pixel coords.
             if (mprState && mprState.renderMeta && (viewType === 'axial' || viewType === 'sagittal' || viewType === 'coronal')) {
                 mprState.renderMeta[viewType] = { w, h, dx, dy, dw, dh };
                 mprState.lastImage[viewType] = img;
             }
-            
-            // If there is an active ROI draft for this plane, redraw overlay on top.
-            if (roiDraft && roiDraft.mode === 'mpr' && roiDraft.plane === viewType) {
-                drawMPRRoiOverlay(viewType);
+
+            // Draw base + overlays (ROI + crosshair) in a single pass.
+            redrawMPRPlane(viewType);
+        }
+
+        function redrawAllMPRPlanes() {
+            ['axial', 'sagittal', 'coronal'].forEach((p) => {
+                try { redrawMPRPlane(p); } catch (e) {}
+            });
+        }
+
+        function redrawMPRPlane(plane) {
+            if (!(plane === 'axial' || plane === 'sagittal' || plane === 'coronal')) return;
+            const c = mprCanvases[plane];
+            const meta = mprState.renderMeta[plane];
+            const img = mprState.lastImage[plane];
+            if (!c || !meta || !img) return;
+            const ctx = c.getContext('2d');
+            const { w, h, dx, dy, dw, dh } = meta;
+            ctx.clearRect(0, 0, c.width, c.height);
+            // Smooth downscale only (avoid blurry zoom-in).
+            ctx.imageSmoothingEnabled = (dw < w || dh < h);
+            try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
+            ctx.drawImage(img, dx, dy, dw, dh);
+
+            // ROI draft overlay (if any)
+            if (roiDraft && roiDraft.mode === 'mpr' && roiDraft.plane === plane) {
+                const sx = dw / w;
+                const sy = dh / h;
+                const start = roiDraft.start;
+                const end = roiDraft.end;
+                const cx = (start.x + end.x) / 2;
+                const cy = (start.y + end.y) / 2;
+                const rx = Math.max(1, Math.abs(end.x - start.x) / 2);
+                const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
+                const ccx = dx + cx * sx;
+                const ccy = dy + cy * sy;
+                const crx = rx * sx;
+                const cry = ry * sy;
+                ctx.save();
+                ctx.strokeStyle = 'rgba(0, 212, 255, 0.95)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 4]);
+                ctx.beginPath();
+                ctx.ellipse(ccx, ccy, crx, cry, 0, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
             }
+
+            // Crosshair overlay (linked MPR)
+            if (crosshair && mprCrosshairVoxel) {
+                drawMPRCrosshair(plane, ctx);
+            }
+        }
+
+        function drawMPRCrosshair(plane, ctx) {
+            const meta = mprState.renderMeta[plane];
+            if (!meta || !mprCrosshairVoxel) return;
+            const { w, h, dx, dy, dw, dh } = meta;
+            const sx = dw / w;
+            const sy = dh / h;
+
+            // Compute crosshair position in slice pixel coordinates for this plane.
+            // Backend display convention: sagittal/coronal have vertical flip in Z (np.flipud).
+            let px = 0, py = 0;
+            if (plane === 'axial') {
+                px = mprCrosshairVoxel.x;
+                py = mprCrosshairVoxel.y;
+            } else if (plane === 'sagittal') {
+                px = mprCrosshairVoxel.y;           // columns = y
+                py = (h - 1) - mprCrosshairVoxel.z; // rows = z (flipped)
+            } else { // coronal
+                px = mprCrosshairVoxel.x;           // columns = x
+                py = (h - 1) - mprCrosshairVoxel.z; // rows = z (flipped)
+            }
+
+            // Clamp to image bounds.
+            px = Math.max(0, Math.min(w - 1, px));
+            py = Math.max(0, Math.min(h - 1, py));
+
+            const cx = dx + px * sx;
+            const cy = dy + py * sy;
+
+            // Color coding (hospital-grade convention-ish):
+            // axial line = cyan, sagittal = red, coronal = green.
+            const COL_AXIAL = 'rgba(0, 212, 255, 0.95)';
+            const COL_SAG = 'rgba(255, 77, 77, 0.95)';
+            const COL_COR = 'rgba(77, 255, 77, 0.95)';
+
+            // Pick which line represents which plane in each view.
+            let vertCol = COL_SAG;
+            let horizCol = COL_COR;
+            if (plane === 'sagittal') {
+                vertCol = COL_COR;   // x-axis is y (coronal index)
+                horizCol = COL_AXIAL; // y-axis is z (axial index)
+            } else if (plane === 'coronal') {
+                vertCol = COL_SAG;   // x-axis is x (sagittal index)
+                horizCol = COL_AXIAL; // y-axis is z (axial index)
+            }
+
+            ctx.save();
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([]);
+
+            // Horizontal line
+            ctx.strokeStyle = horizCol;
+            ctx.beginPath();
+            ctx.moveTo(dx, cy);
+            ctx.lineTo(dx + dw, cy);
+            ctx.stroke();
+
+            // Vertical line
+            ctx.strokeStyle = vertCol;
+            ctx.beginPath();
+            ctx.moveTo(cx, dy);
+            ctx.lineTo(cx, dy + dh);
+            ctx.stroke();
+
+            // Center marker
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
         }
 
         async function fetchMPRPlaneSlice(plane, sliceIndex, qsBase) {
@@ -3421,6 +3604,92 @@
             return { x, y, ix: Math.floor(x), iy: Math.floor(y), w, h };
         }
 
+        function _canvasClientToCanvasPx(c, clientX, clientY) {
+            const rect = c.getBoundingClientRect();
+            const sx = rect.width ? (c.width / rect.width) : 1;
+            const sy = rect.height ? (c.height / rect.height) : 1;
+            return {
+                x: (clientX - rect.left) * sx,
+                y: (clientY - rect.top) * sy,
+            };
+        }
+
+        function _clampInt(v, min, max) {
+            const n = Math.round(Number(v) || 0);
+            return Math.max(min, Math.min(max, n));
+        }
+
+        function _setMPRCrosshairFromCanvasPoint(plane, canvasX, canvasY, syncNow = true) {
+            const p = _mprCanvasToSlicePx(plane, canvasX, canvasY);
+            if (!p) return;
+            const counts = mprState.counts || { axial: 0, sagittal: 0, coronal: 0 };
+            const maxZ = Math.max(0, (counts.axial || 1) - 1);
+            const maxX = Math.max(0, (counts.sagittal || 1) - 1);
+            const maxY = Math.max(0, (counts.coronal || 1) - 1);
+
+            let vx = 0, vy = 0, vz = 0;
+            if (plane === 'axial') {
+                // Axial slice is (y,x)
+                vx = _clampInt(p.x, 0, maxX);
+                vy = _clampInt(p.y, 0, maxY);
+                vz = _clampInt(mprState.index.axial, 0, maxZ);
+            } else if (plane === 'sagittal') {
+                // Sagittal slice is (z,y) with Z flipped vertically for display.
+                vx = _clampInt(mprState.index.sagittal, 0, maxX);
+                vy = _clampInt(p.x, 0, maxY);
+                vz = _clampInt((p.h - 1) - p.y, 0, maxZ);
+            } else if (plane === 'coronal') {
+                // Coronal slice is (z,x) with Z flipped vertically for display.
+                vx = _clampInt(p.x, 0, maxX);
+                vy = _clampInt(mprState.index.coronal, 0, maxY);
+                vz = _clampInt((p.h - 1) - p.y, 0, maxZ);
+            } else {
+                return;
+            }
+
+            mprCrosshairVoxel = { x: vx, y: vy, z: vz };
+            // Keep per-plane indices consistent with the intersection.
+            mprState.index.axial = vz;
+            mprState.index.sagittal = vx;
+            mprState.index.coronal = vy;
+
+            redrawAllMPRPlanes();
+            if (syncNow && mprCrosshairSync) {
+                _fetchAndRenderAllMPRPlanes();
+            }
+        }
+
+        function _fetchAndRenderAllMPRPlanes() {
+            if (viewMode !== 'mpr' || !currentSeries) return;
+            const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
+            Promise.all([
+                fetchMPRPlaneSlice('axial', mprState.index.axial || 0, qsBase),
+                fetchMPRPlaneSlice('sagittal', mprState.index.sagittal || 0, qsBase),
+                fetchMPRPlaneSlice('coronal', mprState.index.coronal || 0, qsBase),
+            ]).then(([ax, sa, co]) => {
+                mprState.counts.axial = ax.count || mprState.counts.axial;
+                mprState.counts.sagittal = sa.count || mprState.counts.sagittal;
+                mprState.counts.coronal = co.count || mprState.counts.coronal;
+                mprState.index.axial = ax.index;
+                mprState.index.sagittal = sa.index;
+                mprState.index.coronal = co.index;
+                return Promise.all([
+                    _renderMPRDataUrl('axial', ax.image),
+                    _renderMPRDataUrl('sagittal', sa.image),
+                    _renderMPRDataUrl('coronal', co.image),
+                ]);
+            }).catch(() => {});
+        }
+
+        function _scheduleMPRSyncFetch() {
+            if (!mprCrosshairSync || !crosshair) return;
+            if (_mprSyncTimer) clearTimeout(_mprSyncTimer);
+            _mprSyncTimer = setTimeout(() => {
+                _mprSyncTimer = null;
+                _fetchAndRenderAllMPRPlanes();
+            }, 60);
+        }
+
         function _scheduleMPRHU(plane, canvasX, canvasY) {
             if (viewMode !== 'mpr' || !currentSeries) return;
             const p = _mprCanvasToSlicePx(plane, canvasX, canvasY);
@@ -3455,7 +3724,22 @@
             if (viewMode !== 'mpr') return;
             if (activeTool === 'roi' && roiDraft) return; // don't toggle while drawing ROI
             setActiveMPRPlane(plane);
-            // Click to maximize this pane; click again to restore 4-up.
+            // In MPR mode, clicking should NOT hide the other planes.
+            // Instead: if crosshair is enabled, move the intersection and (optionally) sync.
+            if (plane === 'bone3d') return;
+            if (crosshair) {
+                const c = mprCanvases[plane];
+                if (!c) return;
+                const p = _canvasClientToCanvasPx(c, event.clientX, event.clientY);
+                _setMPRCrosshairFromCanvasPoint(plane, p.x, p.y, true);
+            }
+        }
+
+        function handleMPRDoubleClick(event, plane) {
+            if (viewMode !== 'mpr') return;
+            if (activeTool === 'roi' && roiDraft) return;
+            setActiveMPRPlane(plane);
+            // Double-click toggles maximize (restore 4-up on second double-click).
             if (mprState.maximizedPlane === plane) {
                 setMPRMaximizedPlane(null);
             } else {
@@ -3463,10 +3747,7 @@
             }
             // Resize after layout change to keep crisp rendering
             try { resizeCanvas(); } catch (e) {}
-            // Re-render current slice in the active plane to fit new size (2D planes),
-            // or re-render the 3D bone viewport.
             if (plane === 'bone3d') {
-                // Keep 3D renderer sized correctly; if no mesh yet, try to generate/refresh.
                 try {
                     if (bone3D && bone3D.renderer && bone3D.scene && bone3D.camera) {
                         renderBoneFrame();
@@ -3476,10 +3757,8 @@
                 } catch (e) {}
                 return;
             }
-            const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
-            fetchMPRPlaneSlice(plane, mprState.index[plane] || 0, qsBase)
-                .then((r) => _renderMPRDataUrl(plane, r.image))
-                .catch(() => {});
+            // Re-fetch slices so each canvas gets fresh scaling/meta after resize.
+            _fetchAndRenderAllMPRPlanes();
         }
 
         function handleMPRWheel(event, plane) {
@@ -3499,36 +3778,55 @@
                 .then((r) => {
                     mprState.index[plane] = r.index;
                     mprState.counts[plane] = r.count || mprState.counts[plane];
+                    // Keep crosshair's intersection consistent with linked scrolling.
+                    if (crosshair && mprCrosshairVoxel) {
+                        if (plane === 'axial') mprCrosshairVoxel.z = mprState.index.axial;
+                        if (plane === 'sagittal') mprCrosshairVoxel.x = mprState.index.sagittal;
+                        if (plane === 'coronal') mprCrosshairVoxel.y = mprState.index.coronal;
+                        // Also keep the other indices tied to the crosshair when syncing.
+                        if (mprCrosshairSync) {
+                            mprState.index.axial = mprCrosshairVoxel.z;
+                            mprState.index.sagittal = mprCrosshairVoxel.x;
+                            mprState.index.coronal = mprCrosshairVoxel.y;
+                        }
+                    }
                     return _renderMPRDataUrl(plane, r.image);
+                })
+                .then(() => {
+                    // Update overlays immediately; schedule linked-plane refresh to avoid spamming requests.
+                    if (crosshair) redrawAllMPRPlanes();
+                    _scheduleMPRSyncFetch();
                 })
                 .catch((e) => console.warn('MPR slice fetch failed:', e));
         }
 
         function handleMPRMouseDown(event, plane) {
             if (viewMode !== 'mpr') return;
-            const rect = mprCanvases[plane].getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
+            const c = mprCanvases[plane];
+            const pxy = c ? _canvasClientToCanvasPx(c, event.clientX, event.clientY) : { x: 0, y: 0 };
+            const x = pxy.x;
+            const y = pxy.y;
             setActiveMPRPlane(plane);
             if (activeTool === 'roi' && event.button === 0) {
                 const p = _mprCanvasToSlicePx(plane, x, y);
                 if (!p) return;
                 roiDraft = { mode: 'mpr', plane, start: { x: p.x, y: p.y }, end: { x: p.x, y: p.y } };
-                drawMPRRoiOverlay(plane);
+                redrawMPRPlane(plane);
             }
         }
 
         function handleMPRMouseMove(event, plane) {
             if (viewMode !== 'mpr') return;
-            const rect = mprCanvases[plane].getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
+            const c = mprCanvases[plane];
+            const pxy = c ? _canvasClientToCanvasPx(c, event.clientX, event.clientY) : { x: 0, y: 0 };
+            const x = pxy.x;
+            const y = pxy.y;
             _scheduleMPRHU(plane, x, y);
             if (activeTool === 'roi' && roiDraft && roiDraft.mode === 'mpr' && roiDraft.plane === plane) {
                 const p = _mprCanvasToSlicePx(plane, x, y);
                 if (!p) return;
                 roiDraft.end = { x: p.x, y: p.y };
-                drawMPRRoiOverlay(plane);
+                redrawMPRPlane(plane);
             }
         }
 
@@ -3575,39 +3873,8 @@
         }
 
         function drawMPRRoiOverlay(plane) {
-            const c = mprCanvases[plane];
-            if (!c) return;
-            const meta = mprState.renderMeta[plane];
-            const img = mprState.lastImage[plane];
-            if (!meta || !img) return;
-            const ctx = c.getContext('2d');
-            const { w, h, dx, dy, dw, dh } = meta;
-            // redraw base image
-            ctx.clearRect(0, 0, c.width, c.height);
-            ctx.imageSmoothingEnabled = (dw < w || dh < h);
-            try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
-            ctx.drawImage(img, dx, dy, dw, dh);
-            if (!roiDraft || roiDraft.mode !== 'mpr' || roiDraft.plane !== plane) return;
-            const sx = dw / w;
-            const sy = dh / h;
-            const start = roiDraft.start;
-            const end = roiDraft.end;
-            const cx = (start.x + end.x) / 2;
-            const cy = (start.y + end.y) / 2;
-            const rx = Math.max(1, Math.abs(end.x - start.x) / 2);
-            const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
-            const ccx = dx + cx * sx;
-            const ccy = dy + cy * sy;
-            const crx = rx * sx;
-            const cry = ry * sy;
-            ctx.save();
-            ctx.strokeStyle = 'rgba(0, 212, 255, 0.95)';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([6, 4]);
-            ctx.beginPath();
-            ctx.ellipse(ccx, ccy, crx, cry, 0, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.restore();
+            // Backwards compatible wrapper (older codepaths call this).
+            redrawMPRPlane(plane);
         }
 
         async function generateBoneReconstruction() {
@@ -3621,11 +3888,12 @@
 
                 const threshold = Number.isFinite(Number(boneThreshold)) ? Number(boneThreshold) : 300;
                 const wantMesh = true;
+                const meshQuality = (smoothSurface ? 'high' : 'medium');
                 const url =
                     `/dicom-viewer/api/series/${currentSeries.id}/bone/` +
                     `?threshold=${encodeURIComponent(threshold)}` +
                     `&mesh=${encodeURIComponent(wantMesh ? 'true' : 'false')}` +
-                    `&quality=${encodeURIComponent('medium')}` +
+                    `&quality=${encodeURIComponent(meshQuality)}` +
                     `&window_width=${encodeURIComponent(2000)}` +
                     `&window_level=${encodeURIComponent(300)}` +
                     `&inverted=${encodeURIComponent(inverted ? 'true' : 'false')}`;
@@ -3690,9 +3958,22 @@
             if (!c || typeof THREE === 'undefined') return;
             if (bone3D.renderer && bone3D.scene && bone3D.camera) return;
 
-            bone3D.renderer = new THREE.WebGLRenderer({ canvas: c, antialias: true, alpha: true });
+            bone3D.renderer = new THREE.WebGLRenderer({
+                canvas: c,
+                antialias: true,
+                alpha: true,
+                powerPreference: 'high-performance',
+                preserveDrawingBuffer: true, // enables clean screenshots/exports
+            });
             bone3D.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
             bone3D.renderer.setSize(c.width || 1, c.height || 1, false);
+            try { bone3D.renderer.outputEncoding = THREE.sRGBEncoding; } catch (e) {}
+            try { bone3D.renderer.toneMapping = THREE.ACESFilmicToneMapping; } catch (e) {}
+            try { bone3D.renderer.toneMappingExposure = 1.1; } catch (e) {}
+            try { bone3D.renderer.physicallyCorrectLights = true; } catch (e) {}
+            bone3D.renderer.setClearColor(0x000000, 1);
+            bone3D.renderer.shadowMap.enabled = true;
+            bone3D.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
             bone3D.scene = new THREE.Scene();
             bone3D.scene.background = new THREE.Color(0x000000);
@@ -3700,11 +3981,39 @@
             bone3D.camera = new THREE.PerspectiveCamera(45, (c.width || 1) / (c.height || 1), 0.1, 10000);
             bone3D.camera.position.set(0, 0, 200);
 
-            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-            const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-            dir.position.set(1, 1, 2);
+            // Lighting tuned for clinical “bone” look (clear depth/edges, no harsh burn-in)
+            const ambient = new THREE.AmbientLight(0xffffff, 0.25);
+            const hemi = new THREE.HemisphereLight(0xffffff, 0x222244, 0.35);
+            const key = new THREE.DirectionalLight(0xffffff, 1.0);
+            key.position.set(1.2, 1.0, 1.8);
+            key.castShadow = true;
+            key.shadow.mapSize.width = 2048;
+            key.shadow.mapSize.height = 2048;
+            key.shadow.camera.near = 0.1;
+            key.shadow.camera.far = 2000;
+            key.shadow.bias = -0.00005;
+
+            const fill = new THREE.DirectionalLight(0xffffff, 0.35);
+            fill.position.set(-1.5, 0.6, 0.8);
+
+            const rim = new THREE.DirectionalLight(0x88aaff, 0.25);
+            rim.position.set(0.0, -1.0, -1.2);
+
             bone3D.scene.add(ambient);
-            bone3D.scene.add(dir);
+            bone3D.scene.add(hemi);
+            bone3D.scene.add(key);
+            bone3D.scene.add(fill);
+            bone3D.scene.add(rim);
+
+            // Shadow catcher (subtle)
+            const shadowPlane = new THREE.Mesh(
+                new THREE.PlaneGeometry(2000, 2000),
+                new THREE.ShadowMaterial({ opacity: 0.18 })
+            );
+            shadowPlane.rotation.x = -Math.PI / 2;
+            shadowPlane.position.y = -200;
+            shadowPlane.receiveShadow = true;
+            bone3D.scene.add(shadowPlane);
 
             // Simple mouse drag rotation + wheel zoom
             c.addEventListener('mousedown', (e) => {
@@ -3770,16 +4079,19 @@
             geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
             geom.setIndex(new THREE.BufferAttribute(idx, 1));
             geom.computeVertexNormals();
+            geom.computeBoundingSphere();
 
             const mat = new THREE.MeshStandardMaterial({
-                color: 0xf2f2f2,
+                color: 0xf4f0e6, // warm bone
                 transparent: true,
                 opacity: Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 0.8)),
-                roughness: 0.6,
-                metalness: 0.05,
-                side: THREE.DoubleSide,
+                roughness: 0.45,
+                metalness: 0.02,
+                side: THREE.FrontSide,
             });
             const mesh = new THREE.Mesh(geom, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = false;
             bone3D.mesh = mesh;
             bone3D.scene.add(mesh);
 
@@ -3792,8 +4104,10 @@
             bb.getCenter(center);
             mesh.position.sub(center);
             const maxDim = Math.max(size.x, size.y, size.z) || 1;
-            const dist = maxDim * 1.2;
-            bone3D.camera.position.set(0, 0, dist);
+            const dist = maxDim * 1.35;
+            bone3D.camera.near = Math.max(0.01, dist / 100);
+            bone3D.camera.far = dist * 20;
+            bone3D.camera.position.set(dist * 0.15, dist * 0.12, dist);
             bone3D.camera.lookAt(0, 0, 0);
             bone3D.camera.zoom = bone3D.zoom = 1.0;
             bone3D.camera.updateProjectionMatrix();

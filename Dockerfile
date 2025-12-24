@@ -26,4 +26,4 @@ COPY . /app
 
 EXPOSE 8000 11112
 
-CMD ["bash", "-lc", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && exec daphne -b 0.0.0.0 -p 8000 noctis_pro.asgi:application"]
+CMD ["bash", "-lc", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && (python manage.py shell -c \"from django.contrib.auth import get_user_model; U=get_user_model(); import sys; sys.exit(0 if U.objects.filter(is_superuser=True).exists() else 1)\" || (PW=\"${NOCTIS_ADMIN_PASSWORD:-}\"; if [ -z \"$PW\" ]; then PW=\"$(python - <<'PY'\nimport secrets\nprint(secrets.token_urlsafe(14))\nPY\n)\"; echo \"[INFO] No superuser found; generated NOCTIS_ADMIN_PASSWORD=$PW\" >&2; fi; python manage.py create_admin --username \"${NOCTIS_ADMIN_USERNAME:-admin}\" --email \"${NOCTIS_ADMIN_EMAIL:-}\" --password \"$PW\")) && exec daphne -b 0.0.0.0 -p 8000 noctis_pro.asgi:application"]

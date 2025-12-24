@@ -32,33 +32,66 @@ THREE.OrbitControls = function(object, domElement) {
     this.rotateEnd = new THREE.Vector2();
     this.rotateDelta = new THREE.Vector2();
     
+    this.panStart = new THREE.Vector2();
+    this.panEnd = new THREE.Vector2();
+    this.panDelta = new THREE.Vector2();
+
+    const STATE = { NONE: -1, ROTATE: 0, PAN: 1 };
+    let state = STATE.NONE;
+
     // Event handlers
     const scope = this;
-    
-    function onMouseDown(event) {
-        scope.rotateStart.set(event.clientX, event.clientY);
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
+
+    function getElement() {
+        return scope.domElement === document ? scope.domElement.body : scope.domElement;
     }
-    
+
+    function onContextMenu(event) {
+        event.preventDefault();
+    }
+
+    function onMouseDown(event) {
+        event.preventDefault();
+        if (event.button === 0) {
+            state = STATE.ROTATE;
+            scope.rotateStart.set(event.clientX, event.clientY);
+        } else if (event.button === 2) {
+            state = STATE.PAN;
+            scope.panStart.set(event.clientX, event.clientY);
+        } else {
+            state = STATE.NONE;
+        }
+        document.addEventListener('mousemove', onMouseMove, { passive: false });
+        document.addEventListener('mouseup', onMouseUp, { passive: false });
+    }
+
     function onMouseMove(event) {
-        scope.rotateEnd.set(event.clientX, event.clientY);
-        scope.rotateDelta.subVectors(scope.rotateEnd, scope.rotateStart).multiplyScalar(scope.rotateSpeed);
-        
-        const element = scope.domElement === document ? scope.domElement.body : scope.domElement;
-        scope.rotateLeft(2 * Math.PI * scope.rotateDelta.x / element.clientHeight);
-        scope.rotateUp(2 * Math.PI * scope.rotateDelta.y / element.clientHeight);
-        
-        scope.rotateStart.copy(scope.rotateEnd);
+        event.preventDefault();
+        const element = getElement();
+        if (state === STATE.ROTATE) {
+            scope.rotateEnd.set(event.clientX, event.clientY);
+            scope.rotateDelta.subVectors(scope.rotateEnd, scope.rotateStart).multiplyScalar(scope.rotateSpeed);
+            scope.rotateLeft(2 * Math.PI * scope.rotateDelta.x / element.clientHeight);
+            scope.rotateUp(2 * Math.PI * scope.rotateDelta.y / element.clientHeight);
+            scope.rotateStart.copy(scope.rotateEnd);
+        } else if (state === STATE.PAN) {
+            scope.panEnd.set(event.clientX, event.clientY);
+            scope.panDelta.subVectors(scope.panEnd, scope.panStart).multiplyScalar(scope.panSpeed);
+            scope.pan(scope.panDelta.x, scope.panDelta.y);
+            scope.panStart.copy(scope.panEnd);
+        }
         scope.update();
     }
-    
-    function onMouseUp() {
+
+    function onMouseUp(event) {
+        event.preventDefault();
+        state = STATE.NONE;
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
     }
-    
+
     function onMouseWheel(event) {
+        event.preventDefault();
         if (event.deltaY < 0) {
             scope.dollyIn(scope.getZoomScale());
         } else if (event.deltaY > 0) {
@@ -66,9 +99,69 @@ THREE.OrbitControls = function(object, domElement) {
         }
         scope.update();
     }
-    
-    this.domElement.addEventListener('mousedown', onMouseDown);
-    this.domElement.addEventListener('wheel', onMouseWheel);
+
+    // Touch: 1 finger rotate, 2 finger pinch zoom + pan
+    let touchStartDist = 0;
+    let touchStartMid = null;
+    function touchDistance(t0, t1) {
+        const dx = t0.clientX - t1.clientX;
+        const dy = t0.clientY - t1.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+    function touchMidpoint(t0, t1) {
+        return { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
+    }
+    function onTouchStart(event) {
+        if (!event.touches) return;
+        if (event.touches.length === 1) {
+            state = STATE.ROTATE;
+            scope.rotateStart.set(event.touches[0].clientX, event.touches[0].clientY);
+        } else if (event.touches.length === 2) {
+            state = STATE.PAN;
+            touchStartDist = touchDistance(event.touches[0], event.touches[1]);
+            touchStartMid = touchMidpoint(event.touches[0], event.touches[1]);
+        }
+    }
+    function onTouchMove(event) {
+        if (!event.touches) return;
+        event.preventDefault();
+        const element = getElement();
+        if (event.touches.length === 1 && state === STATE.ROTATE) {
+            scope.rotateEnd.set(event.touches[0].clientX, event.touches[0].clientY);
+            scope.rotateDelta.subVectors(scope.rotateEnd, scope.rotateStart).multiplyScalar(scope.rotateSpeed);
+            scope.rotateLeft(2 * Math.PI * scope.rotateDelta.x / element.clientHeight);
+            scope.rotateUp(2 * Math.PI * scope.rotateDelta.y / element.clientHeight);
+            scope.rotateStart.copy(scope.rotateEnd);
+        } else if (event.touches.length === 2) {
+            // dolly
+            const dist = touchDistance(event.touches[0], event.touches[1]);
+            if (touchStartDist > 0) {
+                const scale = dist / touchStartDist;
+                if (scale > 1) scope.dollyIn(Math.pow(0.95, scope.zoomSpeed) / scale);
+                if (scale < 1) scope.dollyOut(Math.pow(0.95, scope.zoomSpeed) * (1 / Math.max(scale, 0.001)));
+            }
+            touchStartDist = dist;
+            // pan by midpoint movement
+            const mid = touchMidpoint(event.touches[0], event.touches[1]);
+            if (touchStartMid) {
+                scope.pan(mid.x - touchStartMid.x, mid.y - touchStartMid.y);
+            }
+            touchStartMid = mid;
+        }
+        scope.update();
+    }
+    function onTouchEnd() {
+        state = STATE.NONE;
+        touchStartDist = 0;
+        touchStartMid = null;
+    }
+
+    this.domElement.addEventListener('contextmenu', onContextMenu);
+    this.domElement.addEventListener('mousedown', onMouseDown, { passive: false });
+    this.domElement.addEventListener('wheel', onMouseWheel, { passive: false });
+    this.domElement.addEventListener('touchstart', onTouchStart, { passive: true });
+    this.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
+    this.domElement.addEventListener('touchend', onTouchEnd, { passive: true });
     
     this.rotateLeft = function(angle) {
         this.sphericalDelta.theta -= angle;
@@ -76,6 +169,27 @@ THREE.OrbitControls = function(object, domElement) {
     
     this.rotateUp = function(angle) {
         this.sphericalDelta.phi -= angle;
+    };
+
+    this.pan = function(deltaX, deltaY) {
+        const element = getElement();
+        const offset = new THREE.Vector3();
+        offset.copy(this.object.position).sub(this.target);
+
+        // targetDistance accounts for perspective projection.
+        const targetDistance = offset.length() * Math.tan((this.object.fov / 2) * Math.PI / 180.0);
+        const panX = (2 * deltaX * targetDistance / element.clientHeight);
+        const panY = (2 * deltaY * targetDistance / element.clientHeight);
+
+        const panLeft = new THREE.Vector3();
+        const panUp = new THREE.Vector3();
+        const te = this.object.matrix.elements;
+        // X axis
+        panLeft.set(te[0], te[1], te[2]).multiplyScalar(-panX);
+        // Y axis
+        panUp.set(te[4], te[5], te[6]).multiplyScalar(panY);
+        this.panOffset.add(panLeft);
+        this.panOffset.add(panUp);
     };
     
     this.dollyIn = function(dollyScale) {
@@ -137,8 +251,12 @@ THREE.OrbitControls = function(object, domElement) {
     };
     
     this.dispose = function() {
+        this.domElement.removeEventListener('contextmenu', onContextMenu);
         this.domElement.removeEventListener('mousedown', onMouseDown);
         this.domElement.removeEventListener('wheel', onMouseWheel);
+        this.domElement.removeEventListener('touchstart', onTouchStart);
+        this.domElement.removeEventListener('touchmove', onTouchMove);
+        this.domElement.removeEventListener('touchend', onTouchEnd);
     };
     
     this.update();
@@ -330,11 +448,7 @@ class MasterpieceBoneReconstruction3D {
         // Mouse events for interaction feedback
         this.canvas.addEventListener('mousedown', this.onMouseDown.bind(this));
         this.canvas.addEventListener('contextmenu', this.onContextMenu.bind(this));
-        this.canvas.addEventListener('wheel', this.onWheel.bind(this));
-        
-        // Touch events for mobile support
-        this.canvas.addEventListener('touchstart', this.onTouchStart.bind(this));
-        this.canvas.addEventListener('touchmove', this.onTouchMove.bind(this));
+        // Wheel + touch are handled by OrbitControls for smooth zoom/pan/rotate
     }
     
     setupPerformanceMonitor() {
@@ -368,24 +482,7 @@ class MasterpieceBoneReconstruction3D {
         document.addEventListener('mouseup', onMouseUp);
     }
     
-    onWheel(event) {
-        // Custom wheel handling for smooth zoom
-        event.preventDefault();
-        const delta = event.deltaY * 0.001;
-        this.camera.position.multiplyScalar(1 + delta);
-    }
-    
-    onTouchStart(event) {
-        // Handle touch events for mobile
-        if (event.touches.length === 1) {
-            this.canvas.style.cursor = 'grabbing';
-        }
-    }
-    
-    onTouchMove(event) {
-        // Handle touch move for mobile
-        event.preventDefault();
-    }
+    // Wheel/touch interaction is provided by OrbitControls.
     
     onContextMenu(event) {
         event.preventDefault();
@@ -520,7 +617,19 @@ class MasterpieceBoneReconstruction3D {
             const geometry = new THREE.BufferGeometry();
             
             // Convert vertices and faces to Three.js format
-            const vertices = new Float32Array(meshData.vertices.flat());
+            // Backend vertices are in (z, y, x) voxel order. Re-map to (x, y, z) and make Z(up)->Y to start upright.
+            const srcVerts = Array.isArray(meshData.vertices) ? meshData.vertices : [];
+            const vertices = new Float32Array(srcVerts.length * 3);
+            for (let i = 0; i < srcVerts.length; i++) {
+                const v = srcVerts[i] || [0, 0, 0];
+                const z = Number(v[0]) || 0;
+                const y = Number(v[1]) || 0;
+                const x = Number(v[2]) || 0;
+                // x -> x, z -> y (up), y -> z
+                vertices[i * 3] = x;
+                vertices[i * 3 + 1] = z;
+                vertices[i * 3 + 2] = y;
+            }
             const indices = new Uint32Array(meshData.faces.flat());
             
             geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));

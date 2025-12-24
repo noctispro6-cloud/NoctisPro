@@ -35,6 +35,7 @@ DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 # - localtunnel (hosts containing "loca.lt")
 NGROK_URL = os.environ.get('NGROK_URL', '')
 NGROK_DOMAIN = os.environ.get('NGROK_DOMAIN', '')
+NGROK_AUTHTOKEN = os.environ.get('NGROK_AUTHTOKEN', '')
 TUNNEL_URL = os.environ.get('TUNNEL_URL', '')
 
 # If a tunnel launcher (e.g., scripts/quick-tunnel.sh or scripts/quick-ngrok.sh)
@@ -73,8 +74,17 @@ if not TUNNEL_URL and NGROK_DOMAIN:
 
 _allowed_hosts_env = os.environ.get('ALLOWED_HOSTS', '')
 _allowed_hosts_tokens = [h.strip().lower() for h in _allowed_hosts_env.split(',') if h.strip()]
-IS_NGROK = bool(NGROK_URL) or any('ngrok' in host for host in _allowed_hosts_tokens)
-IS_TUNNEL = bool(TUNNEL_URL) or bool(NGROK_DOMAIN) or any(
+#
+# Important: In "ngrok mode" without a reserved domain, the actual public URL is
+# discovered asynchronously by the tunnel service and written to .tunnel-url
+# after ngrok is up. Django settings are only evaluated at process start, so if
+# we only infer tunnel mode from TUNNEL_URL/NGROK_URL, Django can permanently
+# reject the ngrok Host header with 400 (DisallowedHost) until the server is
+# restarted. Keying off NGROK_AUTHTOKEN avoids that boot-order race.
+IS_NGROK = bool(NGROK_URL) or bool(NGROK_DOMAIN) or bool(NGROK_AUTHTOKEN) or any(
+    'ngrok' in host for host in _allowed_hosts_tokens
+)
+IS_TUNNEL = bool(TUNNEL_URL) or bool(NGROK_DOMAIN) or bool(NGROK_AUTHTOKEN) or any(
     any(marker in host for marker in ('ngrok', 'trycloudflare.com', 'loca.lt')) for host in _allowed_hosts_tokens
 )
 

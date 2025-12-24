@@ -2793,14 +2793,13 @@
                     // Progressive upgrade to full quality (non-blocking).
                     (async () => {
                         try {
-                            const hiResp = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?${qs}&quality=high`, { credentials: 'same-origin' });
-                            const hiData = await hiResp.json();
-                            if (!hiResp.ok) return;
-                            const hiViews = hiData && (hiData.mpr_views || hiData.views || hiData.mprViews);
-                            if (!hiViews) return;
-                            document.getElementById('mprAxial').src = ensureDataUrl(hiViews.axial);
-                            document.getElementById('mprSagittal').src = ensureDataUrl(hiViews.sagittal);
-                            document.getElementById('mprCoronal').src = ensureDataUrl(hiViews.coronal);
+                            // Switch to binary PNG endpoints for high-quality slices (less overhead than base64 JSON).
+                            const ax = Math.floor((data.counts && data.counts.axial ? Number(data.counts.axial) : 1) / 2);
+                            const sa = Math.floor((data.counts && data.counts.sagittal ? Number(data.counts.sagittal) : 1) / 2);
+                            const co = Math.floor((data.counts && data.counts.coronal ? Number(data.counts.coronal) : 1) / 2);
+                            document.getElementById('mprAxial').src = `/dicom-viewer/api/mpr-slice/${currentSeries.id}/axial/${ax}/?${qs}&quality=high`;
+                            document.getElementById('mprSagittal').src = `/dicom-viewer/api/mpr-slice/${currentSeries.id}/sagittal/${sa}/?${qs}&quality=high`;
+                            document.getElementById('mprCoronal').src = `/dicom-viewer/api/mpr-slice/${currentSeries.id}/coronal/${co}/?${qs}&quality=high`;
                         } catch (_) { /* ignore */ }
                     })();
                     

@@ -3751,19 +3751,21 @@
                     coronal: mprState.index.coronal || 0,
                 };
 
-                // Fetch the same slices in high quality.
+                // Upgrade using the binary PNG endpoint (same pixels, less JSON/base64 overhead).
                 // Only swap if the user hasn't moved away from the target slice.
-                const prevQuality = mprQuality;
                 mprQuality = 'high';
-                const [ax, sa, co] = await Promise.all([
-                    fetchMPRPlaneSlice('axial', target.axial, qsBase),
-                    fetchMPRPlaneSlice('sagittal', target.sagittal, qsBase),
-                    fetchMPRPlaneSlice('coronal', target.coronal, qsBase),
-                ]);
+                const mkUrl = (plane, idx) => {
+                    return `/dicom-viewer/api/mpr-slice/${encodeURIComponent(currentSeries.id)}/${encodeURIComponent(plane)}/${encodeURIComponent(idx)}/?${qsBase}&quality=high`;
+                };
+                const axUrl = mkUrl('axial', target.axial);
+                const saUrl = mkUrl('sagittal', target.sagittal);
+                const coUrl = mkUrl('coronal', target.coronal);
 
-                if ((mprState.index.axial || 0) === target.axial) await _renderMPRDataUrl('axial', ax.image);
-                if ((mprState.index.sagittal || 0) === target.sagittal) await _renderMPRDataUrl('sagittal', sa.image);
-                if ((mprState.index.coronal || 0) === target.coronal) await _renderMPRDataUrl('coronal', co.image);
+                await Promise.all([
+                    ((mprState.index.axial || 0) === target.axial) ? _renderMPRDataUrl('axial', axUrl) : Promise.resolve(),
+                    ((mprState.index.sagittal || 0) === target.sagittal) ? _renderMPRDataUrl('sagittal', saUrl) : Promise.resolve(),
+                    ((mprState.index.coronal || 0) === target.coronal) ? _renderMPRDataUrl('coronal', coUrl) : Promise.resolve(),
+                ]);
             } catch (e) {
                 // If upgrade fails, keep fast mode; user still has a working MPR.
                 try { mprQuality = 'fast'; } catch (_) {}
@@ -4162,7 +4164,8 @@
             const angle = (angleDeg * Math.PI) / 180.0;
             const cos = Math.cos(angle);
             const sin = Math.sin(angle);
-            const len = Math.max(c.width, c.height) * 1.2;
+            const cc = (ctx && ctx.canvas) ? ctx.canvas : null;
+            const len = Math.max((cc && cc.width) ? cc.width : 0, (cc && cc.height) ? cc.height : 0) * 1.2;
             const half = len / 2;
 
             // style

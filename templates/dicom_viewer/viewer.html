@@ -40,10 +40,27 @@
 
         .viewer-container {
             display: grid;
-            grid-template-columns: 80px 1fr 300px;
+            /* Auto-adapt to screen width while preserving layout */
+            grid-template-columns: clamp(64px, 6vw, 80px) 1fr minmax(240px, 22vw);
             grid-template-rows: 60px 1fr 40px;
             height: 100vh;
             width: 100vw;
+        }
+
+        /* Responsive: reduce / collapse right panel on small screens (auto-fit) */
+        @media (max-width: 1100px) {
+            .viewer-container {
+                grid-template-columns: clamp(56px, 7vw, 72px) 1fr minmax(220px, 28vw);
+            }
+        }
+        @media (max-width: 900px) {
+            .viewer-container {
+                grid-template-columns: clamp(56px, 7vw, 72px) 1fr;
+                grid-template-rows: 60px 1fr 40px;
+            }
+            .right-panel {
+                display: none;
+            }
         }
 
         /* Top Navigation */
@@ -339,8 +356,42 @@
         .mpr-viewport img {
             max-width: 100%;
             max-height: 100%;
-            image-rendering: pixelated;
+            /* High-quality scaling for diagnostic viewing */
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+            image-rendering: high-quality;
             cursor: crosshair;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+
+        /* MPR overlays (measurements + ROI) */
+        .mpr-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 14; /* below crosshair (15), above image */
+        }
+
+        .roi-ellipse {
+            position: absolute;
+            border: 2px solid #ffaa00;
+            border-radius: 9999px;
+            box-shadow: 0 0 6px rgba(255, 170, 0, 0.35);
+            background: rgba(255, 170, 0, 0.08);
+        }
+
+        .roi-label {
+            position: absolute;
+            padding: 3px 6px;
+            font-size: 11px;
+            border-radius: 4px;
+            background: rgba(0, 0, 0, 0.82);
+            color: #ffaa00;
+            border: 1px solid rgba(255, 170, 0, 0.35);
+            white-space: nowrap;
+            transform: translate(-50%, -110%);
         }
 
         .mpr-label {
@@ -869,6 +920,10 @@
                     <i class="fas fa-ruler"></i>
                     <span>Measure</span>
                 </button>
+                <button class="tool" data-tool="roi" onclick="setTool('roi')" title="ROI (Ellipse)">
+                    <i class="fas fa-draw-polygon"></i>
+                    <span>ROI</span>
+                </button>
                 <button class="tool" data-tool="annotate" onclick="setTool('annotate')" title="Annotate">
                     <i class="fas fa-comment"></i>
                     <span>Annotate</span>
@@ -965,6 +1020,7 @@
                 <div class="mpr-viewport" data-plane="axial" onclick="setActivePlane('axial')">
                     <div class="mpr-label">Axial (Z)</div>
                     <img id="mprAxial" alt="Axial View" onload="updateCrosshairOverlay('axial')">
+                    <div class="mpr-overlay" id="mprOverlayAxial"></div>
                     <div class="crosshair-overlay-mpr" id="crosshairAxial">
                         <div class="crosshair-line-h-mpr"></div>
                         <div class="crosshair-line-v-mpr"></div>
@@ -973,6 +1029,7 @@
                 <div class="mpr-viewport" data-plane="sagittal" onclick="setActivePlane('sagittal')">
                     <div class="mpr-label">Sagittal (X)</div>
                     <img id="mprSagittal" alt="Sagittal View" onload="updateCrosshairOverlay('sagittal')">
+                    <div class="mpr-overlay" id="mprOverlaySagittal"></div>
                     <div class="crosshair-overlay-mpr" id="crosshairSagittal">
                         <div class="crosshair-line-h-mpr"></div>
                         <div class="crosshair-line-v-mpr"></div>
@@ -981,6 +1038,7 @@
                 <div class="mpr-viewport" data-plane="coronal" onclick="setActivePlane('coronal')">
                     <div class="mpr-label">Coronal (Y)</div>
                     <img id="mprCoronal" alt="Coronal View" onload="updateCrosshairOverlay('coronal')">
+                    <div class="mpr-overlay" id="mprOverlayCoronal"></div>
                     <div class="crosshair-overlay-mpr" id="crosshairCoronal">
                         <div class="crosshair-line-h-mpr"></div>
                         <div class="crosshair-line-v-mpr"></div>
@@ -1399,6 +1457,18 @@
         let measurements = [];
         let annotations = [];
         let currentMeasurement = null;
+
+        // --- MPR tool state (measurements + ROI are per-plane/per-slice) ---
+        const _mprState = {
+            counts: { axial: 0, sagittal: 0, coronal: 0 },
+            sliceIndex: { axial: 0, sagittal: 0, coronal: 0 }
+        };
+        let mprMeasurements = []; // { plane, sliceIndex, start:{x,y}, end:{x,y}, distance, timestamp }
+        let mprAnnotations = [];  // { plane, sliceIndex, x,y,text,timestamp }
+        let mprRois = [];         // { plane, sliceIndex, cx,cy,rx,ry, stats?, timestamp }
+        let currentMprMeasurement = null; // { plane, sliceIndex, start, end }
+        let currentMprRoi = null;         // { plane, sliceIndex, cx,cy,rx,ry }
+        const _mprDraw = { down: false, plane: null, kind: null };
         
         // Window presets - Professional medical presets from PyQt
         const windowPresets = {
@@ -1649,6 +1719,9 @@
                 case 'measure':
                     imageContainer.style.cursor = 'crosshair';
                     break;
+                case 'roi':
+                    imageContainer.style.cursor = 'crosshair';
+                    break;
                 case 'annotate':
                     imageContainer.style.cursor = 'text';
                     break;
@@ -1750,6 +1823,8 @@
                     mprImg.style.willChange = 'transform';
                     mprImg.style.transform = tfm;
                 }
+                // Keep MPR overlays aligned with the transformed image
+                updateMprOverlays(activeMprPlane);
                 return;
             }
 
@@ -2646,6 +2721,18 @@
                 const views = data && (data.mpr_views || data.views || data.mprViews);
                 if (views && (views.axial || views.sagittal || views.coronal)) {
                     _mprLastCounts = data.counts || _mprLastCounts;
+                    if (data.counts) {
+                        _mprState.counts = {
+                            axial: Number(data.counts.axial || 0),
+                            sagittal: Number(data.counts.sagittal || 0),
+                            coronal: Number(data.counts.coronal || 0)
+                        };
+                        _mprState.sliceIndex = {
+                            axial: Math.floor((_mprState.counts.axial || 1) / 2),
+                            sagittal: Math.floor((_mprState.counts.sagittal || 1) / 2),
+                            coronal: Math.floor((_mprState.counts.coronal || 1) / 2)
+                        };
+                    }
 
                     // Make MPR axial match the currently displayed axial slice position (as closely as possible).
                     // The MPR volume may be resampled, so map by relative index.
@@ -2656,6 +2743,7 @@
                         if (axialCount > 1 && srcCount > 1) {
                             const t = Math.max(0, Math.min(1, (Number(currentImageIndex) || 0) / (srcCount - 1)));
                             const axialSlice = Math.round(t * (axialCount - 1));
+                            _mprState.sliceIndex.axial = axialSlice;
                             const axialResp = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=axial&slice=${axialSlice}&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`);
                             const axialData = await axialResp.json();
                             if (axialData && axialData.image) {
@@ -2684,6 +2772,10 @@
                     enableMPRCrosshairs();
                     setActivePlane('axial');
                     applyTransform();
+                    // Draw overlays for all planes initially
+                    updateMprOverlays('axial');
+                    updateMprOverlays('sagittal');
+                    updateMprOverlays('coronal');
                     
                     hideLoading();
                     showToast('MPR views generated successfully', 'success');
@@ -2737,6 +2829,202 @@
                 singleView.style.display = 'flex';
                 showToast('Switched to single view', 'info');
             }
+        }
+
+        // ---- MPR slice scroll (wheel) + overlays (measurements/ROI) ----
+        function _mprPlaneToImgId(plane) {
+            if (plane === 'axial') return 'mprAxial';
+            if (plane === 'sagittal') return 'mprSagittal';
+            if (plane === 'coronal') return 'mprCoronal';
+            return null;
+        }
+
+        function _mprPlaneToOverlayId(plane) {
+            if (plane === 'axial') return 'mprOverlayAxial';
+            if (plane === 'sagittal') return 'mprOverlaySagittal';
+            if (plane === 'coronal') return 'mprOverlayCoronal';
+            return null;
+        }
+
+        function _mprGetViewportEl(plane) {
+            return document.querySelector(`.mpr-viewport[data-plane="${plane}"]`);
+        }
+
+        function _mprGetMetrics(plane) {
+            const viewportEl = _mprGetViewportEl(plane);
+            const img = document.getElementById(_mprPlaneToImgId(plane));
+            if (!viewportEl || !img) return null;
+            const imgRect = img.getBoundingClientRect();
+            const vpRect = viewportEl.getBoundingClientRect();
+            const naturalW = img.naturalWidth || 0;
+            const naturalH = img.naturalHeight || 0;
+            const viewW = imgRect.width || img.clientWidth || 0;
+            const viewH = imgRect.height || img.clientHeight || 0;
+            if (!naturalW || !naturalH || !viewW || !viewH) return null;
+            const offsetLeft = imgRect.left - vpRect.left;
+            const offsetTop = imgRect.top - vpRect.top;
+            return { viewportEl, img, imgRect, vpRect, naturalW, naturalH, viewW, viewH, offsetLeft, offsetTop };
+        }
+
+        function _mprViewportPointToImagePx(e, plane) {
+            const m = _mprGetMetrics(plane);
+            if (!m) return null;
+            const xView = e.clientX - m.imgRect.left;
+            const yView = e.clientY - m.imgRect.top;
+            const xImg = (xView / m.viewW) * m.naturalW;
+            const yImg = (yView / m.viewH) * m.naturalH;
+            return { x: xImg, y: yImg };
+        }
+
+        function _mprImagePxToOverlayPoint(pt, plane) {
+            const m = _mprGetMetrics(plane);
+            if (!m) return null;
+            const xInImg = (pt.x / m.naturalW) * m.viewW;
+            const yInImg = (pt.y / m.naturalH) * m.viewH;
+            return { x: m.offsetLeft + xInImg, y: m.offsetTop + yInImg };
+        }
+
+        async function _mprSetSlice(plane, sliceIndex, opts = {}) {
+            if (!currentSeries) return false;
+            const counts = _mprState.counts?.[plane] || 0;
+            if (counts <= 0) return false;
+            const idx = Math.max(0, Math.min(counts - 1, Number(sliceIndex) || 0));
+            _mprState.sliceIndex[plane] = idx;
+
+            // Requirement: ROI disappears in all windows when any MPR slice is scrolled
+            if (opts.clearRoiAll === true) {
+                mprRois = [];
+                currentMprRoi = null;
+            }
+
+            try {
+                const url = `/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(idx)}&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
+                const resp = await fetch(url, { credentials: 'same-origin' });
+                if (!resp.ok) return false;
+                const data = await resp.json();
+                const imgEl = document.getElementById(_mprPlaneToImgId(plane));
+                if (imgEl && data?.image) {
+                    const v = String(data.image || '');
+                    imgEl.decoding = 'async';
+                    imgEl.src = v.startsWith('data:image') ? v : `data:image/png;base64,${v}`;
+                }
+            } catch (e) {
+                return false;
+            } finally {
+                updateMprOverlays(plane);
+                // re-apply transform in case active plane changed size
+                if (_isMprVisible() && activeMprPlane === plane) applyTransform();
+            }
+            return true;
+        }
+
+        function updateMprOverlays(plane) {
+            if (!_isMprVisible()) return;
+            if (!(plane === 'axial' || plane === 'sagittal' || plane === 'coronal')) return;
+            const overlay = document.getElementById(_mprPlaneToOverlayId(plane));
+            if (!overlay) return;
+            overlay.innerHTML = '';
+
+            const sliceIndex = Number(_mprState.sliceIndex?.[plane] ?? 0);
+
+            // Measurements
+            mprMeasurements.forEach((m) => {
+                if (m.plane !== plane || Number(m.sliceIndex) !== sliceIndex) return;
+                _drawMprMeasurement(overlay, plane, m, false);
+            });
+            if (currentMprMeasurement && currentMprMeasurement.plane === plane && Number(currentMprMeasurement.sliceIndex) === sliceIndex) {
+                _drawMprMeasurement(overlay, plane, currentMprMeasurement, true);
+            }
+
+            // Annotations
+            mprAnnotations.forEach((a) => {
+                if (a.plane !== plane || Number(a.sliceIndex) !== sliceIndex) return;
+                const pt = _mprImagePxToOverlayPoint({ x: a.x, y: a.y }, plane);
+                if (!pt) return;
+                const marker = document.createElement('div');
+                marker.className = 'annotation-marker';
+                marker.style.cssText = `left:${pt.x}px; top:${pt.y}px;`;
+                marker.textContent = a.text;
+                overlay.appendChild(marker);
+            });
+
+            // ROI
+            mprRois.forEach((r) => {
+                if (r.plane !== plane || Number(r.sliceIndex) !== sliceIndex) return;
+                _drawMprRoi(overlay, plane, r, false);
+            });
+            if (currentMprRoi && currentMprRoi.plane === plane && Number(currentMprRoi.sliceIndex) === sliceIndex) {
+                _drawMprRoi(overlay, plane, currentMprRoi, true);
+            }
+        }
+
+        function _drawMprMeasurement(overlay, plane, measurement, isTemp) {
+            const start = _mprImagePxToOverlayPoint(measurement.start, plane);
+            const end = _mprImagePxToOverlayPoint(measurement.end, plane);
+            if (!start || !end) return;
+            const length = Math.hypot(end.x - start.x, end.y - start.y);
+            const angle = Math.atan2(end.y - start.y, end.x - start.x) * 180 / Math.PI;
+
+            const line = document.createElement('div');
+            line.className = 'measurement-line';
+            line.style.cssText = `
+                left: ${start.x}px;
+                top: ${start.y}px;
+                width: ${length}px;
+                height: 2px;
+                transform-origin: 0 0;
+                transform: rotate(${angle}deg);
+                background: ${isTemp ? '#ffff00' : '#ff0000'};
+                opacity: ${isTemp ? 0.7 : 1.0};
+            `;
+            overlay.appendChild(line);
+
+            const label = document.createElement('div');
+            label.className = 'measurement-label';
+            const midX = (start.x + end.x) / 2;
+            const midY = (start.y + end.y) / 2;
+            const px = measurement.distance?.pixels ? `${measurement.distance.pixels} px` : `${(length).toFixed(1)} px`;
+            label.textContent = measurement.distance?.mm && measurement.distance.mm !== 'N/A'
+                ? `${measurement.distance.mm} mm / ${measurement.distance.cm} cm`
+                : px;
+            label.style.cssText = `
+                left: ${midX}px;
+                top: ${midY - 15}px;
+                transform: translateX(-50%);
+                background: rgba(0, 0, 0, 0.8);
+                color: ${isTemp ? '#ffff00' : '#ff0000'};
+                opacity: ${isTemp ? 0.7 : 1.0};
+            `;
+            overlay.appendChild(label);
+        }
+
+        function _drawMprRoi(overlay, plane, roi, isTemp) {
+            const c = _mprImagePxToOverlayPoint({ x: roi.cx, y: roi.cy }, plane);
+            const ex = _mprImagePxToOverlayPoint({ x: roi.cx + roi.rx, y: roi.cy }, plane);
+            const ey = _mprImagePxToOverlayPoint({ x: roi.cx, y: roi.cy + roi.ry }, plane);
+            if (!c || !ex || !ey) return;
+            const rx = Math.max(2, Math.abs(ex.x - c.x));
+            const ry = Math.max(2, Math.abs(ey.y - c.y));
+
+            const ellipse = document.createElement('div');
+            ellipse.className = 'roi-ellipse';
+            ellipse.style.left = `${c.x - rx}px`;
+            ellipse.style.top = `${c.y - ry}px`;
+            ellipse.style.width = `${rx * 2}px`;
+            ellipse.style.height = `${ry * 2}px`;
+            ellipse.style.opacity = isTemp ? '0.75' : '1';
+            overlay.appendChild(ellipse);
+
+            const label = document.createElement('div');
+            label.className = 'roi-label';
+            const mean = roi.stats?.mean;
+            const std = roi.stats?.std;
+            label.textContent = (typeof mean === 'number')
+                ? `ROI μ=${mean.toFixed(1)} HU σ=${(typeof std === 'number' ? std.toFixed(1) : '—')}`
+                : 'ROI (drag)';
+            label.style.left = `${c.x}px`;
+            label.style.top = `${c.y - ry}px`;
+            overlay.appendChild(label);
         }
 
         async function show3DReconstruction() {
@@ -3664,6 +3952,24 @@
                 
                 viewport.addEventListener('mousemove', function(e) {
                     _queueMPRCrosshairUpdate(viewport, plane, e.clientX, e.clientY, false);
+
+                    // Live-draw measurement / ROI when active in this plane
+                    if (_mprDraw.down && _isMprVisible() && _mprDraw.plane === plane) {
+                        if (_mprDraw.kind === 'measure' && currentMprMeasurement) {
+                            const p = _mprViewportPointToImagePx(e, plane);
+                            if (p) {
+                                currentMprMeasurement.end = { x: p.x, y: p.y };
+                                updateMprOverlays(plane);
+                            }
+                        } else if (_mprDraw.kind === 'roi' && currentMprRoi) {
+                            const p = _mprViewportPointToImagePx(e, plane);
+                            if (p) {
+                                currentMprRoi.rx = Math.max(1, Math.abs(p.x - currentMprRoi.cx));
+                                currentMprRoi.ry = Math.max(1, Math.abs(p.y - currentMprRoi.cy));
+                                updateMprOverlays(plane);
+                            }
+                        }
+                    }
                 });
                 
                 viewport.addEventListener('click', function(e) {
@@ -3675,14 +3981,74 @@
                 viewport.addEventListener('wheel', function(e) {
                     e.preventDefault();
                     setActivePlane(plane);
-                    const zoomDirection = e.deltaY > 0 ? 0.9 : 1.1;
-                    setZoom(zoomFactor * zoomDirection);
+                    // Default: wheel scrolls slices. Ctrl+wheel (or Zoom tool) zooms.
+                    const direction = e.deltaY > 0 ? 1 : -1;
+                    if (e.ctrlKey || activeTool === 'zoom') {
+                        const zoomDirection = e.deltaY > 0 ? 0.9 : 1.1;
+                        setZoom(zoomFactor * zoomDirection);
+                    } else {
+                        const counts = Number(_mprState.counts?.[plane] || 0);
+                        if (counts > 0) {
+                            const next = (Number(_mprState.sliceIndex?.[plane] || 0) + direction);
+                            _mprSetSlice(plane, next, { clearRoiAll: true });
+                        }
+                    }
                 }, { passive: false });
 
                 viewport.addEventListener('mousedown', function(e) {
                     // Left button only
                     if (e.button !== 0) return;
                     setActivePlane(plane);
+                    // If drawing tools are active, don't start pan/zoom drag
+                    if (activeTool === 'measure') {
+                        const p = _mprViewportPointToImagePx(e, plane);
+                        if (!p) return;
+                        _mprDraw.down = true;
+                        _mprDraw.plane = plane;
+                        _mprDraw.kind = 'measure';
+                        currentMprMeasurement = {
+                            plane,
+                            sliceIndex: Number(_mprState.sliceIndex?.[plane] || 0),
+                            start: { x: p.x, y: p.y },
+                            end: { x: p.x, y: p.y }
+                        };
+                        updateMprOverlays(plane);
+                        return;
+                    }
+                    if (activeTool === 'roi') {
+                        const p = _mprViewportPointToImagePx(e, plane);
+                        if (!p) return;
+                        _mprDraw.down = true;
+                        _mprDraw.plane = plane;
+                        _mprDraw.kind = 'roi';
+                        currentMprRoi = {
+                            plane,
+                            sliceIndex: Number(_mprState.sliceIndex?.[plane] || 0),
+                            cx: p.x,
+                            cy: p.y,
+                            rx: 1,
+                            ry: 1
+                        };
+                        updateMprOverlays(plane);
+                        return;
+                    }
+                    if (activeTool === 'annotate') {
+                        const text = prompt('Enter annotation text:');
+                        if (!text) return;
+                        const p = _mprViewportPointToImagePx(e, plane);
+                        if (!p) return;
+                        mprAnnotations.push({
+                            plane,
+                            sliceIndex: Number(_mprState.sliceIndex?.[plane] || 0),
+                            x: p.x,
+                            y: p.y,
+                            text,
+                            timestamp: new Date().toISOString()
+                        });
+                        updateMprOverlays(plane);
+                        return;
+                    }
+
                     _mprDrag.down = true;
                     _mprDrag.lastX = e.clientX;
                     _mprDrag.lastY = e.clientY;
@@ -3694,6 +4060,51 @@
                 document.body.setAttribute('data-mpr-mouseup', 'true');
                 document.addEventListener('mouseup', function() {
                     _mprDrag.down = false;
+
+                    // Finish drawing tools
+                    if (_mprDraw.down && _isMprVisible() && (_mprDraw.plane === 'axial' || _mprDraw.plane === 'sagittal' || _mprDraw.plane === 'coronal')) {
+                        const plane = _mprDraw.plane;
+                        const sliceIndex = Number(_mprState.sliceIndex?.[plane] || 0);
+                        if (_mprDraw.kind === 'measure' && currentMprMeasurement) {
+                            // Compute distance + store
+                            const distance = calculateDistance(currentMprMeasurement.start, currentMprMeasurement.end);
+                            mprMeasurements.push({
+                                ...currentMprMeasurement,
+                                sliceIndex,
+                                distance,
+                                timestamp: new Date().toISOString()
+                            });
+                            currentMprMeasurement = null;
+                            updateMprOverlays(plane);
+                        } else if (_mprDraw.kind === 'roi' && currentMprRoi) {
+                            // Persist ROI and compute HU stats
+                            const roi = {
+                                ...currentMprRoi,
+                                sliceIndex,
+                                timestamp: new Date().toISOString()
+                            };
+                            currentMprRoi = null;
+                            mprRois.push(roi);
+                            updateMprOverlays(plane);
+                            // Fetch HU ROI stats (non-blocking)
+                            (async () => {
+                                try {
+                                    const cx = Math.round(roi.cx), cy = Math.round(roi.cy);
+                                    const rx = Math.max(1, Math.round(roi.rx)), ry = Math.max(1, Math.round(roi.ry));
+                                    const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(sliceIndex)}&x=${encodeURIComponent(cx)}&y=${encodeURIComponent(cy)}&shape=ellipse&cx=${encodeURIComponent(cx)}&cy=${encodeURIComponent(cy)}&rx=${encodeURIComponent(rx)}&ry=${encodeURIComponent(ry)}`;
+                                    const resp = await fetch(url, { credentials: 'same-origin' });
+                                    const data = await resp.json();
+                                    if (data && data.stats) {
+                                        roi.stats = data.stats;
+                                        updateMprOverlays(plane);
+                                    }
+                                } catch (e) {}
+                            })();
+                        }
+                    }
+                    _mprDraw.down = false;
+                    _mprDraw.plane = null;
+                    _mprDraw.kind = null;
                 });
                 document.addEventListener('mousemove', function(e) {
                     if (!_mprDrag.down || !_isMprVisible()) return;

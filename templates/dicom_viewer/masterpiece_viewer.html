@@ -50,7 +50,7 @@
 
         /* Left Toolbar */
         .toolbar {
-            width: 70px;
+            width: clamp(56px, 6vw, 70px);
             background: linear-gradient(135deg, #2d2d2d, #1a1a1a);
             border-right: 2px solid var(--border-color);
             display: flex;
@@ -271,7 +271,7 @@
 
         /* Right Panel */
         .right-panel {
-            width: 320px;
+            width: clamp(240px, 22vw, 320px);
             background: linear-gradient(135deg, #2d2d2d, #1a1a1a);
             border-left: 2px solid var(--border-color);
             overflow-y: auto;
@@ -1150,9 +1150,21 @@
             maximizedPlane: null, // 'axial' | 'sagittal' | 'coronal' | 'bone3d' | null
             // Mapping from canvas coords -> underlying PNG pixel coords for HU/ROI
             // { w,h, dx,dy, dw,dh }
+            // baseMeta is the "fit to canvas" rect before applying user pan/zoom in MPR
+            baseMeta: { axial: null, sagittal: null, coronal: null },
             renderMeta: { axial: null, sagittal: null, coronal: null },
             lastImage: { axial: null, sagittal: null, coronal: null }, // HTMLImageElement (current rendered)
         };
+        // Per-plane MPR pan/zoom state (independent for each viewport)
+        let mprViewTransform = {
+            axial: { zoom: 1.0, panX: 0, panY: 0 },
+            sagittal: { zoom: 1.0, panX: 0, panY: 0 },
+            coronal: { zoom: 1.0, panX: 0, panY: 0 },
+        };
+        // MPR drag state (pan/zoom/window/measure)
+        let _mprDragState = { down: false, plane: null, tool: null, lastX: 0, lastY: 0 };
+        // MPR measurement draft (stored in slice pixel coords for that plane)
+        let mprCurrentMeasurement = null; // { type, mode:'mpr', plane, slice, ... }
         // MPR crosshair (volume voxel indices; volume is (z,y,x) so store as {x,y,z}).
         // x = sagittal slice index, y = coronal slice index, z = axial slice index.
         let mprCrosshairVoxel = null;
@@ -1573,12 +1585,13 @@
                         if (!c || !img) return;
                         const iw = img.naturalWidth || img.width;
                         const ih = img.naturalHeight || img.height;
-                        const scale = Math.min(c.width / iw, c.height / ih);
+                        const scale = Math.max(0.0001, Math.min(c.width / iw, c.height / ih));
                         const dw = Math.round(iw * scale);
                         const dh = Math.round(ih * scale);
                         const dx = Math.round((c.width - dw) / 2);
                         const dy = Math.round((c.height - dh) / 2);
-                        mprState.renderMeta[p] = { w: iw, h: ih, dx, dy, dw, dh };
+                        // Update base meta, then redraw applies user pan/zoom and refreshes renderMeta
+                        if (mprState.baseMeta) mprState.baseMeta[p] = { w: iw, h: ih, dx, dy, dw, dh };
                         redrawMPRPlane(p);
                     } catch (e) {}
                 });
@@ -3324,8 +3337,14 @@
             measurements = [];
             annotations = [];
             currentMeasurement = null;
+            mprCurrentMeasurement = null;
+            roiDraft = null;
             updateMeasurementsList();
-            redrawCurrentImage();
+            if (viewMode === 'mpr') {
+                redrawAllMPRPlanes();
+            } else {
+                redrawCurrentImage();
+            }
             showToast('All measurements cleared', 'success');
         }
 
@@ -3334,7 +3353,11 @@
                 const measurement = measurements[index];
                 measurements.splice(index, 1);
                 updateMeasurementsList();
-                redrawCurrentImage();
+                if (viewMode === 'mpr') {
+                    redrawAllMPRPlanes();
+                } else {
+                    redrawCurrentImage();
+                }
                 showToast(`${measurement.type} measurement deleted`, 'success');
                 hideContextMenu();
             }
@@ -3591,6 +3614,15 @@
                     mprState.index.sagittal = Math.floor((mprState.counts.sagittal || 1) / 2);
                     mprState.index.coronal = Math.floor((mprState.counts.coronal || 1) / 2);
 
+                    // Fresh MPR generation: reset per-plane pan/zoom and clear drafts (prevents "tools not working")
+                    mprViewTransform = {
+                        axial: { zoom: 1.0, panX: 0, panY: 0 },
+                        sagittal: { zoom: 1.0, panX: 0, panY: 0 },
+                        coronal: { zoom: 1.0, panX: 0, panY: 0 },
+                    };
+                    mprCurrentMeasurement = null;
+                    roiDraft = null;
+
                     await Promise.all([
                         _renderMPRDataUrl('axial', views.axial),
                         _renderMPRDataUrl('sagittal', views.sagittal),
@@ -3671,9 +3703,9 @@
             const w = img.naturalWidth || img.width;
             const h = img.naturalHeight || img.height;
 
-            // Fit-to-canvas without upscaling (prevents “zoomed-in” look on large/high-DPI screens).
+            // Fit-to-canvas (allow upscaling so MPR fills the pane on large screens).
             const scaleFit = Math.min(canvas.width / w, canvas.height / h);
-            const scale = Math.min(1, scaleFit);
+            const scale = Math.max(0.0001, scaleFit);
             const dw = Math.round(w * scale);
             const dh = Math.round(h * scale);
             const dx = Math.round((canvas.width - dw) / 2);
@@ -3681,7 +3713,8 @@
 
             // Store mapping meta so MPR HU/ROI can convert canvas coords -> slice pixel coords.
             if (mprState && mprState.renderMeta && (viewType === 'axial' || viewType === 'sagittal' || viewType === 'coronal')) {
-                mprState.renderMeta[viewType] = { w, h, dx, dy, dw, dh };
+                // baseMeta is the fit-to-pane rect (prior to user pan/zoom); redrawMPRPlane applies transforms.
+                mprState.baseMeta[viewType] = { w, h, dx, dy, dw, dh };
                 mprState.lastImage[viewType] = img;
             }
 
@@ -3698,17 +3731,30 @@
         function redrawMPRPlane(plane) {
             if (!(plane === 'axial' || plane === 'sagittal' || plane === 'coronal')) return;
             const c = mprCanvases[plane];
-            const meta = mprState.renderMeta[plane];
+            const base = (mprState.baseMeta && mprState.baseMeta[plane]) ? mprState.baseMeta[plane] : mprState.renderMeta[plane];
             const img = mprState.lastImage[plane];
-            if (!c || !meta || !img) return;
+            if (!c || !base || !img) return;
             const ctx = c.getContext('2d');
-            const { w, h, dx, dy, dw, dh } = meta;
+            const { w, h } = base;
+            const t = (mprViewTransform && mprViewTransform[plane]) ? mprViewTransform[plane] : { zoom: 1.0, panX: 0, panY: 0 };
+            const z = Math.max(0.2, Math.min(10.0, Number(t.zoom) || 1.0));
+            const centerX = (base.dx + base.dw / 2) + (Number(t.panX) || 0);
+            const centerY = (base.dy + base.dh / 2) + (Number(t.panY) || 0);
+            const dw = Math.max(2, Math.round(base.dw * z));
+            const dh = Math.max(2, Math.round(base.dh * z));
+            const dx = Math.round(centerX - dw / 2);
+            const dy = Math.round(centerY - dh / 2);
+
+            // Update live renderMeta so HU/ROI mapping uses the post-transform rectangle.
+            if (mprState && mprState.renderMeta) {
+                mprState.renderMeta[plane] = { w, h, dx, dy, dw, dh };
+            }
             ctx.clearRect(0, 0, c.width, c.height);
             // Render MPR with high-quality interpolation for better perceived clarity.
             // (The backend already resamples along Z; this improves browser-side scaling quality.)
-            // Only smooth when downscaling; for 1:1 (or larger) keep crisp edges.
+            // Smooth for any non-1:1 scaling; keep high quality.
             const s = Math.min(dw / Math.max(1, w), dh / Math.max(1, h));
-            ctx.imageSmoothingEnabled = s < 1;
+            ctx.imageSmoothingEnabled = Math.abs(s - 1) > 0.01;
             try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
             ctx.drawImage(img, dx, dy, dw, dh);
 
@@ -3736,9 +3782,166 @@
                 ctx.restore();
             }
 
+            // Saved measurements/ROI for this plane+slice (disappear automatically when slice changes)
+            try { drawMPRMeasurementsAndRois(plane, ctx); } catch (e) {}
+
             // Crosshair overlay (linked MPR)
             if (crosshair && mprCrosshairVoxel) {
                 drawMPRCrosshair(plane, ctx);
+            }
+        }
+
+        function _mprSlicePxToCanvasPoint(plane, px, py) {
+            const meta = mprState.renderMeta[plane];
+            if (!meta) return null;
+            const { w, h, dx, dy, dw, dh } = meta;
+            if (!w || !h || !dw || !dh) return null;
+            return { x: dx + (px * (dw / w)), y: dy + (py * (dh / h)) };
+        }
+
+        function drawMPRMeasurementsAndRois(plane, ctx) {
+            if (!measurements || measurements.length === 0) return;
+            const slice = Number(mprState.index[plane] || 0);
+            const meta = mprState.renderMeta[plane];
+            if (!meta) return;
+            const { w, h, dx, dy, dw, dh } = meta;
+            const sx = dw / w;
+            const sy = dh / h;
+
+            measurements.forEach((m) => {
+                if ((m.mode || 'single') !== 'mpr') return;
+                if (m.plane !== plane) return;
+                if (Number(m.slice ?? 0) !== slice) return;
+
+                if (m.type === 'roi') {
+                    const ccx = dx + (m.cx * sx);
+                    const ccy = dy + (m.cy * sy);
+                    const crx = Math.max(2, m.rx * sx);
+                    const cry = Math.max(2, m.ry * sy);
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(255, 170, 0, 0.95)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.ellipse(ccx, ccy, crx, cry, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+                    if (m.stats && typeof m.stats.mean === 'number') {
+                        const txt = `${m.stats.mean.toFixed(1)} HU`;
+                        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                        ctx.fillRect(ccx - 46, ccy - cry - 24, 92, 16);
+                        ctx.fillStyle = '#ffaa00';
+                        ctx.font = '12px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(txt, ccx, ccy - cry - 12);
+                    }
+                    ctx.restore();
+                    return;
+                }
+
+                if (m.type === 'distance') {
+                    const a = _mprSlicePxToCanvasPoint(plane, m.startX, m.startY);
+                    const b = _mprSlicePxToCanvasPoint(plane, m.endX, m.endY);
+                    if (!a || !b) return;
+                    ctx.save();
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(a.x, a.y);
+                    ctx.lineTo(b.x, b.y);
+                    ctx.stroke();
+                    ctx.fillStyle = '#ff0000';
+                    ctx.beginPath(); ctx.arc(a.x, a.y, 3.5, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(b.x, b.y, 3.5, 0, Math.PI * 2); ctx.fill();
+                    const midX = (a.x + b.x) / 2;
+                    const midY = (a.y + b.y) / 2;
+                    const label = (m.value != null && m.unit) ? `${m.value} ${m.unit}` : 'Distance';
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    ctx.fillRect(midX - 42, midY - 20, 84, 16);
+                    ctx.fillStyle = '#ffff00';
+                    ctx.font = '12px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(label, midX, midY - 8);
+                    ctx.restore();
+                    return;
+                }
+
+                if (m.type === 'angle' && m.points && m.points.length >= 3) {
+                    const pts = m.points.map((p) => _mprSlicePxToCanvasPoint(plane, p.x, p.y)).filter(Boolean);
+                    if (pts.length < 3) return;
+                    ctx.save();
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(pts[0].x, pts[0].y);
+                    ctx.lineTo(pts[1].x, pts[1].y);
+                    ctx.lineTo(pts[2].x, pts[2].y);
+                    ctx.stroke();
+                    ctx.fillStyle = '#ffff00';
+                    const label = (m.value != null) ? `${m.value}°` : 'Angle';
+                    ctx.font = '12px Arial';
+                    ctx.fillText(label, pts[1].x + 28, pts[1].y - 10);
+                    ctx.restore();
+                    return;
+                }
+
+                if (m.type === 'area' && m.points && m.points.length >= 3) {
+                    const pts = m.points.map((p) => _mprSlicePxToCanvasPoint(plane, p.x, p.y)).filter(Boolean);
+                    if (pts.length < 3) return;
+                    ctx.save();
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(pts[0].x, pts[0].y);
+                    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+                    ctx.closePath();
+                    ctx.stroke();
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+                    ctx.fill();
+                    const centerX = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+                    const centerY = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+                    ctx.fillStyle = '#ffff00';
+                    ctx.font = '12px Arial';
+                    const label = (m.value != null && m.unit) ? `${m.value} ${m.unit}` : 'Area';
+                    ctx.fillText(label, centerX, centerY);
+                    ctx.restore();
+                }
+            });
+
+            // Annotations (MPR)
+            try {
+                (annotations || []).forEach((a) => {
+                    if ((a.mode || 'single') !== 'mpr') return;
+                    if (a.plane !== plane) return;
+                    if (Number(a.slice ?? 0) !== slice) return;
+                    const pt = _mprSlicePxToCanvasPoint(plane, a.x, a.y);
+                    if (!pt) return;
+                    ctx.save();
+                    ctx.fillStyle = a.color || '#ffff00';
+                    ctx.font = '13px Arial';
+                    ctx.textAlign = 'left';
+                    ctx.fillText(a.text || '', pt.x + 4, pt.y - 4);
+                    ctx.restore();
+                });
+            } catch (e) {}
+
+            // Draft measurement (MPR)
+            if (mprCurrentMeasurement && mprCurrentMeasurement.mode === 'mpr' && mprCurrentMeasurement.plane === plane && Number(mprCurrentMeasurement.slice ?? 0) === slice) {
+                const m = mprCurrentMeasurement;
+                ctx.save();
+                ctx.strokeStyle = '#ffff00';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                if (m.type === 'distance') {
+                    const a = _mprSlicePxToCanvasPoint(plane, m.startX, m.startY);
+                    const b = _mprSlicePxToCanvasPoint(plane, m.endX, m.endY);
+                    if (a && b) {
+                        ctx.beginPath();
+                        ctx.moveTo(a.x, a.y);
+                        ctx.lineTo(b.x, b.y);
+                        ctx.stroke();
+                    }
+                }
+                ctx.setLineDash([]);
+                ctx.restore();
             }
         }
 
@@ -4030,6 +4233,15 @@
             event.preventDefault();
             if (!currentSeries) return;
             setActiveMPRPlane(plane);
+            // Ctrl+wheel zooms the active MPR plane (matches single-view behavior).
+            if (event.ctrlKey) {
+                const t = mprViewTransform[plane] || (mprViewTransform[plane] = { zoom: 1.0, panX: 0, panY: 0 });
+                const d = Math.sign(event.deltaY || 0);
+                const z = Number(t.zoom) || 1.0;
+                t.zoom = Math.max(0.2, Math.min(10.0, z * (d > 0 ? 0.9 : 1.1)));
+                redrawMPRPlane(plane);
+                return;
+            }
             const delta = Math.sign(event.deltaY || 0);
             const step = delta === 0 ? 0 : (delta > 0 ? 1 : -1);
             const count = mprState.counts[plane] || 0;
@@ -4037,6 +4249,9 @@
             const next = Math.max(0, Math.min(count - 1, (mprState.index[plane] || 0) + step));
             if (next === mprState.index[plane]) return;
             mprState.index[plane] = next;
+            // When slice scrolls, any ROI draft should disappear (and saved ROIs/measurements auto-filter per-slice).
+            roiDraft = null;
+            mprCurrentMeasurement = null;
             const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
             fetchMPRPlaneSlice(plane, next, qsBase)
                 .then((r) => {
@@ -4102,6 +4317,71 @@
                 _mprRoiCapture = { plane, onMove, onUp };
                 window.addEventListener('mousemove', onMove, { passive: true });
                 window.addEventListener('mouseup', onUp, { passive: true });
+                return;
+            }
+
+            // Other tools in MPR (windowing/zoom/pan/measure/angle/area/annotate)
+            if (event.button !== 0) return;
+            _mprDragState.down = true;
+            _mprDragState.plane = plane;
+            _mprDragState.tool = activeTool;
+            _mprDragState.lastX = x;
+            _mprDragState.lastY = y;
+
+            if (activeTool === 'measure' || activeTool === 'angle' || activeTool === 'area') {
+                const p = _mprCanvasToSlicePx(plane, x, y);
+                if (!p) return;
+                const slice = Number(mprState.index[plane] || 0);
+                if (activeTool === 'measure') {
+                    mprCurrentMeasurement = {
+                        type: 'distance',
+                        mode: 'mpr',
+                        plane,
+                        slice,
+                        startX: p.x,
+                        startY: p.y,
+                        endX: p.x,
+                        endY: p.y
+                    };
+                } else if (activeTool === 'angle') {
+                    mprCurrentMeasurement = {
+                        type: 'angle',
+                        mode: 'mpr',
+                        plane,
+                        slice,
+                        points: [{ x: p.x, y: p.y }]
+                    };
+                } else {
+                    mprCurrentMeasurement = {
+                        type: 'area',
+                        mode: 'mpr',
+                        plane,
+                        slice,
+                        points: [{ x: p.x, y: p.y }]
+                    };
+                }
+                redrawMPRPlane(plane);
+                return;
+            }
+
+            if (activeTool === 'annotate') {
+                const text = prompt('Enter annotation text:');
+                if (!text) return;
+                const p = _mprCanvasToSlicePx(plane, x, y);
+                if (!p) return;
+                annotations.push({
+                    mode: 'mpr',
+                    plane,
+                    slice: Number(mprState.index[plane] || 0),
+                    x: p.x,
+                    y: p.y,
+                    text,
+                    color: '#ffff00'
+                });
+                redrawMPRPlane(plane);
+                updateMeasurementsList();
+                showToast('Annotation added', 'success');
+                return;
             }
         }
 
@@ -4118,10 +4398,91 @@
                 roiDraft.end = { x: p.x, y: p.y };
                 redrawMPRPlane(plane);
             }
+
+            if (!_mprDragState.down || _mprDragState.plane !== plane) return;
+            const dx = x - _mprDragState.lastX;
+            const dy = y - _mprDragState.lastY;
+            _mprDragState.lastX = x;
+            _mprDragState.lastY = y;
+
+            if (activeTool === 'windowing') {
+                const ww = Math.max(1, Number(windowWidth));
+                const wwStep = Math.max(0.5, ww / 512);
+                const wlStep = Math.max(0.5, ww / 512);
+                windowWidth = Math.round(Number(windowWidth) + dx * wwStep);
+                windowLevel = Math.round(Number(windowLevel) + dy * wlStep);
+                if (currentImageStats) {
+                    windowWidth = _clamp(windowWidth, 1, currentImageStats.wwMax);
+                    windowLevel = _clamp(windowLevel, currentImageStats.wlMin, currentImageStats.wlMax);
+                } else {
+                    windowWidth = Math.max(1, windowWidth);
+                }
+                updateSliders();
+                _scheduleMPRRefresh();
+            } else if (activeTool === 'pan') {
+                const t = mprViewTransform[plane] || (mprViewTransform[plane] = { zoom: 1.0, panX: 0, panY: 0 });
+                t.panX = (Number(t.panX) || 0) + dx;
+                t.panY = (Number(t.panY) || 0) + dy;
+                redrawMPRPlane(plane);
+            } else if (activeTool === 'zoom') {
+                const t = mprViewTransform[plane] || (mprViewTransform[plane] = { zoom: 1.0, panX: 0, panY: 0 });
+                const z = Number(t.zoom) || 1.0;
+                const factor = 1 + (dy * 0.01);
+                t.zoom = Math.max(0.2, Math.min(10.0, z * factor));
+                redrawMPRPlane(plane);
+            } else if ((activeTool === 'measure' || activeTool === 'angle' || activeTool === 'area') && mprCurrentMeasurement) {
+                const p = _mprCanvasToSlicePx(plane, x, y);
+                if (!p) return;
+                if (mprCurrentMeasurement.type === 'distance') {
+                    mprCurrentMeasurement.endX = p.x;
+                    mprCurrentMeasurement.endY = p.y;
+                } else if (mprCurrentMeasurement.type === 'angle' || mprCurrentMeasurement.type === 'area') {
+                    if (mprCurrentMeasurement.points.length < 3) {
+                        mprCurrentMeasurement.points.push({ x: p.x, y: p.y });
+                    } else {
+                        mprCurrentMeasurement.points[mprCurrentMeasurement.points.length - 1] = { x: p.x, y: p.y };
+                    }
+                }
+                redrawMPRPlane(plane);
+            }
         }
 
         async function handleMPRMouseUp(event, plane) {
             if (viewMode !== 'mpr') return;
+            // Finalize non-ROI drags first
+            if (_mprDragState.down && _mprDragState.plane === plane) {
+                _mprDragState.down = false;
+                _mprDragState.plane = null;
+                _mprDragState.tool = null;
+            }
+
+            // Finalize MPR measurement tools
+            if ((activeTool === 'measure' || activeTool === 'angle' || activeTool === 'area') && mprCurrentMeasurement && mprCurrentMeasurement.mode === 'mpr' && mprCurrentMeasurement.plane === plane) {
+                const finalized = { ...mprCurrentMeasurement };
+                try {
+                    if (finalized.type === 'distance') {
+                        const d = calculateDistance(finalized);
+                        finalized.value = d.mm != null ? d.mm : d.pixels;
+                        finalized.unit = d.mm != null ? 'mm' : 'px';
+                    } else if (finalized.type === 'angle' && finalized.points && finalized.points.length >= 3) {
+                        const a = calculateAngle(finalized.points[0], finalized.points[1], finalized.points[2]);
+                        finalized.value = Math.round(a.degrees * 10) / 10;
+                        finalized.unit = 'deg';
+                    } else if (finalized.type === 'area' && finalized.points && finalized.points.length >= 3) {
+                        const a = calculateArea(finalized.points);
+                        finalized.value = a.mm2 != null ? a.mm2 : a.px2;
+                        finalized.unit = a.mm2 != null ? 'mm2' : 'px2';
+                    }
+                } catch (e) {}
+                measurements.push(finalized);
+                mprCurrentMeasurement = null;
+                updateMeasurementsList();
+                redrawMPRPlane(plane);
+                showToast('Measurement saved', 'success');
+                return;
+            }
+
+            // Finalize ROI (existing logic)
             if (!(activeTool === 'roi' && roiDraft && roiDraft.mode === 'mpr' && roiDraft.plane === plane)) return;
             const start = roiDraft.start;
             const end = roiDraft.end;

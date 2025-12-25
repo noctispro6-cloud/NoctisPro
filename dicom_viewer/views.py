@@ -1350,13 +1350,22 @@ def api_dicom_image_display(request, image_id):
             inverted_param = request.GET.get('invert')
         inverted = (inverted_param or 'false').lower() == 'true'
 
-        # Read DICOM file (best-effort)
+        # Read DICOM file (best-effort).
+        # Prefer storage-safe access (works with local FS, S3, etc.). Fall back to local path if available.
         ds = None
         try:
-            dicom_path = os.path.join(settings.MEDIA_ROOT, str(image.file_path))
-            ds = pydicom.dcmread(dicom_path, stop_before_pixels=False)
+            if not image.file_path:
+                raise FileNotFoundError("Image file_path is missing")
+            with image.file_path.open('rb') as f:
+                ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
         except Exception as e:
             warnings['dicom_read_error'] = str(e)
+            try:
+                if image.file_path and hasattr(image.file_path, 'path'):
+                    ds = pydicom.dcmread(image.file_path.path, stop_before_pixels=False, force=True)
+            except Exception as e2:
+                warnings['dicom_read_error_fallback'] = str(e2)
+                ds = None
 
         pixel_array = None
         pixel_decode_error = None
@@ -1371,15 +1380,17 @@ def api_dicom_image_display(request, image_id):
                     pass
                 pixel_array = pixel_array.astype(np.float32)
             except Exception as e:
-                # Fallback for compressed DICOMs without pixel handler: try SimpleITK
+                # Fallback for compressed DICOMs without pixel handler: try SimpleITK (local path only)
                 try:
                     import SimpleITK as sitk
-                    dicom_path = os.path.join(settings.MEDIA_ROOT, str(image.file_path))
-                    sitk_image = sitk.ReadImage(dicom_path)
-                    pixel_array = sitk.GetArrayFromImage(sitk_image)
-                    if pixel_array.ndim == 3 and pixel_array.shape[0] == 1:
-                        pixel_array = pixel_array[0]
-                    pixel_array = pixel_array.astype(np.float32)
+                    if image.file_path and hasattr(image.file_path, 'path'):
+                        sitk_image = sitk.ReadImage(image.file_path.path)
+                        pixel_array = sitk.GetArrayFromImage(sitk_image)
+                        if pixel_array.ndim == 3 and pixel_array.shape[0] == 1:
+                            pixel_array = pixel_array[0]
+                        pixel_array = pixel_array.astype(np.float32)
+                    else:
+                        raise RuntimeError("No local path available for SimpleITK fallback")
                 except Exception as _e:
                     pixel_decode_error = str(_e)
                     pixel_array = None
@@ -2975,15 +2986,28 @@ def web_dicom_image(request, image_id):
     inv_param = request.GET.get('invert')
     invert = (inv_param or '').lower() == 'true'
     try:
-        file_path = os.path.join(settings.MEDIA_ROOT, image.file_path.name)
-        ds = pydicom.dcmread(file_path)
+        # Prefer storage-safe open (works with local FS and remote storage backends).
+        ds = None
+        try:
+            if not image.file_path:
+                raise FileNotFoundError("Image file_path is missing")
+            with image.file_path.open('rb') as f:
+                ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
+        except Exception:
+            # Fall back to local path if available
+            if image.file_path and hasattr(image.file_path, 'path'):
+                ds = pydicom.dcmread(image.file_path.path, stop_before_pixels=False, force=True)
+            else:
+                return HttpResponse(status=500)
         # Robust pixel decode with SimpleITK fallback
         try:
             pixel_array = ds.pixel_array
         except Exception:
             try:
                 import SimpleITK as sitk
-                sitk_image = sitk.ReadImage(file_path)
+                if not (image.file_path and hasattr(image.file_path, 'path')):
+                    raise RuntimeError("No local path available for SimpleITK fallback")
+                sitk_image = sitk.ReadImage(image.file_path.path)
                 px = sitk.GetArrayFromImage(sitk_image)
                 if px.ndim == 3 and px.shape[0] == 1:
                     px = px[0]

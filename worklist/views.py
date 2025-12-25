@@ -18,6 +18,7 @@ import pydicom
 from PIL import Image
 from io import BytesIO
 import logging
+import re
 from django.conf import settings
 from .models import (
     Study, Patient, Modality, Series, DicomImage, StudyAttachment, 
@@ -341,6 +342,32 @@ def upload_study(request):
 			_TEMP_SUFFIXES = ('.tmp', '.temp', '.swp', '.swo', '.bak', '~')
 			_ALLOWED_EXTS = ('.dcm', '.dicom', '.dicm', '.ima')
 
+			_UID_RE = re.compile(r'^[0-9.]+$')
+
+			def _looks_like_real_dicom(ds) -> bool:
+				"""
+				Heuristic validation for non-Part10/no-extension DICOM.
+
+				We avoid relying solely on file extensions or the DICM preamble because many PACS exports
+				contain "raw" DICOM objects without a Part-10 header. Instead we accept only datasets
+				that contain the minimum identifiers needed for worklist grouping.
+				"""
+				try:
+					study_uid = str(getattr(ds, 'StudyInstanceUID', '') or '').strip()
+					series_uid = str(getattr(ds, 'SeriesInstanceUID', '') or '').strip()
+					sop_class_uid = str(getattr(ds, 'SOPClassUID', '') or '').strip()
+
+					if not study_uid or not series_uid:
+						return False
+					# Basic UID shape validation (digits + dots). Reject obvious false parses.
+					if not _UID_RE.match(study_uid) or not _UID_RE.match(series_uid):
+						return False
+					if sop_class_uid and not _UID_RE.match(sop_class_uid):
+						return False
+					return True
+				except Exception:
+					return False
+
 			def _is_temp_or_hidden_name(name: str) -> bool:
 				base = (os.path.basename(name or '') or '').strip()
 				low = base.lower()
@@ -434,21 +461,28 @@ def upload_study(request):
 
 					ds = None
 					try:
-						# Strict parse first to avoid treating arbitrary binaries as DICOM
+						# Strict parse first to avoid treating arbitrary binaries as DICOM.
 						in_file.seek(0)
 						ds = pydicom.dcmread(in_file, stop_before_pixels=True, force=False)
 					except Exception:
-						# Allow slightly non-conformant DICOMs ONLY if they look like DICOM by extension or preamble.
-						if has_preamble or ext in _ALLOWED_EXTS:
-							try:
-								in_file.seek(0)
-								ds = pydicom.dcmread(in_file, stop_before_pixels=True, force=True)
-							except Exception:
-								ds = None
-						else:
+						# PACS exports frequently include valid DICOM objects without a Part-10 header ("DICM")
+						# and sometimes without a meaningful extension. We still try force=True, but only accept
+						# the result if it contains the minimum UIDs required for worklist grouping.
+						try:
+							in_file.seek(0)
+							ds = pydicom.dcmread(in_file, stop_before_pixels=True, force=True)
+						except Exception:
 							ds = None
 
 					if ds is None:
+						invalid_files += 1
+						continue
+
+					# If force=True produced a "dataset" from a non-DICOM binary, it will typically be missing
+					# real Study/Series UIDs. Reject those to prevent garbage entries.
+					#
+					# We also keep the legacy preamble/extension signals purely as a hint for logging/debug.
+					if not _looks_like_real_dicom(ds):
 						invalid_files += 1
 						continue
 
@@ -599,9 +633,51 @@ def upload_study(request):
 				
 				# Facility attribution with admin/radiologist override
 				facility = None
+			def _infer_facility_from_dicom(ds) -> Facility | None:
+				"""
+				Best-effort facility inference from common DICOM fields.
+
+				PACS exports often carry an AE Title and/or InstitutionName that can be mapped to
+				`accounts.Facility.ae_title` or `accounts.Facility.name`.
+				"""
+				try:
+					candidates = []
+					for attr in (
+						'ScheduledStationAETitle',
+						'StationAETitle',
+						'InstitutionName',
+						'InstitutionalDepartmentName',
+					):
+						val = str(getattr(ds, attr, '') or '').strip()
+						if val:
+							candidates.append(val)
+					# Also consider ReferringPhysicianName-ish fields are not facility; skip.
+					# First: exact AE Title match
+					for c in candidates:
+						f = Facility.objects.filter(is_active=True).filter(ae_title__iexact=c).first()
+						if f:
+							return f
+					# Second: exact name match
+					for c in candidates:
+						f = Facility.objects.filter(is_active=True).filter(name__iexact=c).first()
+						if f:
+							return f
+					# Third: loose contains match on InstitutionName (helps when DICOM has "X Hospital - Dept Y")
+					for c in candidates:
+						if len(c) >= 4:
+							f = Facility.objects.filter(is_active=True).filter(name__icontains=c).first()
+							if f:
+								return f
+					return None
+				except Exception:
+					return None
+
 				if (hasattr(request.user, 'is_admin') and request.user.is_admin()) or (hasattr(request.user, 'is_radiologist') and request.user.is_radiologist()):
 					if override_facility_id:
 						facility = Facility.objects.filter(id=override_facility_id, is_active=True).first()
+				# If admin/radiologist didn't explicitly choose a target facility, try to infer from DICOM.
+				if not facility:
+					facility = _infer_facility_from_dicom(rep_ds)
 				if not facility and getattr(request.user, 'facility', None):
 					facility = request.user.facility
 				if not facility:

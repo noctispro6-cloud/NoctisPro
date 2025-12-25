@@ -1937,9 +1937,11 @@
                     // Load related references automatically based on study context
                     try { fetchReferences(); } catch (e) {}
                     
-                    // Auto-load first series
+                    // Auto-load the "best" series (largest diagnostic stack) so local uploads
+                    // look identical to worklist-opened studies. First series is often a low-res scout/localizer.
                     if (data.series.length > 0) {
-                        await loadSeries(data.series[0].id);
+                        const best = pickBestSeriesForDisplay(data.series);
+                        await loadSeries((best && best.id) ? best.id : data.series[0].id);
                     }
                     
                     showToast(`Loaded study: ${currentStudy.patient_name}`, 'success');
@@ -1952,6 +1954,46 @@
                 console.error('Error loading specific study:', error);
                 showToast('Failed to load study', 'error');
                 showLoading(false);
+            }
+        }
+
+        function pickBestSeriesForDisplay(seriesList) {
+            try {
+                const list = Array.isArray(seriesList) ? seriesList : [];
+                if (list.length === 0) return null;
+
+                const badWords = [
+                    'LOCALIZER', 'SCOUT', 'SURVEY', 'TOPO', 'TOP0', 'SCANOGRAM',
+                    'MPR', '3D', 'VRT', 'VR', 'DERIVED', 'SECONDARY', 'TEST', 'QA'
+                ];
+
+                const score = (s) => {
+                    const count = Number(s && s.image_count) || 0;
+                    const modality = String((s && s.modality) || '').toUpperCase();
+                    const desc = String((s && (s.description || s.series_description)) || '').toUpperCase();
+
+                    // Base on stack size (main diagnostic series is usually largest)
+                    let v = count;
+
+                    // Prefer cross-sectional modalities for default display
+                    if (modality === 'CT') v += 5000;
+                    else if (modality === 'MR') v += 4000;
+                    else if (modality === 'PT') v += 2000;
+                    else if (modality === 'NM') v += 1500;
+
+                    // Penalize obvious non-diagnostic / planning series
+                    if (badWords.some(w => desc.includes(w))) v -= 6000;
+
+                    // Prefer thicker stacks over single images (e.g., avoid thumbnails)
+                    if (count <= 1) v -= 3000;
+                    if (count < 10) v -= 800;
+
+                    return v;
+                };
+
+                return list.slice().sort((a, b) => score(b) - score(a))[0] || list[0];
+            } catch (e) {
+                return (Array.isArray(seriesList) && seriesList[0]) ? seriesList[0] : null;
             }
         }
 

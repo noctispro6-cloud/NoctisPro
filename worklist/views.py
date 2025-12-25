@@ -150,7 +150,9 @@ def study_list(request):
 			Q(study_description__icontains=search_query)
 		)
 	
-	# Sort by priority (urgent→low) then most recent first; prefetch attachments for display
+	# Sort by priority (urgent→low) then most recently uploaded first.
+	# IMPORTANT: many DICOM studies contain historical StudyDate values, which can make fresh uploads
+	# "disappear" from the first page if we sort primarily by `study_date`.
 	priority_rank = Case(
 		When(priority='urgent', then=Value(3)),
 		When(priority='high', then=Value(2)),
@@ -164,7 +166,7 @@ def study_list(request):
 		.select_related('patient', 'facility', 'modality', 'radiologist')
 		.prefetch_related('attachments')
 		.annotate(_priority_rank=priority_rank)
-		.order_by('-_priority_rank', '-study_date')
+		.order_by('-_priority_rank', '-upload_date', '-study_date')
 	)
 	
 	# Pagination

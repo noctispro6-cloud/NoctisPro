@@ -9,11 +9,13 @@
  */
 
 :root {
-  /* Spacing tokens (safe across OS; does not change font scaling) */
-  --ui-space-1: clamp(4px, 0.45vw, 8px);
-  --ui-space-2: clamp(8px, 0.75vw, 14px);
-  --ui-space-3: clamp(12px, 1.10vw, 18px);
-  --ui-radius: clamp(6px, 0.6vw, 12px);
+  /* Spacing tokens (fixed, so we don't "inflate" on large screens).
+   * Using vw-based spacing makes Windows (often higher resolution) feel oversized.
+   */
+  --ui-space-1: 6px;
+  --ui-space-2: 12px;
+  --ui-space-3: 16px;
+  --ui-radius: 10px;
 }
 
 /* Never force font-size here; only keep text-size-adjust safety */

@@ -1161,7 +1161,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const totalBytes = selectedFiles.reduce((s, f) => s + (f.size || 0), 0);
 
         // Build chunks by total bytes to respect reverse-proxy limits (e.g., 100MB)
-        const MAX_CHUNK_BYTES = 80 * 1024 * 1024; // 80MB safety margin
+        // Keep chunks small so each request finishes quickly (avoids proxy/browser timeouts).
+        const MAX_CHUNK_BYTES = 20 * 1024 * 1024; // 20MB
         let chunks = [];
         let currentChunk = [];
         let currentBytes = 0;
@@ -1177,8 +1178,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (currentChunk.length) chunks.push(currentChunk);
 
-        // Limit parallel uploads to reduce server pressure
-        let MAX_PARALLEL = chunks.length > 10 ? 2 : 2;
+        // Limit parallel uploads to avoid overloading server/proxy (stability > raw throughput)
+        let MAX_PARALLEL = 1;
 
         let uploadedCount = 0;
         let uploadedBytes = 0;
@@ -1211,7 +1212,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const xhr = new XMLHttpRequest();
                 xhr.open('POST', url, true);
-                xhr.timeout = 300000; // 300s per chunk for large uploads
+                xhr.timeout = 300000; // 300s per chunk (chunks are smaller now)
                 xhr.setRequestHeader('X-CSRFToken', token);
                 xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
 

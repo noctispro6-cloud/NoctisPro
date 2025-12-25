@@ -794,26 +794,28 @@ def upload_study(request):
 				
 				# already tracked above
 				
-				# Enhanced notifications for new study upload
-				try:
-					notif_type, _ = NotificationType.objects.get_or_create(
-						code='new_study', defaults={'name': 'New Study Uploaded', 'description': 'A new study has been uploaded', 'is_system': True}
-					)
-					recipients = User.objects.filter(Q(role='radiologist') | Q(role='admin') | Q(facility=facility))
-					for recipient in recipients:
-						Notification.objects.create(
-							notification_type=notif_type,
-							recipient=recipient,
-							sender=request.user,
-							title=f"New {modality_code} study for {patient.full_name}",
-							message=f"Study {accession_number} uploaded from {facility.name} with {total_series_processed} series",
-							priority='normal',
-							study=study,
-							facility=facility,
-							data={'study_id': study.id, 'accession_number': accession_number, 'series_count': total_series_processed}
+				# Enhanced notifications for NEW study upload only.
+				# Chunked uploads can hit this endpoint multiple times; avoid re-notifying (slow + noisy).
+				if study_created:
+					try:
+						notif_type, _ = NotificationType.objects.get_or_create(
+							code='new_study', defaults={'name': 'New Study Uploaded', 'description': 'A new study has been uploaded', 'is_system': True}
 						)
-				except Exception:
-					pass
+						recipients = User.objects.filter(Q(role='radiologist') | Q(role='admin') | Q(facility=facility))
+						for recipient in recipients:
+							Notification.objects.create(
+								notification_type=notif_type,
+								recipient=recipient,
+								sender=request.user,
+								title=f"New {modality_code} study for {patient.full_name}",
+								message=f"Study {accession_number} uploaded from {facility.name} with {total_series_processed} series",
+								priority='normal',
+								study=study,
+								facility=facility,
+								data={'study_id': study.id, 'accession_number': accession_number, 'series_count': total_series_processed}
+							)
+					except Exception:
+						pass
 			
 			# Professional upload completion with comprehensive statistics
 			upload_stats['invalid_files'] = invalid_files

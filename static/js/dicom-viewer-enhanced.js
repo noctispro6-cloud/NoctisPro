@@ -458,12 +458,16 @@ class DicomViewerEnhanced {
         try {
             const url = '/worklist/upload/';
             const token = (document.querySelector('meta[name="csrf-token"]') && document.querySelector('meta[name="csrf-token"]').getAttribute('content')) || '';
-            // Chunk by total bytes to respect common reverse-proxy limits (~100MB)
-            const MAX_CHUNK_BYTES = 80 * 1024 * 1024;
+            // Keep chunks small so each request completes quickly (avoid proxy/browser timeouts).
+            const MAX_CHUNK_BYTES = 20 * 1024 * 1024; // 20MB
+            const MAX_CHUNK_FILES = 200; // also cap count (CT can have many small slices)
             const chunks = [];
             let current = []; let bytes = 0;
             for (const f of files) {
-                if (bytes + (f.size || 0) > MAX_CHUNK_BYTES && current.length) { chunks.push(current); current = []; bytes = 0; }
+                const fsize = (f.size || 0);
+                const wouldExceedBytes = (bytes + fsize) > MAX_CHUNK_BYTES;
+                const wouldExceedCount = current.length >= MAX_CHUNK_FILES;
+                if ((wouldExceedBytes || wouldExceedCount) && current.length) { chunks.push(current); current = []; bytes = 0; }
                 current.push(f); bytes += (f.size || 0);
             }
             if (current.length) chunks.push(current);

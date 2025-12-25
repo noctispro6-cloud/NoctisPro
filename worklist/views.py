@@ -691,6 +691,38 @@ def upload_study(request):
 							'image_orientation': image_orientation,
 						}
 					)
+
+					# Defensive fix: ensure the Series is linked to this Study.
+					# In the wild, chunk retries or historical data can leave a Series UID attached to the wrong Study,
+					# which makes the newly-created Study show "0 series / 0 images" in the worklist and viewer.
+					try:
+						if series and series.study_id != study.id:
+							logger.warning(
+								f"Series UID collision/mislink detected: series_instance_uid={series_uid} "
+								f"belongs to study_id={series.study_id}, expected study_id={study.id}. Re-linking."
+							)
+							series.study = study
+							# Keep metadata reasonably up-to-date for the UI
+							series.series_number = int(series_number)
+							series.series_description = series_desc
+							series.modality = modality_code
+							series.body_part = body_part
+							series.slice_thickness = slice_thickness if slice_thickness is not None else None
+							series.pixel_spacing = pixel_spacing
+							series.image_orientation = image_orientation
+							series.save(update_fields=[
+								'study',
+								'series_number',
+								'series_description',
+								'modality',
+								'body_part',
+								'slice_thickness',
+								'pixel_spacing',
+								'image_orientation',
+							])
+					except Exception:
+						# Never fail the upload because of a relink attempt; worst case we keep existing behavior.
+						pass
 					
 					if series_created:
 						upload_stats['created_series'] += 1
@@ -772,6 +804,40 @@ def upload_study(request):
 									'processed': False,
 								}
 							)
+
+							# Defensive fix: for retries/chunked uploads, the SOPInstanceUID may already exist.
+							# Ensure the existing image is linked to THIS series and points at a valid file_path.
+							try:
+								if image and not image_created:
+									update_fields = []
+									if series and image.series_id != series.id:
+										image.series = series
+										update_fields.append('series')
+									# Keep instance_number aligned for correct ordering in viewers
+									try:
+										inst_num = int(instance_number)
+									except Exception:
+										inst_num = None
+									if inst_num is not None and image.instance_number != inst_num:
+										image.instance_number = inst_num
+										update_fields.append('instance_number')
+									# Update file path/size if we just saved a (new) copy
+									if saved_path and getattr(image.file_path, 'name', None) != saved_path:
+										image.file_path = saved_path
+										update_fields.append('file_path')
+									if file_size and getattr(image, 'file_size', None) != file_size:
+										image.file_size = file_size
+										update_fields.append('file_size')
+									if image_position is not None and getattr(image, 'image_position', '') != image_position:
+										image.image_position = image_position
+										update_fields.append('image_position')
+									if slice_location is not None and getattr(image, 'slice_location', None) != slice_location:
+										image.slice_location = slice_location
+										update_fields.append('slice_location')
+									if update_fields:
+										image.save(update_fields=update_fields)
+							except Exception:
+								pass
 							
 							if image_created:
 								upload_stats['created_images'] += 1

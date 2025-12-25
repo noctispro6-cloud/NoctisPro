@@ -1,30 +1,27 @@
-/* Responsive UI scaling overrides (Windows/Linux/mobile/tablet)
-   Goal: consistent sizing across OS font metrics + viewport sizes without rewriting existing dense UI CSS.
-*/
+/* Responsive layout helpers (Windows/Linux/mobile/tablet)
+ *
+ * IMPORTANT:
+ * - Do NOT force global font scaling here.
+ * - Let the browser/OS handle actual screen scaling (the user’s zoom/DPI).
+ *
+ * This file should only contain layout resilience fixes (vh/dvh, wrapping, small-screen layout),
+ * not cross-OS font-size overrides that can make Linux appear “too big”.
+ */
 
 :root {
-  /* Fluid typography (keeps "dense" feel but avoids tiny UI on high-DPI Windows) */
-  --ui-font-base: clamp(14px, 0.25vw + 13px, 16px);
-  --ui-font-small: clamp(12px, 0.15vw + 11px, 14px);
-  --ui-font-tiny: clamp(11px, 0.10vw + 10px, 13px);
-
-  /* Fluid spacing */
-  --ui-space-1: clamp(4px, 0.45vw, 8px);
-  --ui-space-2: clamp(8px, 0.75vw, 14px);
-  --ui-space-3: clamp(12px, 1.10vw, 18px);
-  --ui-radius: clamp(6px, 0.6vw, 12px);
+  /* Spacing tokens (fixed, so we don't "inflate" on large screens).
+   * Using vw-based spacing makes Windows (often higher resolution) feel oversized.
+   */
+  --ui-space-1: 6px;
+  --ui-space-2: 12px;
+  --ui-space-3: 16px;
+  --ui-radius: 10px;
 }
 
+/* Never force font-size here; only keep text-size-adjust safety */
 html {
-  font-size: var(--ui-font-base);
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-}
-
-body {
-  font-size: 1rem !important;
-  /* Force a consistent UI font across OSes even if a page-specific stylesheet sets Segoe UI */
-  font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
 }
 
 /* Better viewport height behavior on mobile browsers */
@@ -42,10 +39,6 @@ body {
   gap: var(--ui-space-2);
 }
 
-.logo {
-  font-size: clamp(14px, 0.3vw + 13px, 18px) !important;
-}
-
 .nav-right,
 .nav-left {
   flex-wrap: wrap;
@@ -57,7 +50,6 @@ body {
 }
 
 .nav-tab {
-  font-size: 0.85rem !important;
   padding: 0.45rem 0.75rem !important;
 }
 
@@ -66,36 +58,6 @@ body {
   min-height: 42px;
   padding: var(--ui-space-1) var(--ui-space-2) !important;
   gap: var(--ui-space-1) !important;
-}
-
-.control-label {
-  font-size: 0.85rem !important;
-}
-
-.control-input,
-.control-select,
-.btn-control,
-.btn,
-.btn-primary,
-.btn-secondary,
-.btn-outline-light {
-  font-size: 0.85rem !important;
-}
-
-.admin-btn {
-  font-size: 0.72rem !important;
-}
-
-.data-table {
-  font-size: 0.85rem !important;
-}
-
-.data-table th {
-  font-size: 0.75rem !important;
-}
-
-.data-table td {
-  font-size: 0.85rem !important;
 }
 
 /* Make dense tables usable on small screens */

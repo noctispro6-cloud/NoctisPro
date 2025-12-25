@@ -334,6 +334,16 @@ MEDIA_ROOT = os.environ.get('MEDIA_ROOT', os.path.join(BASE_DIR, 'media'))
 # DICOM files storage
 DICOM_ROOT = os.path.join(MEDIA_ROOT, 'dicom')
 
+# Ensure media directories exist (uploads must persist to disk).
+# In some deployments the volume is mounted but the directory isn't created yet,
+# which causes uploads to silently fail at the storage layer.
+try:
+    os.makedirs(MEDIA_ROOT, exist_ok=True)
+    os.makedirs(DICOM_ROOT, exist_ok=True)
+except Exception:
+    # Don't crash settings import; storage errors will surface during request handling/logging.
+    pass
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

@@ -698,7 +698,7 @@
                     <i class="fas fa-cloud-upload-alt"></i>
                 </div>
                 <h3 class="text-light" style="margin-bottom: 0.25rem;">Upload DICOM Studies</h3>
-                <div class="helper-text">Drag and drop DICOM files or choose a folder. Max 5,000 images (5GB).</div>
+                <div class="helper-text">Drag and drop a DICOM folder (recommended) or select files. Supports <strong>all DICOM modalities</strong> (CT/MR/US/CR/DX/MG/SR/etc). Max 5,000 objects (5GB).</div>
             </div>
 
         <form id="uploadForm" enctype="multipart/form-data">
@@ -974,13 +974,17 @@ document.addEventListener('DOMContentLoaded', function() {
         return false;
     }
 
-    function isLikelyDicomByNameOrType(file) {
-        if (!file || isTempOrHiddenFile(file)) return false;
+    function isDefinitelyNotDicom(file) {
+        if (!file) return true;
         const name = (file.name || '').toLowerCase();
-        // Extension-based allow-list (covers most uploads)
-        if (name.endsWith('.dcm') || name.endsWith('.dicom') || name.endsWith('.dicm') || name.endsWith('.ima')) return true;
-        if (file.type === 'application/dicom') return true;
-        return false;
+        // Fast reject for common non-DICOM file types so folder uploads don't waste bandwidth.
+        const rejectExts = [
+            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tif', '.tiff', '.webp',
+            '.pdf', '.txt', '.csv', '.json', '.xml', '.html', '.htm', '.js', '.css',
+            '.zip', '.rar', '.7z', '.tar', '.gz',
+            '.exe', '.dll', '.so', '.dylib'
+        ];
+        return rejectExts.some(ext => name.endsWith(ext));
     }
 
     async function hasDicomPreamble(file) {
@@ -1002,39 +1006,12 @@ document.addEventListener('DOMContentLoaded', function() {
         //   thousands of file.slice() calls which can stall the browser.
         const all = (files || []).filter(f => !isTempOrHiddenFile(f));
 
-        const fastAccepted = [];
-        const candidates = [];
-        for (const f of all) {
-            if (isLikelyDicomByNameOrType(f)) fastAccepted.push(f);
-            else candidates.push(f);
-        }
-
-        // Always preamble-check small candidate sets.
-        const MAX_PREAMBLE_CHECK = 250; // hard cap for UI responsiveness
-        const SAMPLE_SIZE = 200;
-
-        let preambleAccepted = [];
-        if (candidates.length > 0) {
-            const toCheck = candidates.slice(0, Math.min(candidates.length, Math.max(SAMPLE_SIZE, Math.min(MAX_PREAMBLE_CHECK, candidates.length))));
-
-            // Check in small batches to keep the event loop responsive.
-            const batchSize = 40;
-            for (let i = 0; i < toCheck.length; i += batchSize) {
-                const batch = toCheck.slice(i, i + batchSize);
-                const results = await Promise.all(batch.map(f => hasDicomPreamble(f)));
-                for (let j = 0; j < batch.length; j++) {
-                    if (results[j]) preambleAccepted.push(batch[j]);
-                }
-            }
-
-            // If most of the sample looks like DICOM, assume the rest are DICOM too (server will still validate).
-            const ratio = toCheck.length ? (preambleAccepted.length / toCheck.length) : 0;
-            if (candidates.length > MAX_PREAMBLE_CHECK && ratio >= 0.8) {
-                preambleAccepted = preambleAccepted.concat(candidates.slice(toCheck.length));
-            }
-        }
-
-        const dicomFiles = [...fastAccepted, ...preambleAccepted];
+        // IMPORTANT:
+        // Many PACS exports contain perfectly valid DICOM objects with *no extension* and *no Part-10 preamble*.
+        // Client-side "DICM" checks would incorrectly reject those (common with DX/CR and some vendor exports).
+        // So we keep only a minimal filter here (skip temp/hidden + obvious non-DICOM types) and let the server
+        // perform the authoritative DICOM validation.
+        const dicomFiles = all.filter(f => !isDefinitelyNotDicom(f) && (f.size || 0) >= 256);
         const ignoredCount = (files || []).length - dicomFiles.length;
 
         // Check file count limit (5000 images max)
@@ -1045,7 +1022,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (dicomFiles.length === 0) {
-            showNotification('Please select valid DICOM files (.dcm/.dicom) or a DICOM folder. Temp/hidden/non-DICOM files are ignored.', 'error');
+            showNotification('No uploadable files found. Select a DICOM folder or files. Temp/hidden and obvious non‑DICOM files are ignored; the server will validate DICOM content.', 'error');
             return;
         }
 

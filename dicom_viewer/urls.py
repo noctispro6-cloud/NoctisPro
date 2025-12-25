@@ -79,6 +79,9 @@ urlpatterns += [
     path('study/<int:study_id>/', views.web_study_detail, name='web_study_detail'),
     path('series/<int:series_id>/images/', views.web_series_images, name='web_series_images'),
     path('image/<int:image_id>/', views.web_dicom_image, name='web_dicom_image'),
+    # Compatibility aliases (older templates call these paths)
+    path('web/series/<int:series_id>/images/', views.web_series_images, name='web_series_images_compat'),
+    path('api/study/<int:study_id>/', views.api_study_data, name='api_study_data_compat'),
 
     # Measurements and annotations
     path('measurements/save/', views.web_save_measurement, name='web_save_measurement'),

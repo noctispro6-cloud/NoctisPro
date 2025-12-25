@@ -6,10 +6,14 @@
     <meta name="csrf-token" content="{{ csrf_token }}">
     <title>Noctis Pro DICOM Viewer</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     {% load static %}
     <link href="{% static 'css/dicom-viewer-buttons.css' %}" rel="stylesheet">
     <link href="{% static 'css/dicom-viewer-fixes.css' %}" rel="stylesheet">
     <link href="{% static 'css/high-quality-medical-imaging.css' %}" rel="stylesheet">
+    <link href="{% static 'css/responsive-ui-scaling.css' %}" rel="stylesheet">
     <script src="{% static 'js/high-quality-image-renderer.js' %}"></script>
     <style>
         :root {
@@ -37,7 +41,8 @@
             height: 100%;
             width: 100%;
             overflow: hidden;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            /* Use Inter everywhere to avoid OS font-metric differences (Windows vs Linux) */
+            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: var(--primary-bg);
             color: var(--text-primary);
             /* High-DPI display optimization */

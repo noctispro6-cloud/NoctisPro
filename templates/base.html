@@ -15,6 +15,7 @@
     {% load static %}
     {% load dicts %}
     <link rel="stylesheet" href="{% static 'css/noctis-dashboard-style.css' %}">
+    <link rel="stylesheet" href="{% static 'css/responsive-ui-scaling.css' %}">
     <link href="{% static 'css/dicom-viewer-buttons.css' %}" rel="stylesheet">
     <link href="{% static 'css/enhanced-buttons.css' %}" rel="stylesheet">
     <script src="{% static 'js/dicom-viewer-utils.js' %}" defer></script>
@@ -56,9 +57,11 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            /* Use Inter everywhere to avoid OS font-metric differences (Windows vs Linux) */
+            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: var(--primary-bg);
             color: var(--text-primary);
+            /* Base size is overridden by responsive-ui-scaling.css */
             font-size: 12px;
             line-height: 1.6;
             overflow-x: hidden;

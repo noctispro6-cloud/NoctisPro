@@ -1200,12 +1200,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const totalFiles = selectedFiles.length;
         const totalBytes = selectedFiles.reduce((s, f) => s + (f.size || 0), 0);
 
-        // Build chunks by total bytes to respect reverse-proxy limits (e.g., 100MB)
-        // Keep chunks small so each request finishes quickly (avoids proxy/browser timeouts / connection resets).
-        // 50MB reduces per-request overhead dramatically vs 10MB (fewer round trips) while still
-        // staying under common reverse-proxy limits. Adjust if your proxy is stricter.
-        const MAX_CHUNK_BYTES = 50 * 1024 * 1024; // 50MB
-        const MAX_CHUNK_FILES = 600;
+        // IMPORTANT:
+        // On tunnel/proxy hosts (ngrok/trycloudflare/loca.lt), long-running HTTP requests are
+        // commonly cut off by upstream idle timeouts *after* the browser finishes sending bytes.
+        // That manifests as "upload stuck at the end" because the XHR never gets its JSON response.
+        // Using smaller chunks keeps each request short and reliably completes.
+        const host = (window.location && window.location.host ? String(window.location.host).toLowerCase() : '');
+        const isTunnelHost = host.includes('ngrok') || host.includes('trycloudflare.com') || host.includes('loca.lt');
+        const MAX_CHUNK_BYTES = isTunnelHost ? (8 * 1024 * 1024) : (50 * 1024 * 1024); // 8MB on tunnels, 50MB on normal proxies
+        const MAX_CHUNK_FILES = isTunnelHost ? 200 : 600;
+
+        // Limit parallel uploads to avoid overloading server/proxy (stability > raw throughput)
+        const MAX_PARALLEL = 1;
+
         let chunks = [];
         let currentChunk = [];
         let currentBytes = 0;
@@ -1223,9 +1230,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (currentChunk.length) chunks.push(currentChunk);
 
-        // Limit parallel uploads to avoid overloading server/proxy (stability > raw throughput)
-        let MAX_PARALLEL = 1;
-
         let uploadedCount = 0;
         let uploadedBytes = 0;
         let errors = [];
@@ -1235,6 +1239,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // not how many new DB rows were created (dedup can make created_images=0).
         let totalImagesUploaded = 0;
 
+        // Track per-chunk progress to aggregate bytes across parallel requests
+        const chunkByteProgress = new Array(chunks.length).fill(0);
+
         // Set uploading state
         isUploading = true;
         dropZone.classList.add('uploading');
@@ -1243,10 +1250,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // UI state
         progressSection.style.display = 'block';
-        updateProgress(0, `0 / ${totalFiles} files`, 'Preparing upload...');
-
-        // Track per-chunk progress to aggregate bytes across parallel requests
-        const chunkByteProgress = new Array(chunks.length).fill(0);
+        updateProgress(0, `0 / ${totalFiles} files`, isTunnelHost ? 'Preparing upload (tunnel mode)...' : 'Preparing upload...');
 
         function uploadChunkXHR(chunkIdx, chunk, attempt = 1) {
             return new Promise((resolve) => {
@@ -1259,7 +1263,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const xhr = new XMLHttpRequest();
                 xhr.open('POST', url, true);
-                xhr.timeout = 300000; // 300s per chunk (chunks are smaller now)
+                // Give slow servers enough time, but keep each chunk small on tunnels so we don't hit proxy idle timeouts.
+                xhr.timeout = isTunnelHost ? 600000 : 900000; // 10m on tunnels, 15m otherwise
                 xhr.setRequestHeader('X-CSRFToken', token);
                 xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
 
@@ -1340,25 +1345,26 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        let currentIndex = 0;
-        const workers = Array.from({ length: Math.min(MAX_PARALLEL, chunks.length) }).map(async () => {
-            while (true) {
-                let idx;
-                if (currentIndex >= chunks.length) break;
-                idx = currentIndex++;
-                await uploadChunkXHR(idx, chunks[idx]);
-            }
-        });
+        try {
+            let currentIndex = 0;
+            const workers = Array.from({ length: Math.min(MAX_PARALLEL, chunks.length) }).map(async () => {
+                while (true) {
+                    let idx;
+                    if (currentIndex >= chunks.length) break;
+                    idx = currentIndex++;
+                    await uploadChunkXHR(idx, chunks[idx]);
+                }
+            });
 
-        await Promise.all(workers);
+            await Promise.all(workers);
 
-        if (errors.length === 0) {
-            progressSection.style.display = 'none';
-            uploadActions.style.display = 'none';
-            uploadSuccess.style.display = 'block';
+            if (errors.length === 0) {
+                progressSection.style.display = 'none';
+                uploadActions.style.display = 'none';
+                uploadSuccess.style.display = 'block';
 
-            const uploadSummary = document.getElementById('uploadSummary');
-            uploadSummary.innerHTML = `
+                const uploadSummary = document.getElementById('uploadSummary');
+                uploadSummary.innerHTML = `
                 <div class="stats-grid">
                     <div class="stat-item">
                         <div class="stat-value">${uploadedCount}</div>
@@ -1382,28 +1388,34 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             `;
 
-            showNotification(`Successfully uploaded ${totalImagesUploaded} images creating ${studiesCreated} studies with ${totalSeries} series!`, 'success');
-            try {
-                if (createdStudyIds.length > 0) {
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'btn-control primary';
-                    btn.style.marginTop = '10px';
-                    btn.innerHTML = '<i class="fas fa-eye me-2"></i>Open in DICOM Viewer';
-                    btn.onclick = function(){ 
-                        // Add a small delay to ensure database consistency before opening viewer
-                        setTimeout(() => {
-                            window.location.href = '/dicom-viewer/?study=' + createdStudyIds[0];
-                        }, 1000);
-                    };
-                    document.getElementById('uploadSuccess').appendChild(btn);
-                }
-            } catch(_) {}
-        } else if (uploadedCount > 0) {
-            showNotification(`Upload completed with some errors. Processed ${uploadedCount} of ${totalFiles} files, created ${studiesCreated} studies.`, 'warning');
-            resetUploadState();
-        } else {
-            showNotification('Upload failed: ' + errors[0], 'error');
+                showNotification(`Successfully uploaded ${totalImagesUploaded} images creating ${studiesCreated} studies with ${totalSeries} series!`, 'success');
+                try {
+                    if (createdStudyIds.length > 0) {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'btn-control primary';
+                        btn.style.marginTop = '10px';
+                        btn.innerHTML = '<i class="fas fa-eye me-2"></i>Open in DICOM Viewer';
+                        btn.onclick = function(){ 
+                            // Add a small delay to ensure database consistency before opening viewer
+                            setTimeout(() => {
+                                window.location.href = '/dicom-viewer/?study=' + createdStudyIds[0];
+                            }, 1000);
+                        };
+                        document.getElementById('uploadSuccess').appendChild(btn);
+                    }
+                } catch(_) {}
+            } else if (uploadedCount > 0) {
+                showNotification(`Upload completed with some errors. Processed ${uploadedCount} of ${totalFiles} files, created ${studiesCreated} studies.`, 'warning');
+                resetUploadState();
+            } else {
+                showNotification('Upload failed: ' + errors[0], 'error');
+                resetUploadState();
+            }
+        } catch (e) {
+            // Never leave the UI stuck if an unexpected exception happens mid-upload.
+            console.error('Upload failed unexpectedly:', e);
+            showNotification('Upload failed unexpectedly: ' + (e && e.message ? e.message : String(e)), 'error');
             resetUploadState();
         }
     }

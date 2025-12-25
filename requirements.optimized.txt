@@ -32,6 +32,12 @@ pynetdicom
 highdicom
 numpy
 
+# Pixel data decoders (required for compressed DICOM: JPEG/JPEG2000/RLE)
+pylibjpeg
+pylibjpeg-libjpeg
+pylibjpeg-openjpeg
+pylibjpeg-rle
+
 # Background tasks (requires more memory)
 celery
 

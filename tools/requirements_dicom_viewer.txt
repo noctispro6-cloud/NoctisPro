@@ -17,5 +17,11 @@ scikit-image>=0.19.0
 SimpleITK>=2.1.0  # For advanced DICOM reading
 pydicom[pillow]>=2.3.0  # Enhanced DICOM support
 
+# Pixel data decoders (required for compressed DICOM: JPEG/JPEG2000/RLE)
+pylibjpeg>=2.0.0
+pylibjpeg-libjpeg>=2.2.0
+pylibjpeg-openjpeg>=2.4.0
+pylibjpeg-rle>=2.0.0
+
 # Development and debugging
 requests>=2.25.0  # For backend connectivity

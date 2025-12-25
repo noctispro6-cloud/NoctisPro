@@ -28,6 +28,13 @@ pydicom
 pynetdicom
 highdicom
 
+# Pixel data decoders (required for compressed DICOM: JPEG/JPEG2000/RLE)
+# Without these, the web viewer may show blank images and MPR/3D will fail for compressed transfer syntaxes.
+pylibjpeg
+pylibjpeg-libjpeg
+pylibjpeg-openjpeg
+pylibjpeg-rle
+
 # Imaging / math used by viewer + recon
 numpy
 scipy

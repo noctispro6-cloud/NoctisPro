@@ -718,24 +718,38 @@ def upload_study(request):
 						try:
 							sop_uid = getattr(ds, 'SOPInstanceUID')
 							instance_number = getattr(ds, 'InstanceNumber', 1) or 1
-							# Skip duplicates by SOPInstanceUID to avoid re-uploading the same image
-							if DicomImage.objects.filter(sop_instance_uid=sop_uid).exists():
-								logger.debug(f"Duplicate SOPInstanceUID detected, skipping: {sop_uid}")
-								continue
 							
 							# Professional file organization with medical standards
 							rel_path = f"dicom/professional/{study_uid}/{series_uid}/{sop_uid}.dcm"
 							
 							# Medical-grade file handling with integrity checks
-							fobj.seek(0)
-							file_content = fobj.read()
-							file_size = len(file_content)
+							# IMPORTANT: avoid copying full bytes into memory (large CT uploads).
+							try:
+								fobj.seek(0)
+							except Exception:
+								pass
+							file_size = getattr(fobj, 'size', None)
+							if not file_size:
+								try:
+									file_size = int(getattr(fobj, 'file', None).size)  # may exist on some UploadedFile types
+								except Exception:
+									file_size = None
+							if not file_size:
+								# Fallback: size unknown; set after save if needed
+								file_size = 0
 							
 							# Professional file validation
 							if file_size < 1024:  # Less than 1KB is suspicious
 								logger.warning(f"Suspicious file size: {file_size} bytes for {sop_uid}")
 							
-							saved_path = default_storage.save(rel_path, ContentFile(file_content))
+							# Save file directly (streaming), avoids constructing ContentFile(file_content)
+							saved_path = default_storage.save(rel_path, fobj)
+							# Ensure file_size is set
+							if not file_size:
+								try:
+									file_size = getattr(fobj, 'size', 0) or file_size
+								except Exception:
+									pass
 							
 							# Enhanced medical imaging metadata extraction
 							image_position = str(getattr(ds, 'ImagePositionPatient', ''))

@@ -1402,9 +1402,12 @@
                 const matchesModality = !modalityFilter || study.modality.toLowerCase().includes(modalityFilter);
                 const matchesPriority = !priorityFilter || study.priority.toLowerCase().includes(priorityFilter);
                 
+                // Date filter should reflect what users perceive as "new on the worklist".
+                // Use `study_time` (which the API sets to upload_date when available) rather than the
+                // original DICOM StudyDate, which is often historical and makes fresh uploads "disappear".
                 let matchesDate = true;
                 if (dateFilter) {
-                    const studyDate = new Date(study.study_date).toDateString();
+                    const studyDate = new Date(study.study_time || study.upload_date || study.study_date).toDateString();
                     const filterDate = new Date(dateFilter).toDateString();
                     matchesDate = studyDate === filterDate;
                 }

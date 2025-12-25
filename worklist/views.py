@@ -324,6 +324,8 @@ def upload_study(request):
 			processed_files = 0
 			total_files = len(uploaded_files)
 			file_size_total = 0
+			patient_ids_involved = set()
+			series_uids_touched = set()
 			
 			# Enhanced DICOM processing pipeline with professional validation
 			logger.info("Starting professional DICOM metadata extraction and validation")
@@ -655,6 +657,11 @@ def upload_study(request):
 					logger.info(f"Professional study created: {study.accession_number} - {study.study_description}")
 				else:
 					logger.debug(f"Existing study found: {study.accession_number}")
+				try:
+					if getattr(patient, 'id', None):
+						patient_ids_involved.add(int(patient.id))
+				except Exception:
+					pass
 				
 				# Track by id to keep response consistent
 				created_studies.append(study.id)
@@ -691,6 +698,11 @@ def upload_study(request):
 							'image_orientation': image_orientation,
 						}
 					)
+					try:
+						if series_uid:
+							series_uids_touched.add(str(series_uid))
+					except Exception:
+						pass
 
 					# Defensive fix: ensure the Series is linked to this Study.
 					# In the wild, chunk retries or historical data can leave a Series UID attached to the wrong Study,
@@ -914,11 +926,16 @@ def upload_study(request):
 				'processed_files': processed_files,
 				'studies_created': upload_stats['created_studies'],
 				'total_series': total_series_processed,
+				# Back-compat: historically this represented images created in DB (deduped by SOPInstanceUID).
+				# For "how many images did I upload", use `images_uploaded` instead.
 				'total_images': upload_stats['created_images'],
+				'images_created': upload_stats['created_images'],
+				'images_uploaded': processed_files,
 				'statistics': upload_stats,
 				'created_study_ids': created_studies,
 				'medical_summary': {
-					'patients_affected': len({s.patient_id for s in Study.objects.filter(id__in=created_studies)}),
+					# Avoid per-request DB verification queries (important for chunked uploads).
+					'patients_affected': len(patient_ids_involved),
 					'modalities_processed': list(set(series_key.split('_')[1] for series_map in studies_map.values() for series_key in series_map.keys())),
 					'facilities_involved': [facility.name] if facility else [],
 					'upload_quality': 'EXCELLENT' if invalid_files == 0 else 'GOOD' if invalid_files < total_files * 0.1 else 'ACCEPTABLE',
@@ -936,27 +953,27 @@ def upload_study(request):
 			# Do this in background to keep upload response fast and avoid timeouts.
 			try:
 				# Avoid importing the huge viewer module during request; do it inside the thread.
-				series_ids = []
-				try:
-					# Build series ids from the series objects we just touched.
-					for _study_uid, _series_map in studies_map.items():
-						for _series_key, _items in _series_map.items():
-							_series_uid = _series_key.split('_')[0]
-							s = Series.objects.filter(series_instance_uid=_series_uid).only('id').first()
-							if s and s.id:
-								series_ids.append(int(s.id))
-				except Exception:
-					series_ids = []
-
-				# Deduplicate and cap to prevent overload on very large uploads.
-				series_ids = list(dict.fromkeys(series_ids))[: int(os.environ.get('MPR_PRECACHE_MAX_SERIES', '4') or 4)]
-				if series_ids:
-					def _precache(ids):
+				uids = list(dict.fromkeys([u for u in series_uids_touched if u]))  # preserve order + dedupe
+				max_series = int(os.environ.get('MPR_PRECACHE_MAX_SERIES', '4') or 4)
+				uids = uids[:max_series]
+				if uids:
+					def _precache(series_uids):
 						try:
 							from django.db import close_old_connections
 							close_old_connections()
+							# Resolve to IDs inside thread to keep response path fast
+							series_ids = []
+							for suid in series_uids:
+								try:
+									s = Series.objects.filter(series_instance_uid=suid).only('id').first()
+									if s and s.id:
+										series_ids.append(int(s.id))
+								except Exception:
+									continue
+							if not series_ids:
+								return
 							from dicom_viewer.views import _schedule_mpr_disk_cache_build
-							for sid in ids:
+							for sid in series_ids:
 								try:
 									_schedule_mpr_disk_cache_build(int(sid), quality='high')
 								except Exception:
@@ -964,7 +981,7 @@ def upload_study(request):
 							close_old_connections()
 						except Exception:
 							pass
-					threading.Thread(target=_precache, args=(series_ids,), daemon=True).start()
+					threading.Thread(target=_precache, args=(uids,), daemon=True).start()
 			except Exception:
 				pass
 

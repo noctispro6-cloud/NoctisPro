@@ -906,7 +906,7 @@ def upload_study(request):
 			# and can cause browser/proxy timeouts (seen as XHR "HTTP error 0").
 			
 			# Professional response with medical-grade information
-			return JsonResponse({
+			resp = JsonResponse({
 				'success': True,
 				'message': f'🏥 Professional DICOM upload completed successfully',
 				'details': f'Processed {processed_files} DICOM files across {upload_stats["created_studies"]} studies with {upload_stats["created_series"]} series and {upload_stats["created_images"]} images',
@@ -931,6 +931,44 @@ def upload_study(request):
 					'processing_quality': 'Medical Grade Excellence',
 				}
 			})
+
+			# After upload: pre-decode pixels + prebuild MPR caches (compressed on disk).
+			# Do this in background to keep upload response fast and avoid timeouts.
+			try:
+				# Avoid importing the huge viewer module during request; do it inside the thread.
+				series_ids = []
+				try:
+					# Build series ids from the series objects we just touched.
+					for _study_uid, _series_map in studies_map.items():
+						for _series_key, _items in _series_map.items():
+							_series_uid = _series_key.split('_')[0]
+							s = Series.objects.filter(series_instance_uid=_series_uid).only('id').first()
+							if s and s.id:
+								series_ids.append(int(s.id))
+				except Exception:
+					series_ids = []
+
+				# Deduplicate and cap to prevent overload on very large uploads.
+				series_ids = list(dict.fromkeys(series_ids))[: int(os.environ.get('MPR_PRECACHE_MAX_SERIES', '4') or 4)]
+				if series_ids:
+					def _precache(ids):
+						try:
+							from django.db import close_old_connections
+							close_old_connections()
+							from dicom_viewer.views import _schedule_mpr_disk_cache_build
+							for sid in ids:
+								try:
+									_schedule_mpr_disk_cache_build(int(sid), quality='high')
+								except Exception:
+									pass
+							close_old_connections()
+						except Exception:
+							pass
+					threading.Thread(target=_precache, args=(series_ids,), daemon=True).start()
+			except Exception:
+				pass
+
+			return resp
 			
 		except Exception as e:
 			# Professional error handling with medical-grade logging

@@ -1161,14 +1161,17 @@ document.addEventListener('DOMContentLoaded', function() {
         const totalBytes = selectedFiles.reduce((s, f) => s + (f.size || 0), 0);
 
         // Build chunks by total bytes to respect reverse-proxy limits (e.g., 100MB)
-        // Keep chunks small so each request finishes quickly (avoids proxy/browser timeouts).
-        const MAX_CHUNK_BYTES = 20 * 1024 * 1024; // 20MB
+        // Keep chunks small so each request finishes quickly (avoids proxy/browser timeouts / connection resets).
+        const MAX_CHUNK_BYTES = 10 * 1024 * 1024; // 10MB
+        const MAX_CHUNK_FILES = 120;
         let chunks = [];
         let currentChunk = [];
         let currentBytes = 0;
         for (const file of selectedFiles) {
             const fsize = file.size || 0;
-            if (currentChunk.length && (currentBytes + fsize) > MAX_CHUNK_BYTES) {
+            const wouldExceedBytes = (currentBytes + fsize) > MAX_CHUNK_BYTES;
+            const wouldExceedCount = currentChunk.length >= MAX_CHUNK_FILES;
+            if (currentChunk.length && (wouldExceedBytes || wouldExceedCount)) {
                 chunks.push(currentChunk);
                 currentChunk = [];
                 currentBytes = 0;
@@ -1201,7 +1204,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Track per-chunk progress to aggregate bytes across parallel requests
         const chunkByteProgress = new Array(chunks.length).fill(0);
 
-        function uploadChunkXHR(chunkIdx, chunk) {
+        function uploadChunkXHR(chunkIdx, chunk, attempt = 1) {
             return new Promise((resolve) => {
                 const formData = new FormData();
                 chunk.forEach((file) => formData.append('dicom_files', file));
@@ -1226,7 +1229,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 };
 
                 const handleFailure = (reason) => {
-                    errors.push(reason || 'Upload failed');
+                    const msg = reason || 'Upload failed';
+                    // Retry transient network failures (XHR status 0 / timeout) a couple times.
+                    if (attempt < 3 && (String(msg).includes('HTTP 0') || String(msg).toLowerCase().includes('timeout') || String(msg).toLowerCase().includes('network'))) {
+                        const backoff = 800 * Math.pow(2, attempt - 1);
+                        updateProgress((uploadedBytes / Math.max(1, totalBytes)) * 100, `${uploadedCount} / ${totalFiles} files`, `Retrying chunk ${chunkIdx + 1}/${chunks.length} in ${Math.round(backoff/100)/10}s...`);
+                        setTimeout(() => {
+                            uploadChunkXHR(chunkIdx, chunk, attempt + 1).then(resolve);
+                        }, backoff);
+                        return;
+                    }
+                    errors.push(msg);
                     resolve({ ok: false });
                 };
 
@@ -1262,6 +1275,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 xhr.ontimeout = function () { handleFailure('Request timeout'); };
 
                 xhr.onerror = function () { handleFailure('Network error during upload'); };
+                xhr.onabort = function () { handleFailure('Request aborted'); };
 
                 xhr.send(formData);
             });

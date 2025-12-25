@@ -459,8 +459,8 @@ class DicomViewerEnhanced {
             const url = '/worklist/upload/';
             const token = (document.querySelector('meta[name="csrf-token"]') && document.querySelector('meta[name="csrf-token"]').getAttribute('content')) || '';
             // Keep chunks small so each request completes quickly (avoid proxy/browser timeouts).
-            const MAX_CHUNK_BYTES = 20 * 1024 * 1024; // 20MB
-            const MAX_CHUNK_FILES = 200; // also cap count (CT can have many small slices)
+            const MAX_CHUNK_BYTES = 10 * 1024 * 1024; // 10MB
+            const MAX_CHUNK_FILES = 120; // cap count (CT can have many small slices)
             const chunks = [];
             let current = []; let bytes = 0;
             for (const f of files) {
@@ -472,7 +472,7 @@ class DicomViewerEnhanced {
             }
             if (current.length) chunks.push(current);
 
-            const uploadChunk = (chunk) => new Promise((resolve) => {
+            const uploadChunk = (chunk, attempt = 1) => new Promise((resolve) => {
                 const formData = new FormData();
                 chunk.forEach(file => formData.append('dicom_files', file));
                 formData.append('priority', 'normal');
@@ -489,8 +489,18 @@ class DicomViewerEnhanced {
                         } catch (_) { resolve({ ok: false, data: null }); }
                     }
                 };
-                xhr.onerror = function() { resolve({ ok: false, data: null }); };
-                xhr.ontimeout = function() { resolve({ ok: false, data: null }); };
+                const fail = (reason) => {
+                    // Retry transient network failures a couple times
+                    if (attempt < 3 && (reason === 'timeout' || reason === 'network' || reason === 'abort' || xhr.status === 0)) {
+                        const backoff = 800 * Math.pow(2, attempt - 1);
+                        setTimeout(() => uploadChunk(chunk, attempt + 1).then(resolve), backoff);
+                        return;
+                    }
+                    resolve({ ok: false, data: null });
+                };
+                xhr.onerror = function() { fail('network'); };
+                xhr.ontimeout = function() { fail('timeout'); };
+                xhr.onabort = function() { fail('abort'); };
                 xhr.send(formData);
             });
 

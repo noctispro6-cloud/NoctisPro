@@ -835,14 +835,9 @@ def upload_study(request):
 			logger.info(f"  • Processing time: {upload_stats['processing_time_ms']} ms")
 			logger.info(f"  • User: {upload_stats['user']}")
 			
-			# Verify image counts for created studies
-			for study_id in created_studies:
-				try:
-					study = Study.objects.get(id=study_id)
-					actual_count = study.get_image_count()
-					logger.info(f"  • Study {study.accession_number}: {actual_count} images in database")
-				except Exception as e:
-					logger.warning(f"  • Could not verify image count for study {study_id}: {e}")
+			# NOTE: Avoid expensive per-study verification queries here.
+			# Chunked uploads call this endpoint multiple times; extra DB work increases response time
+			# and can cause browser/proxy timeouts (seen as XHR "HTTP error 0").
 			
 			# Professional response with medical-grade information
 			return JsonResponse({

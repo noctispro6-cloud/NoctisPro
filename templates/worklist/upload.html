@@ -1162,8 +1162,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Build chunks by total bytes to respect reverse-proxy limits (e.g., 100MB)
         // Keep chunks small so each request finishes quickly (avoids proxy/browser timeouts / connection resets).
-        const MAX_CHUNK_BYTES = 10 * 1024 * 1024; // 10MB
-        const MAX_CHUNK_FILES = 120;
+        // 50MB reduces per-request overhead dramatically vs 10MB (fewer round trips) while still
+        // staying under common reverse-proxy limits. Adjust if your proxy is stricter.
+        const MAX_CHUNK_BYTES = 50 * 1024 * 1024; // 50MB
+        const MAX_CHUNK_FILES = 600;
         let chunks = [];
         let currentChunk = [];
         let currentBytes = 0;
@@ -1189,6 +1191,8 @@ document.addEventListener('DOMContentLoaded', function() {
         let errors = [];
         let studiesCreated = 0;
         let totalSeries = 0;
+        // "Uploaded images" should track how many DICOM objects we successfully sent/processed,
+        // not how many new DB rows were created (dedup can make created_images=0).
         let totalImagesUploaded = 0;
 
         // Set uploading state
@@ -1225,7 +1229,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     chunkByteProgress[chunkIdx] = e.loaded;
                     uploadedBytes += delta;
                     const percentBytes = totalBytes > 0 ? (uploadedBytes / totalBytes) * 100 : (uploadedCount / totalFiles) * 100;
-                    updateProgress(percentBytes, `${uploadedCount} / ${totalFiles} files`, `Transferring ${formatFileSize(uploadedBytes)} / ${formatFileSize(totalBytes)}`);
+                    // Show an estimated count during transfer so the UI doesn't look "stuck" until chunk completion.
+                    const estUploaded = totalBytes > 0 ? Math.min(totalFiles, Math.floor((uploadedBytes / totalBytes) * totalFiles)) : uploadedCount;
+                    updateProgress(
+                        percentBytes,
+                        `${Math.max(uploadedCount, estUploaded)} / ${totalFiles} images`,
+                        `Uploading chunk ${chunkIdx + 1}/${chunks.length} • ${formatFileSize(uploadedBytes)} / ${formatFileSize(totalBytes)}`
+                    );
                 };
 
                 const handleFailure = (reason) => {
@@ -1253,12 +1263,21 @@ document.addEventListener('DOMContentLoaded', function() {
                                     uploadedCount += processed;
                                     studiesCreated += (data.studies_created || 0);
                                     totalSeries += (data.total_series || 0);
-                                    totalImagesUploaded += (data.total_images || 0);
+                                    // Prefer explicit `images_uploaded`, fallback to processed_files.
+                                    if (typeof data.images_uploaded === 'number') {
+                                        totalImagesUploaded += data.images_uploaded;
+                                    } else {
+                                        totalImagesUploaded += processed;
+                                    }
                                     if (Array.isArray(data.created_study_ids)) {
                                         createdStudyIds.push(...data.created_study_ids);
                                     }
                                     const percentFiles = (uploadedCount / totalFiles) * 100;
-                                    updateProgress(Math.max(percentFiles, (uploadedBytes / Math.max(1, totalBytes)) * 100), `${uploadedCount} / ${totalFiles} files`, `Created ${studiesCreated} studies, ${totalSeries} series, ${totalImagesUploaded} images`);
+                                    updateProgress(
+                                        Math.max(percentFiles, (uploadedBytes / Math.max(1, totalBytes)) * 100),
+                                        `${uploadedCount} / ${totalFiles} images`,
+                                        `Created ${studiesCreated} studies, ${totalSeries} series • Uploaded ${totalImagesUploaded} images`
+                                    );
                                     resolve({ ok: true });
                                 } else {
                                     handleFailure((data && data.error) || 'Unknown error');
@@ -1303,7 +1322,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="stats-grid">
                     <div class="stat-item">
                         <div class="stat-value">${uploadedCount}</div>
-                        <div class="stat-label">Files Uploaded</div>
+                        <div class="stat-label">Images Uploaded</div>
                     </div>
                     <div class="stat-item">
                         <div class="stat-value">${studiesCreated}</div>
@@ -1315,7 +1334,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                     <div class="stat-item">
                         <div class="stat-value">${totalImagesUploaded}</div>
-                        <div class="stat-label">Images Processed</div>
+                        <div class="stat-label">Images Uploaded</div>
                     </div>
                 </div>
                 <div class="background-processing-info" style="margin-top: 15px; padding: 10px; background: var(--card-bg); border-radius: 6px; border-left: 3px solid var(--accent-color);">
@@ -1323,7 +1342,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             `;
 
-            showNotification(`Successfully uploaded ${uploadedCount} files creating ${studiesCreated} studies with ${totalSeries} series and ${totalImagesUploaded} images!`, 'success');
+            showNotification(`Successfully uploaded ${totalImagesUploaded} images creating ${studiesCreated} studies with ${totalSeries} series!`, 'success');
             try {
                 if (createdStudyIds.length > 0) {
                     const btn = document.createElement('button');

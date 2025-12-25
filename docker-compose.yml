@@ -35,6 +35,13 @@ services:
       # If you run the optional ngrok service, set these in .env.docker:
       # NGROK_AUTHTOKEN=...
       # NGROK_DOMAIN=reserved.ngrok.app
+      #
+      # Important: also pass them explicitly so Django can enable tunnel mode
+      # (prevents 400 DisallowedHost when accessing via ngrok).
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+      NGROK_DOMAIN: ${NGROK_DOMAIN:-}
+      NGROK_URL: ${NGROK_URL:-}
+      TUNNEL_URL: ${TUNNEL_URL:-}
     depends_on:
       db:
         condition: service_healthy

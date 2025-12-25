@@ -5,6 +5,8 @@ Requires=noctis-pro.service
 
 [Service]
 Type=simple
+User=noctispro
+Group=noctispro
 EnvironmentFile=-/etc/noctis-pro/noctis-pro.env
 EnvironmentFile=-/etc/noctispro/noctispro.env
 WorkingDirectory=/
@@ -12,6 +14,22 @@ Environment=DJANGO_SETTINGS_MODULE=noctis_pro.settings
 ExecStart=/usr/bin/env bash -lc 'APP_DIR="${APP_DIR:-/opt/noctispro}"; cd "${APP_DIR}"; exec "${APP_DIR}/venv/bin/celery" -A noctis_pro worker -l info'
 Restart=always
 RestartSec=5
+
+# --- systemd hardening (baseline) ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+LockPersonality=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target

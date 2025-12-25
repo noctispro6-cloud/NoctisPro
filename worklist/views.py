@@ -890,22 +890,51 @@ def upload_study(request):
 				# Chunked uploads can hit this endpoint multiple times; avoid re-notifying (slow + noisy).
 				if study_created:
 					try:
-						notif_type, _ = NotificationType.objects.get_or_create(
-							code='new_study', defaults={'name': 'New Study Uploaded', 'description': 'A new study has been uploaded', 'is_system': True}
-						)
-						recipients = User.objects.filter(Q(role='radiologist') | Q(role='admin') | Q(facility=facility))
-						for recipient in recipients:
-							Notification.objects.create(
-								notification_type=notif_type,
-								recipient=recipient,
-								sender=request.user,
-								title=f"New {modality_code} study for {patient.full_name}",
-								message=f"Study {accession_number} uploaded from {facility.name} with {total_series_processed} series",
-								priority='normal',
-								study=study,
-								facility=facility,
-								data={'study_id': study.id, 'accession_number': accession_number, 'series_count': total_series_processed}
-							)
+						# Notifications can be very slow if there are many recipients.
+						# Offload to a background thread so the upload response returns quickly.
+						study_id = int(study.id)
+						facility_id = int(facility.id) if facility else None
+						sender_id = int(request.user.id)
+						patient_name = patient.full_name
+						facility_name = facility.name if facility else 'Unknown Facility'
+						series_count = int(total_series_processed)
+						acc_num = str(accession_number)
+						mod_code = str(modality_code)
+
+						def _notify_new_study_async():
+							try:
+								from django.db import close_old_connections
+								close_old_connections()
+								notif_type, _ = NotificationType.objects.get_or_create(
+									code='new_study',
+									defaults={'name': 'New Study Uploaded', 'description': 'A new study has been uploaded', 'is_system': True},
+								)
+								recipients = User.objects.filter(Q(role='radiologist') | Q(role='admin') | Q(facility_id=facility_id))
+								sender = User.objects.filter(id=sender_id).first()
+								study_obj = Study.objects.filter(id=study_id).first()
+								fac_obj = Facility.objects.filter(id=facility_id).first() if facility_id else None
+								if not study_obj:
+									return
+								for recipient in recipients:
+									try:
+										Notification.objects.create(
+											notification_type=notif_type,
+											recipient=recipient,
+											sender=sender,
+											title=f"New {mod_code} study for {patient_name}",
+											message=f"Study {acc_num} uploaded from {facility_name} with {series_count} series",
+											priority='normal',
+											study=study_obj,
+											facility=fac_obj,
+											data={'study_id': study_id, 'accession_number': acc_num, 'series_count': series_count},
+										)
+									except Exception:
+										continue
+								close_old_connections()
+							except Exception:
+								return
+
+						threading.Thread(target=_notify_new_study_async, daemon=True).start()
 					except Exception:
 						pass
 			
@@ -1087,12 +1116,20 @@ def api_studies(request):
 				series_count_db=Count('series', distinct=True),
 				image_count_db=Count('series__images', distinct=True),
 			)
-			.order_by('-study_date')
+			# IMPORTANT:
+			# Worklist UX expects the most recently *uploaded* studies first.
+			# Many DICOM studies have old StudyDate/StudyTime, which made fresh uploads
+			# "disappear" from the dashboard (because we previously ordered by study_date
+			# and then sliced to the first 100).
+			.order_by('-upload_date', '-study_date')
 		)
 
-		for study in studies_qs[:100]:
+		for study in studies_qs[:200]:
 			# Professional medical data extraction
-			study_time = study.study_date
+			# Dashboard columns:
+			# - TIME: show upload time (what users perceive as "new on the worklist")
+			# - SCHEDULED: show original study_date (from DICOM metadata)
+			study_time = study.upload_date or study.study_date
 			scheduled_time = study.study_date
 			
 			# Enhanced upload tracking
@@ -1124,6 +1161,10 @@ def api_studies(request):
 			if not processing_stats['date_range']['latest'] or study.study_date > processing_stats['date_range']['latest']:
 				processing_stats['date_range']['latest'] = study.study_date
 			
+			# Normalize status for the legacy dashboard UI which historically used hyphenated keys.
+			# The DB uses underscores (e.g. "in_progress"); the UI expects "in-progress".
+			status_key = (study.status or '').replace('_', '-')
+
 			# Professional study data formatting with medical precision
 			studies_data.append({
 				'id': study.id,
@@ -1131,7 +1172,8 @@ def api_studies(request):
 				'patient_name': study.patient.full_name,
 				'patient_id': study.patient.patient_id,
 				'modality': study.modality.code,
-				'status': study.status,
+				'status': status_key,
+				'status_raw': study.status,
 				'priority': study.priority,
 				'study_date': study.study_date.isoformat(),
 				'study_time': study_time.isoformat(),

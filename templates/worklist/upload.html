@@ -974,27 +974,67 @@ document.addEventListener('DOMContentLoaded', function() {
         return false;
     }
 
-    async function isLikelyDicom(file) {
+    function isLikelyDicomByNameOrType(file) {
         if (!file || isTempOrHiddenFile(file)) return false;
         const name = (file.name || '').toLowerCase();
         // Extension-based allow-list (covers most uploads)
         if (name.endsWith('.dcm') || name.endsWith('.dicom') || name.endsWith('.dicm') || name.endsWith('.ima')) return true;
         if (file.type === 'application/dicom') return true;
-        // Fast preamble check: Part-10 DICOMs include "DICM" at byte offset 128
-        try {
-            if ((file.size || 0) >= 132) {
-                const buf = await file.slice(128, 132).arrayBuffer();
-                const b = new Uint8Array(buf);
-                return b.length === 4 && b[0] === 0x44 && b[1] === 0x49 && b[2] === 0x43 && b[3] === 0x4D; // "DICM"
-            }
-        } catch (_) {}
         return false;
     }
 
+    async function hasDicomPreamble(file) {
+        // Fast preamble check: Part-10 DICOMs include "DICM" at byte offset 128
+        try {
+            if (!file || (file.size || 0) < 132) return false;
+            const buf = await file.slice(128, 132).arrayBuffer();
+            const b = new Uint8Array(buf);
+            return b.length === 4 && b[0] === 0x44 && b[1] === 0x49 && b[2] === 0x43 && b[3] === 0x4D; // "DICM"
+        } catch (_) {
+            return false;
+        }
+    }
+
     async function handleFiles(files) {
-        // Robust DICOM filtering (prevents temp/hidden/non-DICOM files from being uploaded)
-        const checks = await Promise.all((files || []).map(f => isLikelyDicom(f).catch(() => false)));
-        const dicomFiles = (files || []).filter((_, idx) => checks[idx]);
+        // Robust DICOM filtering, optimized for big folders:
+        // - Fast-path: accept known DICOM extensions/types immediately
+        // - For "no extension" DICOM folders, do a bounded preamble check sample to avoid
+        //   thousands of file.slice() calls which can stall the browser.
+        const all = (files || []).filter(f => !isTempOrHiddenFile(f));
+
+        const fastAccepted = [];
+        const candidates = [];
+        for (const f of all) {
+            if (isLikelyDicomByNameOrType(f)) fastAccepted.push(f);
+            else candidates.push(f);
+        }
+
+        // Always preamble-check small candidate sets.
+        const MAX_PREAMBLE_CHECK = 250; // hard cap for UI responsiveness
+        const SAMPLE_SIZE = 200;
+
+        let preambleAccepted = [];
+        if (candidates.length > 0) {
+            const toCheck = candidates.slice(0, Math.min(candidates.length, Math.max(SAMPLE_SIZE, Math.min(MAX_PREAMBLE_CHECK, candidates.length))));
+
+            // Check in small batches to keep the event loop responsive.
+            const batchSize = 40;
+            for (let i = 0; i < toCheck.length; i += batchSize) {
+                const batch = toCheck.slice(i, i + batchSize);
+                const results = await Promise.all(batch.map(f => hasDicomPreamble(f)));
+                for (let j = 0; j < batch.length; j++) {
+                    if (results[j]) preambleAccepted.push(batch[j]);
+                }
+            }
+
+            // If most of the sample looks like DICOM, assume the rest are DICOM too (server will still validate).
+            const ratio = toCheck.length ? (preambleAccepted.length / toCheck.length) : 0;
+            if (candidates.length > MAX_PREAMBLE_CHECK && ratio >= 0.8) {
+                preambleAccepted = preambleAccepted.concat(candidates.slice(toCheck.length));
+            }
+        }
+
+        const dicomFiles = [...fastAccepted, ...preambleAccepted];
         const ignoredCount = (files || []).length - dicomFiles.length;
 
         // Check file count limit (5000 images max)

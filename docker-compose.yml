@@ -87,7 +87,9 @@ services:
       fi
     ports:
       # Local ngrok API (optional; helpful for debugging)
-      - "4040:4040"
+      # Host port is configurable to avoid conflicts (4040 is commonly already in use).
+      # Set NGROK_PORT in .env.docker (defaults to 4041).
+      - "${NGROK_PORT:-4041}:4040"
     restart: unless-stopped
 
 volumes:

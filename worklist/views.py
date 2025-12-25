@@ -756,115 +756,129 @@ def upload_study(request):
 							study.save(update_fields=['priority','clinical_info'])
 					
 					# Professional DICOM image processing with medical-grade precision
+					# SPEED: avoid per-image get_or_create (N+1). Do a bulk existence check by SOPInstanceUID,
+					# then bulk_create new rows and bulk_update only when re-linking is needed.
+					sop_uids = []
+					for _ds, _fobj in items:
+						try:
+							uid = getattr(_ds, 'SOPInstanceUID', None)
+							if uid:
+								sop_uids.append(str(uid))
+						except Exception:
+							continue
+
+					existing_map = {}
+					if sop_uids:
+						try:
+							existing_qs = (
+								DicomImage.objects
+								.filter(sop_instance_uid__in=sop_uids)
+								.only('id', 'sop_instance_uid', 'series_id', 'instance_number')
+							)
+							existing_map = {img.sop_instance_uid: img for img in existing_qs}
+						except Exception:
+							existing_map = {}
+
+					to_create = []
+					to_update = []
 					images_processed = 0
+
 					for image_index, (ds, fobj) in enumerate(items):
 						image_start_time = time.time()
+						sop_uid = None
 						try:
-							sop_uid = getattr(ds, 'SOPInstanceUID')
+							sop_uid = str(getattr(ds, 'SOPInstanceUID'))
 							instance_number = getattr(ds, 'InstanceNumber', 1) or 1
-							
-							# Professional file organization with medical standards
+							try:
+								inst_num = int(instance_number)
+							except Exception:
+								inst_num = 1
+
+							# If this SOP already exists, only ensure it's linked to this series.
+							# Critically, we skip re-saving the file bytes for speed (chunk retries / dedup).
+							existing = existing_map.get(sop_uid)
+							if existing is not None:
+								changed = False
+								if series and existing.series_id != series.id:
+									existing.series_id = series.id
+									changed = True
+								if inst_num and existing.instance_number != inst_num:
+									existing.instance_number = inst_num
+									changed = True
+								if changed:
+									to_update.append(existing)
+								images_processed += 1
+								if (image_index + 1) % 50 == 0:
+									logger.info(f"Series {series_desc}: {image_index + 1}/{len(items)} images processed")
+								continue
+
+							# New SOP: save bytes and create DB row
 							rel_path = f"dicom/professional/{study_uid}/{series_uid}/{sop_uid}.dcm"
-							
-							# Medical-grade file handling with integrity checks
-							# IMPORTANT: avoid copying full bytes into memory (large CT uploads).
 							try:
 								fobj.seek(0)
 							except Exception:
 								pass
+
 							file_size = getattr(fobj, 'size', None)
 							if not file_size:
 								try:
-									file_size = int(getattr(fobj, 'file', None).size)  # may exist on some UploadedFile types
+									file_size = int(getattr(getattr(fobj, 'file', None), 'size', 0) or 0)
 								except Exception:
-									file_size = None
-							if not file_size:
-								# Fallback: size unknown; set after save if needed
-								file_size = 0
-							
-							# Professional file validation
-							if file_size < 1024:  # Less than 1KB is suspicious
+									file_size = 0
+
+							if file_size and file_size < 1024:
 								logger.warning(f"Suspicious file size: {file_size} bytes for {sop_uid}")
-							
-							# Save file directly (streaming), avoids constructing ContentFile(file_content)
+
 							saved_path = default_storage.save(rel_path, fobj)
-							# Ensure file_size is set
-							if not file_size:
-								try:
-									file_size = getattr(fobj, 'size', 0) or file_size
-								except Exception:
-									pass
-							
-							# Enhanced medical imaging metadata extraction
+
 							image_position = str(getattr(ds, 'ImagePositionPatient', ''))
 							slice_location = getattr(ds, 'SliceLocation', None)
-							window_center = getattr(ds, 'WindowCenter', None)
-							window_width = getattr(ds, 'WindowWidth', None)
-							acquisition_number = getattr(ds, 'AcquisitionNumber', None)
-							temporal_position = getattr(ds, 'TemporalPositionIdentifier', None)
-							
-							# Professional image creation with comprehensive metadata
-							image, image_created = DicomImage.objects.get_or_create(
-								sop_instance_uid=sop_uid,
-								defaults={
-									'series': series,
-									'instance_number': int(instance_number),
-									'image_position': image_position,
-									'slice_location': slice_location,
-									'file_path': saved_path,
-									'file_size': file_size,
-									'processed': False,
-								}
-							)
 
-							# Defensive fix: for retries/chunked uploads, the SOPInstanceUID may already exist.
-							# Ensure the existing image is linked to THIS series and points at a valid file_path.
-							try:
-								if image and not image_created:
-									update_fields = []
-									if series and image.series_id != series.id:
-										image.series = series
-										update_fields.append('series')
-									# Keep instance_number aligned for correct ordering in viewers
-									try:
-										inst_num = int(instance_number)
-									except Exception:
-										inst_num = None
-									if inst_num is not None and image.instance_number != inst_num:
-										image.instance_number = inst_num
-										update_fields.append('instance_number')
-									# Update file path/size if we just saved a (new) copy
-									if saved_path and getattr(image.file_path, 'name', None) != saved_path:
-										image.file_path = saved_path
-										update_fields.append('file_path')
-									if file_size and getattr(image, 'file_size', None) != file_size:
-										image.file_size = file_size
-										update_fields.append('file_size')
-									if image_position is not None and getattr(image, 'image_position', '') != image_position:
-										image.image_position = image_position
-										update_fields.append('image_position')
-									if slice_location is not None and getattr(image, 'slice_location', None) != slice_location:
-										image.slice_location = slice_location
-										update_fields.append('slice_location')
-									if update_fields:
-										image.save(update_fields=update_fields)
-							except Exception:
-								pass
-							
-							if image_created:
-								upload_stats['created_images'] += 1
-								images_processed += 1
-								logger.debug(f"Created DICOM image: {sop_uid} for series {series_uid}")
-							
-							image_processing_time = (time.time() - image_start_time) * 1000
-							
-							# Professional progress tracking
+							to_create.append(
+								DicomImage(
+									sop_instance_uid=sop_uid,
+									series=series,
+									instance_number=inst_num,
+									image_position=image_position,
+									slice_location=slice_location,
+									file_path=saved_path,
+									file_size=int(file_size or 0),
+									processed=False,
+								)
+							)
+							images_processed += 1
+
 							if (image_index + 1) % 50 == 0:
 								logger.info(f"Series {series_desc}: {image_index + 1}/{len(items)} images processed")
-							
+
 						except Exception as e:
-							logger.error(f"Image processing failed for {sop_uid}: {str(e)}")
+							logger.error(f"Image processing failed for {sop_uid or 'unknown'}: {str(e)}")
 							continue
+
+					# Flush batched DB ops for this series
+					try:
+						if to_create:
+							DicomImage.objects.bulk_create(to_create, ignore_conflicts=True, batch_size=500)
+							upload_stats['created_images'] += len(to_create)
+					except Exception:
+						# fall back to safest behavior (best effort)
+						try:
+							for obj in to_create:
+								try:
+									obj.save()
+									upload_stats['created_images'] += 1
+								except Exception:
+									pass
+						except Exception:
+							pass
+
+					try:
+						if to_update:
+							# Only re-link fields used by counting + ordering
+							DicomImage.objects.bulk_update(to_update, ['series', 'instance_number'], batch_size=500)
+					except Exception:
+						# best effort: don't fail upload for bulk_update issues
+						pass
 					
 					series_processing_time = (time.time() - series_start_time) * 1000
 					logger.info(f"Professional series completed: {series_desc} - {images_processed} images in {series_processing_time:.1f}ms")
@@ -1065,7 +1079,18 @@ def api_studies(request):
 			'date_range': {'earliest': None, 'latest': None}
 		}
 		
-		for study in studies.select_related('patient', 'facility', 'modality', 'uploaded_by').order_by('-study_date')[:100]:
+		# SPEED + correctness: compute counts in the DB (avoid per-study N+1 count loops)
+		studies_qs = (
+			studies
+			.select_related('patient', 'facility', 'modality', 'uploaded_by')
+			.annotate(
+				series_count_db=Count('series', distinct=True),
+				image_count_db=Count('series__images', distinct=True),
+			)
+			.order_by('-study_date')
+		)
+
+		for study in studies_qs[:100]:
 			# Professional medical data extraction
 			study_time = study.study_date
 			scheduled_time = study.study_date
@@ -1076,12 +1101,16 @@ def api_studies(request):
 			else:
 				upload_date = study.study_date.isoformat()
 			
-			# Professional image and series counting with fresh database connection
-			# Force fresh queries to avoid any caching issues
-			from django.db import connection
-			connection.ensure_connection()
-			image_count = study.get_image_count(force_refresh=True)
-			series_count = study.get_series_count()
+			# Professional image and series counting
+			# Use annotated values when available (fast + consistent)
+			try:
+				image_count = int(getattr(study, 'image_count_db', 0) or 0)
+			except Exception:
+				image_count = 0
+			try:
+				series_count = int(getattr(study, 'series_count_db', 0) or 0)
+			except Exception:
+				series_count = 0
 			
 			# Update processing statistics
 			processing_stats['total_studies'] += 1
@@ -1580,6 +1609,10 @@ def api_study_detail(request, study_id):
             study = get_object_or_404(Study, id=study_id)
         
         # Return study data
+        # Avoid N+1 loops for counts
+        series_count = Series.objects.filter(study=study).count()
+        images_count = DicomImage.objects.filter(series__study=study).count()
+
         study_data = {
             'id': study.id,
             'accession_number': study.accession_number,
@@ -1595,8 +1628,8 @@ def api_study_detail(request, study_id):
             },
             'status': study.status,
             'priority': study.priority,
-            'series_count': study.series_set.count(),
-            'images_count': sum(series.images.count() for series in study.series_set.all()),
+            'series_count': series_count,
+            'images_count': images_count,
             'facility': study.facility.name if study.facility else None
         }
         
@@ -1742,8 +1775,19 @@ def api_refresh_worklist(request):
     else:
         studies = Study.objects.filter(upload_date__gte=recent_cutoff)
     
+    # SPEED + consistency: precompute counts with annotation
+    studies_qs = (
+        studies
+        .select_related('patient', 'facility', 'modality', 'uploaded_by')
+        .annotate(
+            series_count_db=Count('series', distinct=True),
+            image_count_db=Count('series__images', distinct=True),
+        )
+        .order_by('-upload_date')
+    )
+
     studies_data = []
-    for study in studies.order_by('-upload_date')[:20]:  # Last 20 uploaded studies
+    for study in studies_qs[:20]:  # Last 20 uploaded studies
         studies_data.append({
             'id': study.id,
             'accession_number': study.accession_number,
@@ -1755,8 +1799,8 @@ def api_refresh_worklist(request):
             'study_date': study.study_date.isoformat(),
             'upload_date': study.upload_date.isoformat(),
             'facility': study.facility.name,
-            'series_count': study.get_series_count(),
-            'image_count': study.get_image_count(),
+            'series_count': int(getattr(study, 'series_count_db', 0) or 0),
+            'image_count': int(getattr(study, 'image_count_db', 0) or 0),
             'uploaded_by': study.uploaded_by.get_full_name() if study.uploaded_by else 'Unknown',
             'study_description': study.study_description,
         })
@@ -1783,8 +1827,9 @@ def api_get_upload_stats(request):
         recent_studies = Study.objects.filter(upload_date__gte=week_ago)
     
     total_studies = recent_studies.count()
-    total_series = sum(study.get_series_count() for study in recent_studies)
-    total_images = sum(study.get_image_count() for study in recent_studies)
+    # SPEED: compute counts directly on related tables
+    total_series = Series.objects.filter(study__in=recent_studies).count()
+    total_images = DicomImage.objects.filter(series__study__in=recent_studies).count()
     
     # Group by modality
     modality_stats = {}

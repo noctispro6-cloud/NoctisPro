@@ -1146,6 +1146,7 @@ def upload_attachment(request, study_id):
                 return JsonResponse({'error': 'No files provided'}, status=400)
             
             uploaded_attachments = []
+            created_attachment_ids = []
             
             for file in files:
                 # Validate file size (max 5GB)
@@ -1181,12 +1182,8 @@ def upload_attachment(request, study_id):
                     uploaded_by=user,
                     is_public=True
                 )
-                
-                # Generate thumbnail
-                try:
-                    generate_attachment_thumbnail(attachment)
-                except Exception:
-                    pass
+
+                created_attachment_ids.append(attachment.id)
                 
                 uploaded_attachments.append({
                     'id': attachment.id,
@@ -1194,6 +1191,30 @@ def upload_attachment(request, study_id):
                     'size': attachment.file_size,
                     'type': attachment.file_type,
                 })
+
+            # Offload thumbnail/metadata extraction so uploads return quickly.
+            # Thumbnail generation for DICOM (pixel decode) can be very slow.
+            def _process_attachments_async(ids):
+                try:
+                    from django.db import close_old_connections
+                    close_old_connections()
+                    for att_id in ids:
+                        att = StudyAttachment.objects.filter(id=att_id).first()
+                        if not att:
+                            continue
+                        try:
+                            generate_attachment_thumbnail(att)
+                        except Exception:
+                            pass
+                        try:
+                            process_attachment_metadata(att)
+                        except Exception:
+                            pass
+                    close_old_connections()
+                except Exception:
+                    pass
+            if created_attachment_ids:
+                threading.Thread(target=_process_attachments_async, args=(created_attachment_ids,), daemon=True).start()
             
             # Create notifications for new attachments
             try:

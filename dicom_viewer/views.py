@@ -2251,8 +2251,10 @@ def upload_dicom(request):
             
             if not uploaded_files:
                 return JsonResponse({'success': False, 'error': 'No files uploaded'})
-            
-            upload_id = str(uuid.uuid4())
+
+            # Respect client-provided upload_id (used by the JS uploader to group requests).
+            # Fall back to a server-generated ID for backwards compatibility.
+            upload_id = (request.POST.get('upload_id') or '').strip() or str(uuid.uuid4())
             total_files = len(uploaded_files)
             processed_files = 0
             processed_images = []
@@ -2272,12 +2274,15 @@ def upload_dicom(request):
                 except Exception:
                     pos = None
                 try:
+                    # Stream the hash calculation to avoid loading large DICOMs into RAM.
                     try:
                         fobj.seek(0)
                     except Exception:
                         pass
-                    data = fobj.read()
-                    digest = hashlib.sha1(data).hexdigest()
+                    h = hashlib.sha1()
+                    for chunk in iter(lambda: fobj.read(1024 * 1024), b''):
+                        h.update(chunk)
+                    digest = h.hexdigest()
                     return f"SYN-SOP-SHA1-{digest}"
                 except Exception:
                     import uuid as _uuid
@@ -2291,9 +2296,60 @@ def upload_dicom(request):
                     except Exception:
                         pass
 
+            _ALLOWED_EXTS = ('.dcm', '.dicom', '.dicm', '.ima')
+            def _has_dicm_preamble(fobj) -> bool:
+                """Check DICOM Part-10 preamble marker safely without consuming the stream."""
+                try:
+                    pos = fobj.tell()
+                except Exception:
+                    pos = None
+                try:
+                    try:
+                        fobj.seek(0)
+                    except Exception:
+                        pass
+                    head = fobj.read(132)
+                    return len(head) >= 132 and head[128:132] == b'DICM'
+                except Exception:
+                    return False
+                finally:
+                    try:
+                        if pos is not None:
+                            fobj.seek(pos)
+                        else:
+                            fobj.seek(0)
+                    except Exception:
+                        pass
+
             for in_file in uploaded_files:
                 try:
-                    ds = pydicom.dcmread(in_file, force=True)
+                    # Critical performance improvement: read headers only (avoid pixel data decode).
+                    # Also, avoid `force=True` unless the file looks like DICOM.
+                    name = (getattr(in_file, 'name', '') or '')
+                    ext = (os.path.splitext(name)[1] or '').lower()
+                    has_preamble = _has_dicm_preamble(in_file)
+                    ds = None
+                    try:
+                        try:
+                            in_file.seek(0)
+                        except Exception:
+                            pass
+                        ds = pydicom.dcmread(in_file, stop_before_pixels=True, force=False)
+                    except Exception:
+                        if has_preamble or ext in _ALLOWED_EXTS:
+                            try:
+                                try:
+                                    in_file.seek(0)
+                                except Exception:
+                                    pass
+                                ds = pydicom.dcmread(in_file, stop_before_pixels=True, force=True)
+                            except Exception:
+                                ds = None
+
+                    if ds is None:
+                        invalid_files += 1
+                        continue
+
                     study_uid = getattr(ds, 'StudyInstanceUID', None)
                     series_uid = getattr(ds, 'SeriesInstanceUID', None)
                     sop_uid = getattr(ds, 'SOPInstanceUID', None)
@@ -2429,12 +2485,12 @@ def upload_dicom(request):
                             setattr(ds, 'SOPInstanceUID', sop_uid)
                         instance_number = getattr(ds, 'InstanceNumber', 1) or 1
                         rel_path = f"dicom/images/{study_uid}/{series_uid}/{sop_uid}.dcm"
-                        # Ensure we read from start
+                        # Stream to storage; avoid reading full bytes into memory.
                         try:
                             fobj.seek(0)
                         except Exception:
                             pass
-                        saved_path = default_storage.save(rel_path, ContentFile(fobj.read()))
+                        saved_path = default_storage.save(rel_path, fobj)
                         DicomImage.objects.get_or_create(
                             sop_instance_uid=sop_uid,
                             defaults={

@@ -718,24 +718,38 @@ def upload_study(request):
 						try:
 							sop_uid = getattr(ds, 'SOPInstanceUID')
 							instance_number = getattr(ds, 'InstanceNumber', 1) or 1
-							# Skip duplicates by SOPInstanceUID to avoid re-uploading the same image
-							if DicomImage.objects.filter(sop_instance_uid=sop_uid).exists():
-								logger.debug(f"Duplicate SOPInstanceUID detected, skipping: {sop_uid}")
-								continue
 							
 							# Professional file organization with medical standards
 							rel_path = f"dicom/professional/{study_uid}/{series_uid}/{sop_uid}.dcm"
 							
 							# Medical-grade file handling with integrity checks
-							fobj.seek(0)
-							file_content = fobj.read()
-							file_size = len(file_content)
+							# IMPORTANT: avoid copying full bytes into memory (large CT uploads).
+							try:
+								fobj.seek(0)
+							except Exception:
+								pass
+							file_size = getattr(fobj, 'size', None)
+							if not file_size:
+								try:
+									file_size = int(getattr(fobj, 'file', None).size)  # may exist on some UploadedFile types
+								except Exception:
+									file_size = None
+							if not file_size:
+								# Fallback: size unknown; set after save if needed
+								file_size = 0
 							
 							# Professional file validation
 							if file_size < 1024:  # Less than 1KB is suspicious
 								logger.warning(f"Suspicious file size: {file_size} bytes for {sop_uid}")
 							
-							saved_path = default_storage.save(rel_path, ContentFile(file_content))
+							# Save file directly (streaming), avoids constructing ContentFile(file_content)
+							saved_path = default_storage.save(rel_path, fobj)
+							# Ensure file_size is set
+							if not file_size:
+								try:
+									file_size = getattr(fobj, 'size', 0) or file_size
+								except Exception:
+									pass
 							
 							# Enhanced medical imaging metadata extraction
 							image_position = str(getattr(ds, 'ImagePositionPatient', ''))
@@ -780,26 +794,28 @@ def upload_study(request):
 				
 				# already tracked above
 				
-				# Enhanced notifications for new study upload
-				try:
-					notif_type, _ = NotificationType.objects.get_or_create(
-						code='new_study', defaults={'name': 'New Study Uploaded', 'description': 'A new study has been uploaded', 'is_system': True}
-					)
-					recipients = User.objects.filter(Q(role='radiologist') | Q(role='admin') | Q(facility=facility))
-					for recipient in recipients:
-						Notification.objects.create(
-							notification_type=notif_type,
-							recipient=recipient,
-							sender=request.user,
-							title=f"New {modality_code} study for {patient.full_name}",
-							message=f"Study {accession_number} uploaded from {facility.name} with {total_series_processed} series",
-							priority='normal',
-							study=study,
-							facility=facility,
-							data={'study_id': study.id, 'accession_number': accession_number, 'series_count': total_series_processed}
+				# Enhanced notifications for NEW study upload only.
+				# Chunked uploads can hit this endpoint multiple times; avoid re-notifying (slow + noisy).
+				if study_created:
+					try:
+						notif_type, _ = NotificationType.objects.get_or_create(
+							code='new_study', defaults={'name': 'New Study Uploaded', 'description': 'A new study has been uploaded', 'is_system': True}
 						)
-				except Exception:
-					pass
+						recipients = User.objects.filter(Q(role='radiologist') | Q(role='admin') | Q(facility=facility))
+						for recipient in recipients:
+							Notification.objects.create(
+								notification_type=notif_type,
+								recipient=recipient,
+								sender=request.user,
+								title=f"New {modality_code} study for {patient.full_name}",
+								message=f"Study {accession_number} uploaded from {facility.name} with {total_series_processed} series",
+								priority='normal',
+								study=study,
+								facility=facility,
+								data={'study_id': study.id, 'accession_number': accession_number, 'series_count': total_series_processed}
+							)
+					except Exception:
+						pass
 			
 			# Professional upload completion with comprehensive statistics
 			upload_stats['invalid_files'] = invalid_files
@@ -819,14 +835,9 @@ def upload_study(request):
 			logger.info(f"  • Processing time: {upload_stats['processing_time_ms']} ms")
 			logger.info(f"  • User: {upload_stats['user']}")
 			
-			# Verify image counts for created studies
-			for study_id in created_studies:
-				try:
-					study = Study.objects.get(id=study_id)
-					actual_count = study.get_image_count()
-					logger.info(f"  • Study {study.accession_number}: {actual_count} images in database")
-				except Exception as e:
-					logger.warning(f"  • Could not verify image count for study {study_id}: {e}")
+			# NOTE: Avoid expensive per-study verification queries here.
+			# Chunked uploads call this endpoint multiple times; extra DB work increases response time
+			# and can cause browser/proxy timeouts (seen as XHR "HTTP error 0").
 			
 			# Professional response with medical-grade information
 			return JsonResponse({

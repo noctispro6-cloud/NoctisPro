@@ -307,28 +307,23 @@ class DicomViewerEnhanced {
             const input = document.createElement('input');
             input.type = 'file';
             input.multiple = true;
-            input.accept = '.dcm,.dicom';
-            input.setAttribute('webkitdirectory', '');
-            input.setAttribute('directory', '');
+            // CT studies are commonly stored as .IMA (e.g., Siemens), and some studies have .DICM/.DICOM or no extension.
+            // We keep the accept wide and rely on server-side DICOM validation for correctness.
+            input.accept = '.dcm,.dicom,.dicm,.ima,*';
+            // Folder selection is Chromium/WebKit-only; other browsers should gracefully fall back to multi-file selection.
+            try {
+                const test = document.createElement('input');
+                if ('webkitdirectory' in test) {
+                    input.setAttribute('webkitdirectory', '');
+                    input.setAttribute('directory', '');
+                }
+            } catch (_) {}
             input.onchange = (e) => {
                 const files = Array.from(e.target.files || []);
                 if (!files.length) return;
-                const dicomFiles = files.filter(f => {
-                    const n = (f.name || '').toLowerCase();
-                    return n.endsWith('.dcm') || n.endsWith('.dicom') || (f.type === 'application/dicom') || (f.size > 132);
-                });
-                if (!dicomFiles.length) {
-                    this.showToast('No DICOM files detected in selection', 'warning');
-                    return;
-                }
-                this.showToast(`Loading ${dicomFiles.length} DICOM file(s) from folder...`, 'info');
-                // If many files, upload to server and open in full viewer. If few, render locally.
-                const LARGE_THRESHOLD = 50;
-                if (dicomFiles.length >= LARGE_THRESHOLD) {
-                    this.uploadLocalDicomToServer(dicomFiles);
-                } else {
-                    this.displayLocalDicomSeries(dicomFiles);
-                }
+                // Always upload to server so rendering matches worklist-opened studies (CT/transfer syntaxes/etc).
+                this.showToast(`Uploading ${files.length} file(s) to viewer...`, 'info', 4000);
+                this.uploadLocalDicomToServer(files);
             };
             input.click();
         } catch (error) {
@@ -463,17 +458,21 @@ class DicomViewerEnhanced {
         try {
             const url = '/worklist/upload/';
             const token = (document.querySelector('meta[name="csrf-token"]') && document.querySelector('meta[name="csrf-token"]').getAttribute('content')) || '';
-            // Chunk by total bytes to respect common reverse-proxy limits (~100MB)
-            const MAX_CHUNK_BYTES = 80 * 1024 * 1024;
+            // Keep chunks small so each request completes quickly (avoid proxy/browser timeouts).
+            const MAX_CHUNK_BYTES = 10 * 1024 * 1024; // 10MB
+            const MAX_CHUNK_FILES = 120; // cap count (CT can have many small slices)
             const chunks = [];
             let current = []; let bytes = 0;
             for (const f of files) {
-                if (bytes + (f.size || 0) > MAX_CHUNK_BYTES && current.length) { chunks.push(current); current = []; bytes = 0; }
+                const fsize = (f.size || 0);
+                const wouldExceedBytes = (bytes + fsize) > MAX_CHUNK_BYTES;
+                const wouldExceedCount = current.length >= MAX_CHUNK_FILES;
+                if ((wouldExceedBytes || wouldExceedCount) && current.length) { chunks.push(current); current = []; bytes = 0; }
                 current.push(f); bytes += (f.size || 0);
             }
             if (current.length) chunks.push(current);
 
-            const uploadChunk = (chunk) => new Promise((resolve) => {
+            const uploadChunk = (chunk, attempt = 1) => new Promise((resolve) => {
                 const formData = new FormData();
                 chunk.forEach(file => formData.append('dicom_files', file));
                 formData.append('priority', 'normal');
@@ -490,8 +489,18 @@ class DicomViewerEnhanced {
                         } catch (_) { resolve({ ok: false, data: null }); }
                     }
                 };
-                xhr.onerror = function() { resolve({ ok: false, data: null }); };
-                xhr.ontimeout = function() { resolve({ ok: false, data: null }); };
+                const fail = (reason) => {
+                    // Retry transient network failures a couple times
+                    if (attempt < 3 && (reason === 'timeout' || reason === 'network' || reason === 'abort' || xhr.status === 0)) {
+                        const backoff = 800 * Math.pow(2, attempt - 1);
+                        setTimeout(() => uploadChunk(chunk, attempt + 1).then(resolve), backoff);
+                        return;
+                    }
+                    resolve({ ok: false, data: null });
+                };
+                xhr.onerror = function() { fail('network'); };
+                xhr.ontimeout = function() { fail('timeout'); };
+                xhr.onabort = function() { fail('abort'); };
                 xhr.send(formData);
             });
 

@@ -307,28 +307,23 @@ class DicomViewerEnhanced {
             const input = document.createElement('input');
             input.type = 'file';
             input.multiple = true;
-            input.accept = '.dcm,.dicom';
-            input.setAttribute('webkitdirectory', '');
-            input.setAttribute('directory', '');
+            // CT studies are commonly stored as .IMA (e.g., Siemens), and some studies have .DICM/.DICOM or no extension.
+            // We keep the accept wide and rely on server-side DICOM validation for correctness.
+            input.accept = '.dcm,.dicom,.dicm,.ima,*';
+            // Folder selection is Chromium/WebKit-only; other browsers should gracefully fall back to multi-file selection.
+            try {
+                const test = document.createElement('input');
+                if ('webkitdirectory' in test) {
+                    input.setAttribute('webkitdirectory', '');
+                    input.setAttribute('directory', '');
+                }
+            } catch (_) {}
             input.onchange = (e) => {
                 const files = Array.from(e.target.files || []);
                 if (!files.length) return;
-                const dicomFiles = files.filter(f => {
-                    const n = (f.name || '').toLowerCase();
-                    return n.endsWith('.dcm') || n.endsWith('.dicom') || (f.type === 'application/dicom') || (f.size > 132);
-                });
-                if (!dicomFiles.length) {
-                    this.showToast('No DICOM files detected in selection', 'warning');
-                    return;
-                }
-                this.showToast(`Loading ${dicomFiles.length} DICOM file(s) from folder...`, 'info');
-                // If many files, upload to server and open in full viewer. If few, render locally.
-                const LARGE_THRESHOLD = 50;
-                if (dicomFiles.length >= LARGE_THRESHOLD) {
-                    this.uploadLocalDicomToServer(dicomFiles);
-                } else {
-                    this.displayLocalDicomSeries(dicomFiles);
-                }
+                // Always upload to server so rendering matches worklist-opened studies (CT/transfer syntaxes/etc).
+                this.showToast(`Uploading ${files.length} file(s) to viewer...`, 'info', 4000);
+                this.uploadLocalDicomToServer(files);
             };
             input.click();
         } catch (error) {

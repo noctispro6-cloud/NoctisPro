@@ -1315,7 +1315,7 @@
     </div>
 
     <!-- Hidden file input for DICOM loading -->
-    <input type="file" id="fileInput" accept=".dcm,.dicom,*" multiple webkitdirectory directory style="display: none;">
+    <input type="file" id="fileInput" accept=".dcm,.dicom,.dicm,.ima,*" multiple webkitdirectory directory style="display: none;">
 
     <!-- Print/Export modal (layout + multi-image support) -->
     <div id="printExportModal" style="display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 10000; align-items: center; justify-content: center;">
@@ -2232,7 +2232,7 @@
                 // Allow selecting a folder of DICOMs
                 fileInput.setAttribute('webkitdirectory', '');
                 fileInput.setAttribute('directory', '');
-                fileInput.setAttribute('accept', '.dcm,.dicom,*');
+                fileInput.setAttribute('accept', '.dcm,.dicom,.dicm,.ima,*');
                 fileInput.multiple = true;
                 fileInput.click();
                 showToast('📁 Select a DICOM folder or files', 'success');
@@ -2245,7 +2245,7 @@
             try {
                 const fileInput = document.getElementById('fileInput');
                 fileInput.removeAttribute('webkitdirectory');
-                fileInput.setAttribute('accept', '.dcm,.dicom,*');
+                fileInput.setAttribute('accept', '.dcm,.dicom,.dicm,.ima,*');
                 fileInput.multiple = true;
                 fileInput.click();
                 showToast('📁 File browser opened - Select DICOM files from USB/DVD', 'success');

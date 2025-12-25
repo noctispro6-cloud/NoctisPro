@@ -1865,7 +1865,7 @@
     </div>
 
     <!-- Hidden file input for DICOM loading -->
-    <input type="file" id="fileInput" accept=".dcm,.dicom,*" multiple style="display: none;">
+    <input type="file" id="fileInput" accept=".dcm,.dicom,.dicm,.ima,*" multiple style="display: none;">
     
     <!-- CSRF Token for AJAX requests -->
     {% csrf_token %}
@@ -2902,7 +2902,7 @@
         function selectLocalFiles() {
             const fileInput = document.getElementById('fileInput');
             fileInput.removeAttribute('webkitdirectory');
-            fileInput.setAttribute('accept', '.dcm,.dicom,*');
+            fileInput.setAttribute('accept', '.dcm,.dicom,.dicm,.ima,*');
             fileInput.click();
             document.querySelector('.modal-overlay').remove();
         }

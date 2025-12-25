@@ -30,6 +30,7 @@ body {
 /* Better viewport height behavior on mobile browsers */
 .dashboard-container,
 .viewer-container {
+  min-height: 100vh;
   min-height: 100dvh;
 }
 
@@ -120,6 +121,7 @@ body {
 
 /* ===== DICOM viewer (templates/dicom_viewer/base.html) ===== */
 .viewer-container {
+  height: 100vh !important;
   height: 100dvh !important;
 }
 

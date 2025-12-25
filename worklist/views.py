@@ -633,44 +633,44 @@ def upload_study(request):
 				
 				# Facility attribution with admin/radiologist override
 				facility = None
-			def _infer_facility_from_dicom(ds) -> Facility | None:
-				"""
-				Best-effort facility inference from common DICOM fields.
 
-				PACS exports often carry an AE Title and/or InstitutionName that can be mapped to
-				`accounts.Facility.ae_title` or `accounts.Facility.name`.
-				"""
-				try:
-					candidates = []
-					for attr in (
-						'ScheduledStationAETitle',
-						'StationAETitle',
-						'InstitutionName',
-						'InstitutionalDepartmentName',
-					):
-						val = str(getattr(ds, attr, '') or '').strip()
-						if val:
-							candidates.append(val)
-					# Also consider ReferringPhysicianName-ish fields are not facility; skip.
-					# First: exact AE Title match
-					for c in candidates:
-						f = Facility.objects.filter(is_active=True).filter(ae_title__iexact=c).first()
-						if f:
-							return f
-					# Second: exact name match
-					for c in candidates:
-						f = Facility.objects.filter(is_active=True).filter(name__iexact=c).first()
-						if f:
-							return f
-					# Third: loose contains match on InstitutionName (helps when DICOM has "X Hospital - Dept Y")
-					for c in candidates:
-						if len(c) >= 4:
-							f = Facility.objects.filter(is_active=True).filter(name__icontains=c).first()
+				def _infer_facility_from_dicom(ds) -> Facility | None:
+					"""
+					Best-effort facility inference from common DICOM fields.
+
+					PACS exports often carry an AE Title and/or InstitutionName that can be mapped to
+					`accounts.Facility.ae_title` or `accounts.Facility.name`.
+					"""
+					try:
+						candidates = []
+						for attr in (
+							'ScheduledStationAETitle',
+							'StationAETitle',
+							'InstitutionName',
+							'InstitutionalDepartmentName',
+						):
+							val = str(getattr(ds, attr, '') or '').strip()
+							if val:
+								candidates.append(val)
+						# First: exact AE Title match
+						for c in candidates:
+							f = Facility.objects.filter(is_active=True).filter(ae_title__iexact=c).first()
 							if f:
 								return f
-					return None
-				except Exception:
-					return None
+						# Second: exact name match
+						for c in candidates:
+							f = Facility.objects.filter(is_active=True).filter(name__iexact=c).first()
+							if f:
+								return f
+						# Third: loose contains match on InstitutionName (helps when DICOM has "X Hospital - Dept Y")
+						for c in candidates:
+							if len(c) >= 4:
+								f = Facility.objects.filter(is_active=True).filter(name__icontains=c).first()
+								if f:
+									return f
+						return None
+					except Exception:
+						return None
 
 				if (hasattr(request.user, 'is_admin') and request.user.is_admin()) or (hasattr(request.user, 'is_radiologist') and request.user.is_radiologist()):
 					if override_facility_id:

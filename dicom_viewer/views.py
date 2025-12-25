@@ -39,6 +39,139 @@ from .models import WindowLevelPreset, HangingProtocol
 # Initialize logger
 logger = logging.getLogger(__name__)
 
+#
+# Persistent (on-disk) MPR cache
+# - In-memory caches speed up repeated requests within a single process.
+# - Disk cache avoids re-decoding pixels after server restarts and enables "preload after upload".
+#
+def _mpr_disk_cache_dir() -> str:
+    # Versioned dir so we can invalidate format changes safely.
+    return os.path.join(settings.MEDIA_ROOT, 'dicom', 'mpr_cache_v1')
+
+def _mpr_disk_cache_path(series_id: int, quality: str) -> str:
+    q = (quality or 'high').strip().lower()
+    return os.path.join(_mpr_disk_cache_dir(), f"series_{int(series_id)}__q_{q}.npz")
+
+def _mpr_series_signature(series) -> tuple[int, int]:
+    """Return (count, max_id) signature for cache invalidation."""
+    try:
+        from django.db.models import Count as _Count, Max as _Max
+        agg = series.images.aggregate(c=_Count('id'), m=_Max('id'))
+        return int(agg.get('c') or 0), int(agg.get('m') or 0)
+    except Exception:
+        return (0, 0)
+
+def _mpr_try_load_disk_cache(series, quality: str):
+    """Return (volume, spacing) from disk cache if present and valid, else None."""
+    try:
+        path = _mpr_disk_cache_path(series.id, quality)
+        if not os.path.exists(path):
+            return None
+
+        # Validate cache matches current DB state (cheap signature check).
+        cur_count, cur_max_id = _mpr_series_signature(series)
+        if cur_count < 2:
+            return None
+
+        with np.load(path, allow_pickle=False) as z:
+            cached_count = int(z.get('count', 0))
+            cached_max_id = int(z.get('max_id', 0))
+            if cached_count != cur_count or cached_max_id != cur_max_id:
+                return None
+            vol = z['volume']
+            sp = tuple(z['spacing'].tolist())
+            if not isinstance(vol, np.ndarray) or vol.size < 2:
+                return None
+            # Store into in-memory cache for this process too.
+            cache_key = (int(series.id), (quality or 'high').strip().lower())
+            with _MPR_CACHE_LOCK:
+                entry = _MPR_CACHE.get(cache_key)
+                if entry is None:
+                    while len(_MPR_CACHE_ORDER) >= _MAX_MPR_CACHE:
+                        evict_key = _MPR_CACHE_ORDER.pop(0)
+                        _MPR_CACHE.pop(evict_key, None)
+                    _MPR_CACHE[cache_key] = {'volume': vol, 'spacing': sp}
+                    _MPR_CACHE_ORDER.append(cache_key)
+                else:
+                    entry['volume'] = vol
+                    entry['spacing'] = sp
+                    try:
+                        _MPR_CACHE_ORDER.remove(cache_key)
+                    except ValueError:
+                        pass
+                    _MPR_CACHE_ORDER.append(cache_key)
+            return vol, sp
+    except Exception:
+        return None
+
+def _mpr_persist_disk_cache(series, quality: str, volume: np.ndarray, spacing: tuple[float, float, float]) -> None:
+    """Persist (volume, spacing) to a compressed on-disk cache."""
+    try:
+        # Ensure directory exists
+        cache_dir = _mpr_disk_cache_dir()
+        os.makedirs(cache_dir, exist_ok=True)
+
+        # Include signature so we can validate/invalidate on load.
+        count, max_id = _mpr_series_signature(series)
+        if count < 2:
+            return
+
+        out_path = _mpr_disk_cache_path(series.id, quality)
+        tmp_path = f"{out_path}.tmp"
+
+        # Use compressed NPZ; keep float32 for windowing/HU stats correctness.
+        vol = volume.astype(np.float32, copy=False)
+        sp = np.array(spacing, dtype=np.float32)
+        np.savez_compressed(
+            tmp_path,
+            volume=vol,
+            spacing=sp,
+            count=np.int64(count),
+            max_id=np.int64(max_id),
+            quality=str((quality or 'high').strip().lower()),
+            v=np.int32(1),
+        )
+        os.replace(tmp_path, out_path)
+    except Exception:
+        # Best-effort only
+        try:
+            # Cleanup tmp if present
+            tmp_path = _mpr_disk_cache_path(series.id, quality) + '.tmp'
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+def _schedule_mpr_disk_cache_build(series_id: int, quality: str = 'high') -> None:
+    """Decode pixels + build MPR volume and persist compressed disk cache (best-effort)."""
+    q = (quality or 'high').strip().lower()
+    try:
+        sid = int(series_id)
+    except Exception:
+        return
+
+    def _run():
+        try:
+            close_old_connections()
+            s = Series.objects.get(id=sid)
+            # Build/ensure in-memory cache (this does the pixel decode work).
+            vol, sp = _get_mpr_volume_and_spacing(s, quality=q)
+            # Persist to disk so restarts don't lose the work.
+            _mpr_persist_disk_cache(s, q, vol, sp)
+        except Exception:
+            pass
+        finally:
+            try:
+                close_old_connections()
+            except Exception:
+                pass
+
+    try:
+        t = Thread(target=_run, daemon=True)
+        t.start()
+    except Exception:
+        return
+
 def _jsonify_dicom_value(v):
     """Convert pydicom/numpy values to JSON-serializable primitives.
 
@@ -2251,8 +2384,10 @@ def upload_dicom(request):
             
             if not uploaded_files:
                 return JsonResponse({'success': False, 'error': 'No files uploaded'})
-            
-            upload_id = str(uuid.uuid4())
+
+            # Respect client-provided upload_id (used by the JS uploader to group requests).
+            # Fall back to a server-generated ID for backwards compatibility.
+            upload_id = (request.POST.get('upload_id') or '').strip() or str(uuid.uuid4())
             total_files = len(uploaded_files)
             processed_files = 0
             processed_images = []
@@ -2272,12 +2407,15 @@ def upload_dicom(request):
                 except Exception:
                     pos = None
                 try:
+                    # Stream the hash calculation to avoid loading large DICOMs into RAM.
                     try:
                         fobj.seek(0)
                     except Exception:
                         pass
-                    data = fobj.read()
-                    digest = hashlib.sha1(data).hexdigest()
+                    h = hashlib.sha1()
+                    for chunk in iter(lambda: fobj.read(1024 * 1024), b''):
+                        h.update(chunk)
+                    digest = h.hexdigest()
                     return f"SYN-SOP-SHA1-{digest}"
                 except Exception:
                     import uuid as _uuid
@@ -2291,9 +2429,60 @@ def upload_dicom(request):
                     except Exception:
                         pass
 
+            _ALLOWED_EXTS = ('.dcm', '.dicom', '.dicm', '.ima')
+            def _has_dicm_preamble(fobj) -> bool:
+                """Check DICOM Part-10 preamble marker safely without consuming the stream."""
+                try:
+                    pos = fobj.tell()
+                except Exception:
+                    pos = None
+                try:
+                    try:
+                        fobj.seek(0)
+                    except Exception:
+                        pass
+                    head = fobj.read(132)
+                    return len(head) >= 132 and head[128:132] == b'DICM'
+                except Exception:
+                    return False
+                finally:
+                    try:
+                        if pos is not None:
+                            fobj.seek(pos)
+                        else:
+                            fobj.seek(0)
+                    except Exception:
+                        pass
+
             for in_file in uploaded_files:
                 try:
-                    ds = pydicom.dcmread(in_file, force=True)
+                    # Critical performance improvement: read headers only (avoid pixel data decode).
+                    # Also, avoid `force=True` unless the file looks like DICOM.
+                    name = (getattr(in_file, 'name', '') or '')
+                    ext = (os.path.splitext(name)[1] or '').lower()
+                    has_preamble = _has_dicm_preamble(in_file)
+                    ds = None
+                    try:
+                        try:
+                            in_file.seek(0)
+                        except Exception:
+                            pass
+                        ds = pydicom.dcmread(in_file, stop_before_pixels=True, force=False)
+                    except Exception:
+                        if has_preamble or ext in _ALLOWED_EXTS:
+                            try:
+                                try:
+                                    in_file.seek(0)
+                                except Exception:
+                                    pass
+                                ds = pydicom.dcmread(in_file, stop_before_pixels=True, force=True)
+                            except Exception:
+                                ds = None
+
+                    if ds is None:
+                        invalid_files += 1
+                        continue
+
                     study_uid = getattr(ds, 'StudyInstanceUID', None)
                     series_uid = getattr(ds, 'SeriesInstanceUID', None)
                     sop_uid = getattr(ds, 'SOPInstanceUID', None)
@@ -2429,12 +2618,12 @@ def upload_dicom(request):
                             setattr(ds, 'SOPInstanceUID', sop_uid)
                         instance_number = getattr(ds, 'InstanceNumber', 1) or 1
                         rel_path = f"dicom/images/{study_uid}/{series_uid}/{sop_uid}.dcm"
-                        # Ensure we read from start
+                        # Stream to storage; avoid reading full bytes into memory.
                         try:
                             fobj.seek(0)
                         except Exception:
                             pass
-                        saved_path = default_storage.save(rel_path, ContentFile(fobj.read()))
+                        saved_path = default_storage.save(rel_path, fobj)
                         DicomImage.objects.get_or_create(
                             sop_instance_uid=sop_uid,
                             defaults={
@@ -2451,6 +2640,14 @@ def upload_dicom(request):
                     except Exception as e:
                         print(f"Error processing instance in series {series_uid}: {str(e)}")
                         continue
+
+                # After upload: decode pixels + prebuild MPR volume and write compressed disk cache.
+                # Keep it best-effort and async so uploads return fast.
+                try:
+                    if series_obj and series_obj.id:
+                        _schedule_mpr_disk_cache_build(series_obj.id, quality='high')
+                except Exception:
+                    pass
 
             if processed_files == 0:
                 return JsonResponse({'success': False, 'error': 'No valid DICOM files found'})
@@ -3249,6 +3446,12 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
     # Slow path: build once per series (frontends request 3 planes in parallel).
     build_lock = _get_mpr_build_lock(series.id)
     with build_lock:
+        # Try disk cache after acquiring build lock to avoid multiple concurrent loads.
+        if not force_rebuild:
+            disk = _mpr_try_load_disk_cache(series, q)
+            if disk is not None:
+                return disk
+
         # Double-check cache in case another request built it while we waited.
         with _MPR_CACHE_LOCK:
             entry = _MPR_CACHE.get(cache_key)
@@ -3513,6 +3716,14 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
                 except ValueError:
                     pass
                 _MPR_CACHE_ORDER.append(cache_key)
+
+        # Persist to disk so future requests (and restarts) can skip pixel decode.
+        # Keep this synchronous here to guarantee the "cache exists" once the first build completes.
+        # For upload-triggered builds we do it in background anyway.
+        try:
+            _mpr_persist_disk_cache(series, q, volume, spacing)
+        except Exception:
+            pass
 
         return volume, spacing
 

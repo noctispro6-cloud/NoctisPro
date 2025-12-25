@@ -890,8 +890,10 @@ def upload_study(request):
 									logger.info(f"Series {series_desc}: {image_index + 1}/{len(items)} images processed")
 								continue
 
-							# New SOP: save bytes and create DB row
-							rel_path = f"dicom/professional/{study_uid}/{series_uid}/{sop_uid}.dcm"
+							# New SOP: save bytes and create DB row.
+							# Keep paths aligned with the model's `upload_to='dicom/images/'` and
+							# historical tooling that expects DICOM objects under `media/dicom/images/`.
+							rel_path = f"dicom/images/{study_uid}/{series_uid}/{sop_uid}.dcm"
 							try:
 								fobj.seek(0)
 							except Exception:

@@ -1198,11 +1198,15 @@ document.addEventListener('DOMContentLoaded', function() {
         const isTunnelHost = host.includes('ngrok') || host.includes('trycloudflare.com') || host.includes('loca.lt');
         // Use conservative chunk sizing for production stability (avoid upstream/proxy idle timeouts and 413s).
         // Note: this chunks *across files*; a single very large multi-frame DICOM still uploads as one request.
-        const MAX_CHUNK_BYTES = isTunnelHost ? (8 * 1024 * 1024) : (20 * 1024 * 1024); // 8MB on tunnels, 20MB otherwise
+        // Performance vs reliability tradeoff:
+        // - Larger chunks reduce request overhead and speed up uploads on stable connections.
+        // - Tunnels/proxies often kill long requests; keep those small.
+        const MAX_CHUNK_BYTES = isTunnelHost ? (8 * 1024 * 1024) : (48 * 1024 * 1024); // 8MB on tunnels, 48MB otherwise
         const MAX_CHUNK_FILES = isTunnelHost ? 200 : 600;
 
-        // Limit parallel uploads to avoid overloading server/proxy (stability > raw throughput)
-        const MAX_PARALLEL = 1;
+        // Limited parallelism improves throughput without hammering the server.
+        // Keep tunnels at 1 (they're fragile); allow a bit more on normal hosts.
+        const MAX_PARALLEL = isTunnelHost ? 1 : 2;
 
         let chunks = [];
         let currentChunk = [];

@@ -1039,6 +1039,18 @@ document.addEventListener('DOMContentLoaded', function() {
             showNotification(`Ignored ${ignoredCount} non‑DICOM/temp file(s). Uploading ${dicomFiles.length} DICOM file(s).`, 'info');
         }
 
+        // Warn about single huge objects: this uploader chunks across files, not within a single file.
+        // Some production proxies (e.g. Cloudflare free tier) may reject large single uploads.
+        try {
+            const biggest = dicomFiles.reduce((m, f) => Math.max(m, f.size || 0), 0);
+            if (biggest >= 250 * 1024 * 1024) { // 250MB
+                showNotification(
+                    `Warning: at least one file is very large (${formatFileSize(biggest)}). If the upload fails in production, your reverse proxy may be blocking large single requests. Use a direct nginx setup (high client_max_body_size) or send via the DICOM receiver (C-STORE) instead.`,
+                    'warning'
+                );
+            }
+        } catch (_) {}
+
         selectedFiles = [...selectedFiles, ...dicomFiles];
         updateUploadStats();
         // Skip showing file list and immediately start upload
@@ -1184,7 +1196,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // Using smaller chunks keeps each request short and reliably completes.
         const host = (window.location && window.location.host ? String(window.location.host).toLowerCase() : '');
         const isTunnelHost = host.includes('ngrok') || host.includes('trycloudflare.com') || host.includes('loca.lt');
-        const MAX_CHUNK_BYTES = isTunnelHost ? (8 * 1024 * 1024) : (50 * 1024 * 1024); // 8MB on tunnels, 50MB on normal proxies
+        // Use conservative chunk sizing for production stability (avoid upstream/proxy idle timeouts and 413s).
+        // Note: this chunks *across files*; a single very large multi-frame DICOM still uploads as one request.
+        const MAX_CHUNK_BYTES = isTunnelHost ? (8 * 1024 * 1024) : (20 * 1024 * 1024); // 8MB on tunnels, 20MB otherwise
         const MAX_CHUNK_FILES = isTunnelHost ? 200 : 600;
 
         // Limit parallel uploads to avoid overloading server/proxy (stability > raw throughput)
@@ -1241,7 +1255,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 const xhr = new XMLHttpRequest();
                 xhr.open('POST', url, true);
                 // Give slow servers enough time, but keep each chunk small on tunnels so we don't hit proxy idle timeouts.
-                xhr.timeout = isTunnelHost ? 600000 : 900000; // 10m on tunnels, 15m otherwise
+                // Give slow servers enough time. Keep chunks small to avoid long request times.
+                xhr.timeout = isTunnelHost ? 600000 : 1800000; // 10m on tunnels, 30m otherwise
                 xhr.setRequestHeader('X-CSRFToken', token);
                 xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
 

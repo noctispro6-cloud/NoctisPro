@@ -1,5 +1,9 @@
 
 // DICOM Loading Fix
+//
+// NOTE:
+// This file is included globally by `templates/dicom_viewer/base.html`.
+// It must be safe on ALL viewer variants and must not point to non-existent endpoints.
 (function() {
     'use strict';
     
@@ -13,7 +17,10 @@
             clearErrorMessages();
             
             // Make request with proper headers
-            const response = await fetch(`/dicom-viewer/api/image/${imageId}/`, {
+            //
+            // Use the supported endpoint that returns a browser-renderable PNG data URL + image_info.
+            // If the caller needs custom WW/WL/invert, they should call the endpoint directly with query params.
+            const response = await fetch(`/dicom-viewer/api/image/${imageId}/display/`, {
                 method: 'GET',
                 headers: {
                     'Accept': 'application/json',
@@ -32,10 +39,19 @@
                 throw new Error(data.error);
             }
             
-            // Update image display
+            // Update image display (best-effort across templates)
             if (data.image_data) {
-                updateImageDisplay(data);
-                updateImageInfo(data);
+                // Some templates expose `updateImageDisplay()` with no args.
+                // Others expect you to set `#dicomImage.src` yourself.
+                const imgEl = document.getElementById('dicomImage');
+                if (imgEl && typeof data.image_data === 'string') {
+                    imgEl.decoding = 'async';
+                    imgEl.src = data.image_data;
+                }
+                // If the page defines richer hooks, use them.
+                try {
+                    if (typeof window.updateImageInfo === 'function') window.updateImageInfo(data.image_info || data);
+                } catch (_) {}
             } else {
                 throw new Error('No image data received');
             }
@@ -117,9 +133,8 @@
         return errorDiv;
     }
     
-    // Override existing loading functions
-    if (typeof loadDicomImage !== 'undefined') {
-        window.loadDicomImage = window.loadDicomImageEnhanced;
-    }
+    // Do NOT aggressively override unknown global functions.
+    // Older templates may implement their own `loadDicomImage` with different semantics.
+    // If a page wants this enhanced loader, it should call `loadDicomImageEnhanced` directly.
     
 })();

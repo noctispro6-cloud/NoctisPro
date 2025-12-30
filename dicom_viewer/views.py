@@ -621,19 +621,36 @@ def api_image_data(request, image_id):
     pixel_array = None
 
     # Read DICOM dataset (prefer storage-safe open over filesystem path).
-    try:
-        if not image.file_path:
-            raise FileNotFoundError("Image file_path is missing")
-        with image.file_path.open('rb') as f:
-            # Strict read first to avoid treating random binaries as DICOM.
-            ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
-    except Exception as e:
-        warnings['dicom_read_error'] = str(e)
-        # As a fallback (some environments store MEDIA_ROOT locally and some DICOMs are slightly non-conformant),
-        # try a forced read using a local path if available.
+    #
+    # IMPORTANT:
+    # - Many exports are valid DICOM but not Part-10 (no "DICM" preamble). `force=False` can fail.
+    # - Some storage backends do not provide `.path`. We must support `force=True` on the opened stream.
+    if not image.file_path:
+        warnings['dicom_read_error'] = "Image file_path is missing"
+        ds = None
+    else:
+        try:
+            with image.file_path.open('rb') as f:
+                try:
+                    # Strict read first to avoid treating random binaries as DICOM.
+                    ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
+                except Exception as e_strict:
+                    warnings['dicom_read_error'] = str(e_strict)
+                    try:
+                        f.seek(0)
+                    except Exception:
+                        pass
+                    ds = pydicom.dcmread(f, stop_before_pixels=False, force=True)
+                    warnings['dicom_read_forced'] = True
+        except Exception as e_open:
+            warnings['dicom_open_error'] = str(e_open)
+            ds = None
+    # Last resort: forced read via local path (only for local FS storage)
+    if ds is None:
         try:
             if image.file_path and hasattr(image.file_path, 'path'):
                 ds = pydicom.dcmread(image.file_path.path, stop_before_pixels=False, force=True)
+                warnings['dicom_read_forced_path'] = True
         except Exception as e2:
             warnings['dicom_read_error_fallback'] = str(e2)
             ds = None
@@ -1352,17 +1369,39 @@ def api_dicom_image_display(request, image_id):
 
         # Read DICOM file (best-effort).
         # Prefer storage-safe access (works with local FS, S3, etc.). Fall back to local path if available.
+        #
+        # IMPORTANT:
+        # Many PACS exports contain valid DICOM objects without a Part-10 header/preamble ("DICM").
+        # In those cases, `force=False` can fail even though the bytes are valid DICOM. Also, some
+        # storage backends (S3, etc.) do not provide a local `.path`, so we must support a second
+        # attempt with `force=True` using the same file-like object.
         ds = None
-        try:
-            if not image.file_path:
-                raise FileNotFoundError("Image file_path is missing")
-            with image.file_path.open('rb') as f:
-                ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
-        except Exception as e:
-            warnings['dicom_read_error'] = str(e)
+        if not image.file_path:
+            warnings['dicom_read_error'] = "Image file_path is missing"
+        else:
+            # 1) Try strict read (force=False)
+            try:
+                with image.file_path.open('rb') as f:
+                    try:
+                        ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
+                    except Exception as e_strict:
+                        warnings['dicom_read_error'] = str(e_strict)
+                        # 2) Retry forced read on the same storage-backed stream
+                        try:
+                            f.seek(0)
+                        except Exception:
+                            pass
+                        ds = pydicom.dcmread(f, stop_before_pixels=False, force=True)
+                        warnings['dicom_read_forced'] = True
+            except Exception as e_open:
+                warnings['dicom_open_error'] = str(e_open)
+                ds = None
+        # 3) Last resort: local-path forced read (only for local FileSystemStorage-like backends)
+        if ds is None:
             try:
                 if image.file_path and hasattr(image.file_path, 'path'):
                     ds = pydicom.dcmread(image.file_path.path, stop_before_pixels=False, force=True)
+                    warnings['dicom_read_forced_path'] = True
             except Exception as e2:
                 warnings['dicom_read_error_fallback'] = str(e2)
                 ds = None
@@ -1508,6 +1547,19 @@ def api_dicom_image_display(request, image_id):
             except Exception:
                 return fallback
         
+        # Institution: prefer DICOM tag, else fall back to facility name (if available)
+        institution_name = ''
+        try:
+            if ds is not None:
+                institution_name = str(getattr(ds, 'InstitutionName', '') or '').strip()
+        except Exception:
+            institution_name = ''
+        if not institution_name:
+            try:
+                institution_name = str(getattr(getattr(image.series.study, 'facility', None), 'name', '') or '').strip()
+            except Exception:
+                institution_name = ''
+
         image_info = {
             'id': image.id,
             'instance_number': getattr(image, 'instance_number', None),
@@ -1521,6 +1573,7 @@ def api_dicom_image_display(request, image_id):
             'series_description': getattr(ds, 'SeriesDescription', '') if ds is not None else getattr(image.series, 'series_description', ''),
             'patient_name': str(getattr(ds, 'PatientName', '')) if ds is not None else (getattr(image.series.study.patient, 'full_name', '') if hasattr(image.series.study, 'patient') else ''),
             'study_date': str(getattr(ds, 'StudyDate', '')) if ds is not None else (getattr(image.series.study, 'study_date', '') or ''),
+            'institution': institution_name,
             'bits_allocated': _jsonify_dicom_value(getattr(ds, 'BitsAllocated', 16)) if ds is not None else 16,
             'bits_stored': _jsonify_dicom_value(getattr(ds, 'BitsStored', 16)) if ds is not None else 16,
             'photometric_interpretation': _jsonify_dicom_value(getattr(ds, 'PhotometricInterpretation', '')) if ds is not None else '',
@@ -1554,6 +1607,7 @@ def api_dicom_image_display(request, image_id):
                 'series_description': getattr(image.series, 'series_description', ''),
                 'patient_name': getattr(image.series.study.patient, 'full_name', '') if hasattr(image.series.study, 'patient') else '',
                 'study_date': str(getattr(image.series.study, 'study_date', '')),
+                'institution': str(getattr(getattr(image.series.study, 'facility', None), 'name', '') or '').strip(),
                 'bits_allocated': 16,
                 'bits_stored': 16,
                 'photometric_interpretation': ''
@@ -2987,14 +3041,24 @@ def web_dicom_image(request, image_id):
     invert = (inv_param or '').lower() == 'true'
     try:
         # Prefer storage-safe open (works with local FS and remote storage backends).
+        # Try strict read first; retry with force=True on the same opened stream for non-Part10 DICOM.
         ds = None
+        if not image.file_path:
+            return HttpResponse(status=500)
         try:
-            if not image.file_path:
-                raise FileNotFoundError("Image file_path is missing")
             with image.file_path.open('rb') as f:
-                ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
+                try:
+                    ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
+                except Exception:
+                    try:
+                        f.seek(0)
+                    except Exception:
+                        pass
+                    ds = pydicom.dcmread(f, stop_before_pixels=False, force=True)
         except Exception:
-            # Fall back to local path if available
+            ds = None
+        # Fall back to local path if available
+        if ds is None:
             if image.file_path and hasattr(image.file_path, 'path'):
                 ds = pydicom.dcmread(image.file_path.path, stop_before_pixels=False, force=True)
             else:

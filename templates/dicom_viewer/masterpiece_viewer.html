@@ -1621,12 +1621,43 @@
         }
 
         function resizeCanvas() {
+            if (!canvas) return;
             const container = canvas.parentElement;
+            if (!container) return;
+
             const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-            canvas.width = Math.floor(container.clientWidth * dpr);
-            canvas.height = Math.floor(container.clientHeight * dpr);
-            canvas.style.width = container.clientWidth + 'px';
-            canvas.style.height = container.clientHeight + 'px';
+
+            // Some view transitions temporarily hide the container (display:none),
+            // which makes clientWidth/clientHeight become 0 and permanently shrinks the canvas.
+            // Be resilient: fall back to the viewport size and retry on the next frame.
+            let cw = container.clientWidth;
+            let ch = container.clientHeight;
+
+            if (!cw || !ch) {
+                const r = container.getBoundingClientRect();
+                cw = cw || Math.floor(r.width);
+                ch = ch || Math.floor(r.height);
+            }
+
+            if (!cw || !ch) {
+                const vp = document.querySelector('.viewport');
+                if (vp) {
+                    cw = cw || vp.clientWidth;
+                    ch = ch || vp.clientHeight;
+                }
+            }
+
+            if (!cw || !ch) {
+                requestAnimationFrame(() => {
+                    try { resizeCanvas(); } catch (e) {}
+                });
+                return;
+            }
+
+            canvas.width = Math.max(2, Math.floor(cw * dpr));
+            canvas.height = Math.max(2, Math.floor(ch * dpr));
+            canvas.style.width = cw + 'px';
+            canvas.style.height = ch + 'px';
             
             // Resize MPR canvases
             Object.values(mprCanvases).forEach(c => {
@@ -1868,6 +1899,12 @@
                 autoRotate = false;
                 stopBoneAnimationLoop();
                 _updateMPRCrosshairRotateUI();
+                // Coming back from MPR can leave the single-view canvas sized to 0 if the container
+                // was hidden during a resize/layout pass. Ensure it's non-zero before redrawing.
+                requestAnimationFrame(() => {
+                    try { resizeCanvas(); } catch (e) {}
+                    try { redrawCurrentImage(); } catch (e) {}
+                });
             }
         }
 
@@ -2312,6 +2349,13 @@
 
         function renderDicomImage(imageData) {
             if (!imageData || !imageData.pixel_data || !imageData.columns || !imageData.rows) return;
+
+            // Defensive: ensure the main canvas has a real size before drawing.
+            // If the container was hidden during a layout pass, the canvas can get stuck at 0x0.
+            if (!canvas || canvas.width <= 2 || canvas.height <= 2) {
+                try { resizeCanvas(); } catch (e) {}
+                if (!canvas || canvas.width <= 2 || canvas.height <= 2) return;
+            }
 
             const imgW = imageData.columns;
             const imgH = imageData.rows;

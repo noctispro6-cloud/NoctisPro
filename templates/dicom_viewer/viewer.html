@@ -1468,6 +1468,11 @@
             counts: { axial: 0, sagittal: 0, coronal: 0 },
             sliceIndex: { axial: 0, sagittal: 0, coronal: 0 }
         };
+        // MPR crosshair is stored in *volume index space* so it stays consistent across planes.
+        // volume dims: z = axial count, y = coronal count, x = sagittal count
+        const _mprCrosshairVol = { x: 0, y: 0, z: 0 }; // integers (voxel indices)
+        // Trackpad wheels can emit many tiny deltas; accumulate to step slices predictably.
+        const _mprWheelAcc = { axial: 0, sagittal: 0, coronal: 0 };
         let mprMeasurements = []; // { plane, sliceIndex, start:{x,y}, end:{x,y}, distance, timestamp }
         let mprAnnotations = [];  // { plane, sliceIndex, x,y,text,timestamp }
         let mprRois = [];         // { plane, sliceIndex, cx,cy,rx,ry, stats?, timestamp }
@@ -2785,6 +2790,11 @@
                         // Non-fatal; keep mid-slice.
                     }
 
+                    // Initialize crosshair in volume index space so scroll/pan/zoom keep it consistent.
+                    _mprCrosshairVol.x = Number(_mprState.sliceIndex?.sagittal || 0);
+                    _mprCrosshairVol.y = Number(_mprState.sliceIndex?.coronal || 0);
+                    _mprCrosshairVol.z = Number(_mprState.sliceIndex?.axial || 0);
+
                     // Switch to MPR mode and show views
                     document.getElementById('singleView').style.display = 'none';
                     document.getElementById('mprView').style.display = 'grid';
@@ -2816,6 +2826,7 @@
                     enableMPRCrosshairs();
                     setActivePlane('axial');
                     applyTransform();
+                    _mprRenderCrosshairAll();
                     // Draw overlays for all planes initially
                     updateMprOverlays('axial');
                     updateMprOverlays('sagittal');
@@ -2944,24 +2955,116 @@
             }
 
             try {
-                const url = `/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(idx)}&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
-                const resp = await fetch(url, { credentials: 'same-origin' });
-                if (!resp.ok) return false;
-                const data = await resp.json();
                 const imgEl = document.getElementById(_mprPlaneToImgId(plane));
-                if (imgEl && data?.image) {
-                    const v = String(data.image || '');
-                    imgEl.decoding = 'async';
-                    imgEl.src = v.startsWith('data:image') ? v : `data:image/png;base64,${v}`;
-                }
+                if (!imgEl) return false;
+
+                // Prefer binary PNG endpoint for responsiveness during scrolling (no base64 JSON overhead).
+                const qs = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}&quality=high`;
+                const url = `/dicom-viewer/api/mpr-slice/${encodeURIComponent(currentSeries.id)}/${encodeURIComponent(plane)}/${encodeURIComponent(idx)}/?${qs}`;
+
+                // Update overlays/crosshair after the new image is decoded.
+                imgEl.addEventListener('load', () => {
+                    try {
+                        updateMprOverlays(plane);
+                        _mprRenderCrosshairAll();
+                        if (_isMprVisible() && activeMprPlane === plane) applyTransform();
+                    } catch (_) {}
+                }, { once: true });
+
+                imgEl.decoding = 'async';
+                imgEl.src = url;
             } catch (e) {
                 return false;
-            } finally {
-                updateMprOverlays(plane);
-                // re-apply transform in case active plane changed size
-                if (_isMprVisible() && activeMprPlane === plane) applyTransform();
             }
             return true;
+        }
+
+        function _mprGetVolDims() {
+            return {
+                z: Number(_mprState.counts?.axial || 0),
+                y: Number(_mprState.counts?.coronal || 0),
+                x: Number(_mprState.counts?.sagittal || 0),
+            };
+        }
+
+        function _mprClampVol(v) {
+            const d = _mprGetVolDims();
+            const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
+            return {
+                x: clamp(v.x, 0, Math.max(0, d.x - 1)),
+                y: clamp(v.y, 0, Math.max(0, d.y - 1)),
+                z: clamp(v.z, 0, Math.max(0, d.z - 1)),
+            };
+        }
+
+        function _mprPlaneImagePtToVol(plane, ptImg) {
+            // ptImg is in the plane image pixel space (naturalWidth/naturalHeight pixels)
+            const d = _mprGetVolDims();
+            if (!ptImg || !Number.isFinite(ptImg.x) || !Number.isFinite(ptImg.y)) return null;
+            const rint = (n) => Math.round(n);
+            const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, rint(n)));
+
+            if (plane === 'axial') {
+                return _mprClampVol({
+                    x: clamp(ptImg.x, 0, d.x - 1),
+                    y: clamp(ptImg.y, 0, d.y - 1),
+                    z: Number(_mprState.sliceIndex?.axial || 0),
+                });
+            }
+            if (plane === 'sagittal') {
+                // Display is flipped vertically (z axis): row = (d.z - 1 - z), col = y
+                const y = clamp(ptImg.x, 0, d.y - 1);
+                const z = clamp((d.z - 1) - ptImg.y, 0, d.z - 1);
+                return _mprClampVol({
+                    x: Number(_mprState.sliceIndex?.sagittal || 0),
+                    y,
+                    z,
+                });
+            }
+            if (plane === 'coronal') {
+                // Display is flipped vertically (z axis): row = (d.z - 1 - z), col = x
+                const x = clamp(ptImg.x, 0, d.x - 1);
+                const z = clamp((d.z - 1) - ptImg.y, 0, d.z - 1);
+                return _mprClampVol({
+                    x,
+                    y: Number(_mprState.sliceIndex?.coronal || 0),
+                    z,
+                });
+            }
+            return null;
+        }
+
+        function _mprVolToPlaneImagePt(plane, vol) {
+            const d = _mprGetVolDims();
+            const v = _mprClampVol(vol);
+            if (plane === 'axial') return { x: v.x, y: v.y };
+            if (plane === 'sagittal') return { x: v.y, y: (d.z - 1) - v.z };
+            if (plane === 'coronal') return { x: v.x, y: (d.z - 1) - v.z };
+            return null;
+        }
+
+        function _mprRenderCrosshairPlane(plane) {
+            if (!showCrosshair || !_isMprVisible()) return;
+            if (!(plane === 'axial' || plane === 'sagittal' || plane === 'coronal')) return;
+            const viewportEl = _mprGetViewportEl(plane);
+            const crosshairId = `crosshair${plane.charAt(0).toUpperCase() + plane.slice(1)}`;
+            const crosshair = document.getElementById(crosshairId);
+            if (!viewportEl || !crosshair) return;
+
+            const ptImg = _mprVolToPlaneImagePt(plane, _mprCrosshairVol);
+            const pt = ptImg ? _mprImagePxToOverlayPoint(ptImg, plane) : null;
+            if (!pt) return;
+
+            const hLine = crosshair.querySelector('.crosshair-line-h-mpr');
+            const vLine = crosshair.querySelector('.crosshair-line-v-mpr');
+            if (hLine) hLine.style.top = `${pt.y}px`;
+            if (vLine) vLine.style.left = `${pt.x}px`;
+        }
+
+        function _mprRenderCrosshairAll() {
+            _mprRenderCrosshairPlane('axial');
+            _mprRenderCrosshairPlane('sagittal');
+            _mprRenderCrosshairPlane('coronal');
         }
 
         function updateMprOverlays(plane) {
@@ -3801,6 +3904,7 @@
 
         // Missing functions that buttons are calling - URGENT FIX
         function setActivePlane(plane) {
+            const silent = arguments.length > 1 ? !!arguments[1] : false;
             activeMprPlane = plane;
             // Update active plane visually
             document.querySelectorAll('.mpr-viewport').forEach(vp => {
@@ -3821,8 +3925,10 @@
             if (_isMprVisible()) {
                 applyTransform();
             }
-            
-            showToast(`Switched to ${plane} plane`, 'info');
+
+            if (!silent) {
+                showToast(`Switched to ${plane} plane`, 'info');
+            }
         }
 
         function updateCrosshairOverlay(plane) {
@@ -3978,8 +4084,14 @@
             crosshairs.forEach(id => {
                 const crosshair = document.getElementById(id);
                 if (crosshair) {
-                    crosshair.classList.add('active');
-                    crosshair.style.display = 'block';
+                    // Respect the global crosshair toggle; don't force-enable.
+                    if (showCrosshair) {
+                        crosshair.classList.add('active');
+                        crosshair.style.display = 'block';
+                    } else {
+                        crosshair.classList.remove('active');
+                        crosshair.style.display = 'none';
+                    }
                 }
             });
             
@@ -4026,7 +4138,7 @@
                 // MPR zoom/pan interactions (server-rendered images, client-side transform)
                 viewport.addEventListener('wheel', function(e) {
                     e.preventDefault();
-                    setActivePlane(plane);
+                    setActivePlane(plane, true);
                     // Default: wheel scrolls slices. Ctrl+wheel (or Zoom tool) zooms.
                     const direction = e.deltaY > 0 ? 1 : -1;
                     if (e.ctrlKey || activeTool === 'zoom') {
@@ -4035,8 +4147,23 @@
                     } else {
                         const counts = Number(_mprState.counts?.[plane] || 0);
                         if (counts > 0) {
-                            const next = (Number(_mprState.sliceIndex?.[plane] || 0) + direction);
+                            // Accumulate wheel deltas into discrete slice steps (trackpads emit tiny deltas).
+                            const threshold = 80;
+                            _mprWheelAcc[plane] = Number(_mprWheelAcc[plane] || 0) + Number(e.deltaY || 0);
+                            let steps = 0;
+                            while (Math.abs(_mprWheelAcc[plane]) >= threshold) {
+                                steps += (_mprWheelAcc[plane] > 0 ? 1 : -1);
+                                _mprWheelAcc[plane] += (_mprWheelAcc[plane] > 0 ? -threshold : threshold);
+                            }
+                            if (steps === 0) return;
+
+                            const next = (Number(_mprState.sliceIndex?.[plane] || 0) + steps);
                             _mprSetSlice(plane, next, { clearRoiAll: true });
+                            // Keep volume crosshair consistent with the newly selected slice.
+                            if (plane === 'axial') _mprCrosshairVol.z = Number(_mprState.sliceIndex?.axial || 0);
+                            if (plane === 'sagittal') _mprCrosshairVol.x = Number(_mprState.sliceIndex?.sagittal || 0);
+                            if (plane === 'coronal') _mprCrosshairVol.y = Number(_mprState.sliceIndex?.coronal || 0);
+                            _mprRenderCrosshairAll();
                         }
                     }
                 }, { passive: false });
@@ -4188,59 +4315,54 @@
         }
 
         function updateMPRCrosshairPosition(viewportEl, plane, clientX, clientY, lock = false) {
-            const rect = _mprViewportRectCache.get(viewportEl) || viewportEl.getBoundingClientRect();
-            _mprViewportRectCache.set(viewportEl, rect);
-            const x = ((clientX - rect.left) / rect.width) * 100;
-            const y = ((clientY - rect.top) / rect.height) * 100;
-            
-            // Update crosshair position
+            if (!showCrosshair || !_isMprVisible()) return;
+
+            // Convert pointer to image pixel coordinates (accounts for current CSS transform).
+            const fakeEvt = { clientX, clientY };
+            const ptImg = _mprViewportPointToImagePx(fakeEvt, plane);
+            const vol = _mprPlaneImagePtToVol(plane, ptImg);
+            if (!vol) return;
+
+            // Always render the active plane crosshair at pointer position.
             const crosshairId = `crosshair${plane.charAt(0).toUpperCase() + plane.slice(1)}`;
             const crosshair = document.getElementById(crosshairId);
-            
-            if (crosshair) {
+            const pt = ptImg ? _mprImagePxToOverlayPoint(ptImg, plane) : null;
+            if (crosshair && pt) {
                 const hLine = crosshair.querySelector('.crosshair-line-h-mpr');
                 const vLine = crosshair.querySelector('.crosshair-line-v-mpr');
-                
-                // Round to reduce style churn during fast mouse moves.
-                const yy = `${Math.max(0, Math.min(100, y)).toFixed(2)}%`;
-                const xx = `${Math.max(0, Math.min(100, x)).toFixed(2)}%`;
-                if (hLine && hLine.style.top !== yy) hLine.style.top = yy;
-                if (vLine && vLine.style.left !== xx) vLine.style.left = xx;
+                if (hLine) hLine.style.top = `${pt.y}px`;
+                if (vLine) vLine.style.left = `${pt.x}px`;
             }
-            
-            if (lock) {
-                // Update all other crosshairs for orthogonal sync
-                syncOrthogonalCrosshairs(plane, x, y);
-            }
-        }
 
-        function syncOrthogonalCrosshairs(activePlane, x, y) {
-            const planes = ['axial', 'sagittal', 'coronal'];
-            
-            planes.forEach(plane => {
-                if (plane === activePlane) return;
-                
-                const crosshairId = `crosshair${plane.charAt(0).toUpperCase() + plane.slice(1)}`;
-                const crosshair = document.getElementById(crosshairId);
-                
-                if (crosshair) {
-                    const hLine = crosshair.querySelector('.crosshair-line-h-mpr');
-                    const vLine = crosshair.querySelector('.crosshair-line-v-mpr');
-                    
-                    // Sync crosshair positions based on orthogonal relationships
-                    if (hLine && vLine) {
-                        if (plane === 'axial' && activePlane === 'sagittal') {
-                            hLine.style.top = `${y}%`;
-                        } else if (plane === 'axial' && activePlane === 'coronal') {
-                            vLine.style.left = `${x}%`;
-                        } else if (plane === 'sagittal' && activePlane === 'axial') {
-                            hLine.style.top = `${y}%`;
-                        } else if (plane === 'coronal' && activePlane === 'axial') {
-                            vLine.style.left = `${x}%`;
-                        }
-                    }
-                }
-            });
+            if (!lock) return;
+
+            // Lock = pick the intersection point: update volume coord, update orthogonal slices if needed,
+            // and sync all crosshairs.
+            const nextVol = _mprClampVol(vol);
+            const prev = { ..._mprCrosshairVol };
+            _mprCrosshairVol.x = nextVol.x;
+            _mprCrosshairVol.y = nextVol.y;
+            _mprCrosshairVol.z = nextVol.z;
+
+            // Update slice indices (z/x/y respectively)
+            const needAxial = (Number(_mprState.sliceIndex?.axial || 0) !== nextVol.z);
+            const needSag = (Number(_mprState.sliceIndex?.sagittal || 0) !== nextVol.x);
+            const needCor = (Number(_mprState.sliceIndex?.coronal || 0) !== nextVol.y);
+            _mprState.sliceIndex.axial = nextVol.z;
+            _mprState.sliceIndex.sagittal = nextVol.x;
+            _mprState.sliceIndex.coronal = nextVol.y;
+
+            // Reload only planes whose slice index changed.
+            if (needAxial) _mprSetSlice('axial', nextVol.z, { clearRoiAll: false });
+            if (needSag) _mprSetSlice('sagittal', nextVol.x, { clearRoiAll: false });
+            if (needCor) _mprSetSlice('coronal', nextVol.y, { clearRoiAll: false });
+
+            // Render crosshair overlays (including z-flip in sag/cor).
+            _mprRenderCrosshairAll();
+
+            // Update the readout label if present.
+            const pos = document.getElementById('crosshairPosition');
+            if (pos) pos.textContent = `X:${nextVol.x} Y:${nextVol.y} Z:${nextVol.z}`;
         }
 
         // Critical missing functions for button functionality

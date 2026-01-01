@@ -696,6 +696,10 @@ def api_image_data(request, image_id):
             import numpy as _np
 
             arr = pixel_array
+            # Some exports decode as (rows, cols, 1) instead of (rows, cols)
+            # or as (1, rows, cols, 1) for a single-frame/single-sample image.
+            if getattr(arr, "ndim", 0) == 4 and arr.shape[0] == 1:
+                arr = arr[0]
             if getattr(arr, "ndim", 0) == 3:
                 # (1, rows, cols) -> (rows, cols)
                 if arr.shape[0] == 1:
@@ -703,6 +707,9 @@ def api_image_data(request, image_id):
                 # (frames, rows, cols) -> use first frame (viewer is single-slice)
                 elif arr.shape[0] > 1 and arr.shape[1] > 1 and arr.shape[2] > 1:
                     arr = arr[0]
+            # (rows, cols, 1) -> (rows, cols)
+            if getattr(arr, "ndim", 0) == 3 and arr.shape[-1] == 1:
+                arr = arr[..., 0]
             # (rows, cols, channels) -> grayscale
             if getattr(arr, "ndim", 0) == 3 and arr.shape[-1] in (3, 4):
                 arr = arr[..., :3].mean(axis=-1)
@@ -722,7 +729,7 @@ def api_image_data(request, image_id):
         except Exception:
             pass
 
-    # Window defaults (best-effort)
+    # Window defaults (best-effort). For DX/CR, we want sensible non-CT defaults.
     def _first_or_none(v):
         try:
             if hasattr(v, '__iter__') and not isinstance(v, str):
@@ -734,19 +741,35 @@ def api_image_data(request, image_id):
     window_width = _first_or_none(getattr(ds, 'WindowWidth', None)) if ds is not None else None
     window_center = _first_or_none(getattr(ds, 'WindowCenter', None)) if ds is not None else None
 
+    modality_code = str(getattr(ds, 'Modality', '') or '').upper() if ds is not None else ''
+
     if (window_width is None or window_center is None) and pixel_array is not None:
         try:
-            # Derive window using robust percentiles (fast enough for a single slice)
-            flat = pixel_array.astype(np.float32).flatten()
-            p2 = float(np.percentile(flat, 2))
-            p98 = float(np.percentile(flat, 98))
-            ww = max(1.0, p98 - p2)
-            wl = (p98 + p2) / 2.0
+            # Prefer our medical-tuned window estimator when available.
+            try:
+                processor = DicomProcessor()
+                ww, wl = processor.auto_window_from_data(pixel_array, percentile_range=(2, 98), modality=(modality_code or 'CT'))
+            except Exception:
+                # Derive window using robust percentiles (fast enough for a single slice)
+                flat = pixel_array.astype(np.float32).flatten()
+                p2 = float(np.percentile(flat, 2))
+                p98 = float(np.percentile(flat, 98))
+                ww = max(1.0, p98 - p2)
+                wl = (p98 + p2) / 2.0
+
+            # DX/CR often look "blank" with CT-ish defaults; ensure a usable WW/WL floor.
+            if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG'):
+                ww = max(float(ww), 800.0)
             window_width = window_width if window_width is not None else ww
             window_center = window_center if window_center is not None else wl
         except Exception:
-            window_width = window_width if window_width is not None else 400.0
-            window_center = window_center if window_center is not None else 40.0
+            # Last-resort defaults
+            if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG'):
+                window_width = window_width if window_width is not None else 2500.0
+                window_center = window_center if window_center is not None else 1200.0
+            else:
+                window_width = window_width if window_width is not None else 400.0
+                window_center = window_center if window_center is not None else 40.0
 
     # Include pixel payload for canvas renderer
     if pixel_array is not None:
@@ -802,8 +825,9 @@ def api_image_data(request, image_id):
             'rows': int(getattr(ds, 'Rows', 0) or 0) if ds is not None else 0,
             'columns': int(getattr(ds, 'Columns', 0) or 0) if ds is not None else 0,
             'pixel_data': None,
-            'window_width': float(window_width) if window_width is not None else 400.0,
-            'window_center': float(window_center) if window_center is not None else 40.0,
+            # Even without pixels, expose sensible defaults so the server-render fallback picks good W/L.
+            'window_width': float(window_width) if window_width is not None else (2500.0 if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG') else 400.0),
+            'window_center': float(window_center) if window_center is not None else (1200.0 if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG') else 40.0),
         })
 
     if pixel_decode_error or warnings:
@@ -1552,6 +1576,30 @@ def api_dicom_image_display(request, image_id):
                 pixel_array = pixel_array * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
             except Exception:
                 pass
+
+        # Normalize to a 2D grayscale frame (handles DX/CR that decode as (rows, cols, 1))
+        if pixel_array is not None:
+            try:
+                arr = pixel_array
+                if getattr(arr, "ndim", 0) == 4 and arr.shape[0] == 1:
+                    arr = arr[0]
+                if getattr(arr, "ndim", 0) == 3:
+                    if arr.shape[0] == 1:
+                        arr = arr[0]
+                    elif arr.shape[0] > 1 and arr.shape[1] > 1 and arr.shape[2] > 1:
+                        arr = arr[0]
+                if getattr(arr, "ndim", 0) == 3 and arr.shape[-1] == 1:
+                    arr = arr[..., 0]
+                if getattr(arr, "ndim", 0) == 3 and arr.shape[-1] in (3, 4):
+                    arr = arr[..., :3].mean(axis=-1)
+                if getattr(arr, "ndim", 0) != 2:
+                    warnings["pixel_shape"] = f"Unsupported pixel array shape: {getattr(pixel_array, 'shape', None)}"
+                    pixel_array = None
+                else:
+                    pixel_array = np.asarray(arr, dtype=np.float32)
+            except Exception as e:
+                warnings["pixel_shape_error"] = str(e)
+                pixel_array = None
         
         # Enhanced window derivation with medical imaging optimization
         def derive_window(arr, fallback=(400.0, 40.0)):
@@ -1844,6 +1892,9 @@ def api_dicom_image_png(request, image_id):
                     arr = arr[0]
                 elif arr.shape[0] > 1 and arr.shape[1] > 1 and arr.shape[2] > 1:
                     arr = arr[0]
+            # (rows, cols, 1) -> (rows, cols)
+            if getattr(arr, "ndim", 0) == 3 and arr.shape[-1] == 1:
+                arr = arr[..., 0]
             if getattr(arr, "ndim", 0) == 3 and arr.shape[-1] in (3, 4):
                 arr = arr[..., :3].mean(axis=-1)
             if getattr(arr, "ndim", 0) != 2:

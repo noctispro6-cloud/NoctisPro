@@ -1183,7 +1183,178 @@ document.addEventListener('DOMContentLoaded', function() {
         updateProgress(0);
     }
 
+    // -------- Background upload (Service Worker + IndexedDB) --------
+    const BG_UPLOAD = {
+        supported: ('serviceWorker' in navigator) && ('indexedDB' in window),
+        enabled: true,
+        swReady: false,
+    };
+
+    async function registerBackgroundUploader() {
+        if (!BG_UPLOAD.supported) return;
+        try {
+            const reg = await navigator.serviceWorker.register('/worklist/sw-dicom-upload.js', { scope: '/worklist/' });
+            BG_UPLOAD.swReady = true;
+            // Best-effort background sync registration (not supported everywhere)
+            try {
+                if (reg && reg.sync && typeof reg.sync.register === 'function') {
+                    await reg.sync.register('noctis-dicom-upload');
+                }
+            } catch (_) {}
+            // Ask SW to process any pending sessions (resume after navigation)
+            try {
+                if (navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.controller.postMessage({ type: 'PROCESS_PENDING' });
+                }
+            } catch (_) {}
+        } catch (e) {
+            BG_UPLOAD.swReady = false;
+        }
+    }
+
+    function _idbOpen() {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open('noctis_dicom_uploads_v1', 1);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains('sessions')) db.createObjectStore('sessions', { keyPath: 'id' });
+                if (!db.objectStoreNames.contains('files')) {
+                    const s = db.createObjectStore('files', { keyPath: 'key' });
+                    s.createIndex('by_session', 'sessionId', { unique: false });
+                    s.createIndex('by_session_index', ['sessionId', 'index'], { unique: true });
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    function _txDone(tx) {
+        return new Promise((resolve, reject) => {
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+            tx.onabort = () => reject(tx.error || new Error('transaction aborted'));
+        });
+    }
+
+    async function enqueueBackgroundUpload() {
+        if (!BG_UPLOAD.supported || !BG_UPLOAD.swReady) return false;
+        if (!selectedFiles || !selectedFiles.length) return false;
+
+        const url = '{% url "worklist:upload_study" %}';
+        const totalFiles = selectedFiles.length;
+        const totalBytes = selectedFiles.reduce((s, f) => s + (f.size || 0), 0);
+
+        // UI state
+        isUploading = true;
+        dropZone.classList.add('uploading');
+        uploadBtn.disabled = true;
+        uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Queueing...';
+        progressSection.style.display = 'block';
+        updateProgress(0, `0 / ${totalFiles} images`, 'Saving to background queue...');
+
+        const sessionId = 'bg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+        const db = await _idbOpen();
+
+        // Save session + files
+        const session = {
+            id: sessionId,
+            url,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            status: 'pending',
+            nextIndex: 0,
+            totalFiles,
+            totalBytes,
+            uploadedFiles: 0,
+            uploadedBytes: 0,
+            studiesCreated: 0,
+            totalSeries: 0,
+            createdStudyIds: [],
+            errors: [],
+            options: {
+                priority: (priorityInput && priorityInput.value) ? priorityInput.value : 'normal',
+                clinical_info: (clinicalInfoInput && clinicalInfoInput.value) ? clinicalInfoInput.value : '',
+                facility_id: (facilitySelect && facilitySelect.value) ? facilitySelect.value : '',
+                assign_to_me: (assignToMe && assignToMe.checked) ? '1' : '0',
+            }
+        };
+        {
+            const tx = db.transaction(['sessions'], 'readwrite');
+            tx.objectStore('sessions').put(session);
+            await _txDone(tx);
+        }
+        // Store blobs in IDB; this enables resume after navigation.
+        for (let i = 0; i < selectedFiles.length; i++) {
+            const f = selectedFiles[i];
+            const tx = db.transaction(['files'], 'readwrite');
+            tx.objectStore('files').put({
+                key: `${sessionId}:${i}`,
+                sessionId,
+                index: i,
+                name: f.name || `image_${i}.dcm`,
+                type: f.type || 'application/dicom',
+                size: f.size || 0,
+                blob: f, // File is a Blob; storable in IndexedDB
+            });
+            await _txDone(tx);
+            const pct = Math.round(((i + 1) / totalFiles) * 100);
+            updateProgress(Math.min(99, pct), `${i + 1} / ${totalFiles} images`, 'Queued for background upload...');
+        }
+
+        uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Uploading in background...';
+        updateProgress(100, `0 / ${totalFiles} images`, 'Background upload started — you can leave this page.');
+
+        // Kick off worker immediately
+        try {
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({ type: 'START_UPLOAD', sessionId });
+            } else {
+                const reg = await navigator.serviceWorker.ready;
+                reg.active && reg.active.postMessage({ type: 'PROCESS_PENDING' });
+            }
+        } catch (_) {}
+
+        showNotification('Upload is running in the background. You can navigate away safely.', 'success');
+        return true;
+    }
+
+    // Listen for SW progress messages (works if you stay on the page; uploads still continue if you leave)
+    if (BG_UPLOAD.supported) {
+        navigator.serviceWorker?.addEventListener('message', (event) => {
+            const msg = event.data || {};
+            if (msg.type === 'UPLOAD_PROGRESS') {
+                const total = Number(msg.totalFiles || 0);
+                const done = Number(msg.uploadedFiles || 0);
+                const pct = total ? (done / total) * 100 : 0;
+                updateProgress(pct, `${done} / ${total} images`, `Background upload • Created ${msg.studiesCreated || 0} studies, ${msg.totalSeries || 0} series`);
+            }
+            if (msg.type === 'UPLOAD_STATUS' && msg.status === 'completed') {
+                progressSection.style.display = 'none';
+                uploadActions.style.display = 'none';
+                uploadSuccess.style.display = 'block';
+                showNotification('Background upload completed successfully.', 'success');
+            }
+            if (msg.type === 'UPLOAD_STATUS' && msg.status === 'failed') {
+                showNotification('Background upload failed: ' + (msg.error || 'Unknown error'), 'error');
+                resetUploadState();
+            }
+        });
+        // Fire-and-forget SW registration
+        registerBackgroundUploader();
+    }
+
     async function uploadFilesInChunks() {
+        // Prefer background mode if available (keeps working after navigation)
+        if (BG_UPLOAD.supported && BG_UPLOAD.swReady && BG_UPLOAD.enabled) {
+            try {
+                const started = await enqueueBackgroundUpload();
+                if (started) return;
+            } catch (e) {
+                // Fall back to direct upload below
+            }
+        }
+
         const url = '{% url "worklist:upload_study" %}';
         const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
         const totalFiles = selectedFiles.length;

@@ -125,9 +125,10 @@ class DicomImage(models.Model):
     instance_number = models.IntegerField()
     image_position = models.CharField(max_length=100, blank=True)
     slice_location = models.FloatField(null=True, blank=True)
-    file_path = models.FileField(upload_to='dicom/images/')
+    # DICOM paths include nested UIDs and can exceed Django's default 100 char FileField length.
+    file_path = models.FileField(upload_to='dicom/images/', max_length=512)
     file_size = models.BigIntegerField()
-    thumbnail = models.ImageField(upload_to='dicom/thumbnails/', null=True, blank=True)
+    thumbnail = models.ImageField(upload_to='dicom/thumbnails/', max_length=512, null=True, blank=True)
     processed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 

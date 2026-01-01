@@ -13,6 +13,30 @@ as_root() {
   fi
 }
 
+get_ngrok_https_url() {
+  # Best-effort: read the public HTTPS URL from the local ngrok API.
+  # Returns 0 and prints the URL if available; otherwise returns non-zero.
+  python3 - <<'PY'
+import json
+import sys
+import urllib.request
+
+try:
+    with urllib.request.urlopen("http://127.0.0.1:4040/api/tunnels", timeout=2) as resp:
+        data = json.load(resp)
+except Exception:
+    sys.exit(1)
+
+for t in (data.get("tunnels") or []):
+    u = (t.get("public_url") or "").strip()
+    if u.startswith("https://"):
+        print(u)
+        sys.exit(0)
+
+sys.exit(2)
+PY
+}
+
 read_env_kv() {
   # read_env_kv KEY /path/to/env -> prints value or empty
   local key="${1:?}" file="${2:?}" line
@@ -206,5 +230,22 @@ info "Done."
 info "Web:   http://localhost:${web_port}"
 info "DICOM: <server-ip>:${dicom_port} (AE: NOCTIS_SCP)"
 if [[ "$want_ngrok" == "1" ]]; then
-  info "Ngrok: check: docker compose logs --tail=200 ngrok"
+  # ngrok allocates the public URL asynchronously; poll the local API briefly.
+  ngrok_url=""
+  for _ in $(seq 1 60); do
+    ngrok_url="$(get_ngrok_https_url 2>/dev/null || true)"
+    if [[ -n "$ngrok_url" ]]; then
+      break
+    fi
+    sleep 0.5
+  done
+
+  if [[ -n "$ngrok_url" ]]; then
+    printf '%s' "$ngrok_url" > .tunnel-url 2>/dev/null || true
+    info "Ngrok: ${ngrok_url}"
+    info "Ngrok API: http://localhost:4040"
+  else
+    info "Ngrok: (starting) check: docker compose logs --tail=200 ngrok"
+    info "Ngrok API: http://localhost:4040 (should show the public URL once ready)"
+  fi
 fi

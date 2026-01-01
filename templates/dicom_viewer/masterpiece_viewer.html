@@ -2502,8 +2502,29 @@
                 if (!canvas || canvas.width <= 2 || canvas.height <= 2) return;
             }
 
-            const imgW = imageData.columns;
-            const imgH = imageData.rows;
+            const imgW = Number(imageData.columns) || 0;
+            const imgH = Number(imageData.rows) || 0;
+            if (!imgW || !imgH) return;
+
+            // Critical safety check:
+            // If the pixel buffer doesn't match rows*cols, ImageData construction can throw and the
+            // viewer will appear "loaded" but show a blank canvas. In that case, fall back to the
+            // server-rendered PNG endpoint so the user still sees an image.
+            try {
+                const expected = imgW * imgH;
+                const actual = (imageData.pixel_data && imageData.pixel_data.length) ? Number(imageData.pixel_data.length) : 0;
+                if (actual !== expected) {
+                    const id = imageData.id != null ? String(imageData.id) : String(lastLoadedImageId || '');
+                    console.warn('Pixel buffer size mismatch; falling back to server render', { id, imgW, imgH, expected, actual });
+                    if (id) _loadServerRenderedFrame(id, { quiet: true }).catch(() => {});
+                    return;
+                }
+            } catch (e) {
+                const id = imageData.id != null ? String(imageData.id) : String(lastLoadedImageId || '');
+                console.warn('Pixel buffer validation failed; falling back to server render', e);
+                if (id) _loadServerRenderedFrame(id, { quiet: true }).catch(() => {});
+                return;
+            }
             const photometric = (imageData.photometric_interpretation || '').toString().toUpperCase();
             const mono1 = photometric === 'MONOCHROME1';
 
@@ -2534,20 +2555,27 @@
             }
 
             if (_frameCacheKey !== cacheKey) {
-                const pixels = new Uint8ClampedArray(imageData.pixel_data.length * 4);
-                for (let i = 0; i < imageData.pixel_data.length; i++) {
-                    let value = imageData.pixel_data[i];
-                    value = applyWindowing(value, windowWidth, windowLevel);
-                    if (shouldInvert) value = 255 - value;
-                    const j = i * 4;
-                    pixels[j] = value;
-                    pixels[j + 1] = value;
-                    pixels[j + 2] = value;
-                    pixels[j + 3] = 255;
+                try {
+                    const pixels = new Uint8ClampedArray(imageData.pixel_data.length * 4);
+                    for (let i = 0; i < imageData.pixel_data.length; i++) {
+                        let value = imageData.pixel_data[i];
+                        value = applyWindowing(value, windowWidth, windowLevel);
+                        if (shouldInvert) value = 255 - value;
+                        const j = i * 4;
+                        pixels[j] = value;
+                        pixels[j + 1] = value;
+                        pixels[j + 2] = value;
+                        pixels[j + 3] = 255;
+                    }
+                    const imgData = new ImageData(pixels, imgW, imgH);
+                    _frameCtx.putImageData(imgData, 0, 0);
+                    _frameCacheKey = cacheKey;
+                } catch (e) {
+                    const id = imageData.id != null ? String(imageData.id) : String(lastLoadedImageId || '');
+                    console.error('Canvas render failed; falling back to server render', e);
+                    if (id) _loadServerRenderedFrame(id, { quiet: true }).catch(() => {});
+                    return;
                 }
-                const imgData = new ImageData(pixels, imgW, imgH);
-                _frameCtx.putImageData(imgData, 0, 0);
-                _frameCacheKey = cacheKey;
             }
 
             // Clear and draw with transform-aware pipeline (drawImage respects transforms).

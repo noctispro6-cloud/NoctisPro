@@ -40,6 +40,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'noctis_pro.settings')
 import django
 django.setup()
 
+from django.conf import settings
 from pynetdicom import AE, evt, AllStoragePresentationContexts, VerificationPresentationContexts
 from pynetdicom.sop_class import Verification
 from pydicom import dcmread
@@ -275,12 +276,18 @@ class DicomReceiver:
             'last_received': None
         }
         
-        # Storage directory rooted at project base directory
-        self.storage_dir = BASE_DIR / 'media' / 'dicom' / 'received'
+        # Storage directory rooted at Django MEDIA_ROOT so Docker volumes work.
+        #
+        # IMPORTANT:
+        # - In docker-compose, MEDIA_ROOT is mounted to a persistent volume (e.g. /data/media).
+        # - If we write to /app/media inside the container image, the web container will not see the files.
+        # - The rest of the app (uploads/import tooling) expects DICOM objects under `dicom/images/...`.
+        media_root = Path(getattr(settings, "MEDIA_ROOT", str(BASE_DIR / "media")))
+        self.storage_dir = media_root / 'dicom' / 'images'
         self.storage_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Thumbnail directory rooted at project base directory
-        self.thumbnail_dir = BASE_DIR / 'media' / 'dicom' / 'thumbnails'
+
+        # Thumbnails stored alongside DICOM images under MEDIA_ROOT
+        self.thumbnail_dir = media_root / 'dicom' / 'thumbnails'
         self.thumbnail_dir.mkdir(parents=True, exist_ok=True)
         
         # Setup logging
@@ -663,8 +670,9 @@ class DicomReceiver:
                           file_path: Path, thumbnail_data: Optional[bytes]) -> Optional[DicomImage]:
         """Create DICOM image database record"""
         try:
-            # Create relative path for database storage
-            relative_path = str(file_path.relative_to(BASE_DIR / 'media'))
+            # Store a path relative to Django's MEDIA_ROOT so FileField can resolve it correctly.
+            media_root = Path(getattr(settings, "MEDIA_ROOT", str(BASE_DIR / "media")))
+            relative_path = str(file_path.relative_to(media_root))
             file_size = file_path.stat().st_size
             
             # Create DICOM image record

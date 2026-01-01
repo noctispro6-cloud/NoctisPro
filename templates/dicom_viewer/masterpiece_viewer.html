@@ -4129,13 +4129,17 @@
                 throw new Error(`Unable to acquire 2D context for MPR canvas (${viewType})`);
             }
             const img = new Image();
-            // Backend normally returns a data URL (data:image/png;base64,...).
-            // Guard older/alternate payloads that return raw base64 only.
-            const v = (typeof dataUrl === 'string') ? dataUrl.trim() : dataUrl;
-            const src = (typeof v === 'string' && v.startsWith('data:image'))
-                ? v
-                : `data:image/png;base64,${v}`;
-            img.src = src;
+            // Backend may return:
+            // - a full data URL: "data:image/png;base64,..."
+            // - raw base64: "<base64...>"
+            // - a URL to a PNG endpoint (used for high-quality MPR slice streaming): "/dicom-viewer/api/mpr-slice/..."
+            //
+            // IMPORTANT: Do not treat URLs as base64 (that results in an invalid data URL and blank MPR panes).
+            const v = (typeof dataUrl === 'string') ? dataUrl.trim() : '';
+            const isDataUrl = v.startsWith('data:image');
+            const isHttpUrl = v.startsWith('http://') || v.startsWith('https://');
+            const isRelativeUrl = v.startsWith('/') || v.startsWith('./') || v.startsWith('../');
+            img.src = isDataUrl ? v : (isHttpUrl || isRelativeUrl) ? v : `data:image/png;base64,${v}`;
             await new Promise((resolve, reject) => {
                 img.onload = resolve;
                 img.onerror = reject;

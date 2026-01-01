@@ -10,6 +10,8 @@ urlpatterns = [
     path('ui/', views.modern_worklist, name='modern_worklist'),
     path('modern/', views.modern_dashboard, name='modern_dashboard'),
     path('upload/', views.upload_study, name='upload_study'),
+    # Service Worker for background uploads (must be under /worklist/ for scope)
+    path('sw-dicom-upload.js', views.sw_dicom_upload, name='sw_dicom_upload'),
     path('studies/', views.study_list, name='study_list'),
     path('study/<int:study_id>/', views.study_detail, name='study_detail'),
     

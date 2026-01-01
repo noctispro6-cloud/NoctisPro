@@ -1465,6 +1465,26 @@ def upload_attachment(request, study_id):
     
     return render(request, 'worklist/upload_attachment.html', context)
 
+
+@login_required
+def sw_dicom_upload(request):
+    """
+    Serve the Worklist-scoped Service Worker script.
+
+    The Service Worker must be served from `/worklist/...` so its scope can control
+    `/worklist/upload/` and keep uploads running even if the user navigates away.
+    """
+    try:
+        js_path = Path(__file__).resolve().parent / 'sw_dicom_upload.js'
+        js = js_path.read_text(encoding='utf-8')
+    except Exception as e:
+        return HttpResponse(f"// Failed to load service worker: {e}", content_type="application/javascript", status=500)
+
+    resp = HttpResponse(js, content_type="application/javascript")
+    # Reasonably cacheable, but allow quick rollouts.
+    resp["Cache-Control"] = "public, max-age=300"
+    return resp
+
 @login_required
 def view_attachment(request, attachment_id):
     """View or download attachment"""

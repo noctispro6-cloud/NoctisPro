@@ -1288,6 +1288,12 @@
         let cineMode = false;
         let cineInterval = null;
 
+        // Fallback rendering: if raw pixel decoding isn't available (compressed transfer syntaxes, missing decoders, etc),
+        // we can still display images using the server-rendered PNG endpoint.
+        // NOTE: In fallback mode, window/level/invert changes trigger a (debounced) server re-render.
+        let _serverRendered = { enabled: false, imageId: null, image: null, dataUrl: null, info: null, key: null };
+        let _serverRenderRefreshTimer = null;
+
         // Magnifier tool (overlay canvas)
         let magnifierCanvas = null;
         let magnifierCtx = null;
@@ -2097,6 +2103,7 @@
         async function loadSeries(seriesId) {
             try {
                 showLoading(true);
+                _resetServerRendered();
                 // Switching series during MPR should not leave stale requests running.
                 _abortMPRRequestsAndTimers();
                 roiDraft = null;
@@ -2213,6 +2220,119 @@
             return new Float32Array(bytes.buffer);
         }
 
+        function _resetServerRendered() {
+            _serverRendered = { enabled: false, imageId: null, image: null, dataUrl: null, info: null, key: null };
+            if (_serverRenderRefreshTimer) {
+                try { clearTimeout(_serverRenderRefreshTimer); } catch (e) {}
+                _serverRenderRefreshTimer = null;
+            }
+        }
+
+        function _desiredServerInvertFromInfo(info) {
+            try {
+                const photo = ((info && (info.photometric_interpretation || info.photometric)) || '').toString().toUpperCase();
+                const mono1 = photo === 'MONOCHROME1';
+                // Match the client renderer: final inversion is user invert XOR MONOCHROME1.
+                return (!!inverted) !== (!!mono1);
+            } catch (e) {
+                return !!inverted;
+            }
+        }
+
+        function _serverRenderKey(imageId, info) {
+            const inv = _desiredServerInvertFromInfo(info) ? 1 : 0;
+            return `${String(imageId)}|ww:${Math.round(Number(windowWidth) || 0)}|wl:${Math.round(Number(windowLevel) || 0)}|inv:${inv}`;
+        }
+
+        async function _loadServerRenderedFrame(imageId, { quiet = false } = {}) {
+            const id = String(imageId);
+            const params = new URLSearchParams();
+
+            // Only send WW/WL if we have numeric values; backend can choose sensible defaults if omitted.
+            const ww = Number(windowWidth);
+            const wl = Number(windowLevel);
+            if (Number.isFinite(ww) && Number.isFinite(wl) && ww > 0) {
+                params.set('ww', String(ww));
+                params.set('wl', String(wl));
+            }
+
+            // First pass: omit invert so backend can apply MONOCHROME1 defaults.
+            let url = `/dicom-viewer/api/image/${encodeURIComponent(id)}/display/${params.toString() ? `?${params.toString()}` : ''}`;
+            let resp = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+            let data = await resp.json().catch(() => ({}));
+
+            // If we can derive the exact desired inversion from response info, ensure it matches.
+            const info = (data && data.image_info) ? data.image_info : null;
+            const desiredInvert = _desiredServerInvertFromInfo(info);
+            const serverInvert = !!(data && data.windowing && data.windowing.inverted);
+            if (info && (serverInvert !== desiredInvert)) {
+                const p2 = new URLSearchParams(params.toString());
+                p2.set('invert', String(desiredInvert));
+                const url2 = `/dicom-viewer/api/image/${encodeURIComponent(id)}/display/?${p2.toString()}`;
+                resp = await fetch(url2, { credentials: 'same-origin', cache: 'no-store' });
+                data = await resp.json().catch(() => ({}));
+            }
+
+            const dataUrl = data && data.image_data;
+            if (!dataUrl || typeof dataUrl !== 'string') {
+                const warn = (data && data.warnings) || {};
+                const msg =
+                    warn.pixel_decode_error ||
+                    warn.dicom_read_error ||
+                    warn.dicom_open_error ||
+                    warn.render_error ||
+                    'Server did not return renderable image data';
+                throw new Error(msg);
+            }
+
+            // Keep WW/WL synced to what backend used (useful when we omitted ww/wl).
+            try {
+                if (data && data.windowing) {
+                    if (Number.isFinite(Number(data.windowing.window_width))) windowWidth = Number(data.windowing.window_width);
+                    if (Number.isFinite(Number(data.windowing.window_level))) windowLevel = Number(data.windowing.window_level);
+                    updateSliders();
+                }
+            } catch (e) {}
+
+            const img = new Image();
+            try { img.decoding = 'async'; } catch (e) {}
+            img.src = dataUrl;
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+            });
+
+            _serverRendered.enabled = true;
+            _serverRendered.imageId = id;
+            _serverRendered.image = img;
+            _serverRendered.dataUrl = dataUrl;
+            _serverRendered.info = (data && data.image_info) ? data.image_info : info;
+            _serverRendered.key = _serverRenderKey(id, _serverRendered.info);
+
+            if (!quiet) {
+                const warn = (data && data.warnings) || {};
+                if (warn && (warn.pixel_decode_error || warn.dicom_read_forced || warn.dicom_read_forced_path)) {
+                    showToast('Displayed server-rendered image (raw pixel decode unavailable)', 'warning', 3500);
+                }
+            }
+
+            redrawCurrentImage();
+        }
+
+        function _scheduleServerRenderedRefresh(imageId) {
+            if (!_serverRendered || !_serverRendered.enabled) return;
+            const id = imageId != null ? String(imageId) : null;
+            if (!id) return;
+            if (_serverRenderRefreshTimer) {
+                try { clearTimeout(_serverRenderRefreshTimer); } catch (e) {}
+            }
+            // Debounce so WW/WL sliders don't spam the server.
+            _serverRenderRefreshTimer = setTimeout(() => {
+                _serverRenderRefreshTimer = null;
+                _loadServerRenderedFrame(id, { quiet: true }).catch(() => {});
+            }, 120);
+        }
+
         function _applyLoadedImagePayload(data, imageId) {
             // Update window/level from DICOM data - SAME AS YOUR ORIGINAL
             windowWidth = data.window_width || windowWidth;
@@ -2276,6 +2396,7 @@
             const imageId = entry.id;
             const cacheHit = _cacheGetPayload(imageId);
             if (cacheHit && cacheHit.pixel_data) {
+                _resetServerRendered();
                 _applyLoadedImagePayload(cacheHit, imageId);
                 _schedulePrefetchAround(idx);
                 return;
@@ -2298,12 +2419,36 @@
                 const data = await response.json();
                 if (seq !== _imageLoadSeq) return; // stale
 
+                // Keep W/L in sync even if pixels are missing (helps server-render fallback pick good defaults).
+                try {
+                    if (data && Number.isFinite(Number(data.window_width))) windowWidth = Number(data.window_width);
+                    if (data && Number.isFinite(Number(data.window_center))) windowLevel = Number(data.window_center);
+                    updateSliders();
+                } catch (e) {}
+
                 if (data && data.pixel_data_b64 && (!data.pixel_data || !data.pixel_data.length)) {
                     // Decode packed float32 pixels to a TypedArray for faster rendering than JSON lists.
-                    data.pixel_data = _decodeB64ToFloat32Array(data.pixel_data_b64);
-                    data.pixel_data_b64 = null; // reduce memory
+                    try {
+                        data.pixel_data = _decodeB64ToFloat32Array(data.pixel_data_b64);
+                        data.pixel_data_b64 = null; // reduce memory
+                    } catch (e) {
+                        data.pixel_data = null;
+                        data.pixel_data_b64 = null;
+                        data.warnings = { ...(data.warnings || {}), pixel_decode_error: `Client decode failed: ${e?.message || e}` };
+                    }
                 }
 
+                if (!data || !data.pixel_data || !data.columns || !data.rows) {
+                    // Don't silently render nothing — try server-rendered PNG fallback (still supports pan/zoom/rotate).
+                    const warn = (data && data.warnings) || {};
+                    if (warn && warn.pixel_decode_error) {
+                        showToast(`Pixel decode unavailable: ${warn.pixel_decode_error}`, 'warning', 4500);
+                    }
+                    await _loadServerRenderedFrame(imageId, { quiet: true });
+                    return;
+                }
+
+                _resetServerRendered();
                 _cacheSetPayload(imageId, data);
                 _applyLoadedImagePayload(data, imageId);
                 _schedulePrefetchAround(idx);
@@ -2430,6 +2575,50 @@
             if (crosshair) drawCrosshair();
             drawCurrentMeasurement();
 
+            updateOverlayLabels();
+        }
+
+        function renderServerRenderedImage() {
+            if (!_serverRendered || !_serverRendered.enabled) return;
+            if (!canvas || !ctx) return;
+            const img = _serverRendered.image;
+            if (!img) return;
+
+            // Defensive: ensure the main canvas has a real size before drawing.
+            if (!canvas || canvas.width <= 2 || canvas.height <= 2) {
+                try { resizeCanvas(); } catch (e) {}
+                if (!canvas || canvas.width <= 2 || canvas.height <= 2) return;
+            }
+
+            const imgW = img.naturalWidth || img.width || 0;
+            const imgH = img.naturalHeight || img.height || 0;
+            if (!imgW || !imgH) return;
+
+            // Fit-to-viewport base scale (avoid default "too big" / clipped display).
+            const rot = ((rotation % 360) + 360) % 360;
+            const rotated = (rot === 90 || rot === 270);
+            const fitW = rotated ? imgH : imgW;
+            const fitH = rotated ? imgW : imgH;
+            const baseScale = Math.min(1, Math.min(canvas.width / fitW, canvas.height / fitH));
+            _lastRenderMeta = { imgW, imgH, baseScale, rotDeg: rotation };
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
+            if (rotation) ctx.rotate((rotation * Math.PI) / 180);
+            const sx = (flipH ? -1 : 1) * (baseScale * zoom);
+            const sy = (flipV ? -1 : 1) * (baseScale * zoom);
+            ctx.scale(sx, sy);
+            const effScale = Math.max(Math.abs(sx), Math.abs(sy));
+            ctx.imageSmoothingEnabled = effScale < 1;
+            try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
+            ctx.drawImage(img, -imgW / 2, -imgH / 2);
+            ctx.restore();
+
+            drawMeasurements();
+            drawAnnotations();
+            if (crosshair) drawCrosshair();
+            drawCurrentMeasurement();
             updateOverlayLabels();
         }
 
@@ -2985,6 +3174,13 @@
                 const currentId = imageData[currentImageIndex]?.id;
                 if (lastLoadedImagePayload && lastLoadedImageId === currentId) {
                     renderDicomImage(lastLoadedImagePayload);
+                } else if (_serverRendered && _serverRendered.enabled && String(_serverRendered.imageId) === String(currentId)) {
+                    // If WW/WL/invert changed since the last server render, refresh in the background.
+                    const desiredKey = _serverRenderKey(currentId, _serverRendered.info);
+                    if (_serverRendered.key !== desiredKey) {
+                        _scheduleServerRenderedRefresh(currentId);
+                    }
+                    renderServerRenderedImage();
                 } else {
                     loadCurrentImage();
                 }

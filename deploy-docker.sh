@@ -4,6 +4,15 @@ set -euo pipefail
 err() { echo "[ERROR] $*" >&2; }
 info() { echo "[INFO]  $*" >&2; }
 
+as_root() {
+  # Run a command as root (uses sudo if not already root).
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
+
 read_env_kv() {
   # read_env_kv KEY /path/to/env -> prints value or empty
   local key="${1:?}" file="${2:?}" line
@@ -25,10 +34,55 @@ stop_systemd_if_running() {
   systemctl is-active --quiet "${unit}" >/dev/null 2>&1 || return 0
 
   info "Stopping systemd unit ${unit} (to avoid port conflicts)..."
-  if [[ "${EUID:-$(id -u)}" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
-    sudo systemctl stop "${unit}" || true
+  as_root systemctl stop "${unit}" || true
+}
+
+port_in_use() {
+  local port="${1:?}"
+  if command -v ss >/dev/null 2>&1; then
+    # -H: no header; returns output if a listener exists.
+    ss -ltnH "sport = :${port}" 2>/dev/null | awk 'NR==1{found=1} END{exit found?0:1}'
+    return $?
+  fi
+  # Fallback: attempt bind test (slow but reliable).
+  python3 - <<PY >/dev/null 2>&1
+import socket
+port = int("${port}")
+s = socket.socket()
+try:
+    s.bind(("0.0.0.0", port))
+    ok = True
+except OSError:
+    ok = False
+finally:
+    try: s.close()
+    except Exception: pass
+raise SystemExit(0 if (not ok) else 1)
+PY
+}
+
+describe_port_owner() {
+  local port="${1:?}"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp "sport = :${port}" 2>/dev/null || true
   else
-    systemctl stop "${unit}" || true
+    return 0
+  fi
+}
+
+kill_port_listeners() {
+  local port="${1:?}"
+
+  # Best-effort kill of any remaining listeners.
+  if command -v fuser >/dev/null 2>&1; then
+    info "Attempting to stop any process listening on port ${port}..."
+    as_root fuser -k -n tcp "${port}" >/dev/null 2>&1 || true
+  fi
+
+  # If still in use and ss is available, show owner to help debugging.
+  if port_in_use "${port}"; then
+    info "Port ${port} is still in use; current listener(s):"
+    describe_port_owner "${port}" >&2 || true
   fi
 }
 
@@ -44,6 +98,11 @@ ensure_port_free() {
   if [[ -n "$ids" ]]; then
     info "Stopping containers publishing port ${port}..."
     docker stop ${ids} >/dev/null 2>&1 || true
+  fi
+
+  # If any other host process is holding the port, try to stop it.
+  if port_in_use "${port}"; then
+    kill_port_listeners "${port}"
   fi
 
   # Verify we can bind the port (gives a clear error early).
@@ -126,6 +185,11 @@ ensure_port_free "${web_port}"
 
 info "Ensuring host port ${dicom_port} is available..."
 ensure_port_free "${dicom_port}"
+
+if [[ "$want_ngrok" == "1" ]]; then
+  info "Ensuring host port 4040 is available (ngrok local API)..."
+  ensure_port_free "4040"
+fi
 
 args=(--env-file .env.docker up -d --build)
 if [[ "$want_ngrok" == "1" ]]; then

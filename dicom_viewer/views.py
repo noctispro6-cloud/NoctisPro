@@ -684,6 +684,36 @@ def api_image_data(request, image_id):
                 pixel_decode_error = str(_e) or str(e)
                 pixel_array = None
 
+    # Normalize pixel array shape to a 2D grayscale frame (best-effort).
+    # The canvas-based viewer expects rows*cols samples per image.
+    # Some objects can decode into shapes like:
+    # - (1, rows, cols)  (single-frame wrapped)
+    # - (frames, rows, cols) (multi-frame)
+    # - (rows, cols, 3/4) (RGB/RGBA)
+    if pixel_array is not None:
+        try:
+            import numpy as _np
+
+            arr = pixel_array
+            if getattr(arr, "ndim", 0) == 3:
+                # (1, rows, cols) -> (rows, cols)
+                if arr.shape[0] == 1:
+                    arr = arr[0]
+                # (frames, rows, cols) -> use first frame (viewer is single-slice)
+                elif arr.shape[0] > 1 and arr.shape[1] > 1 and arr.shape[2] > 1:
+                    arr = arr[0]
+            # (rows, cols, channels) -> grayscale
+            if getattr(arr, "ndim", 0) == 3 and arr.shape[-1] in (3, 4):
+                arr = arr[..., :3].mean(axis=-1)
+            if getattr(arr, "ndim", 0) != 2:
+                warnings["pixel_shape"] = f"Unsupported pixel array shape: {getattr(pixel_array, 'shape', None)}"
+                pixel_array = None
+            else:
+                pixel_array = _np.asarray(arr, dtype=_np.float32)
+        except Exception as e:
+            warnings["pixel_shape_error"] = str(e)
+            pixel_array = None
+
     # Apply rescale slope/intercept (HU for CT etc.)
     if pixel_array is not None and ds is not None and hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
         try:
@@ -720,8 +750,9 @@ def api_image_data(request, image_id):
     # Include pixel payload for canvas renderer
     if pixel_array is not None:
         try:
-            rows = int(getattr(ds, 'Rows', pixel_array.shape[0]) or pixel_array.shape[0])
-            cols = int(getattr(ds, 'Columns', pixel_array.shape[1]) or pixel_array.shape[1])
+            # Prefer the decoded array shape (it's the ground truth).
+            rows = int(pixel_array.shape[0])
+            cols = int(pixel_array.shape[1])
         except Exception:
             rows = int(pixel_array.shape[0])
             cols = int(pixel_array.shape[1])

@@ -1450,7 +1450,9 @@ def api_dicom_image_display(request, image_id):
                     pass
                 pixel_array = pixel_array.astype(np.float32)
             except Exception as e:
-                # Fallback for compressed DICOMs without pixel handler: try SimpleITK (local path only)
+                # Pixel decode failed (often due to compressed transfer syntaxes).
+                # Fallback: try SimpleITK (local path only). Keep both error messages for diagnostics.
+                pydicom_decode_error = str(e)
                 try:
                     import SimpleITK as sitk
                     if image.file_path and hasattr(image.file_path, 'path'):
@@ -1459,10 +1461,12 @@ def api_dicom_image_display(request, image_id):
                         if pixel_array.ndim == 3 and pixel_array.shape[0] == 1:
                             pixel_array = pixel_array[0]
                         pixel_array = pixel_array.astype(np.float32)
+                        warnings['pixel_decode_fallback'] = 'SimpleITK'
+                        warnings['pydicom_pixel_decode_error'] = pydicom_decode_error
                     else:
                         raise RuntimeError("No local path available for SimpleITK fallback")
                 except Exception as _e:
-                    pixel_decode_error = str(_e)
+                    pixel_decode_error = f"pydicom: {pydicom_decode_error}; SimpleITK: {str(_e)}"
                     pixel_array = None
         
         # Apply rescale slope/intercept

@@ -39,6 +39,7 @@ pylibjpeg-rle
 numpy
 scipy
 scikit-image
+SimpleITK
 
 # Utilities
 requests

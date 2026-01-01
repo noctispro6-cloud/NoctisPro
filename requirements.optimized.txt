@@ -37,6 +37,7 @@ pylibjpeg
 pylibjpeg-libjpeg
 pylibjpeg-openjpeg
 pylibjpeg-rle
+SimpleITK
 
 # Background tasks (requires more memory)
 celery

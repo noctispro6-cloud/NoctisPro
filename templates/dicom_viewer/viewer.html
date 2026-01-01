@@ -1937,6 +1937,8 @@
             let loaderTimer = setTimeout(() => showLoading('Processing image...'), loadingDelay);
             try {
                 const params = new URLSearchParams();
+                // Prefer URL-based rendering to avoid huge base64 payloads/data-URL limits.
+                params.set('mode', 'url');
                 if (!needsAutoInit || windowingLockedByUser) {
                     params.set('ww', String(windowWidth));
                     params.set('wl', String(windowLevel));
@@ -1955,11 +1957,12 @@
                 const data = await response.json();
                 if (seq !== _displaySeq) return; // stale
 
-                if (data && data.image_data) {
+                const imageSrc = data && (data.image_url || data.image_data);
+                if (data && imageSrc) {
                     if (needsAutoInit) {
                         _syncWindowingFromPayload(data);
                     }
-                    const payload = { image_data: data.image_data, image_info: data.image_info };
+                    const payload = { image_data: imageSrc, image_info: data.image_info };
                     const key = _displayCacheKey(currentImage.id);
                     _displayCacheSet(key, payload);
                     _apply(payload);
@@ -1995,12 +1998,13 @@
                     if (!img) return;
                     const key = _displayCacheKey(img.id);
                     if (_displayCache.has(key)) return;
-                    const url = `/dicom-viewer/api/image/${img.id}/display/?ww=${encodeURIComponent(windowWidth)}&wl=${encodeURIComponent(windowLevel)}&invert=${encodeURIComponent(inverted)}`;
+                    const url = `/dicom-viewer/api/image/${img.id}/display/?mode=url&ww=${encodeURIComponent(windowWidth)}&wl=${encodeURIComponent(windowLevel)}&invert=${encodeURIComponent(inverted)}`;
                     fetch(url, { credentials: 'same-origin', cache: 'force-cache' })
                         .then(r => r.ok ? r.json() : null)
                         .then(data => {
-                            if (!data || !data.image_data) return;
-                            _displayCacheSet(key, { image_data: data.image_data, image_info: data.image_info });
+                            const src = data && (data.image_url || data.image_data);
+                            if (!data || !src) return;
+                            _displayCacheSet(key, { image_data: src, image_info: data.image_info });
                         })
                         .catch(() => {});
                 });

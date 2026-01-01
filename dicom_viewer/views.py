@@ -30,6 +30,7 @@ from pydicom.pixel_data_handlers.util import apply_voi_lut
 import scipy.ndimage as ndimage
 import logging
 import subprocess
+from urllib.parse import urlencode
 
 from .models import ViewerSession, Measurement, Annotation, ReconstructionJob
 from .dicom_utils import DicomProcessor, safe_dicom_str
@@ -1373,6 +1374,82 @@ def _array_to_base64_image(array, window_width=None, window_level=None, inverted
         logger.error(f"_array_to_base64_image failed: {str(e)}, array shape: {getattr(array, 'shape', 'unknown')}, dtype: {getattr(array, 'dtype', 'unknown')}")
         return None
 
+
+def _array_to_png_bytes(array, window_width=None, window_level=None, inverted=False, sharpen=False):
+    """Convert numpy array to PNG bytes with proper windowing.
+
+    This is a streaming-friendly alternative to `_array_to_base64_image` which avoids data-URLs
+    (important for very large images that can exceed browser limits).
+    """
+    try:
+        if array is None:
+            return None
+
+        # Ensure array is 2D
+        if array.ndim == 3:
+            # Use the first slice for 3D arrays
+            array = array[0]
+        elif array.ndim == 1:
+            # Try to reshape 1D array to square if possible
+            side = int(np.sqrt(array.size))
+            if side * side == array.size:
+                array = array.reshape((side, side))
+            else:
+                logger.warning("_array_to_png_bytes: cannot reshape 1D array to square")
+                return None
+
+        if array.ndim != 2:
+            logger.warning(f"_array_to_png_bytes: expected 2D array, got {array.ndim}D")
+            return None
+
+        # Normalize and apply windowing
+        image_data = array.astype(np.float32)
+
+        if np.any(np.isnan(image_data)) or np.any(np.isinf(image_data)):
+            image_data = np.nan_to_num(image_data, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Apply windowing if provided
+        if window_width is not None and window_level is not None:
+            min_val = window_level - window_width / 2
+            max_val = window_level + window_width / 2
+            image_data = np.clip(image_data, min_val, max_val)
+            if max_val > min_val:
+                image_data = (image_data - min_val) / (max_val - min_val) * 255
+            else:
+                image_data = np.zeros_like(image_data)
+        else:
+            # Auto-normalize
+            data_min, data_max = image_data.min(), image_data.max()
+            if data_max > data_min:
+                image_data = ((image_data - data_min) / (data_max - data_min) * 255)
+            else:
+                image_data = np.zeros_like(image_data)
+
+        # Apply inversion if requested
+        if inverted:
+            image_data = 255 - image_data
+
+        normalized = np.clip(image_data, 0, 255).astype(np.uint8)
+        img = Image.fromarray(normalized, mode='L')
+
+        if sharpen:
+            try:
+                img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=140, threshold=3))
+            except Exception:
+                pass
+
+        buffer = BytesIO()
+        try:
+            img.save(buffer, format='PNG', optimize=False, compress_level=1)
+        except Exception:
+            img.save(buffer, format='PNG')
+        return buffer.getvalue()
+    except Exception as e:
+        logger.error(
+            f"_array_to_png_bytes failed: {str(e)}, array shape: {getattr(array, 'shape', 'unknown')}, dtype: {getattr(array, 'dtype', 'unknown')}"
+        )
+        return None
+
 @login_required
 @csrf_exempt 
 def api_dicom_image_display(request, image_id):
@@ -1566,9 +1643,28 @@ def api_dicom_image_display(request, image_id):
             window_width = float(default_window_width)
             window_level = float(default_window_level)
         
-        # Generate image if pixels are available
-        image_data_url = None
+        # Frontend can request a lightweight JSON response that returns an image URL rather than
+        # embedding a potentially huge base64 data URL.
+        # - return=url  OR  mode=url  => omit image_data and return image_url only
+        return_mode = (request.GET.get('return') or request.GET.get('mode') or '').strip().lower()
+        want_url_only = return_mode == 'url'
+
+        # Always include a render URL (when possible) so the browser can stream PNG bytes without data-URLs.
+        image_url = None
         if pixel_array is not None:
+            try:
+                params = {
+                    'ww': str(window_width),
+                    'wl': str(window_level),
+                    'invert': 'true' if bool(inverted) else 'false',
+                }
+                image_url = f"/dicom-viewer/api/image/{int(image.id)}/render.png?{urlencode(params)}"
+            except Exception:
+                image_url = None
+
+        # Generate embedded base64 image only when requested/needed (legacy behavior).
+        image_data_url = None
+        if (not want_url_only) and pixel_array is not None:
             try:
                 image_data_url = _array_to_base64_image(pixel_array, window_width, window_level, inverted)
             except Exception as e:
@@ -1616,6 +1712,7 @@ def api_dicom_image_display(request, image_id):
         
         payload = {
             'image_data': image_data_url,
+            'image_url': image_url,
             'image_info': image_info,
             'windowing': {
                 'window_width': window_width,
@@ -1655,6 +1752,153 @@ def api_dicom_image_display(request, image_id):
             'warnings': {'fatal_error': str(e), **warnings}
         }
         return JsonResponse(minimal)  # 200 OK to avoid frontend failure
+
+
+@login_required
+@csrf_exempt
+def api_dicom_image_png(request, image_id):
+    """Stream a windowed DICOM slice as PNG bytes.
+
+    This avoids large `data:image/png;base64,...` URLs which can fail to render for big images.
+    """
+    image = get_object_or_404(DicomImage, id=image_id)
+    user = request.user
+
+    # Check permissions
+    if user.is_facility_user() and getattr(user, 'facility', None) and image.series.study.facility != user.facility:
+        return HttpResponse(status=403)
+
+    warnings = {}
+    try:
+        ww_param = request.GET.get('window_width') or request.GET.get('ww')
+        wl_param = request.GET.get('window_level') or request.GET.get('wl')
+        inverted_param = request.GET.get('inverted')
+        if inverted_param is None:
+            inverted_param = request.GET.get('invert')
+        inverted = (inverted_param or 'false').lower() == 'true'
+
+        # Read DICOM dataset (same robust strategy as JSON endpoint).
+        ds = None
+        if not image.file_path:
+            warnings['dicom_read_error'] = "Image file_path is missing"
+        else:
+            try:
+                with image.file_path.open('rb') as f:
+                    try:
+                        ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
+                    except Exception as e_strict:
+                        warnings['dicom_read_error'] = str(e_strict)
+                        try:
+                            f.seek(0)
+                        except Exception:
+                            pass
+                        ds = pydicom.dcmread(f, stop_before_pixels=False, force=True)
+                        warnings['dicom_read_forced'] = True
+            except Exception as e_open:
+                warnings['dicom_open_error'] = str(e_open)
+                ds = None
+        if ds is None:
+            try:
+                if image.file_path and hasattr(image.file_path, 'path'):
+                    ds = pydicom.dcmread(image.file_path.path, stop_before_pixels=False, force=True)
+                    warnings['dicom_read_forced_path'] = True
+            except Exception as e2:
+                warnings['dicom_read_error_fallback'] = str(e2)
+                ds = None
+
+        if ds is None:
+            return HttpResponse(status=404)
+
+        # Decode pixels (best-effort)
+        pixel_array = None
+        try:
+            pixel_array = ds.pixel_array
+            try:
+                modality = str(getattr(ds, 'Modality', '')).upper()
+                if modality in ['DX', 'CR', 'XA', 'RF', 'MG']:
+                    pixel_array = apply_voi_lut(pixel_array, ds)
+            except Exception:
+                pass
+            pixel_array = pixel_array.astype(np.float32)
+        except Exception as e:
+            # SimpleITK fallback requires local path
+            try:
+                import SimpleITK as sitk
+                if image.file_path and hasattr(image.file_path, 'path'):
+                    sitk_image = sitk.ReadImage(image.file_path.path)
+                    px = sitk.GetArrayFromImage(sitk_image)
+                    if px.ndim == 3 and px.shape[0] == 1:
+                        px = px[0]
+                    pixel_array = px.astype(np.float32)
+                else:
+                    raise RuntimeError("No local path available for SimpleITK fallback")
+            except Exception:
+                warnings['pixel_decode_error'] = str(e)
+                return HttpResponse(status=404)
+
+        # Normalize to 2D grayscale frame
+        try:
+            arr = pixel_array
+            if getattr(arr, "ndim", 0) == 3:
+                if arr.shape[0] == 1:
+                    arr = arr[0]
+                elif arr.shape[0] > 1 and arr.shape[1] > 1 and arr.shape[2] > 1:
+                    arr = arr[0]
+            if getattr(arr, "ndim", 0) == 3 and arr.shape[-1] in (3, 4):
+                arr = arr[..., :3].mean(axis=-1)
+            if getattr(arr, "ndim", 0) != 2:
+                return HttpResponse(status=404)
+            pixel_array = np.asarray(arr, dtype=np.float32)
+        except Exception:
+            return HttpResponse(status=404)
+
+        # Apply rescale slope/intercept
+        if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
+            try:
+                pixel_array = pixel_array * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+            except Exception:
+                pass
+
+        # Derive default window if needed
+        def _first_or_none(v):
+            try:
+                if hasattr(v, '__iter__') and not isinstance(v, str):
+                    return v[0]
+            except Exception:
+                pass
+            return v
+
+        default_ww = _first_or_none(getattr(ds, 'WindowWidth', None))
+        default_wl = _first_or_none(getattr(ds, 'WindowCenter', None))
+        if default_ww is None or default_wl is None:
+            try:
+                flat = pixel_array.astype(np.float32).flatten()
+                p2 = float(np.percentile(flat, 2))
+                p98 = float(np.percentile(flat, 98))
+                default_ww = default_ww or max(1.0, (p98 - p2))
+                default_wl = default_wl or ((p98 + p2) / 2.0)
+            except Exception:
+                default_ww = default_ww or 400.0
+                default_wl = default_wl or 40.0
+
+        # Respect request params when provided; otherwise use defaults
+        try:
+            window_width = float(ww_param) if ww_param is not None else float(default_ww)
+            window_level = float(wl_param) if wl_param is not None else float(default_wl)
+        except Exception:
+            window_width = float(default_ww) if default_ww is not None else 400.0
+            window_level = float(default_wl) if default_wl is not None else 40.0
+
+        png_bytes = _array_to_png_bytes(pixel_array, window_width, window_level, inverted)
+        if not png_bytes:
+            return HttpResponse(status=404)
+
+        resp = HttpResponse(png_bytes, content_type='image/png')
+        # Authenticated content: keep it private-cacheable
+        resp['Cache-Control'] = 'private, max-age=3600'
+        return resp
+    except Exception:
+        return HttpResponse(status=500)
 
 @login_required
 @csrf_exempt

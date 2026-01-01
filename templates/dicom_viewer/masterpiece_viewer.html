@@ -2247,6 +2247,9 @@
         async function _loadServerRenderedFrame(imageId, { quiet = false } = {}) {
             const id = String(imageId);
             const params = new URLSearchParams();
+            // Prefer a lightweight JSON response that returns a PNG URL (streamed bytes),
+            // rather than embedding a potentially huge data URL.
+            params.set('mode', 'url');
 
             // Only send WW/WL if we have numeric values; backend can choose sensible defaults if omitted.
             const ww = Number(windowWidth);
@@ -2273,8 +2276,8 @@
                 data = await resp.json().catch(() => ({}));
             }
 
-            const dataUrl = data && data.image_data;
-            if (!dataUrl || typeof dataUrl !== 'string') {
+            const srcUrl = data && (data.image_url || data.image_data);
+            if (!srcUrl || typeof srcUrl !== 'string') {
                 const warn = (data && data.warnings) || {};
                 const msg =
                     warn.pixel_decode_error ||
@@ -2296,7 +2299,7 @@
 
             const img = new Image();
             try { img.decoding = 'async'; } catch (e) {}
-            img.src = dataUrl;
+            img.src = srcUrl;
             await new Promise((resolve, reject) => {
                 img.onload = resolve;
                 img.onerror = reject;
@@ -2305,7 +2308,7 @@
             _serverRendered.enabled = true;
             _serverRendered.imageId = id;
             _serverRendered.image = img;
-            _serverRendered.dataUrl = dataUrl;
+            _serverRendered.dataUrl = srcUrl;
             _serverRendered.info = (data && data.image_info) ? data.image_info : info;
             _serverRendered.key = _serverRenderKey(id, _serverRendered.info);
 

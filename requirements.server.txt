@@ -12,6 +12,7 @@ django-widget-tweaks
 # API / CORS / ASGI
 djangorestframework
 django-cors-headers
+fastapi
 daphne
 channels
 

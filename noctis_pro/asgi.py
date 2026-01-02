@@ -15,6 +15,34 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'noctis_pro.settings')
 # For now, use simple HTTP ASGI application until channels are properly configured
 django_asgi_app = get_asgi_application()
 
+# Optional FastAPI acceleration for hot image endpoints.
+# If FastAPI isn't installed, we silently fall back to Django views.
+http_app = django_asgi_app
+try:
+    from noctis_pro.fastapi_image_app import fastapi_app as _fastapi_image_app
+
+    async def http_app(scope, receive, send):  # type: ignore[no-redef]
+        """
+        Route only the expensive PNG render endpoint to FastAPI.
+        Everything else stays on the existing Django ASGI app.
+        """
+        try:
+            path = (scope.get("path") or "")
+            method = (scope.get("method") or "GET").upper()
+            if (
+                scope.get("type") == "http"
+                and method == "GET"
+                and path.startswith("/dicom-viewer/api/image/")
+                and path.endswith("/render.png")
+            ):
+                return await _fastapi_image_app(scope, receive, send)
+        except Exception:
+            # Never block requests due to router errors
+            pass
+        return await django_asgi_app(scope, receive, send)
+except ImportError:
+    http_app = django_asgi_app
+
 try:
     from channels.routing import ProtocolTypeRouter, URLRouter
     from channels.auth import AuthMiddlewareStack
@@ -23,7 +51,7 @@ try:
     import notifications.routing
 
     application = ProtocolTypeRouter({
-        "http": django_asgi_app,
+        "http": http_app,
         "websocket": AllowedHostsOriginValidator(
             AuthMiddlewareStack(
                 URLRouter([
@@ -35,4 +63,4 @@ try:
     })
 except ImportError:
     # Fallback to simple HTTP application if channels dependencies are not available
-    application = django_asgi_app
+    application = http_app

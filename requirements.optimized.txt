@@ -25,6 +25,7 @@ django-redis
 djangorestframework
 django-cors-headers
 requests
+fastapi
 
 # DICOM processing
 pydicom

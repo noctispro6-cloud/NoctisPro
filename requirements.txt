@@ -23,6 +23,7 @@ celery
 # API and WebSockets
 djangorestframework
 django-cors-headers
+fastapi
 channels
 channels-redis
 daphne

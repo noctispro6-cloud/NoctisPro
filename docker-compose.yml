@@ -72,7 +72,8 @@ services:
     environment:
       NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
       NGROK_DOMAIN: ${NGROK_DOMAIN:-}
-    entrypoint: ["sh", "-lc"]
+    # Use plain `sh -c` (some /bin/sh variants don't support `-l`)
+    entrypoint: ["sh", "-c"]
     command: >
       if [ -z "$${NGROK_AUTHTOKEN:-}" ]; then
         echo "ERROR: NGROK_AUTHTOKEN is required (set it in .env.docker)" >&2;

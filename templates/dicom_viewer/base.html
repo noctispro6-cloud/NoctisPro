@@ -2362,7 +2362,7 @@
         // Window/Level Management - Professional grade from PyQt
         function updateWindowWidth(value) {
             windowWidth = parseInt(value);
-            document.getElementById('wwValue').textContent = windowWidth;
+            updateWindowSliders();
             if (mprMode) {
                 refreshMPRForWindowingChange();
             } else {
@@ -2372,7 +2372,7 @@
 
         function updateWindowLevel(value) {
             windowLevel = parseInt(value);
-            document.getElementById('wlValue').textContent = windowLevel;
+            updateWindowSliders();
             if (mprMode) {
                 refreshMPRForWindowingChange();
             } else {
@@ -2400,11 +2400,7 @@
                 windowWidth = windowPresets[preset].ww;
                 windowLevel = windowPresets[preset].wl;
                 
-                // Fast UI updates without checking existence
-                document.getElementById('wwSlider').value = windowWidth;
-                document.getElementById('wlSlider').value = windowLevel;
-                document.getElementById('wwValue').textContent = windowWidth;
-                document.getElementById('wlValue').textContent = windowLevel;
+                updateWindowSliders();
                 
                 // Immediate image update
                 if (mprMode) {
@@ -2494,11 +2490,7 @@
             const sensitivity = 3; // Increased sensitivity for better control
             windowWidth = Math.max(1, windowWidth + deltaX * sensitivity);
             windowLevel = Math.max(-1000, Math.min(1000, windowLevel + deltaY * sensitivity));
-            
-            document.getElementById('wwSlider').value = windowWidth;
-            document.getElementById('wlSlider').value = windowLevel;
-            document.getElementById('wwValue').textContent = Math.round(windowWidth);
-            document.getElementById('wlValue').textContent = Math.round(windowLevel);
+            updateWindowSliders();
             
             // Show live feedback during dragging
             updateWindowLevelIndicator(Math.round(windowWidth), Math.round(windowLevel));

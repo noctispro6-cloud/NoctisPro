@@ -1740,9 +1740,21 @@
         }
 
         // Window/Level Management - Professional grade from PyQt
+        function _syncWindowLevelUI() {
+            // Sidebar controls may be hidden/removed in responsive layouts; guard DOM lookups.
+            const wwSlider = document.getElementById('wwSlider');
+            const wlSlider = document.getElementById('wlSlider');
+            const wwValue = document.getElementById('wwValue');
+            const wlValue = document.getElementById('wlValue');
+            if (wwSlider) wwSlider.value = windowWidth;
+            if (wlSlider) wlSlider.value = windowLevel;
+            if (wwValue) wwValue.textContent = Math.round(windowWidth);
+            if (wlValue) wlValue.textContent = Math.round(windowLevel);
+        }
+
         function updateWindowWidth(value) {
             windowWidth = parseInt(value);
-            document.getElementById('wwValue').textContent = windowWidth;
+            _syncWindowLevelUI();
             windowingLockedByUser = true;
             scheduleImageDisplayUpdate(currentImageIndex, 'window');
             _scheduleMprRefresh('window');
@@ -1750,7 +1762,7 @@
 
         function updateWindowLevel(value) {
             windowLevel = parseInt(value);
-            document.getElementById('wlValue').textContent = windowLevel;
+            _syncWindowLevelUI();
             windowingLockedByUser = true;
             scheduleImageDisplayUpdate(currentImageIndex, 'window');
             _scheduleMprRefresh('window');
@@ -1761,11 +1773,8 @@
                 windowWidth = windowPresets[preset].ww;
                 windowLevel = windowPresets[preset].wl;
                 windowingLockedByUser = true;
-                
-                document.getElementById('wwSlider').value = windowWidth;
-                document.getElementById('wlSlider').value = windowLevel;
-                document.getElementById('wwValue').textContent = windowWidth;
-                document.getElementById('wlValue').textContent = windowLevel;
+
+                _syncWindowLevelUI();
                 
                 scheduleImageDisplayUpdate(currentImageIndex, 'window');
                 _scheduleMprRefresh('window');
@@ -1778,11 +1787,8 @@
             windowWidth = Math.max(1, windowWidth + deltaX * sensitivity);
             windowLevel = Math.max(-1000, Math.min(1000, windowLevel + deltaY * sensitivity));
             windowingLockedByUser = true;
-            
-            document.getElementById('wwSlider').value = windowWidth;
-            document.getElementById('wlSlider').value = windowLevel;
-            document.getElementById('wwValue').textContent = Math.round(windowWidth);
-            document.getElementById('wlValue').textContent = Math.round(windowLevel);
+
+            _syncWindowLevelUI();
 
             // Window/level drag can fire dozens of events/sec; coalesce to avoid request storms.
             scheduleImageDisplayUpdate(currentImageIndex, 'window');
@@ -3245,7 +3251,7 @@
                                     <div><strong>Study:</strong> ${document.getElementById('studyStatus').textContent}</div>
                                     <div><strong>Series:</strong> ${document.getElementById('seriesStatus').textContent}</div>
                                     <div><strong>Image:</strong> ${document.getElementById('sliceValue').textContent}</div>
-                                    <div><strong>Window/Level:</strong> ${document.getElementById('wwValue').textContent}/${document.getElementById('wlValue').textContent}</div>
+                                    <div><strong>Window/Level:</strong> ${document.getElementById('wwValue')?.textContent ?? '-'} / ${document.getElementById('wlValue')?.textContent ?? '-'}</div>
                                 </div>
                             </div>
                             <button class="no-print" onclick="window.print()" style="position: fixed; top: 10px; right: 10px; padding: 10px 20px; background: #00d4ff; color: white; border: none; border-radius: 4px; cursor: pointer;">Print</button>

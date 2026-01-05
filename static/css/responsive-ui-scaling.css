@@ -81,6 +81,22 @@ html {
 
 /* Phone layout: keep tabs accessible without breaking */
 @media (max-width: 600px) {
+  /* Stack left/right sections to avoid overlap on very narrow widths */
+  .top-navbar {
+    align-items: flex-start;
+  }
+
+  .nav-left,
+  .nav-right {
+    width: 100%;
+  }
+
+  /* Ensure tab strip drops to its own line below the logo */
+  .nav-tabs {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
   .nav-tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -88,6 +104,32 @@ html {
     padding-bottom: 2px;
   }
   .nav-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
+
+/* Tiny phones / worst-case widths: keep actions reachable (scroll instead of overlap) */
+@media (max-width: 420px) {
+  .top-navbar {
+    gap: var(--ui-space-1);
+    padding: var(--ui-space-1) var(--ui-space-1) !important;
+  }
+
+  .nav-left {
+    gap: var(--ui-space-1);
+  }
+
+  .nav-right {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+    gap: var(--ui-space-1);
+    padding-bottom: 2px;
+  }
+
+  .nav-right > * {
     flex: 0 0 auto;
     white-space: nowrap;
   }
@@ -153,6 +195,24 @@ html {
   max-width: 92vw;
   max-height: calc(100dvh - 90px);
   overflow: auto;
+}
+
+/* Fixed-position floating panels (AI/3D/etc): keep them on-screen on small viewports */
+.viewer-container .floating-panel {
+  width: min(320px, 92vw) !important;
+  right: var(--ui-space-2) !important;
+  left: auto !important;
+  max-height: calc(100dvh - 90px) !important;
+}
+
+.viewer-container .floating-panel .panel-content {
+  max-height: calc(100dvh - 220px) !important;
+}
+
+/* Any modal-ish content should never exceed the viewport */
+.viewer-container .modal-content {
+  max-width: 95vw;
+  max-height: 95dvh;
 }
 
 /* ===== DICOM viewer (templates/dicom_viewer/masterpiece_viewer.html) ===== */

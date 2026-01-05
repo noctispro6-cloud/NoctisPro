@@ -643,6 +643,37 @@
                 padding: 3px 6px;
             }
         }
+
+        /* Small screens: reflow instead of horizontal scrolling */
+        @media (max-width: 900px) {
+            .data-table-container {
+                /* Keep vertical scrolling, avoid sideways “hidden columns” */
+                overflow-x: hidden;
+                overflow-y: auto;
+            }
+            .data-table {
+                table-layout: fixed;
+            }
+        }
+
+        @media (max-width: 600px) {
+            /* Controls bar: stack filters/inputs so they fit */
+            .control-group {
+                flex: 1 1 100%;
+                flex-wrap: wrap;
+            }
+            .control-input, .control-select {
+                width: 100%;
+                min-width: 0;
+            }
+
+            /* Buttons/labels: allow wrapping */
+            .btn-viewer,
+            .btn-control,
+            .nav-tab {
+                white-space: normal;
+            }
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>

@@ -3461,12 +3461,16 @@
             const len = Math.max(canvas.width, canvas.height) * 1.4;
             const half = len / 2;
 
-            // Image X axis (columns) direction in canvas space
-            const xdx = cos;
-            const xdy = sin;
-            // Image Y axis (rows) direction in canvas space
-            const ydx = -sin;
-            const ydy = cos;
+            // Image axis directions in canvas space.
+            // Must include flips so the crosshair stays aligned to the displayed image orientation.
+            const fx = flipH ? -1 : 1;
+            const fy = flipV ? -1 : 1;
+            // Image X axis (columns)
+            const xdx = fx * cos;
+            const xdy = fx * sin;
+            // Image Y axis (rows)
+            const ydx = fy * (-sin);
+            const ydy = fy * (cos);
 
             ctx.beginPath();
             // X axis line

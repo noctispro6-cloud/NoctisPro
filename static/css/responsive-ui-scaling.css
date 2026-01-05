@@ -24,6 +24,16 @@ html {
   text-size-adjust: 100%;
 }
 
+/* Prevent flex children from overflowing and "overlapping" */
+.top-navbar,
+.nav-left,
+.nav-right,
+.nav-tabs,
+.top-bar,
+.center-area {
+  min-width: 0;
+}
+
 /* Better viewport height behavior on mobile browsers */
 .dashboard-container,
 .viewer-container {
@@ -37,6 +47,8 @@ html {
   min-height: 50px;
   padding: var(--ui-space-1) var(--ui-space-2) !important;
   gap: var(--ui-space-2);
+  flex-wrap: wrap;
+  row-gap: var(--ui-space-1);
 }
 
 .nav-right,
@@ -85,13 +97,92 @@ html {
 .viewer-container {
   height: 100vh !important;
   height: 100dvh !important;
+  /* Let header/footer grow if they wrap; keep viewport from being pushed out. */
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+}
+
+/* DICOM viewer header: avoid wrapping-induced overlap into viewport */
+.viewer-container .top-navbar {
+  flex-wrap: wrap;
+  align-content: center;
+}
+
+.viewer-container .patient-info {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Viewer panels must be allowed to shrink within minmax(0, 1fr) rows */
+.viewer-container .toolbar,
+.viewer-container .right-panel,
+.viewer-container .viewport {
+  min-height: 0;
+}
+
+/* Right-panel popups: keep them inside the viewport on narrow/short screens */
+.viewer-container .control-popup {
+  width: min(280px, calc(100vw - 90px));
+  max-width: 92vw;
+  max-height: calc(100dvh - 90px);
+  overflow: auto;
+}
+
+/* ===== DICOM viewer (templates/dicom_viewer/masterpiece_viewer.html) ===== */
+.viewer-container {
+  /* Used by masterpiece_viewer.html for positioning fixed UI elements reliably */
+  --viewer-toolbar-w: clamp(56px, 6vw, 70px);
+  --viewer-topbar-h: 60px;
+}
+
+.viewer-container .top-bar {
+  height: auto !important;
+  min-height: var(--viewer-topbar-h);
+  flex-wrap: wrap;
+  padding: var(--ui-space-1) var(--ui-space-2) !important;
+  row-gap: var(--ui-space-1);
+}
+
+/* Long patient identifiers should not force layout overlap */
+.viewer-container .patient-info {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Crosshair rotate control: anchor to toolbar/topbar sizes, not hardcoded pixels */
+.mpr-crosshair-rotate {
+  left: calc(var(--viewer-toolbar-w) + var(--ui-space-3)) !important;
+  top: calc(var(--viewer-topbar-h) + 32px) !important;
+  width: min(320px, 92vw) !important;
+  max-height: calc(100dvh - 120px);
+  overflow: auto;
+}
+
+@media (max-width: 768px) {
+  /* Masterpiece viewer stacks toolbar + top-bar; keep overlay usable */
+  .mpr-crosshair-rotate {
+    left: var(--ui-space-2) !important;
+    top: calc((var(--viewer-topbar-h) * 2) + var(--ui-space-2)) !important;
+  }
+}
+
+/* Short-height screens: reduce chrome before it starts covering the viewport */
+@media (max-height: 560px) {
+  .viewer-container .top-bar {
+    padding: var(--ui-space-1) var(--ui-space-2) !important;
+    gap: var(--ui-space-1);
+  }
 }
 
 /* Tablet: slightly narrower rails */
 @media (max-width: 900px) {
   .viewer-container {
     grid-template-columns: 64px 1fr 54px !important;
-    grid-template-rows: 56px 1fr 44px !important;
+    /* Keep header/footer flexible to prevent overlap when content wraps */
+    grid-template-rows: auto minmax(0, 1fr) auto !important;
   }
 }
 

@@ -1,3 +1,145 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Iterable, Optional
+
+from django.db import transaction
+from django.utils import timezone
+
+from accounts.models import User, Facility
+from worklist.models import Study
+from .models import Notification, NotificationType
+
+
+@dataclass(frozen=True)
+class StudyUploadNotificationPayload:
+    """
+    Standard payload for a "study uploaded" notification.
+
+    We intentionally dedupe by StudyInstanceUID (and recipient) so multi-series
+    uploads don't spam users with one notification per series.
+    """
+
+    title: str
+    message: str
+    priority: str = "normal"
+    series_count: Optional[int] = None
+    images_count: Optional[int] = None
+
+
+def _get_or_create_type(code: str = "new_study") -> NotificationType:
+    notif_type, _ = NotificationType.objects.get_or_create(
+        code=code,
+        defaults={
+            "name": "New Study Uploaded",
+            "description": "A new study has been uploaded",
+            "is_system": True,
+        },
+    )
+    return notif_type
+
+
+def _dedupe_key(study: Study) -> str:
+    uid = (getattr(study, "study_instance_uid", None) or "").strip()
+    return f"study_upload:{uid or study.id}"
+
+
+def _push_realtime(recipient_id: int, message: str) -> None:
+    """
+    Best-effort websocket push. Safe to call from sync code.
+    """
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+
+        layer = get_channel_layer()
+        if not layer:
+            return
+        async_to_sync(layer.group_send)(
+            f"notifications_{recipient_id}",
+            {
+                "type": "send_notification",
+                "notification_type": "notification",
+                "message": message,
+            },
+        )
+    except Exception:
+        # Never break uploads because realtime isn't configured.
+        return
+
+
+@transaction.atomic
+def upsert_study_upload_notification(
+    *,
+    study: Study,
+    facility: Optional[Facility],
+    recipients: Iterable[User],
+    sender: Optional[User] = None,
+    payload: StudyUploadNotificationPayload,
+    notification_code: str = "new_study",
+) -> int:
+    """
+    Create (or update) a single notification per (recipient, study).
+
+    Returns the number of recipients notified (created or updated).
+    """
+    notif_type = _get_or_create_type(notification_code)
+    key = _dedupe_key(study)
+    now = timezone.now().isoformat()
+
+    notified = 0
+    for recipient in recipients:
+        # Dedupe by recipient + study (and also embed key into JSON for safety).
+        existing = (
+            Notification.objects.filter(
+                notification_type=notif_type,
+                recipient=recipient,
+                study=study,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        data = {
+            "dedupe_key": key,
+            "study_id": study.id,
+            "study_instance_uid": getattr(study, "study_instance_uid", None),
+            "accession_number": getattr(study, "accession_number", None),
+            "series_count": payload.series_count,
+            "images_count": payload.images_count,
+            "updated_at": now,
+        }
+
+        if existing:
+            # Update in place rather than creating a new row.
+            # Keep read/dismiss state intact; just refresh the content.
+            existing.title = payload.title
+            existing.message = payload.message
+            existing.priority = payload.priority or existing.priority
+            existing.sender = sender
+            existing.facility = facility
+            existing.data = {**(existing.data or {}), **{k: v for k, v in data.items() if v is not None}}
+            existing.save(update_fields=["title", "message", "priority", "sender", "facility", "data"])
+            _push_realtime(recipient.id, payload.message)
+            notified += 1
+            continue
+
+        Notification.objects.create(
+            notification_type=notif_type,
+            recipient=recipient,
+            sender=sender,
+            title=payload.title,
+            message=payload.message,
+            priority=payload.priority or "normal",
+            study=study,
+            facility=facility,
+            data={k: v for k, v in data.items() if v is not None},
+        )
+        _push_realtime(recipient.id, payload.message)
+        notified += 1
+
+    return notified
+
 """
 Out-of-band notification delivery (SMS / Phone Call).
 

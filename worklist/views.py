@@ -977,7 +977,8 @@ def upload_study(request):
 						sender_id = int(request.user.id)
 						patient_name = patient.full_name
 						facility_name = facility.name if facility else 'Unknown Facility'
-						series_count = int(total_series_processed)
+						# IMPORTANT: notify per-study, not per-series, and keep the count scoped to this study.
+						series_count = int(len(series_map) if isinstance(series_map, dict) else 0)
 						acc_num = str(accession_number)
 						mod_code = str(modality_code)
 
@@ -985,31 +986,34 @@ def upload_study(request):
 							try:
 								from django.db import close_old_connections
 								close_old_connections()
-								notif_type, _ = NotificationType.objects.get_or_create(
-									code='new_study',
-									defaults={'name': 'New Study Uploaded', 'description': 'A new study has been uploaded', 'is_system': True},
+								recipients = (
+									User.objects
+									.filter(Q(role='radiologist') | Q(role='admin') | Q(facility_id=facility_id), is_active=True)
+									.distinct()
 								)
-								recipients = User.objects.filter(Q(role='radiologist') | Q(role='admin') | Q(facility_id=facility_id))
 								sender = User.objects.filter(id=sender_id).first()
 								study_obj = Study.objects.filter(id=study_id).first()
 								fac_obj = Facility.objects.filter(id=facility_id).first() if facility_id else None
 								if not study_obj:
 									return
-								for recipient in recipients:
-									try:
-										Notification.objects.create(
-											notification_type=notif_type,
-											recipient=recipient,
-											sender=sender,
-											title=f"New {mod_code} study for {patient_name}",
-											message=f"Study {acc_num} uploaded from {facility_name} with {series_count} series",
-											priority='normal',
-											study=study_obj,
-											facility=fac_obj,
-											data={'study_id': study_id, 'accession_number': acc_num, 'series_count': series_count},
-										)
-									except Exception:
-										continue
+								# Dedupe per-study so multi-series uploads don't create multiple notifications.
+								from notifications.services import (
+									upsert_study_upload_notification,
+									StudyUploadNotificationPayload,
+								)
+								upsert_study_upload_notification(
+									study=study_obj,
+									facility=fac_obj,
+									recipients=recipients,
+									sender=sender,
+									payload=StudyUploadNotificationPayload(
+										title=f"New {mod_code} study for {patient_name}",
+										message=f"Study {acc_num} uploaded from {facility_name} with {series_count} series",
+										priority='normal',
+										series_count=series_count,
+									),
+									notification_code="new_study",
+								)
 								close_old_connections()
 							except Exception:
 								return

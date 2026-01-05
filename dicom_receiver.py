@@ -710,15 +710,6 @@ class DicomReceiver:
     def _send_new_study_notifications(self, study: Study, facility: Facility, modality: Modality):
         """Send notifications for new studies"""
         try:
-            notif_type, _ = NotificationType.objects.get_or_create(
-                code='new_study',
-                defaults={
-                    'name': 'New Study Uploaded',
-                    'description': 'A new study has been uploaded',
-                    'is_system': True
-                }
-            )
-            
             # Get recipients (radiologists, admins, facility users)
             recipients = User.objects.filter(
                 models.Q(role='radiologist') | 
@@ -726,29 +717,31 @@ class DicomReceiver:
                 models.Q(facility=facility),
                 is_active=True
             ).distinct()
-            
-            for recipient in recipients:
-                try:
-                    Notification.objects.create(
-                        type=notif_type,
-                        recipient=recipient,
-                        sender=None,
+
+            # Dedupe per-study (multi-series C-STORE should not spam).
+            try:
+                from notifications.services import (
+                    upsert_study_upload_notification,
+                    StudyUploadNotificationPayload,
+                )
+
+                upsert_study_upload_notification(
+                    study=study,
+                    facility=facility,
+                    recipients=recipients,
+                    sender=None,
+                    payload=StudyUploadNotificationPayload(
                         title=f"New {modality.code} study for {study.patient.full_name}",
                         message=f"Study {study.accession_number} uploaded from {facility.name}",
-                        priority='normal',
-                        study=study,
-                        facility=facility,
-                        data={
-                            'study_id': study.id,
-                            'accession_number': study.accession_number,
-                            'modality': modality.code,
-                            'patient_name': study.patient.full_name
-                        }
-                    )
-                except Exception as e:
-                    self.logger.warning(f"Failed to create notification for user {recipient.username}: {str(e)}")
-            
-            self.logger.info(f"Sent notifications for new study {study.accession_number} to {recipients.count()} users")
+                        priority="normal",
+                    ),
+                    notification_code="new_study",
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to send new study notifications (deduped): {str(e)}")
+                return
+
+            self.logger.info(f"Sent notifications for new study {study.accession_number} to {recipients.count()} users (deduped)")
             
         except Exception as e:
             self.logger.warning(f"Failed to send notifications for new study: {str(e)}")

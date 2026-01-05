@@ -1591,7 +1591,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const alertClass = type === 'error' ? 'danger' : type;
         const alert = document.createElement('div');
         alert.className = `alert alert-${alertClass} alert-dismissible fade show`;
-        alert.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+        alert.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; width: min(360px, calc(100vw - 40px));';
         alert.innerHTML = `
             ${message}
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>

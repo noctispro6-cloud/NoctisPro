@@ -75,7 +75,9 @@ html {
 /* Make dense tables usable on small screens */
 @media (max-width: 900px) {
   .data-table-container {
-    overflow-x: auto;
+    /* Prefer wrapping/reflow over sideways scrolling */
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 }
 
@@ -97,15 +99,27 @@ html {
     width: 100%;
   }
 
+  /* Prefer wrapping (no sideways scrolling / hidden tabs) */
   .nav-tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 2px;
+    flex-wrap: wrap;
+    overflow-x: visible;
+    padding-bottom: 0;
+    gap: var(--ui-space-1);
   }
   .nav-tab {
-    flex: 0 0 auto;
-    white-space: nowrap;
+    flex: 1 1 auto;
+    white-space: normal;
+  }
+
+  /* Controls bar: avoid horizontal overflow from min-width inputs */
+  .controls-bar .control-group {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+  .controls-bar .control-input,
+  .controls-bar .control-select {
+    width: 100%;
+    min-width: 0;
   }
 }
 
@@ -121,17 +135,17 @@ html {
   }
 
   .nav-right {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    /* Prefer wrapping (no sideways scrolling / hidden buttons) */
+    flex-wrap: wrap;
+    overflow-x: visible;
     max-width: 100%;
     gap: var(--ui-space-1);
-    padding-bottom: 2px;
+    padding-bottom: 0;
   }
 
   .nav-right > * {
-    flex: 0 0 auto;
-    white-space: nowrap;
+    flex: 1 1 auto;
+    white-space: normal;
   }
 }
 
@@ -277,7 +291,8 @@ html {
   .viewer-container {
     grid-template-columns: 1fr !important;
     grid-template-rows: auto 1fr auto !important;
-    width: 100vw !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
 
   .top-navbar {
@@ -302,23 +317,28 @@ html {
     grid-column: 1 !important;
     grid-row: 3 !important;
     flex-direction: row !important;
+    flex-wrap: wrap !important;
     min-width: 100% !important;
     max-width: none !important;
     width: 100% !important;
     border-right: none !important;
     border-top: 1px solid var(--border-color);
-    overflow-x: auto !important;
-    overflow-y: hidden !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    /* Avoid the toolbar covering the whole viewport */
+    max-height: min(34dvh, 240px) !important;
     padding: var(--ui-space-1) !important;
     gap: var(--ui-space-1) !important;
   }
 
   .tool-group {
     flex-direction: row !important;
+    flex-wrap: wrap !important;
     gap: var(--ui-space-1) !important;
   }
 
   .tool-separator {
+    display: none !important;
     width: 1px !important;
     height: 100% !important;
     margin: 0 var(--ui-space-1) !important;
@@ -332,6 +352,94 @@ html {
 
   .tool i {
     font-size: 18px !important;
+  }
+}
+
+/* Tables: wrap content on small screens (avoid horizontal overflow) */
+@media (max-width: 768px) {
+  table {
+    width: 100%;
+    table-layout: fixed;
+  }
+  .table-responsive {
+    /* Avoid “sideways scrolling containers” where possible */
+    overflow-x: hidden !important;
+  }
+  th,
+  td {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* Buttons with fixed labels should wrap too */
+  .btn-viewer {
+    white-space: normal !important;
+  }
+}
+
+/* App-wide small-screen overflow hardening */
+@media (max-width: 768px) {
+  /* Media should never force page width */
+  img,
+  svg,
+  canvas,
+  video,
+  iframe {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Common “search box in header” patterns */
+  .chat-rooms-page .chat-search,
+  .notifs-page .notifs-search,
+  .perm-page .perm-search,
+  .perm-edit .perm-search {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    flex: 1 1 100% !important;
+  }
+
+  /* Mini counters/labels should wrap instead of pushing headers wider */
+  .chat-rooms-page .chat-mini,
+  .notifs-page .notifs-mini,
+  .perm-page .perm-mini,
+  .perm-edit .perm-mini {
+    white-space: normal !important;
+  }
+
+  /* Grid cards: avoid min column widths that overflow on narrow phones */
+  .chat-rooms-page .rooms-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Permission tables: shrink “min-width” columns so the table can fit */
+  .perm-page .perm-cap-col {
+    min-width: 44px !important;
+  }
+  .perm-page .perm-sticky-right {
+    min-width: 72px !important;
+  }
+}
+
+/* Fixed-position toasts/alerts: keep them on-screen */
+@media (max-width: 600px) {
+  .toast,
+  .alert {
+    max-width: calc(100vw - 24px) !important;
+  }
+
+  /* Template-local styles often force nowrap; override globally on phone widths */
+  .btn-viewer {
+    white-space: normal !important;
+  }
+
+  /* Form controls should never overflow their containers */
+  input,
+  select,
+  textarea {
+    max-width: 100%;
   }
 }
 

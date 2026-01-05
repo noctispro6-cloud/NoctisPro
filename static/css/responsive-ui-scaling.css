@@ -107,7 +107,21 @@ html {
   align-content: center;
 }
 
+.viewer-container .top-navbar .nav-left {
+  /* Allow patient/study text to shrink instead of forcing overlaps */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.viewer-container .top-navbar .nav-right {
+  /* Keep action buttons visible; wrap if needed */
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .viewer-container .patient-info {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -119,6 +133,18 @@ html {
 .viewer-container .right-panel,
 .viewer-container .viewport {
   min-height: 0;
+}
+
+/* Right-panel popups should be positioned relative to the rail, not the viewport */
+.viewer-container .right-panel {
+  position: relative !important;
+}
+
+.viewer-container .control-popup {
+  /* Anchor the popup to the left of the right rail reliably */
+  top: var(--ui-space-2) !important;
+  right: calc(100% + var(--ui-space-2)) !important;
+  left: auto !important;
 }
 
 /* Right-panel popups: keep them inside the viewport on narrow/short screens */

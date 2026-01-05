@@ -261,8 +261,8 @@
                 </div>
             </div>
             <div class="d-flex align-items-center">
-                {% if user_participant.role == 'admin' or user_participant.role == 'moderator' %}
-                <button type="button" class="btn-control me-2" title="Room Settings">
+                {% if can_manage_room %}
+                <button type="button" class="btn-control me-2" title="Room Settings" data-bs-toggle="modal" data-bs-target="#roomSettingsModal">
                     <i class="fas fa-cog"></i>
                 </button>
                 {% endif %}
@@ -375,17 +375,129 @@
             <!-- Room Actions -->
             <div class="mt-4">
                 <h6 class="text-light mb-2">Room Actions</h6>
-                {% if user_participant.role == 'admin' %}
-                <button type="button" class="btn-control w-100 mb-2">
+                {% if can_manage_room %}
+                <button type="button" class="btn-control w-100 mb-2" data-bs-toggle="modal" data-bs-target="#inviteUsersModal">
                     <i class="fas fa-user-plus me-2"></i>Invite Users
                 </button>
-                <button type="button" class="btn-control w-100 mb-2">
+                <button type="button" class="btn-control w-100 mb-2" data-bs-toggle="modal" data-bs-target="#roomSettingsModal">
                     <i class="fas fa-cog me-2"></i>Room Settings
                 </button>
                 {% endif %}
                 <a href="{% url 'chat:leave_room' room.id %}" class="btn-control w-100">
                     <i class="fas fa-sign-out-alt me-2"></i>Leave Room
                 </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Invite Users Modal -->
+    <div class="modal fade" id="inviteUsersModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--border-color);">
+                <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+                    <h5 class="modal-title" style="color: var(--text-primary);">
+                        <i class="fas fa-user-plus"></i> Invite users to {{ room.name }}
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <label class="form-label" style="color: var(--text-secondary); font-size: 11px;">Search users</label>
+                            <input id="inviteUserSearch" class="form-control" placeholder="Type a name, username, or email…">
+                            <div style="color: var(--text-muted); font-size: 10px; margin-top: 6px;">
+                                Tip: type at least 2 characters.
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div id="inviteResults" style="margin-top: 10px;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+                    <button type="button" class="btn-control" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Room Settings Modal -->
+    <div class="modal fade" id="roomSettingsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--border-color);">
+                <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+                    <h5 class="modal-title" style="color: var(--text-primary);">
+                        <i class="fas fa-cog"></i> Room settings
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form id="roomSettingsForm">
+                    {% csrf_token %}
+                    <div class="modal-body">
+                        <div class="row g-3">
+                            <div class="col-12 col-md-6">
+                                <label class="form-label" style="color: var(--text-secondary); font-size: 11px;">Room name</label>
+                                <input name="name" class="form-control" value="{{ room.name }}" required>
+                            </div>
+                            <div class="col-12 col-md-6">
+                                <label class="form-label" style="color: var(--text-secondary); font-size: 11px;">Max participants</label>
+                                <input name="max_participants" type="number" min="2" max="500" class="form-control" value="{{ room.max_participants }}">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label" style="color: var(--text-secondary); font-size: 11px;">Description</label>
+                                <input name="description" class="form-control" value="{{ room.description }}">
+                            </div>
+                            <div class="col-12">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="roomPrivateSwitch" name="is_private" {% if room.is_private %}checked{% endif %}>
+                                    <label class="form-check-label" for="roomPrivateSwitch" style="color: var(--text-secondary); font-size: 11px;">
+                                        Private room (invite required)
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="col-12" style="margin-top: 8px;">
+                                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                                    <div style="font-weight:700;color:var(--text-primary);">Participants</div>
+                                    <div style="color:var(--text-muted);font-size:10px;">Manage roles / remove users</div>
+                                </div>
+                                <div style="margin-top: 10px; display:flex; flex-direction:column; gap:8px;">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid rgba(64,64,64,0.35);border-radius:10px;">
+                                        <div style="min-width:0;">
+                                            <div style="font-weight:700;color:var(--text-primary);">{{ user.get_full_name|default:user.username }} (You)</div>
+                                            <div style="color:var(--text-muted);font-size:10px;">{{ user_participant.get_role_display }}</div>
+                                        </div>
+                                    </div>
+                                    {% for participant in participants %}
+                                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px;border:1px solid rgba(64,64,64,0.35);border-radius:10px;">
+                                        <div style="min-width:0;">
+                                            <div style="font-weight:700;color:var(--text-primary);">{{ participant.user.get_full_name|default:participant.user.username }}</div>
+                                            <div style="color:var(--text-muted);font-size:10px;">Current: {{ participant.get_role_display }}</div>
+                                        </div>
+                                        <div style="display:flex;align-items:center;gap:8px;">
+                                            {% if user_participant.role == 'admin' or user.is_admin %}
+                                            <select class="form-control form-control-sm role-select" data-user-id="{{ participant.user_id }}" style="min-width: 140px;">
+                                                <option value="member" {% if participant.role == 'member' %}selected{% endif %}>Member</option>
+                                                <option value="moderator" {% if participant.role == 'moderator' %}selected{% endif %}>Moderator</option>
+                                                <option value="admin" {% if participant.role == 'admin' %}selected{% endif %}>Admin</option>
+                                            </select>
+                                            {% endif %}
+                                            <button type="button" class="btn-control btn-remove-user" data-user-id="{{ participant.user_id }}">
+                                                <i class="fas fa-user-minus"></i> Remove
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                        <div id="roomSettingsStatus" style="margin-top: 10px; color: var(--text-muted); font-size: 11px;"></div>
+                    </div>
+                    <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+                        <button type="button" class="btn-control" data-bs-dismiss="modal">Close</button>
+                        <button type="submit" class="btn-control"><i class="fas fa-save"></i> Save</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
@@ -425,6 +537,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Real-time chat via WebSocket (Channels)
 (function () {
+    function getCsrf() {
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
     function ready(fn) {
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
         else fn();
@@ -583,6 +700,169 @@ document.addEventListener('DOMContentLoaded', function() {
                 try { socket.send(JSON.stringify({ type: 'mark_read' })); } catch(e) {}
             }
         });
+
+        // Room settings + invites (AJAX)
+        (function setupRoomAdmin() {
+            var canManage = {{ can_manage_room|yesno:"true,false" }};
+            if (!canManage) return;
+
+            var roomIdForAdmin = roomId;
+            var settingsForm = document.getElementById('roomSettingsForm');
+            var statusEl = document.getElementById('roomSettingsStatus');
+            var inviteSearch = document.getElementById('inviteUserSearch');
+            var inviteResults = document.getElementById('inviteResults');
+
+            function setStatus(msg) {
+                if (!statusEl) return;
+                statusEl.textContent = msg || '';
+            }
+
+            async function saveRoomSettings(e) {
+                if (e && e.preventDefault) e.preventDefault();
+                if (!settingsForm) return;
+                setStatus('Saving…');
+                try {
+                    var formData = new FormData(settingsForm);
+                    var res = await fetch('{% url "chat:update_room_settings" room.id %}', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'X-CSRFToken': getCsrf() },
+                        body: formData
+                    });
+                    var data = await res.json().catch(function(){ return {}; });
+                    if (!res.ok || !data.ok) throw new Error((data && data.error) || 'Failed to save');
+                    setStatus('Saved. Refreshing…');
+                    window.location.reload();
+                } catch (err) {
+                    setStatus((err && err.message) ? err.message : 'Failed to save');
+                }
+            }
+
+            async function searchUsers(q) {
+                if (!inviteResults) return;
+                inviteResults.innerHTML = '';
+                if (!q || q.length < 2) return;
+                try {
+                    var res = await fetch('{% url "chat:api_search_users" room.id %}?q=' + encodeURIComponent(q), { credentials: 'same-origin' });
+                    var data = await res.json();
+                    if (!res.ok || !data.ok) return;
+                    var items = (data.results || []);
+                    if (!items.length) {
+                        inviteResults.innerHTML = '<div style="color:var(--text-muted);font-size:11px;">No users found.</div>';
+                        return;
+                    }
+                    inviteResults.innerHTML = items.map(function(u){
+                        var subtitle = (u.role ? (u.role + (u.facility ? (' • ' + u.facility) : '')) : (u.facility || ''));
+                        return (
+                            '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px;border:1px solid rgba(64,64,64,0.35);border-radius:10px;margin-bottom:8px;">' +
+                                '<div style="min-width:0;">' +
+                                    '<div style="font-weight:700;color:var(--text-primary);">' + esc(u.name) + '</div>' +
+                                    '<div style="color:var(--text-muted);font-size:10px;">@' + esc(u.username) + (subtitle ? (' • ' + esc(subtitle)) : '') + '</div>' +
+                                '</div>' +
+                                '<button type="button" class="btn-control invite-btn" data-user-id="' + String(u.id) + '">' +
+                                    '<i class="fas fa-paper-plane"></i> Invite' +
+                                '</button>' +
+                            '</div>'
+                        );
+                    }).join('');
+                } catch(e) {
+                    // ignore
+                }
+            }
+
+            async function sendInvite(userId) {
+                if (!userId) return;
+                try {
+                    var fd = new FormData();
+                    fd.append('user_id', String(userId));
+                    var res = await fetch('{% url "chat:invite_user" room.id %}', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'X-CSRFToken': getCsrf() },
+                        body: fd
+                    });
+                    var data = await res.json().catch(function(){ return {}; });
+                    if (!res.ok || !data.ok) throw new Error((data && data.error) || 'Invite failed');
+                    // Update UI
+                    if (inviteResults) {
+                        var btn = inviteResults.querySelector('.invite-btn[data-user-id="' + String(userId) + '"]');
+                        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-check"></i> Invited'; }
+                    }
+                } catch(e) {
+                    // ignore
+                }
+            }
+
+            async function removeUser(userId) {
+                if (!userId) return;
+                try {
+                    var fd = new FormData();
+                    var url = '{% url "chat:remove_participant" room.id 0 %}'.replace('/0/remove/', '/' + String(userId) + '/remove/');
+                    var res = await fetch(url, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'X-CSRFToken': getCsrf() },
+                        body: fd
+                    });
+                    var data = await res.json().catch(function(){ return {}; });
+                    if (!res.ok || !data.ok) throw new Error((data && data.error) || 'Remove failed');
+                    window.location.reload();
+                } catch(e) {
+                    setStatus((e && e.message) ? e.message : 'Remove failed');
+                }
+            }
+
+            async function updateRole(userId, role) {
+                if (!userId || !role) return;
+                try {
+                    var fd = new FormData();
+                    fd.append('role', role);
+                    var url = '{% url "chat:update_participant_role" room.id 0 %}'.replace('/0/role/', '/' + String(userId) + '/role/');
+                    var res = await fetch(url, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'X-CSRFToken': getCsrf() },
+                        body: fd
+                    });
+                    var data = await res.json().catch(function(){ return {}; });
+                    if (!res.ok || !data.ok) throw new Error((data && data.error) || 'Role update failed');
+                    setStatus('Role updated.');
+                } catch(e) {
+                    setStatus((e && e.message) ? e.message : 'Role update failed');
+                }
+            }
+
+            if (settingsForm) settingsForm.addEventListener('submit', saveRoomSettings);
+            if (inviteSearch) {
+                var t;
+                inviteSearch.addEventListener('input', function(){
+                    clearTimeout(t);
+                    var q = inviteSearch.value || '';
+                    t = setTimeout(function(){ searchUsers(q.trim()); }, 200);
+                }, { passive: true });
+            }
+            if (inviteResults) {
+                inviteResults.addEventListener('click', function(e){
+                    var btn = e.target && (e.target.closest ? e.target.closest('.invite-btn') : null);
+                    if (!btn) return;
+                    var uid = btn.getAttribute('data-user-id');
+                    sendInvite(uid);
+                });
+            }
+            document.addEventListener('click', function(e){
+                var b = e.target && (e.target.closest ? e.target.closest('.btn-remove-user') : null);
+                if (!b) return;
+                var uid = b.getAttribute('data-user-id');
+                removeUser(uid);
+            });
+            document.addEventListener('change', function(e){
+                var sel = e.target && (e.target.closest ? e.target.closest('.role-select') : null);
+                if (!sel) return;
+                var uid = sel.getAttribute('data-user-id');
+                var role = sel.value;
+                updateRole(uid, role);
+            });
+        })();
 
         // initial connect
         connect();

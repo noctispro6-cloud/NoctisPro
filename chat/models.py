@@ -219,11 +219,15 @@ class ChatInvitation(models.Model):
             self.save()
             
             # Add user to room as participant
-            ChatParticipant.objects.get_or_create(
+            participant, _ = ChatParticipant.objects.get_or_create(
                 room=self.room,
                 user=self.invited_user,
                 defaults={'role': 'member'}
             )
+            # If the user had previously left, reactivate them.
+            if not participant.is_active:
+                participant.is_active = True
+                participant.save(update_fields=['is_active'])
             return True
         return False
 

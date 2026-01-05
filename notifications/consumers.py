@@ -6,8 +6,23 @@ from django.contrib.auth.models import User
 
 class NotificationConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        self.user_id = self.scope['url_route']['kwargs']['user_id']
-        self.notification_group_name = f'notifications_{self.user_id}'
+        user = self.scope.get("user")
+        if not user or not getattr(user, "is_authenticated", False):
+            await self.close()
+            return
+
+        try:
+            self.user_id = int(self.scope["url_route"]["kwargs"]["user_id"])
+        except Exception:
+            await self.close()
+            return
+
+        # Prevent users from subscribing to other users' streams.
+        if int(getattr(user, "id", -1)) != self.user_id:
+            await self.close()
+            return
+
+        self.notification_group_name = f"notifications_{self.user_id}"
 
         # Join notification group
         await self.channel_layer.group_add(

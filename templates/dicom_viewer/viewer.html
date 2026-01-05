@@ -2178,9 +2178,10 @@
                     currentImageIndex = 0;
 
                     // Reset per-series auto windowing so "initial axial" and MPR start identical.
+                    // IMPORTANT: do NOT clear `windowingLockedByUser` here — if the user picked a preset
+                    // (e.g. Bone) or adjusted WW/WL manually, that preference should persist while they
+                    // scroll/click through images (and even when switching series) until they explicitly reset.
                     windowingInitializedForSeries = false;
-                    windowingLockedByUser = false;
-                    inversionLockedByUser = false;
 
                     // Reset view transforms when switching series
                     zoomFactor = 1.0;

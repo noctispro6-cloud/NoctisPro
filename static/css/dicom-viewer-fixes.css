@@ -30,6 +30,23 @@
     display: flex !important;
     align-items: center;
     gap: 10px;
+    flex-wrap: wrap;
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* Worst-case widths: allow horizontal scroll rather than overlap/cutoff */
+@media (max-width: 420px) {
+    .top-navbar .nav-right {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 2px;
+    }
+    .top-navbar .nav-right > * {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
 }
 
 /* Delete button fixes */

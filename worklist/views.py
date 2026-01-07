@@ -143,13 +143,25 @@ def study_list(request):
 	
 	search_query = request.GET.get('search')
 	if search_query:
-		studies = studies.filter(
-			Q(accession_number__icontains=search_query) |
-			Q(patient__first_name__icontains=search_query) |
-			Q(patient__last_name__icontains=search_query) |
-			Q(patient__patient_id__icontains=search_query) |
-			Q(study_description__icontains=search_query)
+		q = (search_query or '').strip()
+		# Support searching full names ("John Doe"), DICOM-style ("DOE^JOHN"),
+		# and IDs/accession numbers. For multi-token queries, require each token
+		# to match either first or last name (order-insensitive).
+		tokens = [t for t in re.split(r'[\s,\^]+', q) if t]
+		base_q = (
+			Q(accession_number__icontains=q) |
+			Q(patient__patient_id__icontains=q) |
+			Q(study_description__icontains=q) |
+			Q(patient__first_name__icontains=q) |
+			Q(patient__last_name__icontains=q)
 		)
+		if len(tokens) >= 2:
+			name_q = Q()
+			for t in tokens:
+				name_q &= (Q(patient__first_name__icontains=t) | Q(patient__last_name__icontains=t))
+			studies = studies.filter(base_q | name_q)
+		else:
+			studies = studies.filter(base_q)
 	
 	# Sort by priority (urgent→low) then most recently uploaded first.
 	# IMPORTANT: many DICOM studies contain historical StudyDate values, which can make fresh uploads
@@ -418,6 +430,47 @@ def upload_study(request):
 					return inferred
 				return 'OT'
 
+			def _parse_patient_name(ds) -> tuple[str, str]:
+				"""
+				Extract (first_name, last_name) from DICOM PatientName.
+
+				DICOM PN commonly encodes as:
+				  Family^Given^Middle^Prefix^Suffix
+				We map Given(+Middle) -> first_name, Family -> last_name.
+				"""
+				try:
+					raw = str(getattr(ds, 'PatientName', '') or '').strip()
+				except Exception:
+					raw = ''
+
+				if not raw or raw.upper().startswith('UNKNOWN'):
+					return ('Unknown', 'Patient')
+
+				# PN caret-separated: Family^Given^Middle^Prefix^Suffix
+				if '^' in raw:
+					parts = [p.strip() for p in raw.split('^')]
+					family = parts[0] if len(parts) > 0 else ''
+					given = parts[1] if len(parts) > 1 else ''
+					middle = parts[2] if len(parts) > 2 else ''
+					first = ' '.join([p for p in (given, middle) if p]).strip()
+					last = family.strip()
+					if not first:
+						first = 'Unknown'
+					if not last:
+						last = 'Patient'
+					return (first, last)
+
+				# Common alternative: "LAST, FIRST"
+				if ',' in raw:
+					last, first = [p.strip() for p in raw.split(',', 1)]
+					return (first or 'Unknown', last or 'Patient')
+
+				# Fallback: space-separated "First Last" (best effort)
+				parts = [p for p in raw.replace('\t', ' ').split(' ') if p]
+				if len(parts) == 1:
+					return (parts[0], 'Patient')
+				return (parts[0], ' '.join(parts[1:]))
+
 			def _looks_like_real_dicom(ds) -> bool:
 				"""
 				Heuristic validation for non-Part10/no-extension DICOM.
@@ -628,12 +681,7 @@ def upload_study(request):
 				
 				# Enhanced patient data extraction with medical validation
 				patient_id = getattr(rep_ds, 'PatientID', f'TEMP_{int(timezone.now().timestamp())}')
-				patient_name = str(getattr(rep_ds, 'PatientName', 'UNKNOWN^PATIENT')).replace('^', ' ')
-				
-				# Professional name parsing with medical standards
-				name_parts = patient_name.strip().split(' ')
-				first_name = name_parts[0] if name_parts and name_parts[0] != 'UNKNOWN' else 'Unknown'
-				last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else 'Patient'
+				first_name, last_name = _parse_patient_name(rep_ds)
 				
 				# Professional date handling with medical precision
 				birth_date = getattr(rep_ds, 'PatientBirthDate', None)
@@ -663,6 +711,28 @@ def upload_study(request):
 						'gender': gender
 					}
 				)
+
+				# If the patient already existed but had placeholder names, refresh them from this upload.
+				# This prevents the worklist search from failing when a patient was first created from a
+				# minimal DICOM header (or a prior bad upload) and later uploads bring the real name.
+				try:
+					if not patient_created:
+						is_placeholder = (
+							(not (patient.first_name or '').strip()) or
+							(not (patient.last_name or '').strip()) or
+							(patient.first_name.strip().lower() in ('unknown', 'unk')) or
+							(patient.last_name.strip().lower() in ('patient', 'unknown', 'unk'))
+						)
+						has_better = (
+							(first_name.strip().lower() not in ('unknown', 'unk')) and
+							(last_name.strip().lower() not in ('patient', 'unknown', 'unk'))
+						)
+						if is_placeholder and has_better:
+							patient.first_name = first_name
+							patient.last_name = last_name
+							patient.save(update_fields=['first_name', 'last_name'])
+				except Exception:
+					pass
 				
 				if patient_created:
 					logger.info(f"New patient created: {patient.full_name} (ID: {patient_id})")
@@ -1771,12 +1841,23 @@ def api_search_studies(request):
         studies = studies.filter(patient__patient_id=patient_id)
     
     # Search query
-    studies = studies.filter(
+    tokens = [t for t in re.split(r'[\s,\^]+', query) if t]
+    base_q = (
         Q(accession_number__icontains=query) |
+        Q(patient__patient_id__icontains=query) |
         Q(patient__first_name__icontains=query) |
         Q(patient__last_name__icontains=query) |
         Q(study_description__icontains=query)
-    ).select_related('patient', 'modality').order_by('-study_date')[:20]
+    )
+    if len(tokens) >= 2:
+        name_q = Q()
+        for t in tokens:
+            name_q &= (Q(patient__first_name__icontains=t) | Q(patient__last_name__icontains=t))
+        studies = studies.filter(base_q | name_q)
+    else:
+        studies = studies.filter(base_q)
+
+    studies = studies.select_related('patient', 'modality').order_by('-study_date')[:20]
     
     studies_data = []
     for study in studies:

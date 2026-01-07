@@ -447,8 +447,15 @@
         }
 
         .modality-ct { border-color: #4a90e2; color: #4a90e2; }
-        .modality-mri { border-color: #7b68ee; color: #7b68ee; }
+        /* DICOM modality codes commonly seen in the wild */
+        .modality-mr { border-color: #7b68ee; color: #7b68ee; }
+        .modality-us { border-color: #ffa500; color: #ffa500; }
+        .modality-nm { border-color: #ff6347; color: #ff6347; }
+        .modality-pt { border-color: #ff6347; color: #ff6347; }
+        /* Radiography bucket (CR/DX/DR/MG/etc.) */
         .modality-xr { border-color: #50c878; color: #50c878; }
+        /* Back-compat (older UI used MRI) */
+        .modality-mri { border-color: #7b68ee; color: #7b68ee; }
         .modality-us { border-color: #ffa500; color: #ffa500; }
         .modality-nm { border-color: #ff6347; color: #ff6347; }
 
@@ -696,10 +703,9 @@
                 <select class="control-select" id="statusFilter">
                     <option value="">All Status</option>
                     <option value="scheduled">Scheduled</option>
-                    <option value="urgent">Urgent</option>
                     <option value="in-progress">In Progress</option>
                     <option value="completed">Completed</option>
-                    <option value="pending">Pending</option>
+                    <option value="suspended">Suspended</option>
                     <option value="cancelled">Cancelled</option>
                 </select>
             </div>
@@ -707,11 +713,7 @@
                 <label class="control-label">Modality:</label>
                 <select class="control-select" id="modalityFilter">
                     <option value="">All Modalities</option>
-                    <option value="CT">CT</option>
-                    <option value="MRI">MRI</option>
-                    <option value="XR">X-Ray</option>
-                    <option value="US">Ultrasound</option>
-                    <option value="NM">Nuclear Medicine</option>
+                    {# Options are rebuilt dynamically from API data #}
                 </select>
             </div>
             <div class="control-group">
@@ -833,11 +835,18 @@
                 if (data.success) {
                     studiesData = data.studies || [];
                     filteredData = [...studiesData];
+
+                    // Ensure filter dropdowns match real API values (DICOM modality codes, actual statuses)
+                    rebuildFilterOptionsFromData();
+                    // Apply current filter controls (including default date=today) immediately
+                    applyFilters();
                     
                     if (studiesData.length === 0) {
                         showNoDataMessage();
                         showToast('No studies found. Upload DICOM files to get started.', 'info', 5000);
                     } else {
+                        // renderStudiesTable() is called by applyFilters(); keep as fallback if filters fail
+                        if (!Array.isArray(filteredData)) filteredData = [...studiesData];
                         renderStudiesTable();
                         updateStatusCounts();
                         showToast(`Loaded ${studiesData.length} studies`, 'success', 2000);
@@ -946,7 +955,7 @@
                         <td class="patient-id">${study.patient_id}</td>
                         <td class="patient-name">${study.patient_name}</td>
                         <td class="accession">${study.accession_number}</td>
-                        <td><span class="modality-badge modality-${study.modality.toLowerCase()}">${study.modality}</span></td>
+                        <td><span class="modality-badge modality-${normalizeModalityCssClass(study.modality)}">${String(study.modality || '').toUpperCase()}</span></td>
                         <td><span class="status-badge status-${study.status}">
                             ${getStatusIcon(study.status)}${study.status.toUpperCase().replace('_', ' ')}
                         </span></td>
@@ -1275,9 +1284,8 @@
             document.getElementById('priorityFilter').value = '';
             document.getElementById('searchFilter').value = '';
             
-            // Reset filtered data to show all studies
-            filteredData = [...studiesData];
-            renderStudiesTable();
+            // Re-apply (date defaults to today)
+            applyFilters();
         }
 
         // Enhanced refresh function with better error handling
@@ -1427,6 +1435,85 @@
             });
             
             renderStudiesTable();
+        }
+
+        // Build filter dropdowns from loaded API data (prevents mismatch like "MRI" vs "MR")
+        function rebuildFilterOptionsFromData() {
+            try {
+                const statusEl = document.getElementById('statusFilter');
+                const modalityEl = document.getElementById('modalityFilter');
+
+                if (!Array.isArray(studiesData)) return;
+
+                // Preserve current selections when possible
+                const selectedStatus = statusEl ? statusEl.value : '';
+                const selectedModality = modalityEl ? modalityEl.value : '';
+
+                // Status: prefer a sensible ordering, but only include what actually exists
+                if (statusEl) {
+                    const present = new Set(
+                        studiesData
+                            .map(s => (s && s.status != null ? String(s.status) : '').trim())
+                            .filter(Boolean)
+                    );
+                    const order = ['scheduled', 'in-progress', 'suspended', 'completed', 'cancelled'];
+                    const statuses = order.filter(s => present.has(s));
+                    // Include any unknown statuses at the end (rare, but keeps filter usable)
+                    for (const s of Array.from(present).sort()) {
+                        if (!statuses.includes(s)) statuses.push(s);
+                    }
+                    statusEl.innerHTML = ['<option value="">All Status</option>']
+                        .concat(statuses.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(formatStatusLabel(s))}</option>`))
+                        .join('');
+                    statusEl.value = statuses.includes(selectedStatus) ? selectedStatus : '';
+                }
+
+                // Modality: unique DICOM codes from API (CT, MR, CR, DX, ...)
+                if (modalityEl) {
+                    const modalities = Array.from(
+                        new Set(
+                            studiesData
+                                .map(s => (s && s.modality != null ? String(s.modality) : '').trim().toUpperCase())
+                                .filter(Boolean)
+                        )
+                    ).sort();
+                    modalityEl.innerHTML = ['<option value="">All Modalities</option>']
+                        .concat(modalities.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`))
+                        .join('');
+                    modalityEl.value = modalities.includes(String(selectedModality || '').toUpperCase())
+                        ? String(selectedModality || '').toUpperCase()
+                        : '';
+                }
+            } catch (e) {
+                // Never block page rendering due to filter UI errors
+                console.warn('Failed to rebuild filter options:', e);
+            }
+        }
+
+        function formatStatusLabel(status) {
+            const s = String(status || '');
+            if (!s) return s;
+            return s.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // Normalize modality badge class names (DICOM codes -> grouped styling)
+        function normalizeModalityCssClass(modality) {
+            const m = String(modality || '').trim().toUpperCase();
+            if (!m) return 'ot';
+            // Group common radiography modalities under XR styling bucket
+            const xr = new Set(['CR', 'DX', 'DR', 'MG', 'RF', 'XA', 'IO', 'OP', 'XC']);
+            if (xr.has(m)) return 'xr';
+            if (m === 'MR') return 'mr';
+            return m.toLowerCase();
         }
     </script>
     

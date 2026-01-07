@@ -573,7 +573,7 @@ def view_study(request, study_id):
     return redirect('dicom_viewer:launch_study_in_desktop_viewer', study_id=study_id)
 
 @login_required
-@csrf_exempt
+@require_http_methods(["GET"])
 def api_study_data(request, study_id):
     """API endpoint to get study data for viewer"""
     try:
@@ -646,7 +646,7 @@ def api_study_data(request, study_id):
         return JsonResponse({'error': f'Failed to load study data: {str(e)}'}, status=500)
 
 @login_required
-@csrf_exempt
+@require_http_methods(["GET"])
 def api_image_data(request, image_id):
     """API endpoint to get specific image data.
 
@@ -943,7 +943,6 @@ def api_image_data(request, image_id):
     return JsonResponse(data)
 
 @login_required
-@csrf_exempt
 def api_mpr_reconstruction(request, series_id):
     """API endpoint for Multiplanar Reconstruction (MPR)
     - If no plane is provided, returns mid-slice preview images for axial/sagittal/coronal plus counts
@@ -1099,7 +1098,6 @@ def api_mpr_reconstruction(request, series_id):
         return JsonResponse({'error': f'Error generating MPR: {str(e)}'}, status=500)
 
 @login_required
-@csrf_exempt
 def api_mip_reconstruction(request, series_id):
     """API endpoint for Maximum Intensity Projection (MIP)
     Optimized to reuse cached 3D volume when available for instant response."""
@@ -1185,7 +1183,6 @@ def api_mip_reconstruction(request, series_id):
         return JsonResponse({'error': f'Error generating MIP: {str(e)}'}, status=500)
 
 @login_required
-@csrf_exempt
 def api_bone_reconstruction(request, series_id):
     """API endpoint for bone reconstruction using thresholding
     Optimized to reuse cached 3D volume when available; returns 3-plane previews instantly."""
@@ -1407,7 +1404,6 @@ def api_bone_reconstruction(request, series_id):
         return JsonResponse({'error': f'Error generating bone reconstruction: {str(e)}'}, status=500)
 
 @login_required
-@csrf_exempt
 def api_realtime_studies(request):
     """API endpoint for real-time study updates"""
     try:
@@ -1491,7 +1487,6 @@ def api_realtime_studies(request):
         }, status=500)
 
 @login_required
-@csrf_exempt
 def api_study_progress(request, study_id):
     """API endpoint to get study processing progress"""
     study = get_object_or_404(Study, id=study_id)
@@ -1687,7 +1682,6 @@ def _array_to_png_bytes(array, window_width=None, window_level=None, inverted=Fa
         return None
 
 @login_required
-@csrf_exempt 
 def api_dicom_image_display(request, image_id):
     """API endpoint to get processed DICOM image with windowing
     - If pixel data cannot be decoded, still return metadata and sensible window defaults
@@ -2015,7 +2009,6 @@ def api_dicom_image_display(request, image_id):
 
 
 @login_required
-@csrf_exempt
 def api_dicom_image_png(request, image_id):
     """Stream a windowed DICOM slice as PNG bytes.
 
@@ -2164,7 +2157,6 @@ def api_dicom_image_png(request, image_id):
         return HttpResponse(status=500)
 
 @login_required
-@csrf_exempt
 def api_measurements(request, study_id=None):
     """API endpoint for saving/loading measurements"""
     if study_id:
@@ -2222,7 +2214,6 @@ def api_measurements(request, study_id=None):
         return JsonResponse({'success': True, 'message': 'Measurements cleared'})
 
 @login_required
-@csrf_exempt
 def api_reconstruction(request, study_id):
     """API endpoint for 3D reconstruction processing"""
     study = get_object_or_404(Study, id=study_id)
@@ -2257,7 +2248,6 @@ def api_reconstruction(request, study_id):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 @login_required
-@csrf_exempt
 def api_hounsfield_units(request):
     """API endpoint for Hounsfield Unit calculations"""
     if request.method == 'POST':

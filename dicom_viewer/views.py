@@ -911,6 +911,23 @@ def api_mpr_reconstruction(request, series_id):
             'coronal': int(volume.shape[1]),
         }
 
+        # Optional "metadata-only" mode for fast UI initialization.
+        # This avoids encoding and returning large base64 PNG payloads when the frontend will
+        # load slices via `mpr_slice_api` (binary PNG) anyway.
+        meta_only = (request.GET.get('meta_only') or '').strip().lower() in ('1', 'true', 'yes')
+        if meta_only and not request.GET.get('plane'):
+            return JsonResponse({
+                'mpr_views': None,
+                'volume_shape': tuple(int(x) for x in volume.shape),
+                'counts': counts,
+                'quality': quality,
+                'series_info': {
+                    'id': series.id,
+                    'description': series.series_description,
+                    'modality': series.modality
+                }
+            })
+
         plane = request.GET.get('plane')
         if plane:
             plane = plane.lower()

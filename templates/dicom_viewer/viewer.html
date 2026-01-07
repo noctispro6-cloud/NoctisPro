@@ -69,6 +69,50 @@
             }
         }
 
+        /* Phone-sized layout: prevent navbar overflow, simplify tools, stack MPR viewports */
+        @media (max-width: 600px) {
+            .viewer-container {
+                grid-template-columns: 56px 1fr;
+                grid-template-rows: auto 1fr 40px;
+            }
+            .top-navbar {
+                height: auto;
+                padding: 10px 12px;
+                flex-wrap: wrap;
+                gap: 10px;
+                align-items: flex-start;
+            }
+            .nav-left, .nav-right {
+                width: 100%;
+                min-width: 0;
+            }
+            .nav-left {
+                gap: 10px;
+            }
+            .patient-info {
+                display: none; /* reclaim space on phones */
+            }
+            .nav-right {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            .nav-right .btn, .nav-right .select {
+                flex: 1 1 140px;
+                min-width: 0;
+            }
+            .toolbar .tool span {
+                display: none; /* icon-only tools on phones */
+            }
+            .toolbar .tool {
+                padding: 10px 8px;
+            }
+            .mpr-grid {
+                grid-template-columns: 1fr;
+                grid-auto-rows: minmax(200px, 1fr);
+                gap: 10px;
+            }
+        }
+
         /* Top Navigation */
         .top-navbar {
             grid-column: 1 / -1;
@@ -1418,11 +1462,48 @@
         function _scheduleMprRefresh(reason = 'window') {
             if (!_isMprVisible()) return;
             if (_mprRefreshTimer) clearTimeout(_mprRefreshTimer);
-            // Coalesce fast drags into a single regeneration.
+            // Coalesce fast drags into a single refresh.
             _mprRefreshTimer = setTimeout(() => {
                 _mprRefreshTimer = null;
-                generateMPR();
-            }, reason === 'window' ? 260 : 180);
+                // If MPR hasn't been initialized yet, fall back to full generation.
+                const hasCounts = !!(_mprState?.counts?.axial || _mprState?.counts?.sagittal || _mprState?.counts?.coronal);
+                if (!currentSeries || !hasCounts) {
+                    generateMPR();
+                    return;
+                }
+                _refreshMprSlicesForWindowingChange();
+            }, reason === 'window' ? 240 : 180);
+        }
+
+        function _mprSliceUrl(seriesId, plane, sliceIndex, quality = 'fast') {
+            if (!seriesId) return '';
+            const qs = new URLSearchParams();
+            qs.set('window_width', String(windowWidth));
+            qs.set('window_level', String(windowLevel));
+            qs.set('inverted', String(!!inverted));
+            qs.set('quality', (quality || 'fast'));
+            return `/dicom-viewer/api/mpr-slice/${encodeURIComponent(seriesId)}/${encodeURIComponent(plane)}/${encodeURIComponent(sliceIndex)}/?${qs.toString()}`;
+        }
+
+        function _refreshMprSlicesForWindowingChange() {
+            if (!_isMprVisible()) return;
+            if (!currentSeries) return;
+
+            // Refresh all planes using the binary PNG endpoint (avoids large base64 JSON payloads).
+            const planes = ['axial', 'sagittal', 'coronal'];
+            planes.forEach((plane) => {
+                const imgId = _mprPlaneToImgId(plane);
+                const imgEl = imgId ? document.getElementById(imgId) : null;
+                const count = Number(_mprState?.counts?.[plane] || 0);
+                const idx = Number(_mprState?.sliceIndex?.[plane] ?? 0);
+                if (!imgEl || !count) return;
+                const clamped = Math.max(0, Math.min(count - 1, idx));
+                imgEl.decoding = 'async';
+                imgEl.src = _mprSliceUrl(currentSeries.id, plane, clamped, 'fast');
+            });
+
+            // Keep transforms applied for the active plane (zoom/pan).
+            if (_isMprVisible()) applyTransform();
         }
 
         function _syncWindowingFromPayload(data) {
@@ -1826,26 +1907,35 @@
         function applyTransform() {
             const tfm = `scale(${zoomFactor}) translate(${panX/zoomFactor}px, ${panY/zoomFactor}px)`;
 
+            const _setTransformIfNeeded = (el, transform) => {
+                if (!el) return;
+                if (el.__noctis_last_transform === transform) return;
+                if (!el.__noctis_transform_init) {
+                    el.style.transformOrigin = 'center center';
+                    el.style.willChange = 'transform';
+                    el.__noctis_transform_init = true;
+                }
+                el.style.transform = transform;
+                el.__noctis_last_transform = transform;
+            };
+
             // If we're in MPR mode, apply zoom/pan to the active plane image (images are server-rendered).
             if (_isMprVisible() && (activeMprPlane === 'axial' || activeMprPlane === 'sagittal' || activeMprPlane === 'coronal')) {
                 const imgId = activeMprPlane === 'axial' ? 'mprAxial' : activeMprPlane === 'sagittal' ? 'mprSagittal' : 'mprCoronal';
                 const mprImg = document.getElementById(imgId);
-                if (mprImg) {
-                    mprImg.style.transformOrigin = 'center center';
-                    mprImg.style.willChange = 'transform';
-                    mprImg.style.transform = tfm;
-                }
-                // Keep MPR overlays aligned with the transformed image
-                updateMprOverlays(activeMprPlane);
+                _setTransformIfNeeded(mprImg, tfm);
+
+                // Keep MPR overlays aligned with the transformed image by applying the same transform
+                // to overlay layers (avoid expensive redraws during pan/zoom).
+                const overlayId = _mprPlaneToOverlayId(activeMprPlane);
+                _setTransformIfNeeded(document.getElementById(overlayId), tfm);
+                const crosshairId = `crosshair${activeMprPlane.charAt(0).toUpperCase() + activeMprPlane.slice(1)}`;
+                _setTransformIfNeeded(document.getElementById(crosshairId), tfm);
                 return;
             }
 
             const dicomImage = document.getElementById('dicomImage');
-            if (dicomImage) {
-                dicomImage.style.transformOrigin = 'center center';
-                dicomImage.style.willChange = 'transform';
-                dicomImage.style.transform = tfm;
-            }
+            _setTransformIfNeeded(dicomImage, tfm);
         }
 
         // Slice Navigation
@@ -2731,94 +2821,73 @@
             
             try {
                 showLoading('Generating MPR views...');
-                
-                const qs = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
-                const response = await fetch(
-                    `/dicom-viewer/api/series/${currentSeries.id}/mpr/?${qs}&quality=fast`,
-                    { credentials: 'same-origin' }
-                );
+
+                // Fetch only metadata (counts/shape). Actual images are loaded via binary PNG endpoints.
+                const metaQs = new URLSearchParams();
+                metaQs.set('window_width', String(windowWidth));
+                metaQs.set('window_level', String(windowLevel));
+                metaQs.set('inverted', String(!!inverted));
+                metaQs.set('quality', 'fast');
+                metaQs.set('meta_only', '1');
+                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?${metaQs.toString()}`, { credentials: 'same-origin' });
+
                 let data = null;
                 try {
                     data = await response.json();
                 } catch (e) {
-                    // If we got HTML (e.g. auth redirect) or a proxy error, surface a useful error.
                     const text = await response.text().catch(() => '');
                     throw new Error(text || `Failed to load MPR response (HTTP ${response.status})`);
                 }
                 if (!response.ok) {
                     throw new Error((data && data.error) ? data.error : `Failed to generate MPR (HTTP ${response.status})`);
                 }
-                
-                const views = data && (data.mpr_views || data.views || data.mprViews);
-                if (views && (views.axial || views.sagittal || views.coronal)) {
+
+                if (data && data.counts) {
                     _mprLastCounts = data.counts || _mprLastCounts;
-                    if (data.counts) {
-                        _mprState.counts = {
-                            axial: Number(data.counts.axial || 0),
-                            sagittal: Number(data.counts.sagittal || 0),
-                            coronal: Number(data.counts.coronal || 0)
-                        };
-                        _mprState.sliceIndex = {
-                            axial: Math.floor((_mprState.counts.axial || 1) / 2),
-                            sagittal: Math.floor((_mprState.counts.sagittal || 1) / 2),
-                            coronal: Math.floor((_mprState.counts.coronal || 1) / 2)
-                        };
-                    }
+                    _mprState.counts = {
+                        axial: Number(data.counts.axial || 0),
+                        sagittal: Number(data.counts.sagittal || 0),
+                        coronal: Number(data.counts.coronal || 0)
+                    };
+                    _mprState.sliceIndex = {
+                        axial: Math.floor((_mprState.counts.axial || 1) / 2),
+                        sagittal: Math.floor((_mprState.counts.sagittal || 1) / 2),
+                        coronal: Math.floor((_mprState.counts.coronal || 1) / 2)
+                    };
 
                     // Make MPR axial match the currently displayed axial slice position (as closely as possible).
-                    // The MPR volume may be resampled, so map by relative index.
                     try {
-                        const counts = data.counts || {};
-                        const axialCount = Number(counts.axial || 0);
+                        const axialCount = Number(_mprState.counts.axial || 0);
                         const srcCount = Number(images?.length || 0);
                         if (axialCount > 1 && srcCount > 1) {
                             const t = Math.max(0, Math.min(1, (Number(currentImageIndex) || 0) / (srcCount - 1)));
-                            const axialSlice = Math.round(t * (axialCount - 1));
-                            _mprState.sliceIndex.axial = axialSlice;
-                            const axialResp = await fetch(
-                                `/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=axial&slice=${axialSlice}&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`,
-                                { credentials: 'same-origin' }
-                            );
-                            let axialData = null;
-                            try {
-                                axialData = await axialResp.json();
-                            } catch (e) {
-                                axialData = null;
-                            }
-                            if (axialData && axialData.image) {
-                                views.axial = axialData.image;
-                            }
+                            _mprState.sliceIndex.axial = Math.round(t * (axialCount - 1));
                         }
-                    } catch (e) {
-                        // Non-fatal; keep mid-slice.
-                    }
+                    } catch (_) { /* ignore */ }
 
-                    // Switch to MPR mode and show views
+                    // Switch to MPR mode and show viewports
                     document.getElementById('singleView').style.display = 'none';
                     document.getElementById('mprView').style.display = 'grid';
-                    
-                    // Backend returns data URLs (data:image/png;base64,...). Guard older payloads.
-                    const ensureDataUrl = (v) => {
-                        if (!v) return '';
-                        if (typeof v !== 'string') return '';
-                        return v.startsWith('data:image') ? v : `data:image/png;base64,${v}`;
-                    };
-                    document.getElementById('mprAxial').src = ensureDataUrl(views.axial);
-                    document.getElementById('mprSagittal').src = ensureDataUrl(views.sagittal);
-                    document.getElementById('mprCoronal').src = ensureDataUrl(views.coronal);
+
+                    // Load current slices via binary PNG endpoint (fast first).
+                    const ax = _mprState.sliceIndex.axial;
+                    const sa = _mprState.sliceIndex.sagittal;
+                    const co = _mprState.sliceIndex.coronal;
+                    const axialEl = document.getElementById('mprAxial');
+                    const sagittalEl = document.getElementById('mprSagittal');
+                    const coronalEl = document.getElementById('mprCoronal');
+                    if (axialEl) { axialEl.decoding = 'async'; axialEl.src = _mprSliceUrl(currentSeries.id, 'axial', ax, 'fast'); }
+                    if (sagittalEl) { sagittalEl.decoding = 'async'; sagittalEl.src = _mprSliceUrl(currentSeries.id, 'sagittal', sa, 'fast'); }
+                    if (coronalEl) { coronalEl.decoding = 'async'; coronalEl.src = _mprSliceUrl(currentSeries.id, 'coronal', co, 'fast'); }
 
                     // Progressive upgrade to full quality (non-blocking).
-                    (async () => {
+                    setTimeout(() => {
                         try {
-                            // Switch to binary PNG endpoints for high-quality slices (less overhead than base64 JSON).
-                            const ax = Math.floor((data.counts && data.counts.axial ? Number(data.counts.axial) : 1) / 2);
-                            const sa = Math.floor((data.counts && data.counts.sagittal ? Number(data.counts.sagittal) : 1) / 2);
-                            const co = Math.floor((data.counts && data.counts.coronal ? Number(data.counts.coronal) : 1) / 2);
-                            document.getElementById('mprAxial').src = `/dicom-viewer/api/mpr-slice/${currentSeries.id}/axial/${ax}/?${qs}&quality=high`;
-                            document.getElementById('mprSagittal').src = `/dicom-viewer/api/mpr-slice/${currentSeries.id}/sagittal/${sa}/?${qs}&quality=high`;
-                            document.getElementById('mprCoronal').src = `/dicom-viewer/api/mpr-slice/${currentSeries.id}/coronal/${co}/?${qs}&quality=high`;
+                            if (axialEl) axialEl.src = _mprSliceUrl(currentSeries.id, 'axial', ax, 'high');
+                            if (sagittalEl) sagittalEl.src = _mprSliceUrl(currentSeries.id, 'sagittal', sa, 'high');
+                            if (coronalEl) coronalEl.src = _mprSliceUrl(currentSeries.id, 'coronal', co, 'high');
                         } catch (_) { /* ignore */ }
-                    })();
+                    }, 350);
                     
                     // Enable crosshairs for MPR views
                     enableMPRCrosshairs();
@@ -2952,21 +3021,27 @@
             }
 
             try {
-                const url = `/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(idx)}&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
-                const resp = await fetch(url, { credentials: 'same-origin' });
-                if (!resp.ok) return false;
-                const data = await resp.json();
                 const imgEl = document.getElementById(_mprPlaneToImgId(plane));
-                if (imgEl && data?.image) {
-                    const v = String(data.image || '');
-                    imgEl.decoding = 'async';
-                    imgEl.src = v.startsWith('data:image') ? v : `data:image/png;base64,${v}`;
-                }
+                if (!imgEl) return false;
+                imgEl.decoding = 'async';
+                // Use binary PNG endpoint to avoid large base64 JSON responses.
+                imgEl.src = _mprSliceUrl(currentSeries.id, plane, idx, 'fast');
+
+                // Upgrade to high quality after scroll settles (best-effort).
+                try {
+                    window.__noctis_mpr_hq_timers = window.__noctis_mpr_hq_timers || { axial: null, sagittal: null, coronal: null };
+                    if (window.__noctis_mpr_hq_timers[plane]) clearTimeout(window.__noctis_mpr_hq_timers[plane]);
+                    window.__noctis_mpr_hq_timers[plane] = setTimeout(() => {
+                        try {
+                            const el = document.getElementById(_mprPlaneToImgId(plane));
+                            if (el) el.src = _mprSliceUrl(currentSeries.id, plane, idx, 'high');
+                        } catch (_) {}
+                    }, 220);
+                } catch (_) {}
             } catch (e) {
                 return false;
             } finally {
                 updateMprOverlays(plane);
-                // re-apply transform in case active plane changed size
                 if (_isMprVisible() && activeMprPlane === plane) applyTransform();
             }
             return true;

@@ -2046,31 +2046,114 @@
                 drawY = 0;
             }
             
-            // Apply current zoom/pan + flip/rotate transformations.
-            // We render transforms into the canvas (instead of CSS transforms) to avoid double-rotation
-            // and keep rendering consistent across browsers.
-            ctx.save();
-            ctx.translate(displayWidth / 2, displayHeight / 2);
-            if (rotationAngle !== 0) {
-                ctx.rotate((rotationAngle * Math.PI) / 180);
-            }
-            ctx.scale(
-                zoomFactor * (flipHorizontalState ? -1 : 1),
-                zoomFactor * (flipVerticalState ? -1 : 1)
-            );
-            ctx.translate(
-                -displayWidth / 2 + panX / zoomFactor,
-                -displayHeight / 2 + panY / zoomFactor
-            );
-            
-            // Clear canvas with black background
+            // Draw the base image (no pan/zoom/rotate/flip here).
+            // Pan/zoom/rotate/flip are applied via CSS transforms to the canvas + overlay layers.
+            // This keeps interaction snappy and ensures overlays/crosshairs stay aligned.
+            // Clear canvas with black background (in display pixel space)
             ctx.fillStyle = '#000000';
-            ctx.fillRect(-displayWidth, -displayHeight, displayWidth * 3, displayHeight * 3);
-            
-            // Draw image with high-quality interpolation
+            ctx.fillRect(0, 0, displayWidth, displayHeight);
+
+            // Draw image with high-quality interpolation (context is already scaled for DPR above)
             ctx.drawImage(imgElement, drawX, drawY, drawWidth, drawHeight);
-            
-            ctx.restore();
+        }
+
+        // ---- Coordinate mapping (single view) ----
+        // We draw the base image centered in the canvas. Pan/zoom/rotate/flip are applied via CSS transforms
+        // to the canvas + overlay layers. These helpers invert/apply that transform so HU/measurements stay correct.
+        function _singleViewGetDrawRect(imgNaturalW, imgNaturalH, viewW, viewH) {
+            const imgAspect = imgNaturalW / imgNaturalH;
+            const viewAspect = viewW / viewH;
+            let drawW, drawH, drawX, drawY;
+            if (imgAspect > viewAspect) {
+                drawW = viewW;
+                drawH = viewW / imgAspect;
+                drawX = 0;
+                drawY = (viewH - drawH) / 2;
+            } else {
+                drawW = viewH * imgAspect;
+                drawH = viewH;
+                drawX = (viewW - drawW) / 2;
+                drawY = 0;
+            }
+            return { drawX, drawY, drawW, drawH };
+        }
+
+        function _singleViewClientToLocal(clientX, clientY) {
+            const container = document.getElementById('imageContainer');
+            if (!container) return null;
+            const rect = container.getBoundingClientRect();
+            const w = rect.width || 0;
+            const h = rect.height || 0;
+            if (!w || !h) return null;
+
+            // Point in container space (top-left origin)
+            const x1 = clientX - rect.left;
+            const y1 = clientY - rect.top;
+
+            // Convert to center-origin for transform inversion
+            let dx = x1 - w / 2;
+            let dy = y1 - h / 2;
+
+            // Invert translate (pan is in screen px)
+            dx -= (Number(panX) || 0);
+            dy -= (Number(panY) || 0);
+
+            // Invert rotate
+            const r = ((Number(rotationAngle) || 0) * Math.PI) / 180;
+            if (r) {
+                const cos = Math.cos(-r);
+                const sin = Math.sin(-r);
+                const rx = dx * cos - dy * sin;
+                const ry = dx * sin + dy * cos;
+                dx = rx;
+                dy = ry;
+            }
+
+            // Invert scale/flip
+            const sx = (Number(zoomFactor) || 1) * (flipHorizontalState ? -1 : 1);
+            const sy = (Number(zoomFactor) || 1) * (flipVerticalState ? -1 : 1);
+            if (sx) dx /= sx;
+            if (sy) dy /= sy;
+
+            return { x: dx + w / 2, y: dy + h / 2, w, h };
+        }
+
+        function _singleViewClientToImagePx(clientX, clientY) {
+            const img = document.getElementById('dicomImage');
+            if (!img || !img.complete) return null;
+            const naturalW = img.naturalWidth || 0;
+            const naturalH = img.naturalHeight || 0;
+            if (!naturalW || !naturalH) return null;
+
+            const local = _singleViewClientToLocal(clientX, clientY);
+            if (!local) return null;
+
+            const { drawX, drawY, drawW, drawH } = _singleViewGetDrawRect(naturalW, naturalH, local.w, local.h);
+            if (local.x < drawX || local.y < drawY || local.x > (drawX + drawW) || local.y > (drawY + drawH)) {
+                return null;
+            }
+
+            const xImg = ((local.x - drawX) / drawW) * naturalW;
+            const yImg = ((local.y - drawY) / drawH) * naturalH;
+            return { x: xImg, y: yImg, naturalW, naturalH };
+        }
+
+        function _singleViewImagePxToLocal(imgPt) {
+            const img = document.getElementById('dicomImage');
+            const container = document.getElementById('imageContainer');
+            if (!img || !img.complete || !container) return null;
+            const naturalW = img.naturalWidth || 0;
+            const naturalH = img.naturalHeight || 0;
+            const rect = container.getBoundingClientRect();
+            const w = rect.width || 0;
+            const h = rect.height || 0;
+            if (!naturalW || !naturalH || !w || !h) return null;
+
+            const { drawX, drawY, drawW, drawH } = _singleViewGetDrawRect(naturalW, naturalH, w, h);
+            return {
+                x: drawX + (Number(imgPt.x) / naturalW) * drawW,
+                y: drawY + (Number(imgPt.y) / naturalH) * drawH
+            };
         }
 
         // Professional initialization
@@ -2530,17 +2613,53 @@
             applyTransform();
         }
 
+        // Coalesce transform commits to animation frames (keeps pan/zoom smooth).
+        let _singleViewTransformRaf = null;
+
         function applyTransform() {
             const dicomImage = document.getElementById('dicomImage');
             const dicomCanvas = document.getElementById('dicomCanvas');
-            
-            if (dicomCanvas && dicomImage && dicomImage.complete) {
-                // Re-render to canvas with new transform
-                renderImageToCanvas(dicomImage, dicomCanvas);
-            } else if (dicomImage) {
-                // Fallback to image transform
-                dicomImage.style.transform = `scale(${zoomFactor}) translate(${panX/zoomFactor}px, ${panY/zoomFactor}px)`;
-            }
+
+            const sx = zoomFactor * (flipHorizontalState ? -1 : 1);
+            const sy = zoomFactor * (flipVerticalState ? -1 : 1);
+            const tfm = `translate(${panX}px, ${panY}px) rotate(${rotationAngle}deg) scale(${sx}, ${sy})`;
+
+            const _apply = () => {
+                _singleViewTransformRaf = null;
+                const targets = [
+                    dicomCanvas,
+                    document.getElementById('crosshairOverlay'),
+                    document.getElementById('measurementOverlay')
+                ];
+                targets.forEach((el) => {
+                    if (!el) return;
+                    if (!el.__noctis_transform_init) {
+                        el.style.transformOrigin = 'center center';
+                        el.style.willChange = 'transform';
+                        el.__noctis_transform_init = true;
+                    }
+                    if (el.__noctis_last_transform !== tfm) {
+                        el.style.transform = tfm;
+                        el.__noctis_last_transform = tfm;
+                    }
+                });
+
+                // Keep the hidden <img> (used for decoding) in sync only if it's visible (fallback mode).
+                if (dicomImage && dicomImage.style.display !== 'none') {
+                    if (!dicomImage.__noctis_transform_init) {
+                        dicomImage.style.transformOrigin = 'center center';
+                        dicomImage.style.willChange = 'transform';
+                        dicomImage.__noctis_transform_init = true;
+                    }
+                    if (dicomImage.__noctis_last_transform !== tfm) {
+                        dicomImage.style.transform = tfm;
+                        dicomImage.__noctis_last_transform = tfm;
+                    }
+                }
+            };
+
+            if (_singleViewTransformRaf) return;
+            _singleViewTransformRaf = requestAnimationFrame(_apply);
         }
 
         // Slice Navigation
@@ -2594,11 +2713,8 @@
                         
                         // Render to high-quality canvas with modality-specific optimization
                         renderImageToCanvas(dicomImage, dicomCanvas, modality);
-                        
-                        // Reapply any active transformations
-                        if (flipHorizontalState || flipVerticalState || rotationAngle !== 0) {
-                            applyImageTransformations();
-                        }
+                        // Apply current transforms (CSS layer) after redraw.
+                        applyTransform();
                         
                         hideLoading();
                         updateImageInfo(data.image_info);
@@ -3091,8 +3207,8 @@
             if (!canvas || !img || !img.complete) {
                 return;
             }
-            // Render transformations into the canvas (avoid CSS transforms on the canvas/image).
-            renderImageToCanvas(img, canvas, img.getAttribute('data-modality') || '');
+            // Transforms are applied via CSS (canvas + overlays) for responsiveness.
+            applyTransform();
         }
 
         function resetImageTransformations() {
@@ -3109,16 +3225,8 @@
                 rotateTool.title = 'Rotate 90° CW';
             }
             
-            // Reset canvas and image transforms
-            const canvas = document.getElementById('dicomCanvas');
-            const img = document.getElementById('dicomImage');
-            if (canvas) canvas.style.transform = 'none';
-            if (img) img.style.transform = 'none';
-            
-            // Redraw canvas normally
-            if (canvas && img && img.complete) {
-                renderImageToCanvas(img, canvas);
-            }
+            // Reset transforms (CSS layer)
+            applyTransform();
             
             showToast('All transformations reset', 'info', 2000);
         }
@@ -4048,13 +4156,12 @@
 
         // Measurement System - Professional grade from PyQt
         function startMeasurement(event) {
-            const rect = event.target.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
+            const p = _singleViewClientToImagePx(event.clientX, event.clientY);
+            if (!p) return;
             
             currentMeasurement = {
-                start: { x, y },
-                end: { x, y },
+                start: { x: p.x, y: p.y },
+                end: { x: p.x, y: p.y },
                 imageId: images[currentImageIndex]?.id
             };
             
@@ -4063,12 +4170,10 @@
 
         function updateMeasurement(event) {
             if (!currentMeasurement) return;
-            
-            const rect = event.target.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
-            
-            currentMeasurement.end = { x, y };
+
+            const p = _singleViewClientToImagePx(event.clientX, event.clientY);
+            if (!p) return;
+            currentMeasurement.end = { x: p.x, y: p.y };
             updateMeasurementOverlay();
         }
 
@@ -4089,17 +4194,28 @@
         }
 
         function calculateDistance(start, end) {
-            const pixelDistance = Math.sqrt(
-                Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2)
-            );
+            const dx = (Number(end.x) || 0) - (Number(start.x) || 0);
+            const dy = (Number(end.y) || 0) - (Number(start.y) || 0);
+            const pixelDistance = Math.hypot(dx, dy);
             
             // Convert to real-world units if pixel spacing is available
             if (currentSeries && currentSeries.pixel_spacing) {
                 try {
-                    const spacing = Array.isArray(currentSeries.pixel_spacing) ? 
-                        currentSeries.pixel_spacing : [1.0, 1.0];
-                    const avgSpacing = (parseFloat(spacing[0]) + parseFloat(spacing[1])) / 2;
-                    const distanceMm = pixelDistance * avgSpacing;
+                    let row = 1.0, col = 1.0;
+                    if (Array.isArray(currentSeries.pixel_spacing) && currentSeries.pixel_spacing.length >= 2) {
+                        row = parseFloat(currentSeries.pixel_spacing[0]);
+                        col = parseFloat(currentSeries.pixel_spacing[1]);
+                    } else if (typeof currentSeries.pixel_spacing === 'string') {
+                        const parts = currentSeries.pixel_spacing.split(/[x,\\s]+/).filter(Boolean);
+                        if (parts.length >= 2) {
+                            row = parseFloat(parts[0]);
+                            col = parseFloat(parts[1]);
+                        }
+                    }
+                    if (!isFinite(row) || row <= 0) row = 1.0;
+                    if (!isFinite(col) || col <= 0) col = 1.0;
+
+                    const distanceMm = Math.hypot(dx * col, dy * row);
                     return {
                         pixels: pixelDistance.toFixed(1),
                         mm: distanceMm.toFixed(1),
@@ -4135,8 +4251,10 @@
         }
 
         function drawMeasurement(overlay, measurement, index, isTemp = false) {
-            const start = measurement.start;
-            const end = measurement.end;
+            // Stored in image pixel coordinates -> map to local overlay coordinates (untransformed).
+            const start = _singleViewImagePxToLocal(measurement.start);
+            const end = _singleViewImagePxToLocal(measurement.end);
+            if (!start || !end) return;
             
             // Calculate line properties
             const length = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2));
@@ -4347,14 +4465,14 @@
         function addAnnotation(event) {
             const text = prompt('Enter annotation text:');
             if (!text) return;
-            
-            const rect = event.target.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
+
+            const p = _singleViewClientToImagePx(event.clientX, event.clientY);
+            if (!p) return;
             
             annotations.push({
-                x: x,
-                y: y,
+                // store in image pixels (invariant under zoom/rotate/flip)
+                x: p.x,
+                y: p.y,
                 text: text,
                 imageId: images[currentImageIndex]?.id,
                 timestamp: new Date().toISOString()
@@ -4374,8 +4492,10 @@
                 if (annotation.imageId === images[currentImageIndex]?.id) {
                     const marker = document.createElement('div');
                     marker.className = 'annotation-marker';
-                    marker.style.left = annotation.x + 'px';
-                    marker.style.top = annotation.y + 'px';
+                    const pt = _singleViewImagePxToLocal({ x: annotation.x, y: annotation.y });
+                    if (!pt) return;
+                    marker.style.left = pt.x + 'px';
+                    marker.style.top = pt.y + 'px';
                     marker.textContent = annotation.text;
                     overlay.appendChild(marker);
                 }
@@ -4383,21 +4503,40 @@
         }
 
         // Mouse Info and HU Values
+        let _huAbortController = null;
+        let _huLastRequestAt = 0;
+        let _huLastKey = '';
+
         function updateMouseInfo(event) {
-            const rect = event.target.getBoundingClientRect();
-            const x = Math.round(event.clientX - rect.left);
-            const y = Math.round(event.clientY - rect.top);
-            
-            document.getElementById('mousePosition').textContent = `${x}, ${y}`;
-            
-            // Calculate HU value if available
-            if (images[currentImageIndex]) {
-                calculateHUValue(x, y);
+            const img = images[currentImageIndex];
+            if (!img) return;
+
+            const p = _singleViewClientToImagePx(event.clientX, event.clientY);
+            const posEl = document.getElementById('mousePosition');
+            if (!p) {
+                if (posEl) posEl.textContent = '-';
+                return;
             }
+
+            const xi = Math.max(0, Math.min((p.naturalW || 1) - 1, Math.floor(p.x)));
+            const yi = Math.max(0, Math.min((p.naturalH || 1) - 1, Math.floor(p.y)));
+            if (posEl) posEl.textContent = `${xi}, ${yi}`;
+
+            // Throttle HU lookups; avoid spamming server on every mousemove.
+            const now = Date.now();
+            const key = `${img.id}|${xi}|${yi}`;
+            if (key === _huLastKey && (now - _huLastRequestAt) < 120) return;
+            if ((now - _huLastRequestAt) < 80) return;
+            _huLastKey = key;
+            _huLastRequestAt = now;
+            calculateHUValue(xi, yi);
         }
 
         async function calculateHUValue(x, y) {
             try {
+                try { _huAbortController?.abort(); } catch (_) {}
+                _huAbortController = new AbortController();
+
                 const response = await fetch('/dicom-viewer/api/hounsfield/', {
                     method: 'POST',
                     headers: {
@@ -4408,7 +4547,8 @@
                         x: x,
                         y: y,
                         image_id: images[currentImageIndex].id
-                    })
+                    }),
+                    signal: _huAbortController.signal
                 });
                 
                 const data = await response.json();
@@ -4416,6 +4556,7 @@
                     document.getElementById('huValue').textContent = `${data.hu_value} HU`;
                 }
             } catch (error) {
+                if (error && error.name === 'AbortError') return;
                 // Silently fail for HU calculation
             }
         }

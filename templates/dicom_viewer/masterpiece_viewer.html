@@ -3986,17 +3986,12 @@
                         _renderMPRDataUrl('coronal', co.image),
                     ]);
                 } else {
-                    const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?${qsBase}&quality=${encodeURIComponent(mprQuality)}`, { credentials: 'same-origin' });
+                    // Fetch metadata only (counts/shape) to avoid large base64 payloads.
+                    const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?${qsBase}&quality=${encodeURIComponent(mprQuality)}&meta_only=1`, { credentials: 'same-origin' });
                     const data = await response.json();
                     if (!response.ok) {
                         const msg = (data && (data.error || data.message)) ? (data.error || data.message) : `HTTP ${response.status}`;
                         throw new Error(msg);
-                    }
-
-                    const views = data && (data.mpr_views || data.views || data.mprViews);
-                    if (!views || (!views.axial && !views.sagittal && !views.coronal)) {
-                        console.warn('Unexpected MPR response shape:', data);
-                        throw new Error('Unexpected MPR response');
                     }
 
                     // Initialize counts + mid-slice indices.
@@ -4017,10 +4012,16 @@
                     mprCurrentMeasurement = null;
                     roiDraft = null;
 
+                    // First paint using binary PNG slice endpoints (fast mode).
+                    const [ax, sa, co] = await Promise.all([
+                        fetchMPRPlaneSlice('axial', mprState.index.axial, qsBase),
+                        fetchMPRPlaneSlice('sagittal', mprState.index.sagittal, qsBase),
+                        fetchMPRPlaneSlice('coronal', mprState.index.coronal, qsBase),
+                    ]);
                     await Promise.all([
-                        _renderMPRDataUrl('axial', views.axial),
-                        _renderMPRDataUrl('sagittal', views.sagittal),
-                        _renderMPRDataUrl('coronal', views.coronal),
+                        _renderMPRDataUrl('axial', ax.image),
+                        _renderMPRDataUrl('sagittal', sa.image),
+                        _renderMPRDataUrl('coronal', co.image),
                     ]);
                 }
 
@@ -4495,7 +4496,21 @@
             try { _mprPlaneAbort[plane]?.abort(); } catch (e) {}
             const ac = new AbortController();
             _mprPlaneAbort[plane] = ac;
+
+            // Prefer the binary PNG slice endpoint (much smaller than JSON+base64).
+            // If counts are known, we can avoid a metadata fetch entirely.
+            const knownCount = Number(mprState?.counts?.[plane] || 0);
             const q = (mprQuality === 'high') ? 'high' : 'fast';
+            if (knownCount > 0) {
+                const clamped = Math.max(0, Math.min(knownCount - 1, Math.round(idx)));
+                return {
+                    image: `/dicom-viewer/api/mpr-slice/${encodeURIComponent(currentSeries.id)}/${encodeURIComponent(plane)}/${encodeURIComponent(clamped)}/?${qsBase}&quality=${encodeURIComponent(q)}`,
+                    index: clamped,
+                    count: knownCount,
+                };
+            }
+
+            // Fallback: ask the JSON endpoint (also returns counts).
             const url = `/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(idx)}&${qsBase}&quality=${encodeURIComponent(q)}`;
             const resp = await fetch(url, { credentials: 'same-origin', signal: ac.signal });
             const data = await resp.json();

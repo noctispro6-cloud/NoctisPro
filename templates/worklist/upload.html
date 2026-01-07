@@ -4,155 +4,31 @@
 
 {% block extra_css %}
 <style>
-        :root {
-            --primary-bg: #0a0a0a;
-            --secondary-bg: #1a1a1a;
-            --card-bg: #252525;
-            --card-surface: #252525;
-            --header-bg: #333333;
-            --border-color: #404040;
-            --accent-color: #00d4ff;
-            --text-primary: #ffffff;
-            --text-secondary: #b3b3b3;
-            --text-muted: #666666;
-            --success-color: #00ff88;
-            --warning-color: #ffaa00;
-            --danger-color: #ff4444;
-            --urgent-color: #ff0066;
-            --scheduled-color: #4a90e2;
-            --in-progress-color: #f5a623;
-            --completed-color: #7ed321;
-            --cancelled-color: #d0021b;
-        }
+    /* Page shell */
+    .np-upload-shell {
+        max-width: 980px;
+        margin: 0 auto;
+    }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+    .np-upload-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 18px;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 18px 34px rgba(0, 0, 0, 0.25);
+    }
 
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--primary-bg);
-            color: var(--text-primary);
-            font-size: 12px;
-        }
-
-        .upload-container {
-            background: var(--primary-bg);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-
-        /* Top Navigation - matching admin panel */
-        .top-navbar {
-            background: var(--header-bg);
-            border-bottom: 1px solid var(--border-color);
-            padding: 8px 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            height: 50px;
-        }
-
-        .nav-left {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-        }
-
-        .logo {
-            color: var(--accent-color);
-            font-weight: bold;
-            font-size: 16px;
-        }
-
-        .nav-tabs {
-            display: flex;
-            gap: 2px;
-        }
-
-        .nav-tab {
-            background: var(--secondary-bg);
-            border: 1px solid var(--border-color);
-            color: var(--text-secondary);
-            padding: 6px 12px;
-            font-size: 11px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-decoration: none;
-        }
-
-        .nav-tab.active {
-            background: var(--accent-color);
-            color: var(--primary-bg);
-            font-weight: bold;
-        }
-
-        .nav-tab:hover:not(.active) {
-            background: var(--card-bg);
-            color: var(--text-primary);
-        }
-
-        .nav-right {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: var(--text-secondary);
-            font-size: 11px;
-        }
-
-        .user-avatar {
-            width: 24px;
-            height: 24px;
-            background: var(--accent-color);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            font-weight: bold;
-            color: var(--primary-bg);
-        }
-
-        /* Main Content */
-        .main-content {
-            flex: 1;
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-        }
-
-        .upload-card {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 24px;
-            max-width: 640px;
-            width: 100%;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .upload-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: linear-gradient(90deg, var(--accent-color) 0%, #00b8d4 50%, var(--success-color) 100%);
-            border-radius: 16px 16px 0 0;
-        }
+    .np-upload-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, var(--accent-color) 0%, #00b8d4 55%, var(--success-color) 100%);
+    }
 
     .upload-header { 
         text-align: center; 
@@ -257,29 +133,12 @@
 
     .upload-actions { display: flex; gap: 1rem; margin-top: 2rem; justify-content: center; }
 
-    .btn-control {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
-        padding: 4px 12px;
-        font-size: 11px;
-        cursor: pointer;
-        border-radius: 2px;
-        transition: all 0.2s ease;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        text-decoration: none;
-    }
-
-    .btn-control:hover {
-        background: var(--accent-color);
-        color: var(--primary-bg);
-    }
-
-    .btn-control:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
+    .np-upload-primary.btn-control.primary {
+        padding: 10px 18px;
+        border-radius: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        font-size: 12px;
     }
 
     .progress-section { margin-top: 2rem; display: none; }
@@ -644,61 +503,36 @@
         100% { background-position: -200% 0; }
     }
     
-    /* Enhanced Upload Button */
-    .btn-control.primary {
-        background: linear-gradient(135deg, var(--accent-color) 0%, #00b8d4 100%);
-        color: var(--primary-bg);
-        border: 1px solid var(--accent-color);
-        padding: 10px 18px;
-        font-size: 12px;
-        font-weight: bold;
-        border-radius: 8px;
-        text-transform: uppercase;
-        letter-spacing: 0.6px;
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .btn-control.primary::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(90deg, 
-            transparent, 
-            rgba(255, 255, 255, 0.3), 
-            transparent);
-        transition: left 0.6s ease;
-    }
-    
-    .btn-control.primary:hover::before {
-        left: 100%;
-    }
-    
-    .btn-control.primary:hover {
-        background: linear-gradient(135deg, #33e0ff 0%, #00d4ff 100%);
-        transform: translateY(-2px) scale(1.05);
-        box-shadow: 
-            0 8px 24px rgba(0, 212, 255, 0.4),
-            inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    /* Keep the upload card content readable on narrow widths */
+    @media (max-width: 768px) {
+        .np-upload-card { padding: 14px; }
+        .drop-zone { padding: 1.4rem; }
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="upload-container">
+<div class="np-page">
+    <div class="np-upload-shell">
+        <div class="np-page-header">
+            <div>
+                <h1 class="np-page-title"><i class="fas fa-cloud-upload-alt"></i> Upload DICOM Studies</h1>
+                <div class="np-page-subtitle">Drag & drop a DICOM folder (recommended) or choose files. Max 5,000 objects (5GB).</div>
+            </div>
+            <div class="np-actions">
+                <a href="{% url 'worklist:dashboard' %}" class="btn-control" title="Back to Worklist">
+                    <i class="fas fa-arrow-left me-2"></i>Back to Worklist
+                </a>
+            </div>
+        </div>
 
-    <!-- Main Content -->
-    <div class="main-content">
-        <div class="upload-card">
+        <div class="np-upload-card">
             <div class="upload-header">
                 <div class="upload-icon">
                     <i class="fas fa-cloud-upload-alt"></i>
                 </div>
-                <h3 class="text-light" style="margin-bottom: 0.25rem;">Upload DICOM Studies</h3>
-                <div class="helper-text">Drag and drop a DICOM folder (recommended) or select files. Supports <strong>all DICOM modalities</strong> (CT/MR/US/CR/DX/MG/SR/etc). Max 5,000 objects (5GB).</div>
+                <h3 class="text-light" style="margin-bottom: 0.25rem;">Secure DICOM Upload</h3>
+                <div class="helper-text">Supports <strong>all DICOM modalities</strong> (CT/MR/US/CR/DX/MG/SR/etc). The server will validate DICOM content.</div>
             </div>
 
         <form id="uploadForm" enctype="multipart/form-data">
@@ -739,7 +573,7 @@
                 </div>
                 <h4 class="text-light mb-2" style="font-size: 1.1rem; font-weight: 600;">Drop DICOM files or folders here</h4>
                 <p class="text-secondary mb-2" style="font-size: 0.95rem; line-height: 1.4;">Files upload automatically once selected.</p>
-                <button type="button" class="btn-control primary" id="chooseFilesBtn">
+                <button type="button" class="btn-control primary np-upload-primary" id="chooseFilesBtn">
                     <i class="fas fa-folder-open me-2"></i>
                     Choose Files / Folder
                 </button>
@@ -817,7 +651,7 @@
                 <h4 class="text-light mb-2">Upload Successful!</h4>
                 <p class="text-secondary mb-3">Your DICOM studies have been uploaded successfully.</p>
                 <div id="uploadSummary" class="text-light mb-3"></div>
-                <button type="button" class="btn-control primary" onclick="redirectToDashboard()">
+                <button type="button" class="btn-control primary np-upload-primary" onclick="redirectToDashboard()">
                     <i class="fas fa-arrow-left me-2"></i>Return to Worklist
                 </button>
             </div>
@@ -826,7 +660,7 @@
                 <a href="{% url 'worklist:dashboard' %}" class="btn-control">
                     <i class="fas fa-arrow-left me-2"></i>Cancel
                 </a>
-                <button type="submit" class="btn-control primary" id="uploadBtn" disabled>
+                <button type="submit" class="btn-control primary np-upload-primary" id="uploadBtn" disabled>
                     <i class="fas fa-upload me-2"></i>Upload Studies
                 </button>
             </div>
@@ -838,8 +672,8 @@
                 </a>
             </div>
         </form>
-        </div>
     </div>
+</div>
 </div>
 {% endblock %}
 

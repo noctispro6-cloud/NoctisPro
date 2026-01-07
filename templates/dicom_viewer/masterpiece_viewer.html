@@ -1174,8 +1174,8 @@
             sagittal: { zoom: 1.0, panX: 0, panY: 0 },
             coronal: { zoom: 1.0, panX: 0, panY: 0 },
         };
-        // MPR drag state (pan/zoom/window/measure)
-        let _mprDragState = { down: false, plane: null, tool: null, lastX: 0, lastY: 0 };
+        // MPR drag state (pan/zoom/window/measure/crosshair)
+        let _mprDragState = { down: false, plane: null, tool: null, lastX: 0, lastY: 0, wasDragged: false };
         // MPR measurement draft (stored in slice pixel coords for that plane)
         let mprCurrentMeasurement = null; // { type, mode:'mpr', plane, slice, ... }
         // MPR crosshair (volume voxel indices; volume is (z,y,x) so store as {x,y,z}).
@@ -1186,6 +1186,11 @@
         let _mprPlaneAbort = { axial: null, sagittal: null, coronal: null };
         let _mprHUAbort = null;
         let _mprHUTimer = null;
+
+        // Crosshair drag scheduling (keeps UI real-time while batching network refreshes)
+        let _mprCrosshairDragRaf = null;
+        let _mprCrosshairDragPending = null; // { plane, x, y }
+        let _mprSuppressNextClick = false;
 
         // Progressive MPR quality:
         // - Start in 'fast' so the first 3 images appear quickly.
@@ -1347,6 +1352,10 @@
             if (x < lo) return lo;
             if (x > hi) return hi;
             return x;
+        }
+
+        function _delay(ms) {
+            return new Promise((resolve) => setTimeout(resolve, ms));
         }
 
         function _computeImageStats(pixelData) {
@@ -2418,13 +2427,38 @@
             // Avoid flickery loaders during fast wheel scrolls: show only if it takes noticeable time.
             let loaderTimer = setTimeout(() => showLoading(true), 150);
             try {
-                const response = await fetch(`/dicom-viewer/api/image/${imageId}/data/?packed=1`, {
-                    signal: _imageLoadAbortController.signal,
-                    credentials: 'same-origin',
-                    cache: 'force-cache'
-                });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const data = await response.json();
+                const url = `/dicom-viewer/api/image/${imageId}/data/?packed=1`;
+                let data = null;
+                let lastErr = null;
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    try {
+                        const response = await fetch(url, {
+                            signal: _imageLoadAbortController.signal,
+                            credentials: 'same-origin',
+                            cache: 'force-cache'
+                        });
+                        if (!response.ok) {
+                            // Retry transient server/proxy failures (upload moments, prewarm, etc.)
+                            if ([429, 502, 503, 504].includes(response.status) && attempt < 2) {
+                                await _delay(160 * Math.pow(2, attempt));
+                                continue;
+                            }
+                            throw new Error(`HTTP ${response.status}`);
+                        }
+                        data = await response.json();
+                        lastErr = null;
+                        break;
+                    } catch (e) {
+                        // Ignore aborts (expected during scrolling).
+                        if (e && (e.name === 'AbortError' || String(e).includes('AbortError'))) throw e;
+                        lastErr = e;
+                        if (attempt < 2) {
+                            await _delay(160 * Math.pow(2, attempt));
+                            continue;
+                        }
+                    }
+                }
+                if (!data) throw (lastErr || new Error('Failed to load image payload'));
                 if (seq !== _imageLoadSeq) return; // stale
 
                 // Keep W/L in sync even if pixels are missing (helps server-render fallback pick good defaults).
@@ -4057,11 +4091,16 @@
                     mprState.index.sagittal = sa.index;
                     mprState.index.coronal = co.index;
 
-                    await Promise.all([
-                        _renderMPRDataUrl('axial', ax.image),
-                        _renderMPRDataUrl('sagittal', sa.image),
-                        _renderMPRDataUrl('coronal', co.image),
-                    ]);
+                    {
+                        const settled = await Promise.allSettled([
+                            _renderMPRDataUrl('axial', ax.image),
+                            _renderMPRDataUrl('sagittal', sa.image),
+                            _renderMPRDataUrl('coronal', co.image),
+                        ]);
+                        const ok = settled.some((r) => r.status === 'fulfilled');
+                        if (!ok) throw new Error('All MPR panes failed to render');
+                        settled.forEach((r) => { if (r.status === 'rejected') console.warn('MPR pane render failed:', r.reason); });
+                    }
                 } else {
                     // Fetch metadata only (counts/shape) to avoid large base64 payloads.
                     const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?${qsBase}&quality=${encodeURIComponent(mprQuality)}&meta_only=1`, { credentials: 'same-origin' });
@@ -4095,11 +4134,16 @@
                         fetchMPRPlaneSlice('sagittal', mprState.index.sagittal, qsBase),
                         fetchMPRPlaneSlice('coronal', mprState.index.coronal, qsBase),
                     ]);
-                    await Promise.all([
-                        _renderMPRDataUrl('axial', ax.image),
-                        _renderMPRDataUrl('sagittal', sa.image),
-                        _renderMPRDataUrl('coronal', co.image),
-                    ]);
+                    {
+                        const settled = await Promise.allSettled([
+                            _renderMPRDataUrl('axial', ax.image),
+                            _renderMPRDataUrl('sagittal', sa.image),
+                            _renderMPRDataUrl('coronal', co.image),
+                        ]);
+                        const ok = settled.some((r) => r.status === 'fulfilled');
+                        if (!ok) throw new Error('All MPR panes failed to render');
+                        settled.forEach((r) => { if (r.status === 'rejected') console.warn('MPR pane render failed:', r.reason); });
+                    }
                 }
 
                 // Initialize/refresh crosshair to the current intersection.
@@ -4152,7 +4196,7 @@
                 const saUrl = mkUrl('sagittal', target.sagittal);
                 const coUrl = mkUrl('coronal', target.coronal);
 
-                await Promise.all([
+                await Promise.allSettled([
                     ((mprState.index.axial || 0) === target.axial) ? _renderMPRDataUrl('axial', axUrl) : Promise.resolve(),
                     ((mprState.index.sagittal || 0) === target.sagittal) ? _renderMPRDataUrl('sagittal', saUrl) : Promise.resolve(),
                     ((mprState.index.coronal || 0) === target.coronal) ? _renderMPRDataUrl('coronal', coUrl) : Promise.resolve(),
@@ -4202,6 +4246,7 @@
                 throw new Error(`Unable to acquire 2D context for MPR canvas (${viewType})`);
             }
             const img = new Image();
+            try { img.decoding = 'async'; } catch (_) {}
             // Backend may return:
             // - a full data URL: "data:image/png;base64,..."
             // - raw base64: "<base64...>"
@@ -4212,11 +4257,36 @@
             const isDataUrl = v.startsWith('data:image');
             const isHttpUrl = v.startsWith('http://') || v.startsWith('https://');
             const isRelativeUrl = v.startsWith('/') || v.startsWith('./') || v.startsWith('../');
-            img.src = isDataUrl ? v : (isHttpUrl || isRelativeUrl) ? v : `data:image/png;base64,${v}`;
-            await new Promise((resolve, reject) => {
-                img.onload = resolve;
-                img.onerror = reject;
-            });
+            const baseSrc = isDataUrl ? v : (isHttpUrl || isRelativeUrl) ? v : `data:image/png;base64,${v}`;
+
+            // Robust MPR image loading: retry transient failures and add cache-bust only for URL endpoints.
+            let lastErr = null;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                    let attemptSrc = baseSrc;
+                    if (!baseSrc.startsWith('data:image') && attempt > 0) {
+                        const sep = attemptSrc.includes('?') ? '&' : '?';
+                        attemptSrc = `${attemptSrc}${sep}_cb=${Date.now()}_${attempt}`;
+                    }
+                    img.src = attemptSrc;
+                    await Promise.race([
+                        new Promise((resolve, reject) => {
+                            img.onload = resolve;
+                            img.onerror = () => reject(new Error(`MPR image load failed (${viewType})`));
+                        }),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error(`MPR image load timeout (${viewType})`)), 20000))
+                    ]);
+                    lastErr = null;
+                    break;
+                } catch (e) {
+                    lastErr = e;
+                    if (attempt < 2) {
+                        await _delay(180 * Math.pow(2, attempt));
+                        continue;
+                    }
+                }
+            }
+            if (lastErr) throw lastErr;
 
             const w = img.naturalWidth || img.width;
             const h = img.naturalHeight || img.height;
@@ -4643,6 +4713,48 @@
             };
         }
 
+        function _mprCrosshairCanvasPointForPlane(plane) {
+            if (!mprCrosshairVoxel || !mprState || !mprState.renderMeta) return null;
+            const meta = mprState.renderMeta[plane];
+            if (!meta) return null;
+            const { w, h, dx, dy, dw, dh } = meta;
+            if (!w || !h || !dw || !dh) return null;
+            const sx = dw / w;
+            const sy = dh / h;
+
+            // Mirror drawMPRCrosshair() mapping.
+            let px = 0, py = 0;
+            if (plane === 'axial') {
+                px = mprCrosshairVoxel.x;
+                py = mprCrosshairVoxel.y;
+            } else if (plane === 'sagittal') {
+                px = mprCrosshairVoxel.y;
+                py = (h - 1) - mprCrosshairVoxel.z;
+            } else if (plane === 'coronal') {
+                px = mprCrosshairVoxel.x;
+                py = (h - 1) - mprCrosshairVoxel.z;
+            } else {
+                return null;
+            }
+
+            px = Math.max(0, Math.min(w - 1, px));
+            py = Math.max(0, Math.min(h - 1, py));
+            return { x: dx + px * sx, y: dy + py * sy };
+        }
+
+        function _scheduleMPRCrosshairDragUpdate(plane, x, y) {
+            _mprCrosshairDragPending = { plane, x, y };
+            if (_mprCrosshairDragRaf) return;
+            _mprCrosshairDragRaf = requestAnimationFrame(() => {
+                _mprCrosshairDragRaf = null;
+                const p = _mprCrosshairDragPending;
+                _mprCrosshairDragPending = null;
+                if (!p) return;
+                _setMPRCrosshairFromCanvasPoint(p.plane, p.x, p.y, false);
+                _scheduleMPRSyncFetch();
+            });
+        }
+
         function _clampInt(v, min, max) {
             const n = Math.round(Number(v) || 0);
             return Math.max(min, Math.min(max, n));
@@ -4702,7 +4814,7 @@
                 mprState.index.axial = ax.index;
                 mprState.index.sagittal = sa.index;
                 mprState.index.coronal = co.index;
-                return Promise.all([
+                return Promise.allSettled([
                     _renderMPRDataUrl('axial', ax.image),
                     _renderMPRDataUrl('sagittal', sa.image),
                     _renderMPRDataUrl('coronal', co.image),
@@ -4751,6 +4863,10 @@
 
         function handleMPRClick(event, plane) {
             if (viewMode !== 'mpr') return;
+            if (_mprSuppressNextClick) {
+                _mprSuppressNextClick = false;
+                return;
+            }
             if (activeTool === 'roi' && roiDraft) return; // don't toggle while drawing ROI
             setActiveMPRPlane(plane);
             // In MPR mode, clicking should NOT hide the other planes.
@@ -4848,6 +4964,33 @@
             const x = pxy.x;
             const y = pxy.y;
             setActiveMPRPlane(plane);
+
+            // Drag the crosshair intersection in real-time (grab near the center marker).
+            if (crosshair && (plane === 'axial' || plane === 'sagittal' || plane === 'coronal') && event.button === 0) {
+                const isDrawingTool = (activeTool === 'roi' || activeTool === 'measure' || activeTool === 'angle' || activeTool === 'area' || activeTool === 'annotate');
+                if (!isDrawingTool && c) {
+                    const target = _mprCrosshairCanvasPointForPlane(plane);
+                    if (target) {
+                        const rect = c.getBoundingClientRect();
+                        const sx = rect.width ? (c.width / rect.width) : 1;
+                        const threshold = 12 * sx; // 12 CSS px -> canvas px
+                        const dist = Math.hypot(x - target.x, y - target.y);
+                        if (dist <= threshold) {
+                            event.preventDefault();
+                            _mprDragState.down = true;
+                            _mprDragState.plane = plane;
+                            _mprDragState.tool = 'crosshair';
+                            _mprDragState.lastX = x;
+                            _mprDragState.lastY = y;
+                            _mprDragState.wasDragged = false;
+                            _mprSuppressNextClick = true; // suppress click-after-drag
+                            _scheduleMPRCrosshairDragUpdate(plane, x, y);
+                            return;
+                        }
+                    }
+                }
+            }
+
             if (activeTool === 'roi' && event.button === 0) {
                 const p = _mprCanvasToSlicePx(plane, x, y);
                 if (!p) return;
@@ -4889,6 +5032,7 @@
             _mprDragState.tool = activeTool;
             _mprDragState.lastX = x;
             _mprDragState.lastY = y;
+            _mprDragState.wasDragged = false;
 
             if (activeTool === 'measure' || activeTool === 'angle' || activeTool === 'area') {
                 const p = _mprCanvasToSlicePx(plane, x, y);
@@ -4966,6 +5110,12 @@
             const dy = y - _mprDragState.lastY;
             _mprDragState.lastX = x;
             _mprDragState.lastY = y;
+            if (Math.abs(dx) + Math.abs(dy) > 1.5) _mprDragState.wasDragged = true;
+
+            if (_mprDragState.tool === 'crosshair') {
+                _scheduleMPRCrosshairDragUpdate(plane, x, y);
+                return;
+            }
 
             if (activeTool === 'windowing') {
                 const ww = Math.max(1, Number(windowWidth));
@@ -5011,11 +5161,26 @@
 
         async function handleMPRMouseUp(event, plane) {
             if (viewMode !== 'mpr') return;
+            // Finalize crosshair drag (force a last sync at the last mouse position)
+            if (_mprDragState.down && _mprDragState.plane === plane && _mprDragState.tool === 'crosshair') {
+                try {
+                    _setMPRCrosshairFromCanvasPoint(plane, _mprDragState.lastX, _mprDragState.lastY, true);
+                } catch (e) {}
+                _mprDragState.down = false;
+                _mprDragState.plane = null;
+                _mprDragState.tool = null;
+                _mprDragState.wasDragged = false;
+                // Suppress the immediately following click event triggered by mouseup.
+                _mprSuppressNextClick = true;
+                setTimeout(() => { _mprSuppressNextClick = false; }, 0);
+                return;
+            }
             // Finalize non-ROI drags first
             if (_mprDragState.down && _mprDragState.plane === plane) {
                 _mprDragState.down = false;
                 _mprDragState.plane = null;
                 _mprDragState.tool = null;
+                _mprDragState.wasDragged = false;
             }
 
             // Finalize MPR measurement tools
@@ -5063,6 +5228,7 @@
                     measurements.push({
                         type: 'roi',
                         mode: 'mpr',
+                        seriesId: (currentSeries && currentSeries.id != null) ? Number(currentSeries.id) : null,
                         plane,
                         slice,
                         cx, cy, rx, ry,
@@ -5105,6 +5271,36 @@
                 const threshold = Number.isFinite(Number(boneThreshold)) ? Number(boneThreshold) : 300;
                 const wantMesh = true;
                 const meshQuality = (smoothSurface ? 'high' : 'medium');
+
+                // If the user drew an ROI in MPR, reconstruct only that region (faster + matches expectation).
+                // We use the most recent ROI for the current series.
+                let roiCropQs = '';
+                try {
+                    const seriesId = (currentSeries && currentSeries.id != null) ? Number(currentSeries.id) : null;
+                    const roi = (measurements || [])
+                        .slice()
+                        .reverse()
+                        .find((m) =>
+                            m &&
+                            m.type === 'roi' &&
+                            (m.mode || 'single') === 'mpr' &&
+                            (seriesId == null || Number(m.seriesId) === seriesId)
+                        );
+                    if (roi && (roi.plane === 'axial' || roi.plane === 'sagittal' || roi.plane === 'coronal')) {
+                        const pad = 6;       // pixels (slice coords)
+                        const thickness = 10; // slices (extrusion along orthogonal axis)
+                        roiCropQs =
+                            `&roi_plane=${encodeURIComponent(roi.plane)}` +
+                            `&roi_slice=${encodeURIComponent(Number(roi.slice) || 0)}` +
+                            `&roi_cx=${encodeURIComponent(Math.round(Number(roi.cx) || 0))}` +
+                            `&roi_cy=${encodeURIComponent(Math.round(Number(roi.cy) || 0))}` +
+                            `&roi_rx=${encodeURIComponent(Math.round(Number(roi.rx) || 1))}` +
+                            `&roi_ry=${encodeURIComponent(Math.round(Number(roi.ry) || 1))}` +
+                            `&roi_pad=${encodeURIComponent(pad)}` +
+                            `&roi_thickness=${encodeURIComponent(thickness)}`;
+                    }
+                } catch (e) {}
+
                 const url =
                     `/dicom-viewer/api/series/${currentSeries.id}/bone/` +
                     `?threshold=${encodeURIComponent(threshold)}` +
@@ -5112,7 +5308,8 @@
                     `&quality=${encodeURIComponent(meshQuality)}` +
                     `&window_width=${encodeURIComponent(2000)}` +
                     `&window_level=${encodeURIComponent(300)}` +
-                    `&inverted=${encodeURIComponent(inverted ? 'true' : 'false')}`;
+                    `&inverted=${encodeURIComponent(inverted ? 'true' : 'false')}` +
+                    `${roiCropQs}`;
 
                 const resp = await fetch(url, { credentials: 'same-origin' });
                 const data = await resp.json();
@@ -5498,7 +5695,7 @@
                 if (!views || (!views.axial && !views.sagittal && !views.coronal)) {
                     throw new Error('Unexpected MIP response');
                 }
-                await Promise.all([
+                await Promise.allSettled([
                     _renderMPRDataUrl('axial', views.axial),
                     _renderMPRDataUrl('sagittal', views.sagittal),
                     _renderMPRDataUrl('coronal', views.coronal),

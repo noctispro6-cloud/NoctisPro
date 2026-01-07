@@ -1120,6 +1120,90 @@ def api_bone_reconstruction(request, series_id):
                 return JsonResponse({'error': 'Could not read enough images for bone reconstruction'}, status=400)
             volume = np.stack(volume_data, axis=0)
         
+        # Optional ROI crop (from MPR ellipse) to keep 3D reconstruction focused + fast.
+        # ROI coordinates are in the *displayed slice pixel coordinate system* used by the viewer:
+        # - axial: (y, x)
+        # - sagittal: (z, y) with vertical Z flip
+        # - coronal: (z, x) with vertical Z flip
+        roi_applied = False
+        roi_bounds = None
+        try:
+            roi_plane = (request.GET.get('roi_plane') or '').strip().lower()
+            if roi_plane in ('axial', 'sagittal', 'coronal'):
+                roi_slice = int(float(request.GET.get('roi_slice', '0')))
+                roi_cx = int(float(request.GET.get('roi_cx', '0')))
+                roi_cy = int(float(request.GET.get('roi_cy', '0')))
+                roi_rx = max(1, int(float(request.GET.get('roi_rx', '1'))))
+                roi_ry = max(1, int(float(request.GET.get('roi_ry', '1'))))
+                roi_pad = max(0, int(float(request.GET.get('roi_pad', '0'))))
+                roi_thickness = max(0, int(float(request.GET.get('roi_thickness', '0'))))
+
+                zdim, ydim, xdim = (int(volume.shape[0]), int(volume.shape[1]), int(volume.shape[2]))
+
+                def _clampi(v, lo, hi):
+                    try:
+                        n = int(v)
+                    except Exception:
+                        n = int(lo)
+                    return max(int(lo), min(int(hi), n))
+
+                # Convert ROI -> voxel bounds (inclusive).
+                if roi_plane == 'axial':
+                    z0 = roi_slice - roi_thickness
+                    z1 = roi_slice + roi_thickness
+                    y0 = roi_cy - roi_ry - roi_pad
+                    y1 = roi_cy + roi_ry + roi_pad
+                    x0 = roi_cx - roi_rx - roi_pad
+                    x1 = roi_cx + roi_rx + roi_pad
+                elif roi_plane == 'sagittal':
+                    # Slice index is X; ROI x-axis is Y; ROI y-axis is Z (flipped in display).
+                    x0 = roi_slice - roi_thickness
+                    x1 = roi_slice + roi_thickness
+                    y0 = roi_cx - roi_rx - roi_pad
+                    y1 = roi_cx + roi_rx + roi_pad
+                    zc = (zdim - 1) - roi_cy
+                    z0 = zc - roi_ry - roi_pad
+                    z1 = zc + roi_ry + roi_pad
+                else:  # coronal
+                    # Slice index is Y; ROI x-axis is X; ROI y-axis is Z (flipped in display).
+                    y0 = roi_slice - roi_thickness
+                    y1 = roi_slice + roi_thickness
+                    x0 = roi_cx - roi_rx - roi_pad
+                    x1 = roi_cx + roi_rx + roi_pad
+                    zc = (zdim - 1) - roi_cy
+                    z0 = zc - roi_ry - roi_pad
+                    z1 = zc + roi_ry + roi_pad
+
+                z0 = _clampi(z0, 0, zdim - 1)
+                z1 = _clampi(z1, 0, zdim - 1)
+                y0 = _clampi(y0, 0, ydim - 1)
+                y1 = _clampi(y1, 0, ydim - 1)
+                x0 = _clampi(x0, 0, xdim - 1)
+                x1 = _clampi(x1, 0, xdim - 1)
+
+                if z1 < z0:
+                    z0, z1 = z1, z0
+                if y1 < y0:
+                    y0, y1 = y1, y0
+                if x1 < x0:
+                    x0, x1 = x1, x0
+
+                # Only apply if crop still yields a meaningful volume.
+                if (z1 - z0) >= 1 and (y1 - y0) >= 1 and (x1 - x0) >= 1:
+                    volume = volume[z0:z1 + 1, y0:y1 + 1, x0:x1 + 1]
+                    roi_applied = True
+                    roi_bounds = {
+                        'plane': roi_plane,
+                        'z': [int(z0), int(z1)],
+                        'y': [int(y0), int(y1)],
+                        'x': [int(x0), int(x1)],
+                        'pad': int(roi_pad),
+                        'thickness': int(roi_thickness),
+                    }
+        except Exception:
+            roi_applied = False
+            roi_bounds = None
+
         # Enhanced stabilization for thin stacks - optimized for bone reconstruction
         if volume.shape[0] < 32:  # More aggressive for better bone quality
             # Calculate optimal factor for bone reconstruction
@@ -1202,6 +1286,8 @@ def api_bone_reconstruction(request, series_id):
                 'sagittal': int(preview_volume.shape[2]),
                 'coronal': int(preview_volume.shape[1]),
             },
+            'roi_applied': bool(roi_applied),
+            'roi_bounds': roi_bounds,
             'series_info': {
                 'id': series.id,
                 'description': series.series_description,

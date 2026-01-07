@@ -343,6 +343,80 @@ def upload_study(request):
 			_ALLOWED_EXTS = ('.dcm', '.dicom', '.dicm', '.ima')
 
 			_UID_RE = re.compile(r'^[0-9.]+$')
+			_MODALITY_CODE_RE = re.compile(r'^[A-Z0-9_]{2,10}$')
+
+			# DICOM Modality (0008,0060) is a coded value (CS). In the wild, corrupted inputs or
+			# "force=True" parses can yield garbage like single-letter modalities ("A").
+			# We normalize and validate against a conservative known set and fall back to:
+			# - SOPClassUID inference (common storage classes)
+			# - 'OT' (Other)
+			_KNOWN_MODALITY_CODES = {
+				# Common radiology
+				'CR', 'CT', 'MR', 'US', 'NM', 'PT', 'DX', 'DR', 'MG', 'RF', 'XA', 'OT',
+				# Secondary capture / presentation
+				'SC', 'PR', 'KO', 'SR',
+				# Cardio / waveforms
+				'ECG', 'EPS', 'HD', 'IVUS', 'OCT',
+				# Radiation therapy
+				'RTIMAGE', 'RTDOSE', 'RTPLAN', 'RTSTRUCT',
+				# Registration/segmentation
+				'REG', 'SEG',
+				# Other occasionally seen codes
+				'IO', 'ES', 'SM', 'TG', 'OP', 'XC',
+			}
+
+			_SOP_CLASS_UID_TO_MODALITY = {
+				# CT / MR
+				'1.2.840.10008.5.1.4.1.1.2': 'CT',   # CT Image Storage
+				'1.2.840.10008.5.1.4.1.1.2.1': 'CT', # Enhanced CT Image Storage
+				'1.2.840.10008.5.1.4.1.1.4': 'MR',   # MR Image Storage
+				'1.2.840.10008.5.1.4.1.1.4.1': 'MR', # Enhanced MR Image Storage
+				# Radiography
+				'1.2.840.10008.5.1.4.1.1.1': 'CR',   # Computed Radiography Image Storage
+				'1.2.840.10008.5.1.4.1.1.1.1': 'DX', # Digital X-Ray Image Storage - for Presentation
+				'1.2.840.10008.5.1.4.1.1.1.1.1': 'DX', # Digital X-Ray Image Storage - for Processing
+				'1.2.840.10008.5.1.4.1.1.1.2': 'DX', # Digital Mammography X-Ray Image Storage - for Presentation
+				'1.2.840.10008.5.1.4.1.1.1.2.1': 'DX', # Digital Mammography X-Ray Image Storage - for Processing
+				# Ultrasound
+				'1.2.840.10008.5.1.4.1.1.6.1': 'US', # Ultrasound Image Storage
+				'1.2.840.10008.5.1.4.1.1.6.2': 'US', # Enhanced US Volume Storage
+				# Nuclear medicine / PET
+				'1.2.840.10008.5.1.4.1.1.20': 'NM',  # Nuclear Medicine Image Storage
+				'1.2.840.10008.5.1.4.1.1.128': 'PT', # PET Image Storage
+				# Secondary capture
+				'1.2.840.10008.5.1.4.1.1.7': 'SC',   # Secondary Capture Image Storage
+				# SR
+				'1.2.840.10008.5.1.4.1.1.88.11': 'SR', # Basic Text SR
+				'1.2.840.10008.5.1.4.1.1.88.22': 'SR', # Enhanced SR
+				'1.2.840.10008.5.1.4.1.1.88.33': 'SR', # Comprehensive SR
+			}
+
+			def _infer_modality_from_sop_class(ds) -> str | None:
+				try:
+					sop = str(getattr(ds, 'SOPClassUID', '') or '').strip()
+					if not sop:
+						try:
+							sop = str(getattr(getattr(ds, 'file_meta', None), 'MediaStorageSOPClassUID', '') or '').strip()
+						except Exception:
+							sop = ''
+					return _SOP_CLASS_UID_TO_MODALITY.get(sop)
+				except Exception:
+					return None
+
+			def _normalize_modality_code(ds) -> str:
+				try:
+					raw = str(getattr(ds, 'Modality', '') or '').strip().upper()
+					# DICOM CS allows spaces; some exporters pad values.
+					raw = raw.split()[0] if raw else ''
+					if raw and _MODALITY_CODE_RE.match(raw) and raw in _KNOWN_MODALITY_CODES:
+						return raw
+				except Exception:
+					pass
+
+				inferred = _infer_modality_from_sop_class(ds)
+				if inferred:
+					return inferred
+				return 'OT'
 
 			def _looks_like_real_dicom(ds) -> bool:
 				"""
@@ -498,7 +572,12 @@ def upload_study(request):
 					study_uid = getattr(ds, 'StudyInstanceUID', None)
 					series_uid = getattr(ds, 'SeriesInstanceUID', None)
 					sop_uid = getattr(ds, 'SOPInstanceUID', None)
-					modality = getattr(ds, 'Modality', 'OT')
+					modality = _normalize_modality_code(ds)
+					try:
+						# Ensure consistent downstream grouping/processing
+						setattr(ds, 'Modality', modality)
+					except Exception:
+						pass
 
 					# Validation strategy:
 					# - StudyInstanceUID and SeriesInstanceUID are required to group files correctly.
@@ -591,7 +670,27 @@ def upload_study(request):
 					logger.debug(f"Existing patient found: {patient.full_name} (ID: {patient_id})")
 				
 				# Professional modality and study metadata processing
-				modality_code = getattr(rep_ds, 'Modality', 'OT').upper()
+				# Prefer consistent/validated modality derived from the uploaded series.
+				study_modalities = set()
+				try:
+					for _k in series_map.keys():
+						parts = str(_k).split('_', 1)
+						if len(parts) == 2:
+							m = (parts[1] or '').strip().upper()
+							if m:
+								study_modalities.add(m)
+				except Exception:
+					study_modalities = set()
+
+				# If there's exactly one non-OT modality, use it. Otherwise fall back to OT.
+				non_ot = [m for m in study_modalities if m and m != 'OT']
+				if len(non_ot) == 1:
+					modality_code = non_ot[0]
+				elif len(non_ot) == 0:
+					modality_code = _normalize_modality_code(rep_ds)
+				else:
+					modality_code = 'OT'
+
 				modality, modality_created = Modality.objects.get_or_create(
 					code=modality_code, 
 					defaults={'name': modality_code, 'is_active': True}
@@ -749,12 +848,13 @@ def upload_study(request):
 					series_start_time = time.time()
 					
 					# Parse series key to get series_uid and modality
-					series_uid = series_key.split('_')[0]
+					series_uid, _series_mod_from_key = (str(series_key).split('_', 1) + [''])[:2]
 					
 					# Professional series metadata extraction
 					ds0 = items[0][0]
+					series_modality_code = _normalize_modality_code(ds0) or (str(_series_mod_from_key or '').strip().upper() or modality_code)
 					series_number = getattr(ds0, 'SeriesNumber', 1) or 1
-					series_desc = getattr(ds0, 'SeriesDescription', f'{modality_code} Series {series_number}')
+					series_desc = getattr(ds0, 'SeriesDescription', f'{series_modality_code} Series {series_number}')
 					slice_thickness = getattr(ds0, 'SliceThickness', None)
 					pixel_spacing = str(getattr(ds0, 'PixelSpacing', ''))
 					image_orientation = str(getattr(ds0, 'ImageOrientationPatient', ''))
@@ -769,7 +869,7 @@ def upload_study(request):
 							'study': study,
 							'series_number': int(series_number),
 							'series_description': series_desc,
-							'modality': modality_code,
+							'modality': series_modality_code,
 							'body_part': body_part,
 							'slice_thickness': slice_thickness if slice_thickness is not None else None,
 							'pixel_spacing': pixel_spacing,
@@ -795,7 +895,7 @@ def upload_study(request):
 							# Keep metadata reasonably up-to-date for the UI
 							series.series_number = int(series_number)
 							series.series_description = series_desc
-							series.modality = modality_code
+							series.modality = series_modality_code
 							series.body_part = body_part
 							series.slice_thickness = slice_thickness if slice_thickness is not None else None
 							series.pixel_spacing = pixel_spacing

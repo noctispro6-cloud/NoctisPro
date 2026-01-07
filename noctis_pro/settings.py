@@ -683,6 +683,17 @@ def _env_bool(name: str, default: bool = False) -> bool:
 DICOM_VIEWER_ENABLE_DESKTOP_LAUNCH = _env_bool("DICOM_VIEWER_ENABLE_DESKTOP_LAUNCH", default=False)
 DICOM_VIEWER_ENABLE_LOCAL_DIRECTORY_IMPORT = _env_bool("DICOM_VIEWER_ENABLE_LOCAL_DIRECTORY_IMPORT", default=DEBUG)
 DICOM_VIEWER_ENABLE_CPP_COMPAT_API = _env_bool("DICOM_VIEWER_ENABLE_CPP_COMPAT_API", default=False)
+DICOM_VIEWER_ENABLE_PREPROCESSING = _env_bool("DICOM_VIEWER_ENABLE_PREPROCESSING", default=True)
+
+# Background preprocessing (single-core by default).
+try:
+    DICOM_VIEWER_PREPROCESS_WORKERS = int(os.environ.get("DICOM_VIEWER_PREPROCESS_WORKERS", "1"))
+except Exception:
+    DICOM_VIEWER_PREPROCESS_WORKERS = 1
+try:
+    DICOM_VIEWER_PREPROCESS_MAX_SERIES = int(os.environ.get("DICOM_VIEWER_PREPROCESS_MAX_SERIES", "4"))
+except Exception:
+    DICOM_VIEWER_PREPROCESS_MAX_SERIES = 4
 
 # If local directory import is enabled, restrict imports to these roots (best-effort).
 # Operators can override with a comma-separated list of absolute paths.
@@ -706,4 +717,5 @@ DICOM_VIEWER_SETTINGS = {
     'ENABLE_DESKTOP_LAUNCH': DICOM_VIEWER_ENABLE_DESKTOP_LAUNCH,
     'ENABLE_LOCAL_DIRECTORY_IMPORT': DICOM_VIEWER_ENABLE_LOCAL_DIRECTORY_IMPORT,
     'ENABLE_CPP_COMPAT_API': DICOM_VIEWER_ENABLE_CPP_COMPAT_API,
+    'ENABLE_PREPROCESSING': DICOM_VIEWER_ENABLE_PREPROCESSING,
 }

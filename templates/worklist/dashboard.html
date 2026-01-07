@@ -1276,9 +1276,8 @@
         }
 
         function resetFilters() {
-            // Reset to current date
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('dateFilter').value = today;
+            // Reset to "All dates" (blank). Defaulting to "today" hides older uploads.
+            document.getElementById('dateFilter').value = '';
             document.getElementById('statusFilter').value = '';
             document.getElementById('modalityFilter').value = '';
             document.getElementById('priorityFilter').value = '';
@@ -1323,9 +1322,9 @@
 
         // Enhanced initialization with better auto-refresh and upload detection
         document.addEventListener('DOMContentLoaded', function() {
-            // Set current date in date filter
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('dateFilter').value = today;
+            // Default to "All dates" so users can see previously-uploaded studies.
+            // Users can still pick a date if they want to narrow down.
+            document.getElementById('dateFilter').value = '';
             
             // Load initial data
             loadStudiesData();
@@ -1408,6 +1407,13 @@
             // Defensive string normalization (some fields can be numeric/null depending on data source)
             const _str = (v) => (v == null ? '' : String(v));
             const _low = (v) => _str(v).toLowerCase();
+            const _ymd = (d) => {
+                // Return local YYYY-MM-DD for a Date
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${y}-${m}-${day}`;
+            };
             
             filteredData = studiesData.filter(study => {
                 const matchesStatus = !statusFilter || _low(study.status).includes(statusFilter);
@@ -1419,9 +1425,9 @@
                 // original DICOM StudyDate, which is often historical and makes fresh uploads "disappear".
                 let matchesDate = true;
                 if (dateFilter) {
-                    const studyDate = new Date(study.study_time || study.upload_date || study.study_date).toDateString();
-                    const filterDate = new Date(dateFilter).toDateString();
-                    matchesDate = studyDate === filterDate;
+                    // Avoid JS date-only parsing timezone issues: compare YYYY-MM-DD in local time.
+                    const dt = new Date(study.study_time || study.upload_date || study.study_date);
+                    matchesDate = _ymd(dt) === dateFilter;
                 }
 
                 const matchesSearch = 

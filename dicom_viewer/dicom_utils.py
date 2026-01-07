@@ -218,9 +218,18 @@ class DicomProcessor:
             return result.astype(np.float32)
             
         except ImportError:
-            # Fallback: simple noise reduction
-            kernel = np.ones((3,3)) / 9
-            return ndimage.convolve(image_data, kernel, mode='reflect')
+            # Fallback: simple 3x3 mean filter (no SciPy dependency)
+            # Use reflect padding to preserve edges and avoid dark borders.
+            try:
+                p = np.pad(image_data.astype(np.float32), 1, mode="reflect")
+                smoothed = (
+                    p[:-2, :-2] + p[:-2, 1:-1] + p[:-2, 2:] +
+                    p[1:-1, :-2] + p[1:-1, 1:-1] + p[1:-1, 2:] +
+                    p[2:, :-2] + p[2:, 1:-1] + p[2:, 2:]
+                ) / 9.0
+                return smoothed.astype(np.float32)
+            except Exception:
+                return image_data.astype(np.float32)
     
     def _apply_adaptive_histogram_equalization(self, image_data, min_val, max_val):
         """Apply adaptive histogram equalization for improved local contrast"""
@@ -296,15 +305,21 @@ class DicomProcessor:
             return np.clip(sharpened, 0.0, 1.0)
             
         except ImportError:
-            # Fallback: simple edge enhancement
-            kernel = np.array([[-1, -1, -1],
-                              [-1,  9, -1],
-                              [-1, -1, -1]]) / 9
+            # Fallback: lightweight edge enhancement (no SciPy dependency)
+            # Approximate a sharpen kernel via shifted sums.
             try:
-                from scipy import ndimage
-                enhanced = ndimage.convolve(normalized_data, kernel, mode='reflect')
+                img = normalized_data.astype(np.float32)
+                p = np.pad(img, 1, mode="reflect")
+                # 3x3 sharpen kernel: center*9 - surrounding*1, then normalize.
+                surrounding = (
+                    p[:-2, :-2] + p[:-2, 1:-1] + p[:-2, 2:] +
+                    p[1:-1, :-2] + p[1:-1, 2:] +
+                    p[2:, :-2] + p[2:, 1:-1] + p[2:, 2:]
+                )
+                center = p[1:-1, 1:-1]
+                enhanced = (center * 9.0 - surrounding) / 9.0
                 return np.clip(enhanced, 0.0, 1.0)
-            except:
+            except Exception:
                 return normalized_data
     
     def get_optimal_preset_for_hu_range(self, hu_min, hu_max, modality='CT'):

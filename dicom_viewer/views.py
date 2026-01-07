@@ -1,7 +1,7 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.http import JsonResponse, HttpResponse
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_protect
 from django.contrib import messages
 from worklist.models import Study, Series, DicomImage, Patient, Modality
 from accounts.models import User, Facility
@@ -39,6 +39,21 @@ from .models import WindowLevelPreset, HangingProtocol
 
 # Initialize logger
 logger = logging.getLogger(__name__)
+
+def _flag_enabled(attr_name: str, settings_key: str | None = None, default: bool = False) -> bool:
+    """
+    Read a feature flag from settings.
+    - Prefer explicit settings attr (e.g., DICOM_VIEWER_ENABLE_DESKTOP_LAUNCH)
+    - Fall back to settings.DICOM_VIEWER_SETTINGS[settings_key] when provided
+    """
+    if hasattr(settings, attr_name):
+        return bool(getattr(settings, attr_name))
+    if settings_key:
+        try:
+            return bool(getattr(settings, "DICOM_VIEWER_SETTINGS", {}).get(settings_key, default))
+        except Exception:
+            return default
+    return default
 
 #
 # Persistent (on-disk) MPR cache
@@ -167,6 +182,15 @@ def _schedule_mpr_disk_cache_build(series_id: int, quality: str = 'high') -> Non
             except Exception:
                 pass
 
+    # Prefer the bounded process-based preprocessor (dedicated core) when enabled.
+    try:
+        from .preprocess import schedule_mpr_disk_cache as _schedule_proc
+        if _schedule_proc(sid, quality=q):
+            return
+    except Exception:
+        pass
+
+    # Fallback: thread (best-effort)
     try:
         t = Thread(target=_run, daemon=True)
         t.start()
@@ -313,6 +337,15 @@ def _schedule_mpr_prewarm(series_id: int, quality: str = 'high') -> None:
             with _MPR_PREWARM_LOCK:
                 _MPR_PREWARM_INFLIGHT.discard(key)
 
+    # Prefer the bounded process-based preprocessor (dedicated core) when enabled.
+    try:
+        from .preprocess import schedule_mpr_disk_cache as _schedule_proc
+        if _schedule_proc(int(series_id), quality=q):
+            return
+    except Exception:
+        pass
+
+    # Fallback: thread (best-effort)
     try:
         t = Thread(target=_run, daemon=True)
         t.start()
@@ -558,7 +591,10 @@ def masterpiece_viewer(request):
         'study_id': request.GET.get('study', ''),
         'series_id': request.GET.get('series', ''),
         'current_date': timezone.now().strftime('%Y-%m-%d'),
-        'user': request.user
+        'user': request.user,
+        # Feature flags for production-safe UI gating
+        'enable_directory_import': _flag_enabled("DICOM_VIEWER_ENABLE_LOCAL_DIRECTORY_IMPORT", "ENABLE_LOCAL_DIRECTORY_IMPORT", default=False),
+        'enable_desktop_launch': _flag_enabled("DICOM_VIEWER_ENABLE_DESKTOP_LAUNCH", "ENABLE_DESKTOP_LAUNCH", default=False),
     }
     return render(request, 'dicom_viewer/masterpiece_viewer.html', context)
 
@@ -573,7 +609,7 @@ def view_study(request, study_id):
     return redirect('dicom_viewer:launch_study_in_desktop_viewer', study_id=study_id)
 
 @login_required
-@csrf_exempt
+@require_http_methods(["GET"])
 def api_study_data(request, study_id):
     """API endpoint to get study data for viewer"""
     try:
@@ -646,7 +682,7 @@ def api_study_data(request, study_id):
         return JsonResponse({'error': f'Failed to load study data: {str(e)}'}, status=500)
 
 @login_required
-@csrf_exempt
+@require_http_methods(["GET"])
 def api_image_data(request, image_id):
     """API endpoint to get specific image data.
 
@@ -943,7 +979,6 @@ def api_image_data(request, image_id):
     return JsonResponse(data)
 
 @login_required
-@csrf_exempt
 def api_mpr_reconstruction(request, series_id):
     """API endpoint for Multiplanar Reconstruction (MPR)
     - If no plane is provided, returns mid-slice preview images for axial/sagittal/coronal plus counts
@@ -1099,7 +1134,6 @@ def api_mpr_reconstruction(request, series_id):
         return JsonResponse({'error': f'Error generating MPR: {str(e)}'}, status=500)
 
 @login_required
-@csrf_exempt
 def api_mip_reconstruction(request, series_id):
     """API endpoint for Maximum Intensity Projection (MIP)
     Optimized to reuse cached 3D volume when available for instant response."""
@@ -1185,7 +1219,6 @@ def api_mip_reconstruction(request, series_id):
         return JsonResponse({'error': f'Error generating MIP: {str(e)}'}, status=500)
 
 @login_required
-@csrf_exempt
 def api_bone_reconstruction(request, series_id):
     """API endpoint for bone reconstruction using thresholding
     Optimized to reuse cached 3D volume when available; returns 3-plane previews instantly."""
@@ -1407,7 +1440,6 @@ def api_bone_reconstruction(request, series_id):
         return JsonResponse({'error': f'Error generating bone reconstruction: {str(e)}'}, status=500)
 
 @login_required
-@csrf_exempt
 def api_realtime_studies(request):
     """API endpoint for real-time study updates"""
     try:
@@ -1491,7 +1523,6 @@ def api_realtime_studies(request):
         }, status=500)
 
 @login_required
-@csrf_exempt
 def api_study_progress(request, study_id):
     """API endpoint to get study processing progress"""
     study = get_object_or_404(Study, id=study_id)
@@ -1687,7 +1718,6 @@ def _array_to_png_bytes(array, window_width=None, window_level=None, inverted=Fa
         return None
 
 @login_required
-@csrf_exempt 
 def api_dicom_image_display(request, image_id):
     """API endpoint to get processed DICOM image with windowing
     - If pixel data cannot be decoded, still return metadata and sensible window defaults
@@ -2015,7 +2045,6 @@ def api_dicom_image_display(request, image_id):
 
 
 @login_required
-@csrf_exempt
 def api_dicom_image_png(request, image_id):
     """Stream a windowed DICOM slice as PNG bytes.
 
@@ -2164,7 +2193,6 @@ def api_dicom_image_png(request, image_id):
         return HttpResponse(status=500)
 
 @login_required
-@csrf_exempt
 def api_measurements(request, study_id=None):
     """API endpoint for saving/loading measurements"""
     if study_id:
@@ -2222,7 +2250,6 @@ def api_measurements(request, study_id=None):
         return JsonResponse({'success': True, 'message': 'Measurements cleared'})
 
 @login_required
-@csrf_exempt
 def api_reconstruction(request, study_id):
     """API endpoint for 3D reconstruction processing"""
     study = get_object_or_404(Study, id=study_id)
@@ -2257,7 +2284,6 @@ def api_reconstruction(request, study_id):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 @login_required
-@csrf_exempt
 def api_hounsfield_units(request):
     """API endpoint for Hounsfield Unit calculations"""
     if request.method == 'POST':
@@ -2322,91 +2348,107 @@ def api_hounsfield_units(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 @login_required
-@csrf_exempt
+@require_http_methods(["POST"])
+@csrf_protect
 def api_auto_window(request, image_id):
     """API endpoint for automatic window/level optimization"""
-    if request.method == 'POST':
+    try:
+        image = get_object_or_404(DicomImage, id=image_id)
+        user = request.user
+
+        # Check permissions
+        if user.is_facility_user() and getattr(user, 'facility', None) and image.series.study.facility != user.facility:
+            return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+
+        if not image.file_path:
+            return JsonResponse({'success': False, 'error': 'DICOM file not found'}, status=404)
+
+        # Read DICOM dataset via storage (production-safe)
+        ds = None
         try:
-            image = get_object_or_404(DicomImage, id=image_id)
-            user = request.user
-            
-            # Check permissions
-            if user.is_facility_user() and getattr(user, 'facility', None) and image.series.study.facility != user.facility:
-                return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
-            
-            # Load DICOM file and analyze
-            dicom_path = os.path.join(settings.MEDIA_ROOT, str(image.file_path))
-            ds = pydicom.dcmread(dicom_path)
-            
-            # Get pixel data and convert to HU
-            try:
-                pixel_array = ds.pixel_array
+            with image.file_path.open("rb") as f:
                 try:
-                    modality = str(getattr(ds, 'Modality', '')).upper()
-                    if modality in ['DX','CR','XA','RF','MG']:
-                        pixel_array = apply_voi_lut(pixel_array, ds)
+                    ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
                 except Exception:
-                    pass
-                pixel_array = pixel_array.astype(np.float32)
+                    try:
+                        f.seek(0)
+                    except Exception:
+                        pass
+                    ds = pydicom.dcmread(f, stop_before_pixels=False, force=True)
+        except Exception:
+            # last resort: local path only when available
+            if hasattr(image.file_path, "path"):
+                ds = pydicom.dcmread(image.file_path.path, stop_before_pixels=False, force=True)
+
+        if ds is None:
+            return JsonResponse({'success': False, 'error': 'Could not read DICOM'}, status=500)
+
+        # Decode pixels
+        pixel_array = None
+        try:
+            pixel_array = ds.pixel_array
+            try:
+                modality = str(getattr(ds, 'Modality', '')).upper()
+                if modality in ['DX', 'CR', 'XA', 'RF', 'MG']:
+                    pixel_array = apply_voi_lut(pixel_array, ds)
             except Exception:
-                try:
-                    import SimpleITK as sitk
-                    sitk_image = sitk.ReadImage(dicom_path)
+                pass
+            pixel_array = pixel_array.astype(np.float32)
+        except Exception:
+            # Fallback for compressed DICOMs if local path exists
+            try:
+                import SimpleITK as sitk
+                if hasattr(image.file_path, "path"):
+                    sitk_image = sitk.ReadImage(image.file_path.path)
                     px = sitk.GetArrayFromImage(sitk_image)
                     if px.ndim == 3 and px.shape[0] == 1:
                         px = px[0]
                     pixel_array = px.astype(np.float32)
-                except Exception:
-                    return JsonResponse({'success': False, 'error': 'Could not read pixel data'}, status=500)
-            
-            # Apply rescale slope/intercept
-            if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
-                try:
-                    pixel_array = pixel_array * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
-                except Exception:
-                    pass
-            
-            # Use enhanced windowing algorithm
-            processor = DicomProcessor()
-            modality = str(getattr(ds, 'Modality', '')).upper()
-            auto_ww, auto_wl = processor.auto_window_from_data(pixel_array, percentile_range=(2, 98), modality=modality)
-            
-            # Get modality and suggest optimal preset
-            modality = str(getattr(ds, 'Modality', '')).upper()
-            suggested_preset = None
-            
-            if modality == 'CT':
-                suggested_preset = processor.get_optimal_preset_for_hu_range(
-                    pixel_array.min(), pixel_array.max(), modality
-                )
-                if suggested_preset in processor.window_presets:
-                    preset = processor.window_presets[suggested_preset]
-                    auto_ww = preset['ww']
-                    auto_wl = preset['wl']
-            
-            result = {
-                'success': True,
-                'window_width': float(auto_ww),
-                'window_level': float(auto_wl),
-                'suggested_preset': suggested_preset,
-                'modality': modality,
-                'hu_range': {
-                    'min': float(pixel_array.min()),
-                    'max': float(pixel_array.max()),
-                    'mean': float(np.mean(pixel_array))
-                }
+            except Exception:
+                pixel_array = None
+
+        if pixel_array is None:
+            return JsonResponse({'success': False, 'error': 'Could not read pixel data'}, status=500)
+
+        # Apply rescale slope/intercept
+        if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
+            try:
+                pixel_array = pixel_array * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+            except Exception:
+                pass
+
+        processor = DicomProcessor()
+        modality = str(getattr(ds, 'Modality', '')).upper()
+        auto_ww, auto_wl = processor.auto_window_from_data(pixel_array, percentile_range=(2, 98), modality=modality)
+
+        # Suggest preset for CT based on range
+        suggested_preset = None
+        if modality == 'CT':
+            suggested_preset = processor.get_optimal_preset_for_hu_range(pixel_array.min(), pixel_array.max(), modality)
+            if suggested_preset in processor.window_presets:
+                preset = processor.window_presets[suggested_preset]
+                auto_ww = preset['ww']
+                auto_wl = preset['wl']
+
+        return JsonResponse({
+            'success': True,
+            'window_width': float(auto_ww),
+            'window_level': float(auto_wl),
+            'suggested_preset': suggested_preset,
+            'modality': modality,
+            'hu_range': {
+                'min': float(pixel_array.min()),
+                'max': float(pixel_array.max()),
+                'mean': float(np.mean(pixel_array)),
             }
-            
-            return JsonResponse(result)
-            
-        except Exception as e:
-            logger.error(f"Error in auto-windowing for image {image_id}: {str(e)}")
-            return JsonResponse({'success': False, 'error': f'Auto-windowing failed: {str(e)}'}, status=500)
-    
-    return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
+        })
+    except Exception as e:
+        logger.error(f"Error in auto-windowing for image {image_id}: {str(e)}")
+        return JsonResponse({'success': False, 'error': f'Auto-windowing failed: {str(e)}'}, status=500)
 
 @login_required
-@csrf_exempt
+@require_http_methods(["POST"])
+@csrf_protect
 def api_window_level(request):
     """API endpoint for window/level adjustments"""
     if request.method == 'POST':
@@ -2445,7 +2487,8 @@ def api_window_level(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 @login_required
-@csrf_exempt
+@require_http_methods(["POST"])
+@csrf_protect
 def api_calculate_distance(request):
     """API endpoint to calculate distance with pixel spacing"""
     if request.method == 'POST':
@@ -2513,7 +2556,8 @@ def api_export_image(request, image_id):
     return JsonResponse(result)
 
 @login_required
-@csrf_exempt
+@require_http_methods(["GET", "POST"])
+@csrf_protect
 def api_annotations(request, study_id):
     """API endpoint for saving/loading annotations"""
     study = get_object_or_404(Study, id=study_id)
@@ -2574,7 +2618,8 @@ def api_cine_mode(request, series_id):
     return JsonResponse(cine_data)
 
 @login_required
-@csrf_exempt
+@require_http_methods(["POST"])
+@csrf_protect
 def api_export_measurements(request, study_id):
     """API endpoint to export measurements as PDF"""
     study = get_object_or_404(Study, id=study_id)
@@ -2611,6 +2656,9 @@ def api_export_measurements(request, study_id):
 @login_required
 def load_from_directory(request):
     """Load DICOM files from local directory, flash drive, or disc"""
+    if not _flag_enabled("DICOM_VIEWER_ENABLE_LOCAL_DIRECTORY_IMPORT", "ENABLE_LOCAL_DIRECTORY_IMPORT", default=False):
+        return JsonResponse({'success': False, 'error': 'Directory import is disabled'}, status=404)
+
     if request.method == 'POST':
         try:
             import os
@@ -2625,6 +2673,20 @@ def load_from_directory(request):
             # Security check: ensure path is safe
             try:
                 directory_path = os.path.abspath(directory_path)
+                # Restrict to operator-approved import roots (prevents arbitrary server path scans).
+                import_roots = getattr(settings, "DICOM_VIEWER_IMPORT_ROOTS", None) or []
+                if import_roots:
+                    allowed = False
+                    for root in import_roots:
+                        try:
+                            root_abs = os.path.abspath(root)
+                            if directory_path == root_abs or directory_path.startswith(root_abs.rstrip(os.sep) + os.sep):
+                                allowed = True
+                                break
+                        except Exception:
+                            continue
+                    if not allowed:
+                        return JsonResponse({'success': False, 'error': 'Directory path not allowed'}, status=403)
                 if not os.path.exists(directory_path):
                     return JsonResponse({'success': False, 'error': 'Directory does not exist'})
                 if not os.path.isdir(directory_path):
@@ -2976,7 +3038,8 @@ def process_dicom_study(study_uid, series_map, rep_ds, user, upload_id):
     return study_obj
 
 @login_required
-@csrf_exempt
+@require_http_methods(["POST"])
+@csrf_protect
 def upload_dicom(request):
     """Upload DICOM files for processing"""
     if request.method == 'POST':
@@ -3276,7 +3339,7 @@ def upload_dicom(request):
     return JsonResponse({'success': False, 'error': 'Use POST to upload DICOM files'})
 
 @login_required
-@csrf_exempt
+@require_http_methods(["GET"])
 def api_upload_progress(request, upload_id):
     """API endpoint to check upload progress"""
     try:
@@ -3298,7 +3361,8 @@ def api_upload_progress(request, upload_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 @login_required
-@csrf_exempt
+@require_http_methods(["POST"])
+@csrf_protect
 def api_process_study(request, study_id):
     """API endpoint to process/reprocess a study"""
     study = get_object_or_404(Study, id=study_id)
@@ -3312,9 +3376,14 @@ def api_process_study(request, study_id):
         try:
             data = json.loads(request.body)
             processing_options = data.get('options', {})
-            
-            # This would trigger study reprocessing
-            # For now, we'll simulate processing
+
+            # Trigger bounded background preprocessing (MPR disk cache warm).
+            try:
+                from .preprocess import schedule_study_preprocess
+                schedule_study_preprocess(int(study.id), quality=str(processing_options.get("quality") or "high"))
+            except Exception:
+                pass
+
             result = {
                 'success': True,
                 'message': f'Study {study.accession_number} processing started',
@@ -3333,7 +3402,6 @@ def api_process_study(request, study_id):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 @login_required
-@csrf_exempt
 def launch_standalone_viewer(request):
     """Launch the standalone DICOM viewer application (Python PyQt)."""
     import subprocess
@@ -3343,6 +3411,13 @@ def launch_standalone_viewer(request):
     # If this looks like a normal browser navigation (expects HTML), redirect to web UI
     accept_header = request.headers.get('Accept', '')
     wants_html = 'text/html' in accept_header or 'application/xhtml+xml' in accept_header
+
+    # Production safety: do not allow launching local GUI subprocesses from HTTP unless explicitly enabled.
+    if not _flag_enabled("DICOM_VIEWER_ENABLE_DESKTOP_LAUNCH", "ENABLE_DESKTOP_LAUNCH", default=False):
+        web_url = '/dicom-viewer/web/viewer/'
+        if wants_html:
+            return redirect(web_url)
+        return JsonResponse({'success': False, 'message': 'Desktop launch disabled'}, status=404)
 
     try:
         study_id = None
@@ -3416,6 +3491,13 @@ def launch_study_in_desktop_viewer(request, study_id):
     # If this looks like a normal browser navigation (expects HTML), redirect to web UI
     accept_header = request.headers.get('Accept', '')
     wants_html = 'text/html' in accept_header or 'application/xhtml+xml' in accept_header
+
+    # Production safety: do not allow launching local GUI subprocesses from HTTP unless explicitly enabled.
+    if not _flag_enabled("DICOM_VIEWER_ENABLE_DESKTOP_LAUNCH", "ENABLE_DESKTOP_LAUNCH", default=False):
+        web_url = f'/dicom-viewer/web/viewer/?study_id={study_id}'
+        if wants_html:
+            return redirect(web_url)
+        return JsonResponse({'success': True, 'fallback_url': web_url, 'message': 'Desktop launch disabled; opening web viewer'}, status=200)
 
     try:
         study = get_object_or_404(Study, id=study_id)
@@ -3678,8 +3760,8 @@ def web_dicom_image(request, image_id):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
+@csrf_protect
 def web_save_measurement(request):
     try:
         data = json.loads(request.body)
@@ -3708,8 +3790,8 @@ def web_save_measurement(request):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
+@csrf_protect
 def web_save_annotation(request):
     try:
         data = json.loads(request.body)
@@ -3770,8 +3852,8 @@ def web_get_annotations(request, image_id):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
+@csrf_protect
 def web_save_viewer_session(request):
     try:
         payload = json.loads(request.body)
@@ -3802,8 +3884,8 @@ def web_load_viewer_session(request, study_id):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
+@csrf_protect
 def web_start_reconstruction(request):
     try:
         data = json.loads(request.body)
@@ -3935,7 +4017,7 @@ def process_mri_reconstruction(job_id):
         job.save()
 
 @login_required
-@csrf_exempt
+@require_http_methods(["GET"])
 def api_hu_value(request):
     """Return Hounsfield Unit at a given pixel.
     Query params:
@@ -3956,8 +4038,17 @@ def api_hu_value(request):
             image = get_object_or_404(DicomImage, id=image_id)
             if user.is_facility_user() and getattr(user, 'facility', None) and image.series.study.facility != user.facility:
                 return JsonResponse({'error': 'Permission denied'}, status=403)
-            dicom_path = os.path.join(settings.MEDIA_ROOT, str(image.file_path))
-            ds = pydicom.dcmread(dicom_path)
+            if not image.file_path:
+                return JsonResponse({'error': 'DICOM file not found'}, status=404)
+            ds = None
+            try:
+                with image.file_path.open("rb") as f:
+                    ds = pydicom.dcmread(f, force=True)
+            except Exception:
+                if hasattr(image.file_path, "path"):
+                    ds = pydicom.dcmread(image.file_path.path, force=True)
+            if ds is None:
+                return JsonResponse({'error': 'Could not read DICOM'}, status=500)
             arr = ds.pixel_array.astype(np.float32)
             slope = float(getattr(ds, 'RescaleSlope', 1.0))
             intercept = float(getattr(ds, 'RescaleIntercept', 0.0))
@@ -4362,7 +4453,8 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
         return volume, spacing
 
 @login_required
-@csrf_exempt
+@require_http_methods(["GET", "POST", "DELETE"])
+@csrf_protect
 def api_user_presets(request):
     """CRUD for per-user window/level presets.
     GET: list presets (optionally filter by modality/body_part)
@@ -4492,7 +4584,7 @@ def api_export_dicom_sr(request, study_id):
         return JsonResponse({'error': f'Failed to export SR: {e}'}, status=500)
 
 @login_required
-@csrf_exempt
+@require_http_methods(["GET"])
 def api_series_volume_uint8(request, series_id):
     """Return a downsampled uint8 volume for GPU VR with basic windowing.
     Query: ww, wl, max_dim (e.g., 256)
@@ -4581,7 +4673,8 @@ def hu_calibration_dashboard(request):
 
 @login_required
 @user_passes_test(lambda u: u.is_admin() or u.is_technician())
-@csrf_exempt
+@require_http_methods(["POST"])
+@csrf_protect
 def validate_hu_calibration(request, study_id):
     """Validate Hounsfield unit calibration for a study"""
     from .models import HounsfieldCalibration
@@ -4607,9 +4700,18 @@ def validate_hu_calibration(request, study_id):
             if not first_image:
                 return JsonResponse({'error': 'No images found in CT series'}, status=400)
             
-            # Load DICOM data
-            dicom_path = os.path.join(settings.MEDIA_ROOT, str(first_image.file_path))
-            ds = pydicom.dcmread(dicom_path)
+            # Load DICOM data via storage (production-safe)
+            if not first_image.file_path:
+                return JsonResponse({'error': 'DICOM file not found'}, status=404)
+            ds = None
+            try:
+                with first_image.file_path.open("rb") as f:
+                    ds = pydicom.dcmread(f, force=True)
+            except Exception:
+                if hasattr(first_image.file_path, "path"):
+                    ds = pydicom.dcmread(first_image.file_path.path, force=True)
+            if ds is None:
+                return JsonResponse({'error': 'Could not read DICOM'}, status=500)
             pixel_array = ds.pixel_array
             
             # Validate calibration

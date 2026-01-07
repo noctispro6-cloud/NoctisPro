@@ -143,13 +143,25 @@ def study_list(request):
 	
 	search_query = request.GET.get('search')
 	if search_query:
-		studies = studies.filter(
-			Q(accession_number__icontains=search_query) |
-			Q(patient__first_name__icontains=search_query) |
-			Q(patient__last_name__icontains=search_query) |
-			Q(patient__patient_id__icontains=search_query) |
-			Q(study_description__icontains=search_query)
+		q = (search_query or '').strip()
+		# Support searching full names ("John Doe"), DICOM-style ("DOE^JOHN"),
+		# and IDs/accession numbers. For multi-token queries, require each token
+		# to match either first or last name (order-insensitive).
+		tokens = [t for t in re.split(r'[\s,\^]+', q) if t]
+		base_q = (
+			Q(accession_number__icontains=q) |
+			Q(patient__patient_id__icontains=q) |
+			Q(study_description__icontains=q) |
+			Q(patient__first_name__icontains=q) |
+			Q(patient__last_name__icontains=q)
 		)
+		if len(tokens) >= 2:
+			name_q = Q()
+			for t in tokens:
+				name_q &= (Q(patient__first_name__icontains=t) | Q(patient__last_name__icontains=t))
+			studies = studies.filter(base_q | name_q)
+		else:
+			studies = studies.filter(base_q)
 	
 	# Sort by priority (urgent→low) then most recently uploaded first.
 	# IMPORTANT: many DICOM studies contain historical StudyDate values, which can make fresh uploads
@@ -343,6 +355,121 @@ def upload_study(request):
 			_ALLOWED_EXTS = ('.dcm', '.dicom', '.dicm', '.ima')
 
 			_UID_RE = re.compile(r'^[0-9.]+$')
+			_MODALITY_CODE_RE = re.compile(r'^[A-Z0-9_]{2,10}$')
+
+			# DICOM Modality (0008,0060) is a coded value (CS). In the wild, corrupted inputs or
+			# "force=True" parses can yield garbage like single-letter modalities ("A").
+			# We normalize and validate against a conservative known set and fall back to:
+			# - SOPClassUID inference (common storage classes)
+			# - 'OT' (Other)
+			_KNOWN_MODALITY_CODES = {
+				# Common radiology
+				'CR', 'CT', 'MR', 'US', 'NM', 'PT', 'DX', 'DR', 'MG', 'RF', 'XA', 'OT',
+				# Secondary capture / presentation
+				'SC', 'PR', 'KO', 'SR',
+				# Cardio / waveforms
+				'ECG', 'EPS', 'HD', 'IVUS', 'OCT',
+				# Radiation therapy
+				'RTIMAGE', 'RTDOSE', 'RTPLAN', 'RTSTRUCT',
+				# Registration/segmentation
+				'REG', 'SEG',
+				# Other occasionally seen codes
+				'IO', 'ES', 'SM', 'TG', 'OP', 'XC',
+			}
+
+			_SOP_CLASS_UID_TO_MODALITY = {
+				# CT / MR
+				'1.2.840.10008.5.1.4.1.1.2': 'CT',   # CT Image Storage
+				'1.2.840.10008.5.1.4.1.1.2.1': 'CT', # Enhanced CT Image Storage
+				'1.2.840.10008.5.1.4.1.1.4': 'MR',   # MR Image Storage
+				'1.2.840.10008.5.1.4.1.1.4.1': 'MR', # Enhanced MR Image Storage
+				# Radiography
+				'1.2.840.10008.5.1.4.1.1.1': 'CR',   # Computed Radiography Image Storage
+				'1.2.840.10008.5.1.4.1.1.1.1': 'DX', # Digital X-Ray Image Storage - for Presentation
+				'1.2.840.10008.5.1.4.1.1.1.1.1': 'DX', # Digital X-Ray Image Storage - for Processing
+				'1.2.840.10008.5.1.4.1.1.1.2': 'DX', # Digital Mammography X-Ray Image Storage - for Presentation
+				'1.2.840.10008.5.1.4.1.1.1.2.1': 'DX', # Digital Mammography X-Ray Image Storage - for Processing
+				# Ultrasound
+				'1.2.840.10008.5.1.4.1.1.6.1': 'US', # Ultrasound Image Storage
+				'1.2.840.10008.5.1.4.1.1.6.2': 'US', # Enhanced US Volume Storage
+				# Nuclear medicine / PET
+				'1.2.840.10008.5.1.4.1.1.20': 'NM',  # Nuclear Medicine Image Storage
+				'1.2.840.10008.5.1.4.1.1.128': 'PT', # PET Image Storage
+				# Secondary capture
+				'1.2.840.10008.5.1.4.1.1.7': 'SC',   # Secondary Capture Image Storage
+				# SR
+				'1.2.840.10008.5.1.4.1.1.88.11': 'SR', # Basic Text SR
+				'1.2.840.10008.5.1.4.1.1.88.22': 'SR', # Enhanced SR
+				'1.2.840.10008.5.1.4.1.1.88.33': 'SR', # Comprehensive SR
+			}
+
+			def _infer_modality_from_sop_class(ds) -> str | None:
+				try:
+					sop = str(getattr(ds, 'SOPClassUID', '') or '').strip()
+					if not sop:
+						try:
+							sop = str(getattr(getattr(ds, 'file_meta', None), 'MediaStorageSOPClassUID', '') or '').strip()
+						except Exception:
+							sop = ''
+					return _SOP_CLASS_UID_TO_MODALITY.get(sop)
+				except Exception:
+					return None
+
+			def _normalize_modality_code(ds) -> str:
+				try:
+					raw = str(getattr(ds, 'Modality', '') or '').strip().upper()
+					# DICOM CS allows spaces; some exporters pad values.
+					raw = raw.split()[0] if raw else ''
+					if raw and _MODALITY_CODE_RE.match(raw) and raw in _KNOWN_MODALITY_CODES:
+						return raw
+				except Exception:
+					pass
+
+				inferred = _infer_modality_from_sop_class(ds)
+				if inferred:
+					return inferred
+				return 'OT'
+
+			def _parse_patient_name(ds) -> tuple[str, str]:
+				"""
+				Extract (first_name, last_name) from DICOM PatientName.
+
+				DICOM PN commonly encodes as:
+				  Family^Given^Middle^Prefix^Suffix
+				We map Given(+Middle) -> first_name, Family -> last_name.
+				"""
+				try:
+					raw = str(getattr(ds, 'PatientName', '') or '').strip()
+				except Exception:
+					raw = ''
+
+				if not raw or raw.upper().startswith('UNKNOWN'):
+					return ('Unknown', 'Patient')
+
+				# PN caret-separated: Family^Given^Middle^Prefix^Suffix
+				if '^' in raw:
+					parts = [p.strip() for p in raw.split('^')]
+					family = parts[0] if len(parts) > 0 else ''
+					given = parts[1] if len(parts) > 1 else ''
+					middle = parts[2] if len(parts) > 2 else ''
+					first = ' '.join([p for p in (given, middle) if p]).strip()
+					last = family.strip()
+					if not first:
+						first = 'Unknown'
+					if not last:
+						last = 'Patient'
+					return (first, last)
+
+				# Common alternative: "LAST, FIRST"
+				if ',' in raw:
+					last, first = [p.strip() for p in raw.split(',', 1)]
+					return (first or 'Unknown', last or 'Patient')
+
+				# Fallback: space-separated "First Last" (best effort)
+				parts = [p for p in raw.replace('\t', ' ').split(' ') if p]
+				if len(parts) == 1:
+					return (parts[0], 'Patient')
+				return (parts[0], ' '.join(parts[1:]))
 
 			def _looks_like_real_dicom(ds) -> bool:
 				"""
@@ -498,7 +625,12 @@ def upload_study(request):
 					study_uid = getattr(ds, 'StudyInstanceUID', None)
 					series_uid = getattr(ds, 'SeriesInstanceUID', None)
 					sop_uid = getattr(ds, 'SOPInstanceUID', None)
-					modality = getattr(ds, 'Modality', 'OT')
+					modality = _normalize_modality_code(ds)
+					try:
+						# Ensure consistent downstream grouping/processing
+						setattr(ds, 'Modality', modality)
+					except Exception:
+						pass
 
 					# Validation strategy:
 					# - StudyInstanceUID and SeriesInstanceUID are required to group files correctly.
@@ -549,12 +681,7 @@ def upload_study(request):
 				
 				# Enhanced patient data extraction with medical validation
 				patient_id = getattr(rep_ds, 'PatientID', f'TEMP_{int(timezone.now().timestamp())}')
-				patient_name = str(getattr(rep_ds, 'PatientName', 'UNKNOWN^PATIENT')).replace('^', ' ')
-				
-				# Professional name parsing with medical standards
-				name_parts = patient_name.strip().split(' ')
-				first_name = name_parts[0] if name_parts and name_parts[0] != 'UNKNOWN' else 'Unknown'
-				last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else 'Patient'
+				first_name, last_name = _parse_patient_name(rep_ds)
 				
 				# Professional date handling with medical precision
 				birth_date = getattr(rep_ds, 'PatientBirthDate', None)
@@ -584,6 +711,28 @@ def upload_study(request):
 						'gender': gender
 					}
 				)
+
+				# If the patient already existed but had placeholder names, refresh them from this upload.
+				# This prevents the worklist search from failing when a patient was first created from a
+				# minimal DICOM header (or a prior bad upload) and later uploads bring the real name.
+				try:
+					if not patient_created:
+						is_placeholder = (
+							(not (patient.first_name or '').strip()) or
+							(not (patient.last_name or '').strip()) or
+							(patient.first_name.strip().lower() in ('unknown', 'unk')) or
+							(patient.last_name.strip().lower() in ('patient', 'unknown', 'unk'))
+						)
+						has_better = (
+							(first_name.strip().lower() not in ('unknown', 'unk')) and
+							(last_name.strip().lower() not in ('patient', 'unknown', 'unk'))
+						)
+						if is_placeholder and has_better:
+							patient.first_name = first_name
+							patient.last_name = last_name
+							patient.save(update_fields=['first_name', 'last_name'])
+				except Exception:
+					pass
 				
 				if patient_created:
 					logger.info(f"New patient created: {patient.full_name} (ID: {patient_id})")
@@ -591,7 +740,27 @@ def upload_study(request):
 					logger.debug(f"Existing patient found: {patient.full_name} (ID: {patient_id})")
 				
 				# Professional modality and study metadata processing
-				modality_code = getattr(rep_ds, 'Modality', 'OT').upper()
+				# Prefer consistent/validated modality derived from the uploaded series.
+				study_modalities = set()
+				try:
+					for _k in series_map.keys():
+						parts = str(_k).split('_', 1)
+						if len(parts) == 2:
+							m = (parts[1] or '').strip().upper()
+							if m:
+								study_modalities.add(m)
+				except Exception:
+					study_modalities = set()
+
+				# If there's exactly one non-OT modality, use it. Otherwise fall back to OT.
+				non_ot = [m for m in study_modalities if m and m != 'OT']
+				if len(non_ot) == 1:
+					modality_code = non_ot[0]
+				elif len(non_ot) == 0:
+					modality_code = _normalize_modality_code(rep_ds)
+				else:
+					modality_code = 'OT'
+
 				modality, modality_created = Modality.objects.get_or_create(
 					code=modality_code, 
 					defaults={'name': modality_code, 'is_active': True}
@@ -749,12 +918,13 @@ def upload_study(request):
 					series_start_time = time.time()
 					
 					# Parse series key to get series_uid and modality
-					series_uid = series_key.split('_')[0]
+					series_uid, _series_mod_from_key = (str(series_key).split('_', 1) + [''])[:2]
 					
 					# Professional series metadata extraction
 					ds0 = items[0][0]
+					series_modality_code = _normalize_modality_code(ds0) or (str(_series_mod_from_key or '').strip().upper() or modality_code)
 					series_number = getattr(ds0, 'SeriesNumber', 1) or 1
-					series_desc = getattr(ds0, 'SeriesDescription', f'{modality_code} Series {series_number}')
+					series_desc = getattr(ds0, 'SeriesDescription', f'{series_modality_code} Series {series_number}')
 					slice_thickness = getattr(ds0, 'SliceThickness', None)
 					pixel_spacing = str(getattr(ds0, 'PixelSpacing', ''))
 					image_orientation = str(getattr(ds0, 'ImageOrientationPatient', ''))
@@ -769,7 +939,7 @@ def upload_study(request):
 							'study': study,
 							'series_number': int(series_number),
 							'series_description': series_desc,
-							'modality': modality_code,
+							'modality': series_modality_code,
 							'body_part': body_part,
 							'slice_thickness': slice_thickness if slice_thickness is not None else None,
 							'pixel_spacing': pixel_spacing,
@@ -795,7 +965,7 @@ def upload_study(request):
 							# Keep metadata reasonably up-to-date for the UI
 							series.series_number = int(series_number)
 							series.series_description = series_desc
-							series.modality = modality_code
+							series.modality = series_modality_code
 							series.body_part = body_part
 							series.slice_thickness = slice_thickness if slice_thickness is not None else None
 							series.pixel_spacing = pixel_spacing
@@ -1671,12 +1841,23 @@ def api_search_studies(request):
         studies = studies.filter(patient__patient_id=patient_id)
     
     # Search query
-    studies = studies.filter(
+    tokens = [t for t in re.split(r'[\s,\^]+', query) if t]
+    base_q = (
         Q(accession_number__icontains=query) |
+        Q(patient__patient_id__icontains=query) |
         Q(patient__first_name__icontains=query) |
         Q(patient__last_name__icontains=query) |
         Q(study_description__icontains=query)
-    ).select_related('patient', 'modality').order_by('-study_date')[:20]
+    )
+    if len(tokens) >= 2:
+        name_q = Q()
+        for t in tokens:
+            name_q &= (Q(patient__first_name__icontains=t) | Q(patient__last_name__icontains=t))
+        studies = studies.filter(base_q | name_q)
+    else:
+        studies = studies.filter(base_q)
+
+    studies = studies.select_related('patient', 'modality').order_by('-study_date')[:20]
     
     studies_data = []
     for study in studies:

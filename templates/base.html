@@ -683,22 +683,24 @@
         <div class="nav-left">
             <div class="logo"><i class="fas fa-hospital-symbol"></i> Noctis Pro PACS</div>
             <div class="nav-tabs">
-                <div class="nav-tab{% if request.resolver_match and request.resolver_match.namespace == 'worklist' %} active{% endif %}" onclick="window.location.href='{% url 'worklist:dashboard' %}'">WORKLIST</div>
-                <div class="nav-tab" onclick="window.location.href='{% url 'worklist:study_list' %}'">STUDIES</div>
-                <div class="nav-tab" onclick="window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
-                <div class="nav-tab" onclick="window.location.href='{% url 'dicom_viewer:viewer' %}'"><i class="fas fa-eye"></i> DICOM VIEWER</div>
+                {% with ns=request.resolver_match.namespace url=request.resolver_match.url_name %}
+                <div class="nav-tab{% if ns == 'worklist' and url == 'dashboard' %} active{% endif %}" onclick="window.location.href='{% url 'worklist:dashboard' %}'">WORKLIST</div>
+                <div class="nav-tab{% if ns == 'worklist' and url == 'study_list' %} active{% endif %}" onclick="window.location.href='{% url 'worklist:study_list' %}'">STUDIES</div>
+                <div class="nav-tab{% if ns == 'reports' %} active{% endif %}" onclick="window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
+                <div class="nav-tab{% if ns == 'dicom_viewer' %} active{% endif %}" onclick="window.location.href='{% url 'dicom_viewer:viewer' %}'"><i class="fas fa-eye"></i> DICOM VIEWER</div>
                 {% user_caps as caps %}
                 {% if caps.ai_visible %}
                 {% if user.role == 'admin' or user.role == 'radiologist' %}
-                <div class="nav-tab" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI</div>
+                <div class="nav-tab{% if ns == 'ai_analysis' %} active{% endif %}" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI</div>
                 {% endif %}
                 {% endif %}
                 {% if user.is_authenticated %}
                 {% user_caps as caps %}
                 {% if user.role == 'admin' or caps.manage_users %}
-                <div class="nav-tab" onclick="window.location.href='{% url 'admin_panel:user_management' %}'"><i class="fas fa-user-cog"></i> MANAGE USERS</div>
+                <div class="nav-tab{% if ns == 'admin_panel' %} active{% endif %}" onclick="window.location.href='{% url 'admin_panel:user_management' %}'"><i class="fas fa-user-cog"></i> MANAGE USERS</div>
                 {% endif %}
                 {% endif %}
+                {% endwith %}
             </div>
         </div>
         <div class="nav-right">

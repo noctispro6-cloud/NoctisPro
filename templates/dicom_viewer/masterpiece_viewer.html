@@ -1297,6 +1297,12 @@
         let rotation = 0;
         let flipH = false;
         let flipV = false;
+        // Crosshair refinement:
+        // - Stored in image pixel coordinates (center point)
+        // - Has an independent rotation (degrees) to help align misaligned images without rotating the pixels
+        let crosshairRotation = 0; // degrees, additional rotation relative to displayed image axes
+        let _crosshairRotateDrag = { active: false, startAngle: 0, baseDeg: 0 };
+        let _crosshairRotateHover = false;
         let cineMode = false;
         let cineInterval = null;
 
@@ -1815,6 +1821,9 @@
                             }
                         }
                         redrawCurrentImage();
+                        if (crosshair) {
+                            showToast('Crosshair: drag the small handle to rotate; Alt+Click to reposition', 'info', 3500);
+                        }
                     }
                     break;
                 case 'rotate':
@@ -2231,6 +2240,124 @@
             return new Float32Array(bytes.buffer);
         }
 
+        function _isLittleEndian() {
+            try {
+                const u32 = new Uint32Array([0x11223344]);
+                const u8 = new Uint8Array(u32.buffer);
+                return u8[0] === 0x44;
+            } catch (_) {
+                return true;
+            }
+        }
+
+        function _decodeArrayBufferToFloat32LE(buf) {
+            // Server sends little-endian float32 bytes.
+            if (_isLittleEndian()) return new Float32Array(buf);
+            // Rare: big-endian client; swap using DataView.
+            const dv = new DataView(buf);
+            const out = new Float32Array(buf.byteLength / 4);
+            for (let i = 0; i < out.length; i++) out[i] = dv.getFloat32(i * 4, true);
+            return out;
+        }
+
+        function _parseHeaderNum(headers, name) {
+            try {
+                const v = headers.get(name);
+                if (v == null) return null;
+                const n = Number(v);
+                return Number.isFinite(n) ? n : null;
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function _parseHeaderStr(headers, name) {
+            try {
+                const v = headers.get(name);
+                return (v == null) ? null : String(v);
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function _parsePixelSpacingHeader(headers) {
+            const v = _parseHeaderStr(headers, 'X-Noctis-Pixel-Spacing');
+            if (!v) return null;
+            // Accept "row,col" or "row\\col"
+            const parts = v.includes('\\') ? v.split('\\') : v.split(',');
+            if (!parts.length) return null;
+            const row = parseFloat(parts[0]);
+            const col = parseFloat(parts.length >= 2 ? parts[1] : parts[0]);
+            if (!isFinite(row) || !isFinite(col) || row <= 0 || col <= 0) return null;
+            return [row, col];
+        }
+
+        async function _fetchImagePayloadBinary(imageId, signal) {
+            const url = `/dicom-viewer/api/image/${imageId}/data/?packed=bin`;
+            const resp = await fetch(url, {
+                signal,
+                credentials: 'same-origin',
+                cache: 'force-cache',
+            });
+            if (!resp.ok) return null;
+
+            const ct = (resp.headers.get('content-type') || '').toLowerCase();
+            // If the server returns JSON here (older backend / error), treat as unsupported and fall back.
+            if (ct.includes('application/json')) return null;
+
+            const rows = _parseHeaderNum(resp.headers, 'X-Noctis-Rows');
+            const cols = _parseHeaderNum(resp.headers, 'X-Noctis-Columns');
+            if (!rows || !cols) return null;
+
+            const ww = _parseHeaderNum(resp.headers, 'X-Noctis-Window-Width');
+            const wl = _parseHeaderNum(resp.headers, 'X-Noctis-Window-Center');
+            const ps = _parsePixelSpacingHeader(resp.headers);
+            const st = _parseHeaderNum(resp.headers, 'X-Noctis-Slice-Thickness');
+            const modality = _parseHeaderStr(resp.headers, 'X-Noctis-Modality');
+
+            const buf = await resp.arrayBuffer();
+            const pixel_data = _decodeArrayBufferToFloat32LE(buf);
+
+            return {
+                id: imageId,
+                rows: rows,
+                columns: cols,
+                window_width: ww != null ? ww : undefined,
+                window_center: wl != null ? wl : undefined,
+                pixel_spacing: ps != null ? ps : undefined,
+                slice_thickness: st != null ? st : undefined,
+                modality: modality != null ? modality : undefined,
+                pixel_data,
+                pixel_data_b64: null,
+                pixel_dtype: 'float32',
+                pixel_endian: 'little',
+            };
+        }
+
+        async function _fetchImagePayloadJsonPacked(imageId, signal) {
+            const url = `/dicom-viewer/api/image/${imageId}/data/?packed=1`;
+            const response = await fetch(url, {
+                signal,
+                credentials: 'same-origin',
+                cache: 'force-cache'
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            const data = await response.json();
+            if (data && data.pixel_data_b64 && (!data.pixel_data || !data.pixel_data.length)) {
+                try {
+                    data.pixel_data = _decodeB64ToFloat32Array(data.pixel_data_b64);
+                    data.pixel_data_b64 = null; // reduce memory
+                } catch (e) {
+                    data.pixel_data = null;
+                    data.pixel_data_b64 = null;
+                    data.warnings = { ...(data.warnings || {}), pixel_decode_error: `Client decode failed: ${e?.message || e}` };
+                }
+            }
+            return data;
+        }
+
         function _resetServerRendered() {
             _serverRendered = { enabled: false, imageId: null, image: null, dataUrl: null, info: null, key: null };
             if (_serverRenderRefreshTimer) {
@@ -2427,25 +2554,15 @@
             // Avoid flickery loaders during fast wheel scrolls: show only if it takes noticeable time.
             let loaderTimer = setTimeout(() => showLoading(true), 150);
             try {
-                const url = `/dicom-viewer/api/image/${imageId}/data/?packed=1`;
                 let data = null;
                 let lastErr = null;
                 for (let attempt = 0; attempt < 3; attempt++) {
                     try {
-                        const response = await fetch(url, {
-                            signal: _imageLoadAbortController.signal,
-                            credentials: 'same-origin',
-                            cache: 'force-cache'
-                        });
-                        if (!response.ok) {
-                            // Retry transient server/proxy failures (upload moments, prewarm, etc.)
-                            if ([429, 502, 503, 504].includes(response.status) && attempt < 2) {
-                                await _delay(160 * Math.pow(2, attempt));
-                                continue;
-                            }
-                            throw new Error(`HTTP ${response.status}`);
+                        // Prefer raw float32 bytes (lower overhead), fall back to JSON packed if unsupported.
+                        data = await _fetchImagePayloadBinary(imageId, _imageLoadAbortController.signal);
+                        if (!data) {
+                            data = await _fetchImagePayloadJsonPacked(imageId, _imageLoadAbortController.signal);
                         }
-                        data = await response.json();
                         lastErr = null;
                         break;
                     } catch (e) {
@@ -2467,18 +2584,6 @@
                     if (data && Number.isFinite(Number(data.window_center))) windowLevel = Number(data.window_center);
                     updateSliders();
                 } catch (e) {}
-
-                if (data && data.pixel_data_b64 && (!data.pixel_data || !data.pixel_data.length)) {
-                    // Decode packed float32 pixels to a TypedArray for faster rendering than JSON lists.
-                    try {
-                        data.pixel_data = _decodeB64ToFloat32Array(data.pixel_data_b64);
-                        data.pixel_data_b64 = null; // reduce memory
-                    } catch (e) {
-                        data.pixel_data = null;
-                        data.pixel_data_b64 = null;
-                        data.warnings = { ...(data.warnings || {}), pixel_decode_error: `Client decode failed: ${e?.message || e}` };
-                    }
-                }
 
                 if (!data || !data.pixel_data || !data.columns || !data.rows) {
                     // Don't silently render nothing — try server-rendered PNG fallback (still supports pan/zoom/rotate).
@@ -2519,16 +2624,9 @@
                     if (!id) return;
                     if (_imagePayloadCache.has(String(id))) return;
                     // Fire-and-forget prefetch; browser cache + our LRU cache will make the next scroll instant.
-                    fetch(`/dicom-viewer/api/image/${id}/data/?packed=1`, { credentials: 'same-origin', cache: 'force-cache' })
-                        .then(r => r.ok ? r.json() : null)
-                        .then(d => {
-                            if (!d) return;
-                            if (d.pixel_data_b64 && (!d.pixel_data || !d.pixel_data.length)) {
-                                d.pixel_data = _decodeB64ToFloat32Array(d.pixel_data_b64);
-                                d.pixel_data_b64 = null; // reduce memory
-                            }
-                            _cacheSetPayload(id, d);
-                        })
+                    _fetchImagePayloadBinary(id, undefined)
+                        .then((d) => d ? d : _fetchImagePayloadJsonPacked(id, undefined))
+                        .then((d) => { if (d) _cacheSetPayload(id, d); })
                         .catch(() => {});
                 });
             }, 140);
@@ -2732,6 +2830,19 @@
             
             // Handle left-click (button 0)
             if (event.button === 0) {
+                // Crosshair rotate: drag the handle to rotate to any degree (single-view).
+                if (crosshair && viewMode === 'single' && _hitTestCrosshairRotateHandle(lastMouseX, lastMouseY)) {
+                    const c = _crosshairCenterCanvasPoint();
+                    _crosshairRotateDrag.active = true;
+                    _crosshairRotateDrag.startAngle = Math.atan2(lastMouseY - c.y, lastMouseX - c.x);
+                    _crosshairRotateDrag.baseDeg = Number(crosshairRotation) || 0;
+                    _crosshairRotateHover = true;
+                    isDragging = true;
+                    try { canvas.style.cursor = 'grabbing'; } catch (_) {}
+                    redrawCurrentImage();
+                    return;
+                }
+
                 // Alt+click to reposition crosshair when enabled (store in image pixels)
                 if (crosshair && event.altKey) {
                     const p = canvasPointToImagePx(lastMouseX, lastMouseY);
@@ -2786,6 +2897,32 @@
 
             // Magnifier works without dragging
             updateMagnifier(mouseX, mouseY);
+
+            // Crosshair rotate hover feedback (single-view).
+            // Keep this lightweight: just a hit-test against the small handle.
+            if (crosshair && viewMode === 'single') {
+                const hover = _hitTestCrosshairRotateHandle(mouseX, mouseY);
+                if (hover !== _crosshairRotateHover) {
+                    _crosshairRotateHover = hover;
+                    try { canvas.style.cursor = _crosshairRotateDrag.active ? 'grabbing' : (hover ? 'grab' : 'crosshair'); } catch (_) {}
+                    // Only redraw when the highlight state changes.
+                    try { redrawCurrentImage(); } catch (_) {}
+                } else {
+                    try { canvas.style.cursor = _crosshairRotateDrag.active ? 'grabbing' : (hover ? 'grab' : 'crosshair'); } catch (_) {}
+                }
+            }
+
+            // Crosshair rotate drag (single-view): consumes the drag so we don't window/zoom/pan at the same time.
+            if (_crosshairRotateDrag && _crosshairRotateDrag.active) {
+                const c = _crosshairCenterCanvasPoint();
+                const a = Math.atan2(mouseY - c.y, mouseX - c.x);
+                const deltaDeg = (a - _crosshairRotateDrag.startAngle) * (180 / Math.PI);
+                crosshairRotation = _normalizeDeg((_crosshairRotateDrag.baseDeg || 0) + deltaDeg);
+                redrawCurrentImage();
+                lastMouseX = mouseX;
+                lastMouseY = mouseY;
+                return;
+            }
             
             if (!isDragging) return;
             
@@ -2928,6 +3065,15 @@
 
         async function handleMouseUp(event) {
             isDragging = false;
+
+            // End crosshair rotation drag (single-view)
+            if (_crosshairRotateDrag && _crosshairRotateDrag.active) {
+                _crosshairRotateDrag.active = false;
+                try { canvas.style.cursor = _crosshairRotateHover ? 'grab' : 'crosshair'; } catch (_) {}
+                try { redrawCurrentImage(); } catch (_) {}
+                // Don't fall through into ROI/measurement finalize logic for this mouseup.
+                return;
+            }
 
             if (activeTool === 'roi' && roiDraft && roiDraft.mode === 'single') {
                 try {
@@ -3149,6 +3295,9 @@
             rotation = 0;
             flipH = false;
             flipV = false;
+            crosshairRotation = 0;
+            _crosshairRotateDrag = { active: false, startAngle: 0, baseDeg: 0 };
+            _crosshairRotateHover = false;
             updateZoomSlider();
             redrawCurrentImage();
             showToast('View reset', 'success');
@@ -3183,6 +3332,9 @@
             windowingLockedByUser = false;
             crosshair = false;
             crosshairImagePx = null;
+            crosshairRotation = 0;
+            _crosshairRotateDrag = { active: false, startAngle: 0, baseDeg: 0 };
+            _crosshairRotateHover = false;
 
             // Reset basic view transform
             zoom = 1.0;
@@ -3555,18 +3707,72 @@
         // Crosshair is stored in image pixel coordinates (not canvas coordinates)
         let crosshairImagePx = null; // { x, y } in image px
 
+        function _normalizeDeg(d) {
+            const n = Number(d) || 0;
+            return ((n % 360) + 360) % 360;
+        }
+
+        function _crosshairCenterCanvasPoint() {
+            const pt = crosshairImagePx ? imagePxToCanvasPoint(crosshairImagePx) : null;
+            return {
+                x: (pt && pt.x != null) ? pt.x : (canvas.width / 2),
+                y: (pt && pt.y != null) ? pt.y : (canvas.height / 2),
+            };
+        }
+
+        function _crosshairAxesForCanvas() {
+            const rot = _normalizeDeg(rotation);
+            const rot2 = _normalizeDeg(crosshairRotation);
+            const total = _normalizeDeg(rot + rot2);
+            const angle = (total * Math.PI) / 180;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            const fx = flipH ? -1 : 1;
+            const fy = flipV ? -1 : 1;
+            // Image X axis (columns)
+            const xdx = fx * cos;
+            const xdy = fx * sin;
+            // Image Y axis (rows)
+            const ydx = fy * (-sin);
+            const ydy = fy * (cos);
+            return { xdx, xdy, ydx, ydy };
+        }
+
+        function _crosshairRotateHandleCanvasPoint() {
+            const c = _crosshairCenterCanvasPoint();
+            const ax = _crosshairAxesForCanvas();
+            const handleDist = 26;
+            return { x: c.x + handleDist * ax.xdx, y: c.y + handleDist * ax.xdy };
+        }
+
+        function _hitTestCrosshairRotateHandle(canvasX, canvasY) {
+            if (!crosshair) return false;
+            if (viewMode !== 'single') return false;
+            const h = _crosshairRotateHandleCanvasPoint();
+            const dx = canvasX - h.x;
+            const dy = canvasY - h.y;
+            return (dx * dx + dy * dy) <= (10 * 10);
+        }
+
         function drawCrosshair() {
             const pt = crosshairImagePx ? imagePxToCanvasPoint(crosshairImagePx) : null;
             const centerX = (pt && pt.x != null) ? pt.x : (canvas.width / 2);
             const centerY = (pt && pt.y != null) ? pt.y : (canvas.height / 2);
-            
-            ctx.strokeStyle = '#00ffff';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([3, 3]);
+
+            const isRotateActive = !!(_crosshairRotateDrag && _crosshairRotateDrag.active);
+            const isRotateHover = !!_crosshairRotateHover;
+            const highlight = isRotateActive || isRotateHover;
+
+            ctx.strokeStyle = highlight ? 'rgba(255,255,0,0.95)' : '#00ffff';
+            ctx.lineWidth = highlight ? 2 : 1;
+            ctx.setLineDash(highlight ? [] : [3, 3]);
 
             // Draw crosshair aligned to the image axes (rotates with the image).
             const rot = ((Number(rotation) || 0) % 360 + 360) % 360;
-            const angle = (rot * Math.PI) / 180;
+            // Additional crosshair rotation for alignment (does not rotate the pixels).
+            const rot2 = ((Number(crosshairRotation) || 0) % 360 + 360) % 360;
+            const total = ((rot + rot2) % 360 + 360) % 360;
+            const angle = (total * Math.PI) / 180;
             const cos = Math.cos(angle);
             const sin = Math.sin(angle);
             const len = Math.max(canvas.width, canvas.height) * 1.4;
@@ -3594,6 +3800,33 @@
             
             ctx.setLineDash([]);
 
+            // Rotation handle (drag to rotate crosshair to any degree).
+            // Handle sits on the +X axis of the crosshair.
+            const handleDist = 26;
+            const hx = centerX + handleDist * xdx;
+            const hy = centerY + handleDist * xdy;
+
+            // Optional rotate ring highlight
+            if (highlight) {
+                ctx.save();
+                ctx.strokeStyle = 'rgba(255,255,0,0.35)';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, handleDist, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            ctx.save();
+            ctx.fillStyle = highlight ? 'rgba(255,255,0,0.9)' : 'rgba(0, 212, 255, 0.9)';
+            ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(hx, hy, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+
             // Small center marker + rotation glyph when the view is rotated.
             ctx.save();
             ctx.fillStyle = 'rgba(0,0,0,0.65)';
@@ -3604,7 +3837,8 @@
             ctx.fill();
             ctx.stroke();
 
-            if (rot !== 0) {
+            // Show a glyph when either the image or the crosshair is rotated.
+            if (rot !== 0 || rot2 !== 0) {
                 const r = 9;
                 const start = -Math.PI / 3;
                 const end = (Math.PI * 4) / 3;

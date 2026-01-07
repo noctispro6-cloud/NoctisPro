@@ -479,8 +479,8 @@
                 </label>
                 <select class="form-select form-control-medical" id="status" name="status">
                     <option value="">All Status</option>
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
+                    <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+                    <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
                 </select>
             </div>
             <div class="col-md-2">
@@ -488,10 +488,10 @@
                     <i class="fas fa-sort me-2"></i>Sort By
                 </label>
                 <select class="form-select form-control-medical" id="sortBy" name="sort">
-                    <option value="name">Name</option>
-                    <option value="created_at">Date Added</option>
-                    <option value="user_count">User Count</option>
-                    <option value="study_count">Study Count</option>
+                    <option value="name" {% if sort_by == 'name' %}selected{% endif %}>Name</option>
+                    <option value="created_at" {% if sort_by == 'created_at' %}selected{% endif %}>Date Added</option>
+                    <option value="user_count" {% if sort_by == 'user_count' %}selected{% endif %}>User Count</option>
+                    <option value="study_count" {% if sort_by == 'study_count' %}selected{% endif %}>Study Count</option>
                 </select>
             </div>
             <div class="col-md-2 d-flex align-items-end">
@@ -705,10 +705,10 @@
             <ul class="pagination">
                 {% if facilities.has_previous %}
                     <li class="page-item">
-                        <a class="page-link" href="?page=1">First</a>
+                        <a class="page-link" href="?page=1{% if search_query %}&search={{ search_query|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if sort_by %}&sort={{ sort_by }}{% endif %}">First</a>
                     </li>
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ facilities.previous_page_number }}">Previous</a>
+                        <a class="page-link" href="?page={{ facilities.previous_page_number }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if sort_by %}&sort={{ sort_by }}{% endif %}">Previous</a>
                     </li>
                 {% endif %}
 
@@ -719,17 +719,17 @@
                         </li>
                     {% elif num > facilities.number|add:'-3' and num < facilities.number|add:'3' %}
                         <li class="page-item">
-                            <a class="page-link" href="?page={{ num }}">{{ num }}</a>
+                            <a class="page-link" href="?page={{ num }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if sort_by %}&sort={{ sort_by }}{% endif %}">{{ num }}</a>
                         </li>
                     {% endif %}
                 {% endfor %}
 
                 {% if facilities.has_next %}
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ facilities.next_page_number }}">Next</a>
+                        <a class="page-link" href="?page={{ facilities.next_page_number }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if sort_by %}&sort={{ sort_by }}{% endif %}">Next</a>
                     </li>
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ facilities.paginator.num_pages }}">Last</a>
+                        <a class="page-link" href="?page={{ facilities.paginator.num_pages }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if sort_by %}&sort={{ sort_by }}{% endif %}">Last</a>
                     </li>
                 {% endif %}
             </ul>

@@ -693,6 +693,8 @@ def facility_management(request):
     context = {
         'facilities': facilities_page,
         'search_query': search_query,
+        'status_filter': status_filter,
+        'sort_by': sort_by,
         'total_users': total_users,
         'total_studies': total_studies,
     }

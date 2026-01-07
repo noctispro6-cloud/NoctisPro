@@ -140,34 +140,41 @@
         </div>
     </div>
 
-    <div class="controls-bar">
+    <form class="controls-bar" id="reportFiltersForm" method="get" action="">
         <div class="control-group">
             <label class="control-label">Search:</label>
-            <input type="text" class="control-input" id="searchInput" placeholder="Patient, Accession, Radiologist...">
+            <input
+                type="text"
+                class="control-input"
+                id="searchInput"
+                name="search"
+                value="{{ search_query|default:'' }}"
+                placeholder="Patient, Accession, Radiologist..."
+            >
         </div>
         <div class="control-group">
             <label class="control-label">Status:</label>
-            <select class="control-select" id="statusFilter">
+            <select class="control-select" id="statusFilter" name="status">
                 <option value="">All Status</option>
-                <option value="draft">Draft</option>
-                <option value="preliminary">Preliminary</option>
-                <option value="final">Final</option>
-                <option value="amended">Amended</option>
+                <option value="draft" {% if status_filter == 'draft' %}selected{% endif %}>Draft</option>
+                <option value="preliminary" {% if status_filter == 'preliminary' %}selected{% endif %}>Preliminary</option>
+                <option value="final" {% if status_filter == 'final' %}selected{% endif %}>Final</option>
+                <option value="amended" {% if status_filter == 'amended' %}selected{% endif %}>Amended</option>
             </select>
         </div>
         <div class="control-group">
             <label class="control-label">Modality:</label>
-            <select class="control-select" id="modalityFilter">
+            <select class="control-select" id="modalityFilter" name="modality">
                 <option value="">All Modalities</option>
-                <option value="CT">CT</option>
-                <option value="MR">MR</option>
-                <option value="XR">X-Ray</option>
-                <option value="US">Ultrasound</option>
+                <option value="CT" {% if modality_filter == 'CT' %}selected{% endif %}>CT</option>
+                <option value="MR" {% if modality_filter == 'MR' %}selected{% endif %}>MR</option>
+                <option value="XR" {% if modality_filter == 'XR' %}selected{% endif %}>X-Ray</option>
+                <option value="US" {% if modality_filter == 'US' %}selected{% endif %}>Ultrasound</option>
             </select>
         </div>
-        <button type="button" class="btn-control reset" onclick="applyFilters()">REFRESH</button>
+        <button type="submit" class="btn-control reset">REFRESH</button>
         <button type="button" class="btn-control" onclick="resetFilters()">RESET FILTERS</button>
-    </div>
+    </form>
 
     <div class="stats-grid">
         <div class="stat-card">
@@ -277,29 +284,37 @@ function selectReport(row) {
 }
 
 function applyFilters() {
-    // Implement filtering logic here
-    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-    const statusFilter = document.getElementById('statusFilter').value;
-    const modalityFilter = document.getElementById('modalityFilter').value;
-    
-    // This would typically make an AJAX call to filter results
-    console.log('Applying filters:', { searchTerm, statusFilter, modalityFilter });
+    // Server-side filtering via GET parameters (reports/views.py already supports this)
+    const form = document.getElementById('reportFiltersForm');
+    if (form) form.submit();
 }
 
 function resetFilters() {
-    document.getElementById('searchInput').value = '';
-    document.getElementById('statusFilter').value = '';
-    document.getElementById('modalityFilter').value = '';
-    applyFilters();
+    // Clear query params entirely (clean reset)
+    window.location.href = "{% url 'reports:report_list' %}";
 }
 
-// Real-time search
-document.getElementById('searchInput').addEventListener('input', function() {
-    // Implement real-time search here
-    applyFilters();
-});
+// Debounced auto-submit for a snappy UX without reloading on every keystroke
+(function () {
+    const form = document.getElementById('reportFiltersForm');
+    const searchEl = document.getElementById('searchInput');
+    const statusEl = document.getElementById('statusFilter');
+    const modalityEl = document.getElementById('modalityFilter');
+    if (!form || !searchEl || !statusEl || !modalityEl) return;
 
-document.getElementById('statusFilter').addEventListener('change', applyFilters);
-document.getElementById('modalityFilter').addEventListener('change', applyFilters);
+    let t = null;
+    function debouncedSubmit() {
+        window.clearTimeout(t);
+        t = window.setTimeout(() => form.submit(), 350);
+    }
+
+    searchEl.addEventListener('input', function () {
+        const v = (searchEl.value || '').trim();
+        // Submit when cleared, or when meaningful input exists
+        if (v.length === 0 || v.length >= 2) debouncedSubmit();
+    });
+    statusEl.addEventListener('change', () => form.submit());
+    modalityEl.addEventListener('change', () => form.submit());
+})();
 </script>
 {% endblock %}

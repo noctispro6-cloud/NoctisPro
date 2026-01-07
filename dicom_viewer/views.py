@@ -1439,8 +1439,9 @@ def _array_to_base64_image(array, window_width=None, window_level=None, inverted
             logger.warning(f"_array_to_base64_image: array has {array.ndim} dimensions, using first 2D slice")
             array = array[0] if array.ndim == 3 else array.reshape(array.shape[-2:])
             
-        # Convert to float for calculations
-        image_data = array.astype(np.float32)
+        # Convert to float for calculations.
+        # PERF: avoid unconditional copies (sagittal/coronal often use flip views with negative strides).
+        image_data = array.astype(np.float32, copy=False)
         
         # Check for invalid data
         if np.any(np.isnan(image_data)) or np.any(np.isinf(image_data)):
@@ -1530,7 +1531,8 @@ def _array_to_png_bytes(array, window_width=None, window_level=None, inverted=Fa
             return None
 
         # Normalize and apply windowing
-        image_data = array.astype(np.float32)
+        # PERF: avoid unconditional copies (sagittal/coronal often use flip views with negative strides).
+        image_data = array.astype(np.float32, copy=False)
 
         if np.any(np.isnan(image_data)) or np.any(np.isinf(image_data)):
             image_data = np.nan_to_num(image_data, nan=0.0, posinf=0.0, neginf=0.0)

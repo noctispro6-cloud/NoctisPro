@@ -1396,11 +1396,15 @@
             const priorityFilter = document.getElementById('priorityFilter').value.toLowerCase();
             const dateFilter = document.getElementById('dateFilter').value;
             const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
+
+            // Defensive string normalization (some fields can be numeric/null depending on data source)
+            const _str = (v) => (v == null ? '' : String(v));
+            const _low = (v) => _str(v).toLowerCase();
             
             filteredData = studiesData.filter(study => {
-                const matchesStatus = !statusFilter || study.status.toLowerCase().includes(statusFilter);
-                const matchesModality = !modalityFilter || study.modality.toLowerCase().includes(modalityFilter);
-                const matchesPriority = !priorityFilter || study.priority.toLowerCase().includes(priorityFilter);
+                const matchesStatus = !statusFilter || _low(study.status).includes(statusFilter);
+                const matchesModality = !modalityFilter || _low(study.modality).includes(modalityFilter);
+                const matchesPriority = !priorityFilter || _low(study.priority).includes(priorityFilter);
                 
                 // Date filter should reflect what users perceive as "new on the worklist".
                 // Use `study_time` (which the API sets to upload_date when available) rather than the
@@ -1414,10 +1418,10 @@
 
                 const matchesSearch = 
                     !searchFilter || 
-                    (study.patient_id && study.patient_id.toLowerCase().includes(searchFilter)) ||
-                    (study.patient_name && study.patient_name.toLowerCase().includes(searchFilter)) ||
-                    (study.accession_number && study.accession_number.toLowerCase().includes(searchFilter)) ||
-                    (study.study_description && study.study_description.toLowerCase().includes(searchFilter));
+                    _low(study.patient_id).includes(searchFilter) ||
+                    _low(study.patient_name).includes(searchFilter) ||
+                    _low(study.accession_number).includes(searchFilter) ||
+                    _low(study.study_description).includes(searchFilter);
                 
                 return matchesStatus && matchesModality && matchesPriority && matchesDate && matchesSearch;
             });

@@ -2240,6 +2240,124 @@
             return new Float32Array(bytes.buffer);
         }
 
+        function _isLittleEndian() {
+            try {
+                const u32 = new Uint32Array([0x11223344]);
+                const u8 = new Uint8Array(u32.buffer);
+                return u8[0] === 0x44;
+            } catch (_) {
+                return true;
+            }
+        }
+
+        function _decodeArrayBufferToFloat32LE(buf) {
+            // Server sends little-endian float32 bytes.
+            if (_isLittleEndian()) return new Float32Array(buf);
+            // Rare: big-endian client; swap using DataView.
+            const dv = new DataView(buf);
+            const out = new Float32Array(buf.byteLength / 4);
+            for (let i = 0; i < out.length; i++) out[i] = dv.getFloat32(i * 4, true);
+            return out;
+        }
+
+        function _parseHeaderNum(headers, name) {
+            try {
+                const v = headers.get(name);
+                if (v == null) return null;
+                const n = Number(v);
+                return Number.isFinite(n) ? n : null;
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function _parseHeaderStr(headers, name) {
+            try {
+                const v = headers.get(name);
+                return (v == null) ? null : String(v);
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function _parsePixelSpacingHeader(headers) {
+            const v = _parseHeaderStr(headers, 'X-Noctis-Pixel-Spacing');
+            if (!v) return null;
+            // Accept "row,col" or "row\\col"
+            const parts = v.includes('\\') ? v.split('\\') : v.split(',');
+            if (!parts.length) return null;
+            const row = parseFloat(parts[0]);
+            const col = parseFloat(parts.length >= 2 ? parts[1] : parts[0]);
+            if (!isFinite(row) || !isFinite(col) || row <= 0 || col <= 0) return null;
+            return [row, col];
+        }
+
+        async function _fetchImagePayloadBinary(imageId, signal) {
+            const url = `/dicom-viewer/api/image/${imageId}/data/?packed=bin`;
+            const resp = await fetch(url, {
+                signal,
+                credentials: 'same-origin',
+                cache: 'force-cache',
+            });
+            if (!resp.ok) return null;
+
+            const ct = (resp.headers.get('content-type') || '').toLowerCase();
+            // If the server returns JSON here (older backend / error), treat as unsupported and fall back.
+            if (ct.includes('application/json')) return null;
+
+            const rows = _parseHeaderNum(resp.headers, 'X-Noctis-Rows');
+            const cols = _parseHeaderNum(resp.headers, 'X-Noctis-Columns');
+            if (!rows || !cols) return null;
+
+            const ww = _parseHeaderNum(resp.headers, 'X-Noctis-Window-Width');
+            const wl = _parseHeaderNum(resp.headers, 'X-Noctis-Window-Center');
+            const ps = _parsePixelSpacingHeader(resp.headers);
+            const st = _parseHeaderNum(resp.headers, 'X-Noctis-Slice-Thickness');
+            const modality = _parseHeaderStr(resp.headers, 'X-Noctis-Modality');
+
+            const buf = await resp.arrayBuffer();
+            const pixel_data = _decodeArrayBufferToFloat32LE(buf);
+
+            return {
+                id: imageId,
+                rows: rows,
+                columns: cols,
+                window_width: ww != null ? ww : undefined,
+                window_center: wl != null ? wl : undefined,
+                pixel_spacing: ps != null ? ps : undefined,
+                slice_thickness: st != null ? st : undefined,
+                modality: modality != null ? modality : undefined,
+                pixel_data,
+                pixel_data_b64: null,
+                pixel_dtype: 'float32',
+                pixel_endian: 'little',
+            };
+        }
+
+        async function _fetchImagePayloadJsonPacked(imageId, signal) {
+            const url = `/dicom-viewer/api/image/${imageId}/data/?packed=1`;
+            const response = await fetch(url, {
+                signal,
+                credentials: 'same-origin',
+                cache: 'force-cache'
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            const data = await response.json();
+            if (data && data.pixel_data_b64 && (!data.pixel_data || !data.pixel_data.length)) {
+                try {
+                    data.pixel_data = _decodeB64ToFloat32Array(data.pixel_data_b64);
+                    data.pixel_data_b64 = null; // reduce memory
+                } catch (e) {
+                    data.pixel_data = null;
+                    data.pixel_data_b64 = null;
+                    data.warnings = { ...(data.warnings || {}), pixel_decode_error: `Client decode failed: ${e?.message || e}` };
+                }
+            }
+            return data;
+        }
+
         function _resetServerRendered() {
             _serverRendered = { enabled: false, imageId: null, image: null, dataUrl: null, info: null, key: null };
             if (_serverRenderRefreshTimer) {
@@ -2436,25 +2554,15 @@
             // Avoid flickery loaders during fast wheel scrolls: show only if it takes noticeable time.
             let loaderTimer = setTimeout(() => showLoading(true), 150);
             try {
-                const url = `/dicom-viewer/api/image/${imageId}/data/?packed=1`;
                 let data = null;
                 let lastErr = null;
                 for (let attempt = 0; attempt < 3; attempt++) {
                     try {
-                        const response = await fetch(url, {
-                            signal: _imageLoadAbortController.signal,
-                            credentials: 'same-origin',
-                            cache: 'force-cache'
-                        });
-                        if (!response.ok) {
-                            // Retry transient server/proxy failures (upload moments, prewarm, etc.)
-                            if ([429, 502, 503, 504].includes(response.status) && attempt < 2) {
-                                await _delay(160 * Math.pow(2, attempt));
-                                continue;
-                            }
-                            throw new Error(`HTTP ${response.status}`);
+                        // Prefer raw float32 bytes (lower overhead), fall back to JSON packed if unsupported.
+                        data = await _fetchImagePayloadBinary(imageId, _imageLoadAbortController.signal);
+                        if (!data) {
+                            data = await _fetchImagePayloadJsonPacked(imageId, _imageLoadAbortController.signal);
                         }
-                        data = await response.json();
                         lastErr = null;
                         break;
                     } catch (e) {
@@ -2476,18 +2584,6 @@
                     if (data && Number.isFinite(Number(data.window_center))) windowLevel = Number(data.window_center);
                     updateSliders();
                 } catch (e) {}
-
-                if (data && data.pixel_data_b64 && (!data.pixel_data || !data.pixel_data.length)) {
-                    // Decode packed float32 pixels to a TypedArray for faster rendering than JSON lists.
-                    try {
-                        data.pixel_data = _decodeB64ToFloat32Array(data.pixel_data_b64);
-                        data.pixel_data_b64 = null; // reduce memory
-                    } catch (e) {
-                        data.pixel_data = null;
-                        data.pixel_data_b64 = null;
-                        data.warnings = { ...(data.warnings || {}), pixel_decode_error: `Client decode failed: ${e?.message || e}` };
-                    }
-                }
 
                 if (!data || !data.pixel_data || !data.columns || !data.rows) {
                     // Don't silently render nothing — try server-rendered PNG fallback (still supports pan/zoom/rotate).
@@ -2528,16 +2624,9 @@
                     if (!id) return;
                     if (_imagePayloadCache.has(String(id))) return;
                     // Fire-and-forget prefetch; browser cache + our LRU cache will make the next scroll instant.
-                    fetch(`/dicom-viewer/api/image/${id}/data/?packed=1`, { credentials: 'same-origin', cache: 'force-cache' })
-                        .then(r => r.ok ? r.json() : null)
-                        .then(d => {
-                            if (!d) return;
-                            if (d.pixel_data_b64 && (!d.pixel_data || !d.pixel_data.length)) {
-                                d.pixel_data = _decodeB64ToFloat32Array(d.pixel_data_b64);
-                                d.pixel_data_b64 = null; // reduce memory
-                            }
-                            _cacheSetPayload(id, d);
-                        })
+                    _fetchImagePayloadBinary(id, undefined)
+                        .then((d) => d ? d : _fetchImagePayloadJsonPacked(id, undefined))
+                        .then((d) => { if (d) _cacheSetPayload(id, d); })
                         .catch(() => {});
                 });
             }, 140);

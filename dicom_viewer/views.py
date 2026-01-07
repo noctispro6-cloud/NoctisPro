@@ -841,12 +841,60 @@ def api_image_data(request, image_id):
             cols = int(pixel_array.shape[1])
 
         # For performance: the default JSON `pixel_data: [..]` list is extremely large and slow to
-        # serialize/parse for typical CT/MR frames (e.g. 512x512). The main viewer can request a
-        # packed payload via `?packed=1` to receive a base64-encoded little-endian float32 buffer.
-        packed = (request.GET.get('packed', '') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+        # serialize/parse for typical CT/MR frames (e.g. 512x512).
+        #
+        # Supported packed modes (backwards compatible):
+        # - packed=1|true: JSON with base64 float32 payload (existing behavior)
+        # - packed=bin|binary: raw float32 bytes with key metadata in headers (new; avoids base64+JSON overhead)
+        packed_param = (request.GET.get('packed', '') or '').strip().lower()
+        packed_bin = packed_param in ('bin', 'binary', 'bytes', 'raw')
+        packed_b64 = packed_param in ('1', 'true', 'yes', 'on')
 
         # Flatten in row-major order
         flat = pixel_array.reshape(rows * cols).astype(np.float32, copy=False)
+
+        # Binary packed response (safe, additive). The viewer will fall back to JSON if unsupported.
+        if packed_bin:
+            resp = HttpResponse(flat.tobytes(order='C'), content_type='application/octet-stream')
+            resp['X-Noctis-Rows'] = str(rows)
+            resp['X-Noctis-Columns'] = str(cols)
+            resp['X-Noctis-Window-Width'] = str(float(window_width) if window_width is not None else 400.0)
+            resp['X-Noctis-Window-Center'] = str(float(window_center) if window_center is not None else 40.0)
+            resp['X-Noctis-Pixel-DType'] = 'float32'
+            resp['X-Noctis-Pixel-Endian'] = 'little'
+            try:
+                ps = _jsonify_dicom_value(getattr(ds, 'PixelSpacing', None)) if ds is not None else None
+                if ps is not None:
+                    # Ensure stable string encoding for array-like values.
+                    if isinstance(ps, (list, tuple)) and len(ps) >= 2:
+                        resp['X-Noctis-Pixel-Spacing'] = f"{ps[0]},{ps[1]}"
+                    else:
+                        resp['X-Noctis-Pixel-Spacing'] = str(ps)
+            except Exception:
+                pass
+            try:
+                stv = _jsonify_dicom_value(getattr(ds, 'SliceThickness', None)) if ds is not None else None
+                if stv is not None:
+                    resp['X-Noctis-Slice-Thickness'] = str(stv)
+            except Exception:
+                pass
+            try:
+                modv = _jsonify_dicom_value(getattr(ds, 'Modality', None)) if ds is not None else None
+                if modv is not None:
+                    resp['X-Noctis-Modality'] = str(modv)
+            except Exception:
+                pass
+            # Modest caching; bytes are immutable per image. Client already uses force-cache.
+            resp['Cache-Control'] = 'private, max-age=60'
+            if pixel_decode_error or warnings:
+                # Keep warnings best-effort in a header (bounded).
+                try:
+                    msg = {**warnings, **({'pixel_decode_error': pixel_decode_error} if pixel_decode_error else {})}
+                    txt = json.dumps(msg)[:1800]
+                    resp['X-Noctis-Warnings'] = txt
+                except Exception:
+                    pass
+            return resp
 
         pixel_payload = {
             'rows': rows,
@@ -862,7 +910,7 @@ def api_image_data(request, image_id):
             'bits_stored': _jsonify_dicom_value(getattr(ds, 'BitsStored', None)) if ds is not None else None,
         }
 
-        if packed:
+        if packed_b64:
             pixel_payload.update({
                 'pixel_data': None,
                 'pixel_data_b64': base64.b64encode(flat.tobytes(order='C')).decode('ascii'),

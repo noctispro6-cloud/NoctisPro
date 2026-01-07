@@ -253,6 +253,13 @@ _MPR_IMG_CACHE = {}  # key -> base64 data URL
 _MPR_IMG_CACHE_ORDER = []  # list of keys in LRU order
 _MAX_MPR_IMG_CACHE = 800
 
+# Encoded MPR slice cache (PNG bytes) for the `mpr_slice_api` endpoint.
+# This avoids the wasteful base64 encode -> base64 decode roundtrip on every request.
+_MPR_PNG_CACHE_LOCK = Lock()
+_MPR_PNG_CACHE = {}  # key -> bytes (PNG)
+_MPR_PNG_CACHE_ORDER = []
+_MAX_MPR_PNG_CACHE = 500
+
 # Safety budget for in-memory MPR volumes (per-request/build). Large CT stacks can otherwise
 # allocate multiple GB and stall/hang the request under ASGI.
 _MAX_MPR_VOLUME_BYTES = 256 * 1024 * 1024  # 256MB
@@ -362,6 +369,57 @@ def _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64, qua
             pass
         _MPR_IMG_CACHE_ORDER.append(key)
 
+def _mpr_png_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=None):
+    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
+    with _MPR_PNG_CACHE_LOCK:
+        val = _MPR_PNG_CACHE.get(key)
+        if val is not None:
+            try:
+                _MPR_PNG_CACHE_ORDER.remove(key)
+            except ValueError:
+                pass
+            _MPR_PNG_CACHE_ORDER.append(key)
+        return val
+
+def _mpr_png_cache_set(series_id, plane, slice_index, ww, wl, inverted, png_bytes, quality=None):
+    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
+    with _MPR_PNG_CACHE_LOCK:
+        if key not in _MPR_PNG_CACHE:
+            while len(_MPR_PNG_CACHE_ORDER) >= _MAX_MPR_PNG_CACHE:
+                evict = _MPR_PNG_CACHE_ORDER.pop(0)
+                _MPR_PNG_CACHE.pop(evict, None)
+        _MPR_PNG_CACHE[key] = png_bytes
+        try:
+            _MPR_PNG_CACHE_ORDER.remove(key)
+        except ValueError:
+            pass
+        _MPR_PNG_CACHE_ORDER.append(key)
+
+def _get_png_mpr_slice_bytes(series_id, volume, plane, slice_index, ww, wl, inverted, quality=None):
+    """Return PNG bytes for a given MPR slice (used by `mpr_slice_api`)."""
+    cached = _mpr_png_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
+    if cached is not None:
+        return cached
+
+    # Extract the displayed slice array (mirrors `_get_encoded_mpr_slice`)
+    if plane == 'axial':
+        slice_index = min(max(0, int(slice_index)), int(volume.shape[0]) - 1)
+        slice_array = volume[slice_index, :, :]
+    elif plane == 'sagittal':
+        slice_index = min(max(0, int(slice_index)), int(volume.shape[2]) - 1)
+        slice_array = np.flipud(volume[:, :, slice_index])
+    else:  # coronal
+        slice_index = min(max(0, int(slice_index)), int(volume.shape[1]) - 1)
+        slice_array = np.flipud(volume[:, slice_index, :])
+
+    q = (quality or 'high').strip().lower()
+    # PERF: skip sharpening in fast mode (major win for large stacks while browsing).
+    sharpen = (q != 'fast')
+    png_bytes = _array_to_png_bytes(slice_array, ww, wl, inverted, sharpen=sharpen)
+    if png_bytes:
+        _mpr_png_cache_set(series_id, plane, slice_index, ww, wl, inverted, png_bytes, quality=quality)
+    return png_bytes
+
 def _get_encoded_mpr_slice(series_id, volume, plane, slice_index, ww, wl, inverted, quality=None):
     """Get encoded base64 PNG for given MPR slice, using cache if possible.
     volume is a numpy array (depth,height,width).
@@ -392,8 +450,9 @@ def _get_encoded_mpr_slice(series_id, volume, plane, slice_index, ww, wl, invert
         # Display convention: superior at top, so flip the z axis for display.
         slice_array = np.flipud(volume[:, slice_index, :])
     
-    # MPR benefits from mild sharpening to counteract scaling softness.
-    img_b64 = _array_to_base64_image(slice_array, ww, wl, inverted, sharpen=True)
+    q = (quality or 'high').strip().lower()
+    # PERF: skip sharpening in fast mode (major win for large stacks while browsing).
+    img_b64 = _array_to_base64_image(slice_array, ww, wl, inverted, sharpen=(q != 'fast'))
     if img_b64:
         _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64, quality=quality)
     else:
@@ -4072,6 +4131,10 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
         def _ceil_div(a, b):
             return (a + b - 1) // b
 
+        # In fast mode, use a smaller memory budget so initial MPR is responsive even for huge stacks.
+        # High-quality still uses the full budget because it may resample Z and benefits from more detail.
+        max_bytes_budget = _MAX_MPR_VOLUME_BYTES if q != 'fast' else min(_MAX_MPR_VOLUME_BYTES, 96 * 1024 * 1024)
+
         def _bytes_for_steps(_zs, _ys, _xs):
             dz = _ceil_div(z, _zs)
             dy = _ceil_div(y, _ys)
@@ -4085,7 +4148,7 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
         # (slice direction) which is often lower resolution and later can be interpolated for reformats.
         #
         # This loop is bounded by dimensions and typically runs only a few iterations.
-        while _bytes_for_steps(z_step, y_step, x_step) > _MAX_MPR_VOLUME_BYTES and (z_step < z or y_step < y or x_step < x):
+        while _bytes_for_steps(z_step, y_step, x_step) > max_bytes_budget and (z_step < z or y_step < y or x_step < x):
             if z_step < z:
                 z_step += 1
                 continue
@@ -5565,11 +5628,10 @@ def mpr_slice_api(request, series_id, plane, slice_index):
         if quality not in ('fast', 'high'):
             quality = 'high'
 
-        # Serve from encoded slice cache if present
-        cached_slice = _mpr_cache_get(series_id, plane, slice_index, window_width, window_level, inverted, quality=quality)
-        if cached_slice:
-            image_data = base64.b64decode(cached_slice.split(',')[1])
-            resp = HttpResponse(image_data, content_type='image/png')
+        # Serve from PNG-bytes cache if present (fast path)
+        cached_png = _mpr_png_cache_get(series_id, plane, slice_index, window_width, window_level, inverted, quality=quality)
+        if cached_png:
+            resp = HttpResponse(cached_png, content_type='image/png')
             resp['Cache-Control'] = 'private, max-age=30'
             return resp
 
@@ -5587,13 +5649,12 @@ def mpr_slice_api(request, series_id, plane, slice_index):
         else:  # coronal
             slice_index = max(0, min(int(volume.shape[1]) - 1, slice_index))
 
-        img_b64 = _get_encoded_mpr_slice(series.id, volume, plane, slice_index, window_width, window_level, inverted, quality=quality)
-        if not img_b64:
+        png_bytes = _get_png_mpr_slice_bytes(series.id, volume, plane, slice_index, window_width, window_level, inverted, quality=quality)
+        if not png_bytes:
             from django.http import Http404
             raise Http404("MPR slice not available")
 
-        image_data = base64.b64decode(img_b64.split(',')[1])
-        resp = HttpResponse(image_data, content_type='image/png')
+        resp = HttpResponse(png_bytes, content_type='image/png')
         resp['Cache-Control'] = 'private, max-age=30'
         return resp
 

@@ -1447,6 +1447,43 @@
         let windowingLockedByUser = false;
         let inversionLockedByUser = false;
 
+        // Persist user windowing per series (WW/WL + invert)
+        const _WINDOWING_STORE_KEY = 'noctis_windowing_v1';
+        function _loadWindowingStore() {
+            try {
+                const raw = localStorage.getItem(_WINDOWING_STORE_KEY);
+                const obj = raw ? JSON.parse(raw) : {};
+                return (obj && typeof obj === 'object') ? obj : {};
+            } catch (_) { return {}; }
+        }
+        function _saveWindowingStore(obj) {
+            try { localStorage.setItem(_WINDOWING_STORE_KEY, JSON.stringify(obj || {})); } catch (_) {}
+        }
+        function _setSeriesWindowing(seriesId, ww, wl, inv) {
+            if (seriesId == null) return;
+            const store = _loadWindowingStore();
+            store[String(seriesId)] = { ww: Number(ww), wl: Number(wl), inverted: !!inv, ts: Date.now() };
+            _saveWindowingStore(store);
+        }
+        function _restoreSeriesWindowing(seriesId) {
+            if (seriesId == null) return false;
+            const store = _loadWindowingStore();
+            const s = store[String(seriesId)];
+            if (!s) return false;
+            const ww = Number(s.ww);
+            const wl = Number(s.wl);
+            if (Number.isFinite(ww) && ww > 0) windowWidth = Math.round(ww);
+            if (Number.isFinite(wl)) windowLevel = Math.round(wl);
+            inverted = !!s.inverted;
+            windowingLockedByUser = true;
+            inversionLockedByUser = true;
+            try { _syncWindowLevelUI(); } catch (_) {}
+            try { document.querySelector('[data-tool="invert"]')?.classList.toggle('active', inverted); } catch (_) {}
+            // Treat as already initialized for this series (so first slice doesn't override).
+            windowingInitializedForSeries = true;
+            return true;
+        }
+
         // MPR interaction state (zoom/pan + active plane)
         let activeMprPlane = 'axial';
         let _mprDrag = { down: false, lastX: 0, lastY: 0 };
@@ -1837,6 +1874,7 @@
             windowWidth = parseInt(value);
             _syncWindowLevelUI();
             windowingLockedByUser = true;
+            _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
             scheduleImageDisplayUpdate(currentImageIndex, 'window');
             _scheduleMprRefresh('window');
         }
@@ -1845,6 +1883,7 @@
             windowLevel = parseInt(value);
             _syncWindowLevelUI();
             windowingLockedByUser = true;
+            _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
             scheduleImageDisplayUpdate(currentImageIndex, 'window');
             _scheduleMprRefresh('window');
         }
@@ -1856,6 +1895,7 @@
                 windowingLockedByUser = true;
 
                 _syncWindowLevelUI();
+                _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
                 
                 scheduleImageDisplayUpdate(currentImageIndex, 'window');
                 _scheduleMprRefresh('window');
@@ -1870,6 +1910,7 @@
             windowingLockedByUser = true;
 
             _syncWindowLevelUI();
+            _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
 
             // Window/level drag can fire dozens of events/sec; coalesce to avoid request storms.
             scheduleImageDisplayUpdate(currentImageIndex, 'window');
@@ -2267,11 +2308,15 @@
                     images = data.images;
                     currentImageIndex = 0;
 
+                    // Restore persisted WW/WL/invert for this series if present.
+                    // If not present, allow auto-init from first slice.
+                    const restoredWindowing = _restoreSeriesWindowing(currentSeries && currentSeries.id);
+
                     // Reset per-series auto windowing so "initial axial" and MPR start identical.
                     // IMPORTANT: do NOT clear `windowingLockedByUser` here — if the user picked a preset
                     // (e.g. Bone) or adjusted WW/WL manually, that preference should persist while they
                     // scroll/click through images (and even when switching series) until they explicitly reset.
-                    windowingInitializedForSeries = false;
+                    if (!restoredWindowing) windowingInitializedForSeries = false;
 
                     // Reset view transforms when switching series
                     zoomFactor = 1.0;
@@ -2531,6 +2576,7 @@
         function toggleInvert() {
             inverted = !inverted;
             inversionLockedByUser = true;
+            _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
             scheduleImageDisplayUpdate(currentImageIndex, 'invert');
             _scheduleMprRefresh('invert');
             

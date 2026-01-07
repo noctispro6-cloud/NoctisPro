@@ -1223,6 +1223,59 @@
         let zoom = 1.0;
         let panX = 0, panY = 0;
         let inverted = false;
+        // Persist user-chosen WW/WL per series (prevents resets while scrolling / switching series).
+        let windowingLockedByUser = false;
+        let inversionLockedByUser = false;
+
+        const _WINDOWING_STORE_KEY = 'noctis_windowing_v1';
+        function _loadWindowingStore() {
+            try {
+                const raw = localStorage.getItem(_WINDOWING_STORE_KEY);
+                const obj = raw ? JSON.parse(raw) : {};
+                return (obj && typeof obj === 'object') ? obj : {};
+            } catch (e) {
+                return {};
+            }
+        }
+        function _saveWindowingStore(obj) {
+            try { localStorage.setItem(_WINDOWING_STORE_KEY, JSON.stringify(obj || {})); } catch (e) {}
+        }
+        function _getSeriesWindowing(seriesId) {
+            const store = _loadWindowingStore();
+            return store[String(seriesId)] || null;
+        }
+        function _setSeriesWindowing(seriesId, ww, wl, inv) {
+            if (seriesId == null) return;
+            const store = _loadWindowingStore();
+            store[String(seriesId)] = {
+                ww: Number(ww),
+                wl: Number(wl),
+                inverted: !!inv,
+                ts: Date.now()
+            };
+            _saveWindowingStore(store);
+        }
+        function _clearSeriesWindowing(seriesId) {
+            if (seriesId == null) return;
+            const store = _loadWindowingStore();
+            delete store[String(seriesId)];
+            _saveWindowingStore(store);
+        }
+        function _restoreSeriesWindowing(seriesId) {
+            const s = _getSeriesWindowing(seriesId);
+            if (!s) return false;
+            const ww = Number(s.ww);
+            const wl = Number(s.wl);
+            if (Number.isFinite(ww) && ww > 0) windowWidth = Math.round(ww);
+            if (Number.isFinite(wl)) windowLevel = Math.round(wl);
+            inverted = !!s.inverted;
+            windowingLockedByUser = true;
+            inversionLockedByUser = true;
+            try { updateSliders(); } catch (e) {}
+            try { updateOverlayLabels(); } catch (e) {}
+            try { updateToolStates(); } catch (e) {}
+            return true;
+        }
         // Dynamic WL/WW bounds per image (supports CT/MR/CR/DX/MG/etc without hard clamps).
         // { p1, p99, range, wlMin, wlMax, wwMax } (derived from pixel_data sample)
         let currentImageStats = null;
@@ -1725,6 +1778,8 @@
                     break;
                 case 'invert':
                     inverted = !inverted;
+                    inversionLockedByUser = true;
+                    _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
                     redrawCurrentImage();
                     break;
                 case 'crosshair':
@@ -2064,6 +2119,12 @@
                 currentSeries = data.series;
                 imageData = data.images;
                 currentImageIndex = 0;
+
+                // Restore persisted WW/WL/invert for this series if present.
+                // If not present, allow the first loaded slice to set defaults.
+                windowingLockedByUser = false;
+                inversionLockedByUser = false;
+                _restoreSeriesWindowing(currentSeries && currentSeries.id);
                 
                 // Update UI
                 _setActiveSeriesListItem(seriesId);
@@ -2279,8 +2340,11 @@
 
         function _applyLoadedImagePayload(data, imageId) {
             // Update window/level from DICOM data - SAME AS YOUR ORIGINAL
-            windowWidth = data.window_width || windowWidth;
-            windowLevel = data.window_center || windowLevel;
+            // Do not overwrite user-selected WW/WL while scrolling.
+            if (!windowingLockedByUser) {
+                windowWidth = data.window_width || windowWidth;
+                windowLevel = data.window_center || windowLevel;
+            }
 
             // Derive WL/WW slider bounds from actual pixel distribution (fast sampled percentiles).
             if (!data.__stats) {
@@ -2923,6 +2987,8 @@
                     break;
                 case 'i':
                     inverted = !inverted;
+                    inversionLockedByUser = true;
+                    _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
                     redrawCurrentImage();
                     break;
                 case 'c':
@@ -2959,6 +3025,8 @@
             if (currentImageStats) windowWidth = _clamp(windowWidth, 1, currentImageStats.wwMax);
             document.getElementById('wwValue').textContent = windowWidth;
             document.getElementById('windowWidth').textContent = windowWidth;
+            windowingLockedByUser = true;
+            _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
             redrawCurrentImage();
             _scheduleMPRRefresh();
         }
@@ -2968,6 +3036,8 @@
             if (currentImageStats) windowLevel = _clamp(windowLevel, currentImageStats.wlMin, currentImageStats.wlMax);
             document.getElementById('wlValue').textContent = windowLevel;
             document.getElementById('windowLevel').textContent = windowLevel;
+            windowingLockedByUser = true;
+            _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
             redrawCurrentImage();
             _scheduleMPRRefresh();
         }
@@ -3025,6 +3095,8 @@
                 windowWidth = windowPresets[preset].ww;
                 windowLevel = windowPresets[preset].wl;
                 updateSliders();
+                windowingLockedByUser = true;
+                _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
                 redrawCurrentImage();
                 showToast(`Applied ${preset} preset`, 'success');
             }
@@ -3073,6 +3145,8 @@
             // Reset primary tools/state toggles
             activeTool = 'windowing';
             inverted = false;
+            inversionLockedByUser = false;
+            windowingLockedByUser = false;
             crosshair = false;
             crosshairImagePx = null;
 
@@ -3090,6 +3164,9 @@
             currentImageStats = null;
             try { updateSliders(); } catch (e) {}
             try { updateZoomSlider(); } catch (e) {}
+
+            // Clear persisted windowing for this series (so defaults can re-derive).
+            try { _clearSeriesWindowing(currentSeries && currentSeries.id); } catch (e) {}
 
             // Reset MPR state to defaults and return to single-view default layout
             mprCrosshairVoxel = null;

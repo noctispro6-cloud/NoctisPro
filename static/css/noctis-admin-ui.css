@@ -1,0 +1,140 @@
+/* Shared admin/form page layout helpers
+ *
+ * Goal:
+ * - Keep Noctis Pro's existing dark/medical authenticity
+ * - Provide consistent spacing, headers, cards and responsive behavior
+ * - Avoid overriding global typography or colors (base.html already defines theme tokens)
+ */
+
+.np-page {
+  padding: 16px;
+}
+
+.np-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.np-page-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.2px;
+}
+
+.np-page-subtitle {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.np-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.np-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.np-card-header {
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.np-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.4px;
+  color: var(--text-primary);
+}
+
+.np-card-body {
+  padding: 14px;
+}
+
+/* Make dense tables and filter toolbars behave nicely on small screens */
+.np-table-wrap {
+  overflow: auto;
+  border-radius: 12px;
+}
+
+/* Navbar: keep desktop buttons, collapse to a single menu on smaller widths */
+.np-nav-actions-mobile {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .np-nav-actions-desktop {
+    display: none !important;
+  }
+  .np-nav-actions-mobile {
+    display: inline-flex;
+  }
+}
+
+/* Dropdown menu styling to match theme */
+.np-dropdown-menu {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 6px;
+  min-width: 240px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+}
+
+.np-dropdown-menu .dropdown-item {
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.np-dropdown-menu .dropdown-item:hover,
+.np-dropdown-menu .dropdown-item:focus {
+  background: rgba(0, 212, 255, 0.14);
+  color: var(--text-primary);
+}
+
+.np-dropdown-menu .dropdown-divider {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 6px 0;
+}
+
+/* Primary action button variant (used across admin forms) */
+.btn-control.primary {
+  background: var(--gradient-accent);
+  border-color: var(--accent-color);
+  color: var(--primary-bg);
+  font-weight: 800;
+  letter-spacing: 0.4px;
+}
+
+.btn-control.primary:hover {
+  background: linear-gradient(135deg, #33e0ff 0%, #00d4ff 60%, #00b8d4 100%);
+  border-color: #33e0ff;
+  color: var(--primary-bg);
+}
+

@@ -4,28 +4,28 @@
 {% block title %}{% if facility %}Edit Facility{% else %}Create Facility{% endif %} - Admin Panel{% endblock %}
 
 {% block content %}
-<div class="container-fluid py-4">
-    <!-- Header Section -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="d-flex justify-content-between align-items-center">
-                <h1 class="text-white mb-0">
-                    <i class="fas fa-hospital me-3"></i>
+<div class="np-page">
+    <div style="max-width: 1024px; margin: 0 auto;">
+        <div class="np-page-header">
+            <div>
+                <h1 class="np-page-title">
+                    <i class="fas fa-hospital"></i>
                     {% if facility %}Edit Facility{% else %}Create Facility{% endif %}
                 </h1>
-                <div class="btn-group" role="group">
-                    <a href="{% url 'admin_panel:facility_management' %}" class="btn btn-outline-light">
-                        <i class="fas fa-arrow-left me-2"></i>Back to Facilities
-                    </a>
-                </div>
+                <div class="np-page-subtitle">Facility profile, DICOM AE Title, and optional facility login.</div>
+            </div>
+            <div class="np-actions">
+                <a href="{% url 'admin_panel:facility_management' %}" class="btn-control">
+                    <i class="fas fa-arrow-left me-2"></i>Back to Facilities
+                </a>
             </div>
         </div>
-    </div>
 
-    <!-- Facility Form -->
-    <div class="row justify-content-center">
-        <div class="col-lg-8">
-            <div class="card-medical p-4">
+        <div class="np-card">
+            <div class="np-card-header">
+                <div class="np-card-title"><i class="fas fa-info-circle"></i> Facility Details</div>
+            </div>
+            <div class="np-card-body">
                 <form method="post" enctype="multipart/form-data" class="row g-4">
                     {% csrf_token %}
                     
@@ -214,16 +214,16 @@
                     <div class="col-12 mt-5">
                         <hr class="border-secondary mb-4">
                         <div class="d-flex justify-content-between">
-                            <a href="{% url 'admin_panel:facility_management' %}" class="btn btn-outline-light">
+                            <a href="{% url 'admin_panel:facility_management' %}" class="btn-control">
                                 <i class="fas fa-times me-2"></i>Cancel
                             </a>
                             <div>
                                 {% if not facility %}
-                                <button type="button" class="btn btn-outline-secondary me-2" onclick="resetForm()" type="button"  >
+                                <button type="button" class="btn-control me-2" onclick="resetForm()">
                                     <i class="fas fa-undo me-2"></i>Reset
                                 </button>
                                 {% endif %}
-                                <button type="submit" class="btn btn-medical">
+                                <button type="submit" class="btn-control primary">
                                     <i class="fas fa-save me-2"></i>
                                     {% if facility %}Update Facility{% else %}Create Facility{% endif %}
                                 </button>
@@ -239,26 +239,6 @@
 
 {% block extra_css %}
 <style>
-        :root {
-            --primary-bg: #0a0a0a;
-            --secondary-bg: #1a1a1a;
-            --card-surface: #252525;
-            --header-bg: #333333;
-            --border-color: #404040;
-            --accent-color: #00d4ff;
-            --text-primary: #ffffff;
-            --text-secondary: #b3b3b3;
-            --text-muted: #666666;
-            --success-color: #00ff88;
-            --warning-color: #ffaa00;
-            --danger-color: #ff4444;
-        }
-
-    .navbar-medical {
-        background: var(--gradient-primary);
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-    }
-
     .form-check-input:checked {
         background-color: var(--accent-color);
         border-color: var(--accent-color);
@@ -292,8 +272,8 @@
 
     // AE Title auto-gen from Facility Name when empty
     document.addEventListener('DOMContentLoaded', function() {
-        const nameInput = document.getElementById('name');
-        const aeInput = document.getElementById('ae_title');
+        const nameInput = document.getElementById('id_name') || document.getElementById('name');
+        const aeInput = document.getElementById('id_ae_title') || document.getElementById('ae_title');
         function toAeTitle(str){
             const up = (str || '').toUpperCase();
             const sanitized = up.replace(/[^A-Z0-9 ]/g, '').trim().replace(/\s+/g, '_');

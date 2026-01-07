@@ -4,7 +4,7 @@
 {% block title %}{% if edit_mode %}Edit User{% else %}Create User{% endif %} - Admin Panel{% endblock %}
 
 {% block content %}
-<div class="container-fluid py-4">
+<div class="np-page">
   {% if messages %}
   <div class="mb-3">
     {% for message in messages %}
@@ -14,15 +14,18 @@
     {% endfor %}
   </div>
   {% endif %}
-  <div class="row mb-4">
-    <div class="col-12 d-flex justify-content-between align-items-center">
-      <h1 class="text-white mb-0">
+  <div class="np-page-header">
+    <div>
+      <h1 class="np-page-title">
         {% if edit_mode %}
-          <i class="fas fa-user-edit me-3"></i>Edit User: {{ user_obj.username }}
+          <i class="fas fa-user-edit"></i>Edit User: {{ user_obj.username }}
         {% else %}
-          <i class="fas fa-user-plus me-3"></i>Create User
+          <i class="fas fa-user-plus"></i>Create User
         {% endif %}
       </h1>
+      <div class="np-page-subtitle">Account details, role, facility assignment, and professional information.</div>
+    </div>
+    <div class="np-actions">
       <a href="{% url 'admin_panel:user_management' %}" class="btn-control">
         <i class="fas fa-arrow-left me-2"></i>Back to Users
       </a>

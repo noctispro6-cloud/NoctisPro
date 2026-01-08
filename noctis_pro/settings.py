@@ -319,11 +319,7 @@ _extra_static_dir = os.path.join(BASE_DIR, 'static')
 os.makedirs(_extra_static_dir, exist_ok=True)
 STATICFILES_DIRS = [_extra_static_dir]
 
-# Serving user-uploaded media via Django is convenient for dev/tunnels but is not a
-# production-grade default. In production, serve `MEDIA_URL` via your reverse proxy
-# (nginx/Apache/S3) and keep this disabled.
-_serve_media_default = 'True' if DEBUG else 'False'
-SERVE_MEDIA_FILES = os.environ.get('SERVE_MEDIA_FILES', _serve_media_default).lower() == 'true'
+SERVE_MEDIA_FILES = os.environ.get('SERVE_MEDIA_FILES', 'True').lower() == 'true'
 
 # Configure MIME types for static files
 import mimetypes
@@ -670,40 +666,6 @@ USE_X_FORWARDED_HOST = os.environ.get('USE_X_FORWARDED_HOST', 'False').lower() =
 USE_X_FORWARDED_PORT = os.environ.get('USE_X_FORWARDED_PORT', 'False').lower() == 'true'
 
 # DICOM viewer masterpiece settings
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name, None)
-    if raw is None or str(raw).strip() == "":
-        return default
-    return str(raw).strip().lower() in ("1", "true", "yes", "on")
-
-# Production hardening flags (safe-by-default):
-# - Desktop launch: running local subprocesses from HTTP requests is unsafe in production.
-# - Local directory import: scanning server paths is unsafe unless explicitly restricted.
-# - C++ compat API: legacy endpoints can expose sensitive info; keep off unless needed.
-DICOM_VIEWER_ENABLE_DESKTOP_LAUNCH = _env_bool("DICOM_VIEWER_ENABLE_DESKTOP_LAUNCH", default=False)
-DICOM_VIEWER_ENABLE_LOCAL_DIRECTORY_IMPORT = _env_bool("DICOM_VIEWER_ENABLE_LOCAL_DIRECTORY_IMPORT", default=DEBUG)
-DICOM_VIEWER_ENABLE_CPP_COMPAT_API = _env_bool("DICOM_VIEWER_ENABLE_CPP_COMPAT_API", default=False)
-DICOM_VIEWER_ENABLE_PREPROCESSING = _env_bool("DICOM_VIEWER_ENABLE_PREPROCESSING", default=True)
-
-# Background preprocessing (single-core by default).
-try:
-    DICOM_VIEWER_PREPROCESS_WORKERS = int(os.environ.get("DICOM_VIEWER_PREPROCESS_WORKERS", "1"))
-except Exception:
-    DICOM_VIEWER_PREPROCESS_WORKERS = 1
-try:
-    DICOM_VIEWER_PREPROCESS_MAX_SERIES = int(os.environ.get("DICOM_VIEWER_PREPROCESS_MAX_SERIES", "4"))
-except Exception:
-    DICOM_VIEWER_PREPROCESS_MAX_SERIES = 4
-
-# If local directory import is enabled, restrict imports to these roots (best-effort).
-# Operators can override with a comma-separated list of absolute paths.
-_import_roots_env = os.environ.get("DICOM_VIEWER_IMPORT_ROOTS", "").strip()
-if _import_roots_env:
-    DICOM_VIEWER_IMPORT_ROOTS = [p.strip() for p in _import_roots_env.split(",") if p.strip()]
-else:
-    # Conservative defaults for typical removable-media mount points.
-    DICOM_VIEWER_IMPORT_ROOTS = ["/media", "/mnt", "/run/media", "/Volumes"]
-
 DICOM_VIEWER_SETTINGS = {
     'MAX_UPLOAD_SIZE': MAX_UPLOAD_SIZE_BYTES,  # 5GB
     'SUPPORTED_MODALITIES': ['CT', 'MR', 'CR', 'DX', 'US', 'XA'],
@@ -714,8 +676,4 @@ DICOM_VIEWER_SETTINGS = {
     'ENABLE_AI_ANALYSIS': True,
     'ENABLE_QR_CODES': True,
     'ENABLE_LETTERHEADS': True,
-    'ENABLE_DESKTOP_LAUNCH': DICOM_VIEWER_ENABLE_DESKTOP_LAUNCH,
-    'ENABLE_LOCAL_DIRECTORY_IMPORT': DICOM_VIEWER_ENABLE_LOCAL_DIRECTORY_IMPORT,
-    'ENABLE_CPP_COMPAT_API': DICOM_VIEWER_ENABLE_CPP_COMPAT_API,
-    'ENABLE_PREPROCESSING': DICOM_VIEWER_ENABLE_PREPROCESSING,
 }

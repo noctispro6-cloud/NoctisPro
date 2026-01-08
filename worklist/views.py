@@ -5,7 +5,7 @@ from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models import Q, Count, Case, When, Value, IntegerField
 from django.utils import timezone
-from django.views.decorators.csrf import csrf_exempt, csrf_protect
+from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
@@ -281,8 +281,8 @@ def study_detail(request, study_id):
 	return render(request, 'worklist/study_detail.html', context)
 
 @login_required
+@csrf_exempt
 @transaction.atomic
-@csrf_protect
 def upload_study(request):
 	"""
 	Professional DICOM Upload Backend - Medical Imaging Excellence
@@ -1247,23 +1247,38 @@ def upload_study(request):
 			})
 
 			# After upload: pre-decode pixels + prebuild MPR caches (compressed on disk).
-			# Do this in background with the bounded preprocess worker (single core by default).
+			# Do this in background to keep upload response fast and avoid timeouts.
 			try:
+				# Avoid importing the huge viewer module during request; do it inside the thread.
 				uids = list(dict.fromkeys([u for u in series_uids_touched if u]))  # preserve order + dedupe
-				max_series = int(os.environ.get('DICOM_VIEWER_PREPROCESS_MAX_SERIES', '4') or 4)
+				max_series = int(os.environ.get('MPR_PRECACHE_MAX_SERIES', '4') or 4)
 				uids = uids[:max_series]
 				if uids:
-					series_ids = []
-					for suid in uids:
+					def _precache(series_uids):
 						try:
-							s = Series.objects.filter(series_instance_uid=suid).only('id').first()
-							if s and s.id:
-								series_ids.append(int(s.id))
+							from django.db import close_old_connections
+							close_old_connections()
+							# Resolve to IDs inside thread to keep response path fast
+							series_ids = []
+							for suid in series_uids:
+								try:
+									s = Series.objects.filter(series_instance_uid=suid).only('id').first()
+									if s and s.id:
+										series_ids.append(int(s.id))
+								except Exception:
+									continue
+							if not series_ids:
+								return
+							from dicom_viewer.views import _schedule_mpr_disk_cache_build
+							for sid in series_ids:
+								try:
+									_schedule_mpr_disk_cache_build(int(sid), quality='high')
+								except Exception:
+									pass
+							close_old_connections()
 						except Exception:
-							continue
-					if series_ids:
-						from dicom_viewer.preprocess import schedule_series_mpr_cache
-						schedule_series_mpr_cache(series_ids, quality='high')
+							pass
+					threading.Thread(target=_precache, args=(uids,), daemon=True).start()
 			except Exception:
 				pass
 

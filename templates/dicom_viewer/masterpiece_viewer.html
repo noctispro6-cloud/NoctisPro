@@ -994,18 +994,10 @@
                 </div>
 
                 <div class="preset-grid">
-                    <button class="preset-btn" onclick="applyPreset('auto')">Auto</button>
                     <button class="preset-btn" onclick="applyPreset('lung')">Lung</button>
                     <button class="preset-btn" onclick="applyPreset('bone')">Bone</button>
-                    <button class="preset-btn" onclick="applyPreset('soft')">Soft</button>
+                    <button class="preset-btn" onclick="applyPreset('soft')">Soft Tissue</button>
                     <button class="preset-btn" onclick="applyPreset('brain')">Brain</button>
-                    <button class="preset-btn" onclick="applyPreset('chest')">Chest</button>
-                    <button class="preset-btn" onclick="applyPreset('abdomen')">Abdomen</button>
-                    <button class="preset-btn" onclick="applyPreset('liver')">Liver</button>
-                    <button class="preset-btn" onclick="applyPreset('mediastinum')">Mediastinum</button>
-                    <button class="preset-btn" onclick="applyPreset('xray_chest')">XR Chest</button>
-                    <button class="preset-btn" onclick="applyPreset('xray_bone')">XR Bone</button>
-                    <button class="preset-btn" onclick="applyPreset('mammo')">Mammo</button>
                 </div>
             </div>
 
@@ -1332,22 +1324,12 @@
         let smoothSurface = true;
         let autoRotate = false;
 
-        // Window/Level presets (medical-grade defaults).
-        // NOTE: "auto" calls the backend estimator for the current image.
-        const DIRECTORY_IMPORT_ENABLED = {{ enable_directory_import|yesno:"true,false" }};
-        const DESKTOP_LAUNCH_ENABLED = {{ enable_desktop_launch|yesno:"true,false" }};
+        // Window presets
         const windowPresets = {
-            lung: { ww: 1600, wl: -600 },
+            lung: { ww: 1500, wl: -600 },
             bone: { ww: 2000, wl: 300 },
-            soft: { ww: 350, wl: 40 },
-            brain: { ww: 80, wl: 40 },
-            chest: { ww: 400, wl: 40 },
-            abdomen: { ww: 350, wl: 50 },
-            liver: { ww: 160, wl: 60 },
-            mediastinum: { ww: 350, wl: 50 },
-            xray_chest: { ww: 2000, wl: 0 },
-            xray_bone: { ww: 3000, wl: 500 },
-            mammo: { ww: 4000, wl: 2000 },
+            soft: { ww: 400, wl: 40 },
+            brain: { ww: 100, wl: 50 }
         };
 
         function _normalizePixelSpacing(ps) {
@@ -3289,10 +3271,6 @@
         }
 
         function applyPreset(preset) {
-            if (preset === 'auto') {
-                autoWindowCurrentImage();
-                return;
-            }
             if (windowPresets[preset]) {
                 windowWidth = windowPresets[preset].ww;
                 windowLevel = windowPresets[preset].wl;
@@ -3301,35 +3279,6 @@
                 _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
                 redrawCurrentImage();
                 showToast(`Applied ${preset} preset`, 'success');
-            }
-        }
-
-        async function autoWindowCurrentImage() {
-            try {
-                if (!imageData || !imageData.length) return;
-                const img = imageData[currentImageIndex];
-                if (!img || !img.id) return;
-                const response = await fetch(`/dicom-viewer/api/auto-window/${img.id}/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken')
-                    },
-                    body: JSON.stringify({})
-                });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const data = await response.json();
-                if (!data || data.success === false) throw new Error(data?.error || 'Auto window failed');
-                if (Number.isFinite(Number(data.window_width))) windowWidth = Math.round(Number(data.window_width));
-                if (Number.isFinite(Number(data.window_level))) windowLevel = Math.round(Number(data.window_level));
-                updateSliders();
-                windowingLockedByUser = true;
-                _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
-                redrawCurrentImage();
-                showToast('Auto window applied', 'success');
-            } catch (e) {
-                console.error(e);
-                showToast('Auto window failed', 'error');
             }
         }
 
@@ -6192,10 +6141,6 @@
 
         // Directory Loader Functions
         function showDirectoryLoader() {
-            if (!DIRECTORY_IMPORT_ENABLED) {
-                showToast('Directory import is disabled on this server', 'warning');
-                return;
-            }
             document.getElementById('directoryModal').style.display = 'flex';
         }
 
@@ -6204,10 +6149,6 @@
         }
 
         async function loadFromDirectory() {
-            if (!DIRECTORY_IMPORT_ENABLED) {
-                showToast('Directory import is disabled on this server', 'warning');
-                return;
-            }
             const directoryPath = document.getElementById('directoryPath').value.trim();
             if (!directoryPath) {
                 showToast('Please enter a directory path', 'error');

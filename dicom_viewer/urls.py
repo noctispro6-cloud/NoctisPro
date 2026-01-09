@@ -1,6 +1,8 @@
+import os
+
 from django.urls import path
+
 from . import views
-from . import api_cpp
 
 app_name = 'dicom_viewer'
 
@@ -61,14 +63,26 @@ urlpatterns = [
     path('api/upload/progress/<str:upload_id>/', views.api_upload_progress, name='api_upload_progress'),
     path('api/process/study/<int:study_id>/', views.api_process_study, name='api_process_study'),
 
-    # C++ desktop viewer integration endpoints (compat layer)
-    path('api/worklist/', api_cpp.api_cpp_worklist, name='api_cpp_worklist'),
-    path('api/study-status/', api_cpp.api_cpp_study_status, name='api_cpp_study_status'),
-    path('api/series/<str:study_id>/', api_cpp.api_cpp_series, name='api_cpp_series'),
-    path('api/dicom-file/<str:instance_uid>/', api_cpp.api_cpp_dicom_file, name='api_cpp_dicom_file'),
-    path('api/dicom-info/<str:instance_uid>/', api_cpp.api_cpp_dicom_info, name='api_cpp_dicom_info'),
-    path('api/viewer-sessions/', api_cpp.api_cpp_viewer_sessions, name='api_cpp_viewer_sessions'),
 ]
+
+# C++ desktop viewer integration endpoints (compat layer)
+#
+# SECURITY:
+# These endpoints can return PHI (including raw DICOM bytes). They must not be exposed
+# on public deployments unless you have strong authentication and authorization in place.
+#
+# Default: disabled.
+if os.environ.get("ENABLE_CPP_COMPAT_API", "False").lower() in ("1", "true", "yes", "on"):
+    from . import api_cpp
+
+    urlpatterns += [
+        path('api/worklist/', api_cpp.api_cpp_worklist, name='api_cpp_worklist'),
+        path('api/study-status/', api_cpp.api_cpp_study_status, name='api_cpp_study_status'),
+        path('api/series/<str:study_id>/', api_cpp.api_cpp_series, name='api_cpp_series'),
+        path('api/dicom-file/<str:instance_uid>/', api_cpp.api_cpp_dicom_file, name='api_cpp_dicom_file'),
+        path('api/dicom-info/<str:instance_uid>/', api_cpp.api_cpp_dicom_info, name='api_cpp_dicom_info'),
+        path('api/viewer-sessions/', api_cpp.api_cpp_viewer_sessions, name='api_cpp_viewer_sessions'),
+    ]
 
 urlpatterns += [
     # Web viewer pages

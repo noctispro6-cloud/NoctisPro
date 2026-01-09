@@ -210,7 +210,20 @@ def print_report_stub(request, study_id):
     qr_viewer_b64 = _data_url_from_png(_qr_png_bytes(viewer_url))
     qr_report_b64 = _data_url_from_png(_qr_png_bytes(report_url))
 
-    letterhead_url = study.facility.letterhead.url if getattr(study.facility, 'letterhead', None) else ''
+    # Embed letterhead directly to avoid relying on public /media/ URLs.
+    # This keeps the printable report working even when MEDIA is not served publicly.
+    letterhead_url = ''
+    try:
+        lh = getattr(study.facility, 'letterhead', None)
+        if lh and getattr(lh, 'name', ''):
+            import mimetypes
+            ctype, _ = mimetypes.guess_type(lh.name)
+            ctype = ctype or 'image/png'
+            with lh.open('rb') as f:
+                b = f.read()
+            letterhead_url = f"data:{ctype};base64," + base64.b64encode(b).decode('ascii')
+    except Exception:
+        letterhead_url = ''
     facility_name = escape(getattr(study.facility, 'name', '') or '')
     facility_address = escape(getattr(study.facility, 'address', '') or '')
     patient_name = escape(getattr(study.patient, 'full_name', '') or '')

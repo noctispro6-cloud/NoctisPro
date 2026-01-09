@@ -15,6 +15,7 @@ django-cors-headers
 fastapi
 daphne
 channels
+channels-redis
 
 # Production serving
 gunicorn

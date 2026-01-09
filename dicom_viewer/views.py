@@ -2164,7 +2164,6 @@ def api_dicom_image_png(request, image_id):
         return HttpResponse(status=500)
 
 @login_required
-@csrf_exempt
 def api_measurements(request, study_id=None):
     """API endpoint for saving/loading measurements"""
     if study_id:
@@ -2222,7 +2221,6 @@ def api_measurements(request, study_id=None):
         return JsonResponse({'success': True, 'message': 'Measurements cleared'})
 
 @login_required
-@csrf_exempt
 def api_reconstruction(request, study_id):
     """API endpoint for 3D reconstruction processing"""
     study = get_object_or_404(Study, id=study_id)
@@ -2257,7 +2255,6 @@ def api_reconstruction(request, study_id):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 @login_required
-@csrf_exempt
 def api_hounsfield_units(request):
     """API endpoint for Hounsfield Unit calculations"""
     if request.method == 'POST':
@@ -2513,7 +2510,6 @@ def api_export_image(request, image_id):
     return JsonResponse(result)
 
 @login_required
-@csrf_exempt
 def api_annotations(request, study_id):
     """API endpoint for saving/loading annotations"""
     study = get_object_or_404(Study, id=study_id)
@@ -2976,7 +2972,6 @@ def process_dicom_study(study_uid, series_map, rep_ds, user, upload_id):
     return study_obj
 
 @login_required
-@csrf_exempt
 def upload_dicom(request):
     """Upload DICOM files for processing"""
     if request.method == 'POST':
@@ -3276,7 +3271,6 @@ def upload_dicom(request):
     return JsonResponse({'success': False, 'error': 'Use POST to upload DICOM files'})
 
 @login_required
-@csrf_exempt
 def api_upload_progress(request, upload_id):
     """API endpoint to check upload progress"""
     try:
@@ -3298,7 +3292,6 @@ def api_upload_progress(request, upload_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 @login_required
-@csrf_exempt
 def api_process_study(request, study_id):
     """API endpoint to process/reprocess a study"""
     study = get_object_or_404(Study, id=study_id)
@@ -3333,7 +3326,6 @@ def api_process_study(request, study_id):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 @login_required
-@csrf_exempt
 def launch_standalone_viewer(request):
     """Launch the standalone DICOM viewer application (Python PyQt)."""
     import subprocess
@@ -3678,13 +3670,15 @@ def web_dicom_image(request, image_id):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
 def web_save_measurement(request):
     try:
         data = json.loads(request.body)
         image_id = data.get('image_id')
-        measurement_type = data.get('type')
+        # Frontend sends `measurement_type`; accept legacy `type` too.
+        measurement_type = (data.get('measurement_type') or data.get('type') or '').strip()
+        if measurement_type not in {'length', 'area', 'angle', 'cobb_angle'}:
+            measurement_type = 'length'
         points = data.get('points')
         value = data.get('value')
         unit = data.get('unit', 'mm')
@@ -3700,7 +3694,20 @@ def web_save_measurement(request):
             unit=unit,
             notes=notes,
         )
-        measurement.set_points(points or [])
+        # Normalize `points` to a JSON array of points.
+        # Some callers send a JSON string or a richer object (e.g. {points: [...], type: ...}).
+        points_list = []
+        try:
+            raw = points
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            if isinstance(raw, dict) and isinstance(raw.get('points'), list):
+                points_list = raw.get('points') or []
+            elif isinstance(raw, list):
+                points_list = raw
+        except Exception:
+            points_list = []
+        measurement.set_points(points_list)
         measurement.save()
         return JsonResponse({'success': True, 'id': measurement.id})
     except Exception as e:
@@ -3708,7 +3715,6 @@ def web_save_measurement(request):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
 def web_save_annotation(request):
     try:
@@ -3770,7 +3776,6 @@ def web_get_annotations(request, image_id):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
 def web_save_viewer_session(request):
     try:
@@ -3780,11 +3785,21 @@ def web_save_viewer_session(request):
         study = get_object_or_404(Study, id=study_id)
         if hasattr(request.user, 'is_facility_user') and request.user.is_facility_user() and study.facility != request.user.facility:
             return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+        # Frontend often sends session_data as a JSON string; normalize to a dict.
+        session_obj = {}
+        try:
+            if isinstance(session_data, str):
+                session_obj = json.loads(session_data) if session_data.strip() else {}
+            elif isinstance(session_data, dict):
+                session_obj = session_data
+        except Exception:
+            session_obj = {}
+
         session, created = ViewerSession.objects.get_or_create(
-            user=request.user, study=study, defaults={'session_data': json.dumps(session_data or {})}
+            user=request.user, study=study, defaults={'session_data': json.dumps(session_obj)}
         )
         if not created:
-            session.set_session_data(session_data or {})
+            session.set_session_data(session_obj)
             session.save()
         return JsonResponse({'success': True})
     except Exception as e:
@@ -3802,7 +3817,6 @@ def web_load_viewer_session(request, study_id):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
 def web_start_reconstruction(request):
     try:
@@ -4362,7 +4376,6 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
         return volume, spacing
 
 @login_required
-@csrf_exempt
 def api_user_presets(request):
     """CRUD for per-user window/level presets.
     GET: list presets (optionally filter by modality/body_part)
@@ -4581,7 +4594,6 @@ def hu_calibration_dashboard(request):
 
 @login_required
 @user_passes_test(lambda u: u.is_admin() or u.is_technician())
-@csrf_exempt
 def validate_hu_calibration(request, study_id):
     """Validate Hounsfield unit calibration for a study"""
     from .models import HounsfieldCalibration

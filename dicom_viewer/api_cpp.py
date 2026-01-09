@@ -1,5 +1,5 @@
 from django.http import JsonResponse, HttpResponse, Http404
-from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_http_methods
 from django.shortcuts import get_object_or_404
 from django.conf import settings
@@ -10,11 +10,14 @@ import json
 import pydicom
 
 @require_http_methods(["GET"])
-@csrf_exempt
+@login_required
 def api_cpp_worklist(request):
     # Return a simple array of worklist-like items expected by the C++ app
     items = []
-    studies = Study.objects.select_related("patient", "modality").order_by("-study_date")[:50]
+    studies = Study.objects.select_related("patient", "modality", "facility").order_by("-study_date")
+    if hasattr(request.user, "is_facility_user") and request.user.is_facility_user() and getattr(request.user, "facility", None):
+        studies = studies.filter(facility=request.user.facility)
+    studies = studies[:50]
     for study in studies:
         series = study.series_set.first()
         dicom_path = None
@@ -33,7 +36,7 @@ def api_cpp_worklist(request):
     return JsonResponse(items, safe=False)
 
 @require_http_methods(["POST"])
-@csrf_exempt
+@login_required
 def api_cpp_study_status(request):
     try:
         data = json.loads(request.body or b"{}")
@@ -48,6 +51,9 @@ def api_cpp_study_status(request):
     study = Study.objects.filter(study_instance_uid=study_uid).first()
     if not study:
         return JsonResponse({"error": "Study not found"}, status=404)
+    if hasattr(request.user, "is_facility_user") and request.user.is_facility_user() and getattr(request.user, "facility", None):
+        if getattr(study, "facility", None) != request.user.facility:
+            return JsonResponse({"error": "Permission denied"}, status=403)
 
     # Map incoming statuses to our Study.status choices
     mapped = {
@@ -61,9 +67,12 @@ def api_cpp_study_status(request):
     return JsonResponse({"success": True, "message": f"Study status set to {study.status}"})
 
 @require_http_methods(["GET"])
-@csrf_exempt
+@login_required
 def api_cpp_series(request, study_id:str):
     study = get_object_or_404(Study, study_instance_uid=study_id)
+    if hasattr(request.user, "is_facility_user") and request.user.is_facility_user() and getattr(request.user, "facility", None):
+        if getattr(study, "facility", None) != request.user.facility:
+            raise Http404()
     series_list = study.series_set.order_by("series_number")
     payload = {"study_id": study_id, "series": []}
     for s in series_list:
@@ -94,9 +103,15 @@ def api_cpp_series(request, study_id:str):
     return JsonResponse(payload)
 
 @require_http_methods(["GET"])
-@csrf_exempt
+@login_required
 def api_cpp_dicom_file(request, instance_uid:str):
     img = get_object_or_404(DicomImage, sop_instance_uid=instance_uid)
+    try:
+        if hasattr(request.user, "is_facility_user") and request.user.is_facility_user() and getattr(request.user, "facility", None):
+            if img.series.study.facility != request.user.facility:
+                raise Http404()
+    except Exception:
+        raise Http404()
     if not img.file_path or not os.path.exists(img.file_path.path):
         raise Http404("DICOM file not found")
     with open(img.file_path.path, "rb") as f:
@@ -105,9 +120,15 @@ def api_cpp_dicom_file(request, instance_uid:str):
         return resp
 
 @require_http_methods(["GET"])
-@csrf_exempt
+@login_required
 def api_cpp_dicom_info(request, instance_uid:str):
     img = get_object_or_404(DicomImage, sop_instance_uid=instance_uid)
+    try:
+        if hasattr(request.user, "is_facility_user") and request.user.is_facility_user() and getattr(request.user, "facility", None):
+            if img.series.study.facility != request.user.facility:
+                return JsonResponse({"error": "Permission denied"}, status=403)
+    except Exception:
+        return JsonResponse({"error": "Permission denied"}, status=403)
     if not img.file_path or not os.path.exists(img.file_path.path):
         return JsonResponse({"error": "DICOM file not found"}, status=404)
     try:
@@ -135,7 +156,7 @@ def api_cpp_dicom_info(request, instance_uid:str):
         return JsonResponse({"error": "Cannot read DICOM metadata"}, status=500)
 
 @require_http_methods(["GET"]) 
-@csrf_exempt
+@login_required
 def api_cpp_viewer_sessions(request):
     # Minimal stub for compatibility with C++ app
     return JsonResponse({"active_sessions": []})

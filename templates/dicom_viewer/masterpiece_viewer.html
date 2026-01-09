@@ -6152,13 +6152,156 @@
             }
         }
 
-        // Print and Export Functions
+        // Print and Export Functions (production: backend wired)
+        function _getActiveImageId() {
+            try {
+                return imageData && imageData[currentImageIndex] ? imageData[currentImageIndex].id : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function _getCurrentModality() {
+            try {
+                return (currentSeries && currentSeries.modality) || (currentStudy && currentStudy.modality) || '';
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function _getPatientNameForPrint() {
+            try {
+                return (currentStudy && (currentStudy.patient_name || currentStudy.patient || currentStudy.patient_full_name)) || '';
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function _getStudyDateForPrint() {
+            try {
+                return (currentStudy && (currentStudy.study_date || currentStudy.date)) || '';
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function _openModal(id) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'flex';
+        }
+
+        function _closeModal(id) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        }
+
+        async function _populatePrintModal() {
+            const modal = document.getElementById('printExportModal');
+            if (!modal) return;
+
+            const modality = _getCurrentModality();
+            const seriesId = (currentSeries && currentSeries.id != null) ? String(currentSeries.id) : '';
+            const total = Array.isArray(imageData) ? imageData.length : 0;
+
+            const seriesEl = document.getElementById('pe_series_id');
+            const modalityEl = document.getElementById('pe_modality');
+            const sliceStartEl = document.getElementById('pe_slice_start');
+            const sliceStepEl = document.getElementById('pe_slice_step');
+            const sliceCountEl = document.getElementById('pe_slice_count');
+
+            if (seriesEl) seriesEl.value = seriesId;
+            if (modalityEl) modalityEl.value = modality;
+            if (sliceStartEl) sliceStartEl.value = String(Math.max(0, Math.floor(total / 2) - 8));
+            if (sliceStepEl) sliceStepEl.value = '1';
+            if (sliceCountEl) sliceCountEl.value = String(Math.min(16, Math.max(1, total)));
+
+            // Load printers (best-effort; can still download PDF if none)
+            try {
+                const resp = await fetch('/dicom-viewer/print/printers/', { credentials: 'same-origin' });
+                const data = await resp.json();
+                const sel = document.getElementById('pe_printer_name');
+                if (sel) {
+                    sel.innerHTML = '';
+                    const opt0 = document.createElement('option');
+                    opt0.value = '';
+                    opt0.textContent = (data && data.success && Array.isArray(data.printers) && data.printers.length) ? 'Select a printer…' : 'No printers detected (download PDF instead)';
+                    sel.appendChild(opt0);
+                    if (data && data.success && Array.isArray(data.printers)) {
+                        data.printers.forEach((p) => {
+                            const o = document.createElement('option');
+                            o.value = p.name || '';
+                            o.textContent = `${p.name || 'Printer'}${p.description ? ' - ' + p.description : ''}`;
+                            sel.appendChild(o);
+                        });
+                    }
+                }
+            } catch (e) {
+                // ignore
+            }
+
+            // Load layouts for the current modality
+            try {
+                const resp = await fetch(`/dicom-viewer/print/layouts/?modality=${encodeURIComponent(modality)}`, { credentials: 'same-origin' });
+                const data = await resp.json();
+                const sel = document.getElementById('pe_layout_type');
+                if (sel) {
+                    sel.innerHTML = '';
+                    const layouts = (data && data.success && Array.isArray(data.layouts)) ? data.layouts : [];
+                    const fallback = [
+                        { id: 'single', name: 'Single Image' },
+                        { id: 'grid', name: 'Grid (custom rows/cols)' },
+                    ];
+                    const list = layouts.length ? layouts : fallback;
+                    list.forEach((l) => {
+                        const o = document.createElement('option');
+                        o.value = l.id || 'single';
+                        o.textContent = l.name || l.id || 'Layout';
+                        sel.appendChild(o);
+                    });
+                    // Prefer grid for stacks
+                    if (total > 1) {
+                        sel.value = (list.find((x) => x.id === 'grid') ? 'grid' : (list[0] && list[0].id) || 'single');
+                    }
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+
         function printCurrentImage() {
-            if (!canvas) return;
-            
+            // Open modal (backend print/download + grid options)
+            _openModal('printExportModal');
+            _populatePrintModal();
+        }
+
+        function exportCurrentImage() {
+            // Open modal (backend export w/ burn-in)
+            _openModal('printExportModal');
+            _populatePrintModal();
+            const tab = document.getElementById('pe_tab_export');
+            if (tab) tab.click();
+        }
+
+        async function pe_downloadExport() {
+            const imageId = _getActiveImageId();
+            if (!imageId) {
+                showToast('No image loaded', 'warning');
+                return;
+            }
+            const fmt = (document.getElementById('pe_export_format') || {}).value || 'png';
+            const burn = (document.getElementById('pe_burn_in') || {}).checked ? '1' : '0';
+            const inv = inverted ? '1' : '0';
+            const url = `/dicom-viewer/api/image/${encodeURIComponent(imageId)}/export/?format=${encodeURIComponent(fmt)}&burn_in=${encodeURIComponent(burn)}&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inv)}`;
+            window.location.href = url;
+        }
+
+        function pe_browserPrintQuick() {
+            if (!canvas) {
+                showToast('No image to print', 'warning');
+                return;
+            }
             const printWindow = window.open('', '_blank');
             const imageDataUrl = canvas.toDataURL('image/png');
-            
             printWindow.document.write(`
                 <html>
                     <head><title>DICOM Image Print</title></head>
@@ -6167,27 +6310,127 @@
                     </body>
                 </html>
             `);
-            
             printWindow.document.close();
             printWindow.focus();
-            
             setTimeout(() => {
-                printWindow.print();
-                printWindow.close();
+                try { printWindow.print(); } catch (e) {}
+                try { printWindow.close(); } catch (e) {}
             }, 250);
-            
-            showToast('Print dialog opened', 'success');
         }
 
-        function exportCurrentImage() {
-            if (!canvas) return;
-            
-            const link = document.createElement('a');
-            link.download = `dicom_image_${Date.now()}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-            
-            showToast('Image exported', 'success');
+        function _pe_buildPrintFormData({ downloadPdf }) {
+            const fd = new FormData();
+            const seriesId = (document.getElementById('pe_series_id') || {}).value || '';
+            const layoutType = (document.getElementById('pe_layout_type') || {}).value || 'single';
+            const paperSize = (document.getElementById('pe_paper_size') || {}).value || 'A4';
+            const paperType = (document.getElementById('pe_paper_type') || {}).value || 'glossy';
+            const quality = (document.getElementById('pe_print_quality') || {}).value || 'high';
+            const copies = (document.getElementById('pe_copies') || {}).value || '1';
+            const printer = (document.getElementById('pe_printer_name') || {}).value || '';
+            const medium = (document.getElementById('pe_print_medium') || {}).value || 'paper';
+            const rows = (document.getElementById('pe_grid_rows') || {}).value || '';
+            const cols = (document.getElementById('pe_grid_cols') || {}).value || '';
+            const sliceStart = (document.getElementById('pe_slice_start') || {}).value || '';
+            const sliceStep = (document.getElementById('pe_slice_step') || {}).value || '';
+            const sliceCount = (document.getElementById('pe_slice_count') || {}).value || '';
+
+            // Prefer server-rendered grids if seriesId present; otherwise fall back to single image_data from canvas.
+            if (seriesId) {
+                fd.append('series_id', seriesId);
+                if (sliceStart !== '') fd.append('slice_start', sliceStart);
+                if (sliceStep !== '') fd.append('slice_step', sliceStep);
+                if (sliceCount !== '') fd.append('slice_count', sliceCount);
+            } else if (canvas) {
+                fd.append('image_data', canvas.toDataURL('image/png'));
+            }
+
+            fd.append('layout_type', layoutType);
+            fd.append('paper_size', paperSize);
+            fd.append('paper_type', paperType);
+            fd.append('print_quality', quality);
+            fd.append('copies', String(Math.max(1, parseInt(copies || '1', 10) || 1)));
+            fd.append('printer_name', printer);
+            fd.append('print_medium', medium);
+            if (rows !== '') fd.append('grid_rows', rows);
+            if (cols !== '') fd.append('grid_cols', cols);
+
+            // Metadata + windowing (burn-in happens in PDF generator)
+            fd.append('modality', (document.getElementById('pe_modality') || {}).value || _getCurrentModality());
+            fd.append('patient_name', _getPatientNameForPrint() || '');
+            fd.append('study_date', _getStudyDateForPrint() || '');
+            fd.append('series_description', (currentSeries && currentSeries.description) ? String(currentSeries.description) : '');
+            fd.append('window_width', String(windowWidth));
+            fd.append('window_level', String(windowLevel));
+            fd.append('inverted', inverted ? '1' : '0');
+
+            if (downloadPdf) fd.append('download_pdf', '1');
+            return fd;
+        }
+
+        async function pe_downloadPrintPdf() {
+            try {
+                if (!currentSeries && !canvas) {
+                    showToast('Load an image/series first', 'warning');
+                    return;
+                }
+                showLoading(true);
+                const fd = _pe_buildPrintFormData({ downloadPdf: true });
+                const resp = await fetch('/dicom-viewer/print/image/', {
+                    method: 'POST',
+                    body: fd,
+                    headers: { 'X-CSRFToken': getCookie('csrftoken') },
+                    credentials: 'same-origin',
+                });
+                if (!resp.ok) {
+                    let msg = `Print PDF failed (${resp.status})`;
+                    try {
+                        const j = await resp.json();
+                        if (j && j.error) msg = j.error;
+                    } catch (e) {}
+                    showToast(msg, 'error');
+                    return;
+                }
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `dicom_print_${Date.now()}.pdf`;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1500);
+                showToast('Downloaded print PDF', 'success');
+            } catch (e) {
+                showToast(`Failed to download PDF: ${e?.message || e}`, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function pe_sendToPrinter() {
+            try {
+                const printer = (document.getElementById('pe_printer_name') || {}).value || '';
+                if (!printer) {
+                    showToast('Select a printer, or use Download PDF', 'warning');
+                    return;
+                }
+                showLoading(true);
+                const fd = _pe_buildPrintFormData({ downloadPdf: false });
+                const resp = await fetch('/dicom-viewer/print/image/', {
+                    method: 'POST',
+                    body: fd,
+                    headers: { 'X-CSRFToken': getCookie('csrftoken') },
+                    credentials: 'same-origin',
+                });
+                const j = await resp.json();
+                if (!j || !j.success) {
+                    showToast((j && j.error) ? j.error : 'Print failed', 'error');
+                    return;
+                }
+                showToast('Sent to printer', 'success');
+            } catch (e) {
+                showToast(`Print failed: ${e?.message || e}`, 'error');
+            } finally {
+                showLoading(false);
+            }
         }
 
         // Utility Functions
@@ -6334,6 +6577,7 @@
             }
             if (e.key === 'Escape') {
                 hideDirectoryLoader();
+                try { _closeModal('printExportModal'); } catch (e) {}
             }
         });
     </script>
@@ -6369,6 +6613,168 @@
                 • /home/user/Downloads/patient_study/<br>
                 <br>
                 <strong>Tip:</strong> Use Ctrl+O to quickly open this dialog
+            </div>
+        </div>
+    </div>
+
+    <!-- Print / Export Modal -->
+    <div id="printExportModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); z-index: 10001; justify-content: center; align-items: center;">
+        <div style="background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color); max-width: 760px; width: 92%; max-height: 88vh; overflow: auto;">
+            <div style="display:flex; align-items:center; justify-content: space-between; gap: 12px; margin-bottom: 10px;">
+                <h3 style="color: var(--text-primary); margin: 0;">
+                    <i class="fas fa-print"></i> Print / Export
+                </h3>
+                <button onclick="_closeModal('printExportModal')" style="border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-secondary); padding: 8px 10px; border-radius: 8px; cursor: pointer;">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div style="display:flex; gap: 10px; margin-bottom: 14px;">
+                <button id="pe_tab_print" onclick="document.getElementById('pe_print_panel').style.display='block'; document.getElementById('pe_export_panel').style.display='none';" style="flex:1; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
+                    <i class="fas fa-print"></i> Print
+                </button>
+                <button id="pe_tab_export" onclick="document.getElementById('pe_print_panel').style.display='none'; document.getElementById('pe_export_panel').style.display='block';" style="flex:1; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
+                    <i class="fas fa-download"></i> Export
+                </button>
+            </div>
+
+            <!-- PRINT PANEL -->
+            <div id="pe_print_panel" style="display:block;">
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Printer (optional)</label>
+                        <select id="pe_printer_name" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="">Loading printers…</option>
+                        </select>
+                        <div style="color: var(--text-muted); font-size: 11px; margin-top: 6px;">
+                            If no printers are available, use <strong>Download PDF</strong>.
+                        </div>
+                    </div>
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Layout</label>
+                        <select id="pe_layout_type" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="single">Single Image</option>
+                            <option value="grid">Grid (custom)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Paper / Film size</label>
+                        <select id="pe_paper_size" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="A4">A4</option>
+                            <option value="Letter">Letter</option>
+                            <option value="FILM_14X17">Film 14×17</option>
+                            <option value="FILM_11X14">Film 11×14</option>
+                            <option value="FILM_10X12">Film 10×12</option>
+                            <option value="FILM_8X10">Film 8×10</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Medium</label>
+                        <select id="pe_print_medium" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="paper">Paper</option>
+                            <option value="film">Film</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Paper type</label>
+                        <select id="pe_paper_type" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="glossy">Glossy</option>
+                            <option value="matte">Matte</option>
+                            <option value="plain">Plain</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Quality</label>
+                        <select id="pe_print_quality" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="high">High</option>
+                            <option value="normal">Normal</option>
+                            <option value="draft">Draft</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="margin-top: 14px; padding: 12px; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(255,255,255,0.02);">
+                    <div style="color: var(--text-primary); font-size: 12px; margin-bottom: 8px;">
+                        Multi-slice (server-rendered grid from current series)
+                    </div>
+                    <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap: 10px;">
+                        <div style="grid-column: span 2;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Series ID</label>
+                            <input id="pe_series_id" type="text" placeholder="(auto)" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary); font-family: monospace;">
+                        </div>
+                        <div style="grid-column: span 1;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Rows</label>
+                            <input id="pe_grid_rows" type="number" min="1" max="8" value="4" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        </div>
+                        <div style="grid-column: span 1;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Cols</label>
+                            <input id="pe_grid_cols" type="number" min="1" max="8" value="4" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        </div>
+                        <div style="grid-column: span 1;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Start</label>
+                            <input id="pe_slice_start" type="number" min="0" value="0" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        </div>
+                        <div style="grid-column: span 1;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Step</label>
+                            <input id="pe_slice_step" type="number" min="1" value="1" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        </div>
+                        <div style="grid-column: span 2;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Count</label>
+                            <input id="pe_slice_count" type="number" min="1" max="96" value="16" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        </div>
+                        <div style="grid-column: span 2;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Copies</label>
+                            <input id="pe_copies" type="number" min="1" max="20" value="1" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        </div>
+                    </div>
+                    <input id="pe_modality" type="hidden" value="">
+                </div>
+
+                <div style="display:flex; gap: 10px; justify-content: space-between; flex-wrap: wrap; margin-top: 16px;">
+                    <button onclick="pe_browserPrintQuick()" style="padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
+                        <i class="fas fa-window-maximize"></i> Browser Print (quick)
+                    </button>
+                    <div style="display:flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
+                        <button onclick="pe_downloadPrintPdf()" style="padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
+                            <i class="fas fa-file-pdf"></i> Download PDF
+                        </button>
+                        <button onclick="pe_sendToPrinter()" style="padding: 10px 14px; border-radius: 8px; border: none; background: var(--accent-color); color: white; cursor:pointer;">
+                            <i class="fas fa-print"></i> Send to Printer
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EXPORT PANEL -->
+            <div id="pe_export_panel" style="display:none;">
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px;">
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Format</label>
+                        <select id="pe_export_format" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="png">PNG</option>
+                            <option value="jpg">JPG</option>
+                            <option value="tiff">TIFF</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; align-items:flex-end; gap: 10px;">
+                        <label style="display:flex; align-items:center; gap: 8px; color: var(--text-primary); font-size: 12px;">
+                            <input id="pe_burn_in" type="checkbox" checked>
+                            Burn-in patient/study info
+                        </label>
+                    </div>
+                </div>
+                <div style="color: var(--text-muted); font-size: 11px; margin-top: 10px;">
+                    Export uses the server renderer (includes correct WW/WL and optional burn-in overlays).
+                </div>
+                <div style="display:flex; gap: 10px; justify-content: flex-end; margin-top: 14px;">
+                    <button onclick="pe_downloadExport()" style="padding: 10px 14px; border-radius: 8px; border: none; background: var(--accent-color); color: white; cursor:pointer;">
+                        <i class="fas fa-download"></i> Download Export
+                    </button>
+                </div>
             </div>
         </div>
     </div>

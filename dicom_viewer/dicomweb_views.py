@@ -8,12 +8,14 @@ import pydicom
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from django.http import HttpResponse
 from rest_framework.authentication import BasicAuthentication, SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import Facility
+from accounts.audit import log_audit
 from worklist.models import DicomImage, Modality, Patient, Series, Study
 
 
@@ -298,6 +300,90 @@ class DicomWebStowView(APIView):
     authentication_classes = [BasicAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
 
+    def get(self, request, *args, **kwargs):
+        """
+        Minimal QIDO-RS:
+          - GET /dicomweb/studies/
+
+        Returns a list of study attribute objects (DICOM JSON model) for basic interop.
+        """
+        user = request.user
+        qs = Study.objects.select_related("patient", "facility", "modality")
+        if getattr(user, "is_facility_user", None) and user.is_facility_user() and getattr(user, "facility", None):
+            qs = qs.filter(facility=user.facility)
+
+        # Common QIDO query parameters
+        patient_id = (request.query_params.get("PatientID") or "").strip()
+        study_uid = (request.query_params.get("StudyInstanceUID") or "").strip()
+        accession = (request.query_params.get("AccessionNumber") or "").strip()
+        modality = (request.query_params.get("ModalitiesInStudy") or request.query_params.get("Modality") or "").strip()
+
+        if patient_id:
+            qs = qs.filter(patient__patient_id__icontains=patient_id)
+        if study_uid:
+            qs = qs.filter(study_instance_uid=study_uid)
+        if accession:
+            qs = qs.filter(accession_number__icontains=accession)
+        if modality:
+            qs = qs.filter(modality__code__iexact=modality)
+
+        # Paging (best-effort)
+        try:
+            limit = int(request.query_params.get("limit", "200"))
+        except Exception:
+            limit = 200
+        try:
+            offset = int(request.query_params.get("offset", "0"))
+        except Exception:
+            offset = 0
+        limit = max(1, min(2000, limit))
+        offset = max(0, offset)
+
+        qs = qs.order_by("-study_date")[offset : offset + limit]
+
+        def _attr(tag: str, vr: str, value):
+            if value is None or value == "":
+                return {tag: {"vr": vr}}
+            if isinstance(value, list):
+                return {tag: {"vr": vr, "Value": value}}
+            return {tag: {"vr": vr, "Value": [value]}}
+
+        def _study_item(study: Study) -> dict:
+            patient = getattr(study, "patient", None)
+            modality_obj = getattr(study, "modality", None)
+            mod_code = getattr(modality_obj, "code", "") if modality_obj else ""
+            mod_code = mod_code or ""
+            # DICOM JSON model expects DICOM-formatted values; keep it minimal and predictable
+            d = {}
+            d.update(_attr("0020000D", "UI", getattr(study, "study_instance_uid", "") or ""))  # StudyInstanceUID
+            d.update(_attr("00080050", "SH", getattr(study, "accession_number", "") or ""))  # AccessionNumber
+            d.update(_attr("00081030", "LO", getattr(study, "study_description", "") or ""))  # StudyDescription
+            if getattr(study, "study_date", None):
+                d.update(_attr("00080020", "DA", study.study_date.strftime("%Y%m%d")))  # StudyDate
+                d.update(_attr("00080030", "TM", study.study_date.strftime("%H%M%S")))  # StudyTime
+            if patient:
+                d.update(_attr("00100020", "LO", getattr(patient, "patient_id", "") or ""))  # PatientID
+                d.update(_attr("00100010", "PN", getattr(patient, "full_name", "") or ""))  # PatientName
+            d.update(_attr("00080061", "CS", [mod_code] if mod_code else []))  # ModalitiesInStudy
+            return d
+
+        items = [_study_item(s) for s in qs]
+        try:
+            log_audit(
+                request=request,
+                action="dicomweb_qido",
+                user=user,
+                facility=getattr(user, "facility", None),
+                extra={
+                    "level": "studies",
+                    "query": dict(request.query_params),
+                    "count": len(items),
+                },
+            )
+        except Exception:
+            pass
+        return Response(items, status=200)
+
     def post(self, request, *args, **kwargs):
         content_type = (request.META.get("CONTENT_TYPE") or "").lower()
         overwrite = str(request.query_params.get("overwrite", "false")).lower() in {"1", "true", "yes"}
@@ -354,6 +440,24 @@ class DicomWebStowView(APIView):
                 except Exception as e:
                     errors.append({"index": idx, "error": str(e), "client_ip": client_ip})
 
+        try:
+            log_audit(
+                request=request,
+                action="dicomweb_stow",
+                user=request.user,
+                facility=facility,
+                extra={
+                    "overwrite": bool(overwrite),
+                    "client_ip": client_ip,
+                    "received_instances": len(dicom_blobs),
+                    "stored": len([r for r in stored if r.status == "stored"]),
+                    "skipped": len([r for r in stored if r.status == "skipped"]),
+                    "errors": len(errors),
+                },
+            )
+        except Exception:
+            pass
+
         return Response(
             {
                 "stored": [r.__dict__ for r in stored if r.status == "stored"],
@@ -368,4 +472,206 @@ class DicomWebStowView(APIView):
             },
             status=200 if not errors else 207,  # 207 Multi-Status when partial failures
         )
+
+
+class DicomWebSeriesView(APIView):
+    """
+    Minimal QIDO-RS Series:
+      - GET /dicomweb/studies/{StudyInstanceUID}/series/
+    """
+
+    authentication_classes = [BasicAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, study_uid: str, *args, **kwargs):
+        user = request.user
+        study = Study.objects.select_related("facility").filter(study_instance_uid=study_uid).first()
+        if not study:
+            return Response({"detail": "Study not found"}, status=404)
+        if getattr(user, "is_facility_user", None) and user.is_facility_user() and getattr(user, "facility", None):
+            if study.facility != user.facility:
+                return Response({"detail": "Permission denied"}, status=403)
+
+        qs = Series.objects.filter(study=study).order_by("series_number", "id")
+        modality = (request.query_params.get("Modality") or "").strip()
+        if modality:
+            qs = qs.filter(modality__iexact=modality)
+
+        def _attr(tag: str, vr: str, value):
+            if value is None or value == "":
+                return {tag: {"vr": vr}}
+            if isinstance(value, list):
+                return {tag: {"vr": vr, "Value": value}}
+            return {tag: {"vr": vr, "Value": [value]}}
+
+        items = []
+        for s in qs:
+            d = {}
+            d.update(_attr("0020000D", "UI", getattr(study, "study_instance_uid", "") or ""))  # StudyInstanceUID
+            d.update(_attr("0020000E", "UI", getattr(s, "series_instance_uid", "") or ""))  # SeriesInstanceUID
+            d.update(_attr("00200011", "IS", str(getattr(s, "series_number", 0) or 0)))  # SeriesNumber
+            d.update(_attr("00080060", "CS", getattr(s, "modality", "") or ""))  # Modality
+            d.update(_attr("0008103E", "LO", getattr(s, "series_description", "") or ""))  # SeriesDescription
+            try:
+                d.update(_attr("00201209", "IS", str(s.images.count())))  # NumberOfSeriesRelatedInstances
+            except Exception:
+                pass
+            items.append(d)
+
+        try:
+            log_audit(
+                request=request,
+                action="dicomweb_qido",
+                user=user,
+                facility=getattr(study, "facility", None),
+                study_instance_uid=getattr(study, "study_instance_uid", "") or "",
+                study_id=int(study.id),
+                extra={"level": "series", "query": dict(request.query_params), "count": len(items)},
+            )
+        except Exception:
+            pass
+
+        return Response(items, status=200)
+
+
+class DicomWebInstancesView(APIView):
+    """
+    Minimal QIDO-RS Instances:
+      - GET /dicomweb/studies/{StudyInstanceUID}/series/{SeriesInstanceUID}/instances/
+    """
+
+    authentication_classes = [BasicAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, study_uid: str, series_uid: str, *args, **kwargs):
+        user = request.user
+        study = Study.objects.select_related("facility").filter(study_instance_uid=study_uid).first()
+        if not study:
+            return Response({"detail": "Study not found"}, status=404)
+        if getattr(user, "is_facility_user", None) and user.is_facility_user() and getattr(user, "facility", None):
+            if study.facility != user.facility:
+                return Response({"detail": "Permission denied"}, status=403)
+
+        series = Series.objects.filter(study=study, series_instance_uid=series_uid).first()
+        if not series:
+            return Response({"detail": "Series not found"}, status=404)
+
+        qs = DicomImage.objects.filter(series=series).order_by("instance_number", "id")
+
+        def _attr(tag: str, vr: str, value):
+            if value is None or value == "":
+                return {tag: {"vr": vr}}
+            if isinstance(value, list):
+                return {tag: {"vr": vr, "Value": value}}
+            return {tag: {"vr": vr, "Value": [value]}}
+
+        items = []
+        for img in qs:
+            d = {}
+            d.update(_attr("0020000D", "UI", getattr(study, "study_instance_uid", "") or ""))  # StudyInstanceUID
+            d.update(_attr("0020000E", "UI", getattr(series, "series_instance_uid", "") or ""))  # SeriesInstanceUID
+            d.update(_attr("00080018", "UI", getattr(img, "sop_instance_uid", "") or ""))  # SOPInstanceUID
+            d.update(_attr("00200013", "IS", str(getattr(img, "instance_number", 0) or 0)))  # InstanceNumber
+            items.append(d)
+
+        try:
+            log_audit(
+                request=request,
+                action="dicomweb_qido",
+                user=user,
+                facility=getattr(study, "facility", None),
+                study_instance_uid=getattr(study, "study_instance_uid", "") or "",
+                series_instance_uid=getattr(series, "series_instance_uid", "") or "",
+                study_id=int(study.id),
+                series_id=int(series.id),
+                extra={"level": "instances", "query": dict(request.query_params), "count": len(items)},
+            )
+        except Exception:
+            pass
+
+        return Response(items, status=200)
+
+
+class DicomWebWadoInstanceView(APIView):
+    """
+    Minimal WADO-RS Retrieve:
+      - GET /dicomweb/studies/{StudyInstanceUID}/series/{SeriesInstanceUID}/instances/{SOPInstanceUID}
+      - GET /dicomweb/studies/{StudyInstanceUID}/series/{SeriesInstanceUID}/instances/{SOPInstanceUID}/metadata
+    """
+
+    authentication_classes = [BasicAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, study_uid: str, series_uid: str, instance_uid: str, *args, **kwargs):
+        user = request.user
+        study = Study.objects.select_related("facility").filter(study_instance_uid=study_uid).first()
+        if not study:
+            return Response({"detail": "Study not found"}, status=404)
+        if getattr(user, "is_facility_user", None) and user.is_facility_user() and getattr(user, "facility", None):
+            if study.facility != user.facility:
+                return Response({"detail": "Permission denied"}, status=403)
+
+        series = Series.objects.filter(study=study, series_instance_uid=series_uid).first()
+        if not series:
+            return Response({"detail": "Series not found"}, status=404)
+
+        img = DicomImage.objects.filter(series=series, sop_instance_uid=instance_uid).first()
+        if not img or not getattr(img, "file_path", None):
+            return Response({"detail": "Instance not found"}, status=404)
+
+        # If the URL ends with /metadata, return metadata JSON.
+        if request.path.rstrip("/").endswith("/metadata"):
+            try:
+                with img.file_path.open("rb") as f:
+                    ds = pydicom.dcmread(f, stop_before_pixels=True, force=True)
+                try:
+                    payload = [ds.to_json_dict()]  # pydicom>=2
+                except Exception:
+                    payload = []
+                try:
+                    log_audit(
+                        request=request,
+                        action="dicomweb_wado",
+                        user=user,
+                        facility=getattr(study, "facility", None),
+                        study_instance_uid=study_uid,
+                        series_instance_uid=series_uid,
+                        sop_instance_uid=instance_uid,
+                        study_id=int(study.id),
+                        series_id=int(series.id),
+                        image_id=int(img.id),
+                        extra={"mode": "metadata"},
+                    )
+                except Exception:
+                    pass
+                return Response(payload, status=200)
+            except Exception as e:
+                return Response({"detail": f"Failed to read metadata: {str(e)}"}, status=500)
+
+        # Default: return raw DICOM bytes
+        try:
+            with img.file_path.open("rb") as f:
+                blob = f.read()
+            resp = HttpResponse(blob, content_type="application/dicom")
+            resp["Content-Disposition"] = f'inline; filename="{instance_uid}.dcm"'
+            resp["Cache-Control"] = "private, max-age=0, no-store"
+            try:
+                log_audit(
+                    request=request,
+                    action="dicomweb_wado",
+                    user=user,
+                    facility=getattr(study, "facility", None),
+                    study_instance_uid=study_uid,
+                    series_instance_uid=series_uid,
+                    sop_instance_uid=instance_uid,
+                    study_id=int(study.id),
+                    series_id=int(series.id),
+                    image_id=int(img.id),
+                    extra={"mode": "dicom"},
+                )
+            except Exception:
+                pass
+            return resp
+        except Exception as e:
+            return Response({"detail": f"Failed to read instance: {str(e)}"}, status=500)
 

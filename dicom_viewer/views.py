@@ -5,6 +5,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
 from worklist.models import Study, Series, DicomImage, Patient, Modality
 from accounts.models import User, Facility
+from accounts.audit import log_audit
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 import json
@@ -2669,6 +2670,28 @@ def api_export_image(request, image_id):
         resp = HttpResponse(out.getvalue(), content_type=ctype)
         resp['Content-Disposition'] = f'attachment; filename="{filename}"'
         resp['Cache-Control'] = 'private, max-age=0, no-store'
+        try:
+            log_audit(
+                request=request,
+                action="viewer_export",
+                user=request.user,
+                facility=getattr(study, "facility", None),
+                study_instance_uid=getattr(study, "study_instance_uid", "") or "",
+                series_instance_uid=getattr(image.series, "series_instance_uid", "") or "",
+                sop_instance_uid=getattr(image, "sop_instance_uid", "") or "",
+                image_id=int(image.id),
+                series_id=int(image.series.id) if getattr(image, "series_id", None) else None,
+                study_id=int(study.id),
+                extra={
+                    "format": export_format,
+                    "burn_in": bool(burn_in),
+                    "window_width": window_width,
+                    "window_level": window_level,
+                    "inverted": bool(inverted),
+                },
+            )
+        except Exception:
+            pass
         return resp
     except Exception as e:
         return JsonResponse({'error': f'Export failed: {str(e)}'}, status=500)
@@ -5196,8 +5219,60 @@ def print_dicom_image(request):
                 grid_rows=(int(grid_rows) if (grid_rows and str(grid_rows).strip()) else None),
                 grid_cols=(int(grid_cols) if (grid_cols and str(grid_cols).strip()) else None),
             )
-            
-            # Print the PDF
+
+            # Optionally return the generated PDF to the browser instead of sending to CUPS.
+            download_pdf = (request.POST.get('download_pdf') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+            if download_pdf:
+                try:
+                    with open(pdf_temp_path, 'rb') as f:
+                        pdf_bytes = f.read()
+                    resp = HttpResponse(pdf_bytes, content_type='application/pdf')
+                    resp["Content-Disposition"] = f'attachment; filename="dicom_print_{timezone.now().strftime("%Y%m%d_%H%M%S")}.pdf"'
+                    resp['Cache-Control'] = 'private, max-age=0, no-store'
+                    try:
+                        # Best-effort linkage to the underlying series/study when server-rendered printing is used.
+                        _study_uid = ""
+                        _series_uid = ""
+                        _study_id = None
+                        _series_db_id = None
+                        if series_id:
+                            try:
+                                from worklist.models import Series as _Series
+                                _s = _Series.objects.select_related("study").get(id=int(series_id))
+                                _study_uid = getattr(_s.study, "study_instance_uid", "") or ""
+                                _series_uid = getattr(_s, "series_instance_uid", "") or ""
+                                _study_id = int(_s.study.id)
+                                _series_db_id = int(_s.id)
+                            except Exception:
+                                pass
+                        log_audit(
+                            request=request,
+                            action="viewer_print",
+                            user=request.user,
+                            facility=getattr(request.user, "facility", None),
+                            study_instance_uid=_study_uid,
+                            series_instance_uid=_series_uid,
+                            study_id=_study_id,
+                            series_id=_series_db_id,
+                            extra={
+                                "mode": "download_pdf",
+                                "paper_size": paper_size,
+                                "paper_type": paper_type,
+                                "print_quality": print_quality,
+                                "copies": copies,
+                                "layout_type": layout_type,
+                                "grid_rows": grid_rows,
+                                "grid_cols": grid_cols,
+                                "modality": modality,
+                            },
+                        )
+                    except Exception:
+                        pass
+                    return resp
+                except Exception as e:
+                    return JsonResponse({'success': False, 'error': f'Failed to prepare PDF download: {str(e)}'})
+
+            # Print the PDF via CUPS/lp
             print_result = send_to_printer(
                 pdf_temp_path,
                 printer_name,
@@ -5210,6 +5285,46 @@ def print_dicom_image(request):
             if print_result['success']:
                 # Log successful print
                 logger.info(f"Successfully printed DICOM image for patient {patient_name}")
+                try:
+                    _study_uid = ""
+                    _series_uid = ""
+                    _study_id = None
+                    _series_db_id = None
+                    if series_id:
+                        try:
+                            from worklist.models import Series as _Series
+                            _s = _Series.objects.select_related("study").get(id=int(series_id))
+                            _study_uid = getattr(_s.study, "study_instance_uid", "") or ""
+                            _series_uid = getattr(_s, "series_instance_uid", "") or ""
+                            _study_id = int(_s.study.id)
+                            _series_db_id = int(_s.id)
+                        except Exception:
+                            pass
+                    log_audit(
+                        request=request,
+                        action="viewer_print",
+                        user=request.user,
+                        facility=getattr(request.user, "facility", None),
+                        study_instance_uid=_study_uid,
+                        series_instance_uid=_series_uid,
+                        study_id=_study_id,
+                        series_id=_series_db_id,
+                        extra={
+                            "mode": "cups",
+                            "printer_name": printer_name,
+                            "paper_size": paper_size,
+                            "paper_type": paper_type,
+                            "print_quality": print_quality,
+                            "copies": copies,
+                            "layout_type": layout_type,
+                            "grid_rows": grid_rows,
+                            "grid_cols": grid_cols,
+                            "modality": modality,
+                            "job_id": print_result.get("job_id"),
+                        },
+                    )
+                except Exception:
+                    pass
                 return JsonResponse({
                     'success': True, 
                     'message': f'Image sent to printer successfully. Job ID: {print_result.get("job_id", "N/A")}'

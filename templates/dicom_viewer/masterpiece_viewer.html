@@ -928,6 +928,7 @@
                         <div>WW: <span id="windowWidth">400</span></div>
                         <div>WL: <span id="windowLevel">40</span></div>
                         <div>Slice: <span id="currentSlice">1</span>/<span id="totalSlices">1</span></div>
+                        <div id="frameOverlay" style="display:none;">Frame: <span id="frameValue">1</span>/<span id="totalFrames">1</span></div>
                         <div>HU: <span id="hounsfield">-</span></div>
                     </div>
                     <div class="zoom-info" id="zoomInfo">
@@ -1053,6 +1054,31 @@
                     </div>
                     <input type="range" class="custom-slider" id="sliceSlider" 
                            min="0" max="0" value="0" oninput="updateSlice(this.value)">
+                </div>
+
+                <div class="slider-group" id="frameControls" style="display:none;">
+                    <div class="slider-header">
+                        <span class="slider-label">Frame</span>
+                        <span class="slider-value"><span id="frameValue">1</span>/<span id="totalFrames">1</span></span>
+                    </div>
+                    <input type="range" class="custom-slider" id="frameSlider"
+                           min="0" max="0" value="0"
+                           oninput="updateFrame(this.value)">
+                    <div style="display:flex; gap: 8px; margin-top: 8px; align-items:center; justify-content: space-between;">
+                        <button class="btn" style="padding: 6px 10px;" onclick="toggleCineMode()" title="Play/Pause cine">
+                            <i class="fas fa-play"></i> Cine
+                        </button>
+                        <div style="display:flex; gap: 8px; align-items:center;">
+                            <span style="color: var(--text-secondary); font-size: 11px;">FPS</span>
+                            <select id="cineFpsSelect" class="btn" style="padding: 6px 10px;" onchange="setCineFps(this.value)">
+                                <option value="3">3</option>
+                                <option value="5" selected>5</option>
+                                <option value="10">10</option>
+                                <option value="15">15</option>
+                                <option value="24">24</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="slider-group">
@@ -1352,6 +1378,10 @@
         let _crosshairRotateHover = false;
         let cineMode = false;
         let cineInterval = null;
+        // Multi-frame cine (Enhanced MR/US, etc.)
+        let currentFrameIndex = 0;
+        let currentFrameCount = 1;
+        let cineFps = 5; // default FPS for both slice cine and frame cine
 
         // Fallback rendering: if raw pixel decoding isn't available (compressed transfer syntaxes, missing decoders, etc),
         // we can still display images using the server-rendered PNG endpoint.
@@ -1920,13 +1950,27 @@
         }
 
         function startCine() {
+            // Prefer frame-cine if current image is multi-frame; otherwise slice-cine for series stacks.
+            const isMultiFrame = Number(currentFrameCount || 1) > 1;
+            const fps = Math.max(1, Number(cineFps || 5));
+            const intervalMs = Math.round(1000 / fps);
+
+            if (isMultiFrame) {
+                cineInterval = setInterval(() => {
+                    currentFrameIndex = (currentFrameIndex + 1) % Math.max(1, Number(currentFrameCount || 1));
+                    _setFrameUIState();
+                    // Reload same image ID but different frame
+                    loadCurrentImage(currentImageIndex).catch(() => {});
+                }, intervalMs);
+                return;
+            }
+
             if (imageData.length <= 1) return;
-            
             cineInterval = setInterval(() => {
                 currentImageIndex = (currentImageIndex + 1) % imageData.length;
                 document.getElementById('sliceSlider').value = currentImageIndex;
                 updateSlice(currentImageIndex);
-            }, 200); // 5 FPS
+            }, intervalMs);
         }
 
         function stopCine() {
@@ -1934,6 +1978,26 @@
                 clearInterval(cineInterval);
                 cineInterval = null;
             }
+        }
+
+        function setCineFps(v) {
+            try {
+                const n = Number(v);
+                if (Number.isFinite(n) && n > 0) cineFps = n;
+            } catch (e) {}
+            // If cine is already running, restart with new FPS.
+            if (cineMode) {
+                stopCine();
+                startCine();
+            }
+        }
+
+        function updateFrame(v) {
+            const n = Math.max(1, Number(currentFrameCount || 1));
+            currentFrameIndex = Math.max(0, Math.min(n - 1, Number(v || 0)));
+            _setFrameUIState();
+            // Reload the same image ID but different frame
+            loadCurrentImage(currentImageIndex).catch(() => {});
         }
 
         function toggleMPRView() {
@@ -2340,7 +2404,8 @@
         }
 
         async function _fetchImagePayloadBinary(imageId, signal) {
-            const url = `/dicom-viewer/api/image/${imageId}/data/?packed=bin`;
+            const frameQs = (Number(currentFrameIndex || 0) > 0) ? `&frame=${encodeURIComponent(String(Number(currentFrameIndex || 0)))}` : '';
+            const url = `/dicom-viewer/api/image/${imageId}/data/?packed=bin${frameQs}`;
             const resp = await fetch(url, {
                 signal,
                 credentials: 'same-origin',
@@ -2361,6 +2426,8 @@
             const ps = _parsePixelSpacingHeader(resp.headers);
             const st = _parseHeaderNum(resp.headers, 'X-Noctis-Slice-Thickness');
             const modality = _parseHeaderStr(resp.headers, 'X-Noctis-Modality');
+            const nFrames = _parseHeaderNum(resp.headers, 'X-Noctis-Number-Of-Frames');
+            const fIdx = _parseHeaderNum(resp.headers, 'X-Noctis-Frame-Index');
 
             const buf = await resp.arrayBuffer();
             const pixel_data = _decodeArrayBufferToFloat32LE(buf);
@@ -2374,6 +2441,8 @@
                 pixel_spacing: ps != null ? ps : undefined,
                 slice_thickness: st != null ? st : undefined,
                 modality: modality != null ? modality : undefined,
+                number_of_frames: nFrames != null ? nFrames : undefined,
+                frame_index: fIdx != null ? fIdx : undefined,
                 pixel_data,
                 pixel_data_b64: null,
                 pixel_dtype: 'float32',
@@ -2382,7 +2451,8 @@
         }
 
         async function _fetchImagePayloadJsonPacked(imageId, signal) {
-            const url = `/dicom-viewer/api/image/${imageId}/data/?packed=1`;
+            const frameQs = (Number(currentFrameIndex || 0) > 0) ? `&frame=${encodeURIComponent(String(Number(currentFrameIndex || 0)))}` : '';
+            const url = `/dicom-viewer/api/image/${imageId}/data/?packed=1${frameQs}`;
             const response = await fetch(url, {
                 signal,
                 credentials: 'same-origin',
@@ -2445,6 +2515,10 @@
             }
 
             // First pass: omit invert so backend can apply MONOCHROME1 defaults.
+            // Preserve multi-frame selection if applicable.
+            try {
+                if (Number(currentFrameIndex || 0) > 0) params.set('frame', String(Number(currentFrameIndex || 0)));
+            } catch (e) {}
             let url = `/dicom-viewer/api/image/${encodeURIComponent(id)}/display/${params.toString() ? `?${params.toString()}` : ''}`;
             let resp = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
             let data = await resp.json().catch(() => ({}));
@@ -2551,8 +2625,40 @@
             updateSliders();
             lastLoadedImagePayload = data;
             lastLoadedImageId = imageId;
+            try {
+                // Multi-frame: keep UI state in sync with backend payload.
+                const n = Number(data && (data.number_of_frames ?? data.NumberOfFrames ?? data.frames));
+                currentFrameCount = (Number.isFinite(n) && n >= 1) ? Math.floor(n) : 1;
+                const fi = Number(data && (data.frame_index ?? data.frame));
+                if (Number.isFinite(fi) && fi >= 0) currentFrameIndex = Math.floor(fi);
+                _setFrameUIState();
+            } catch (e) {}
             renderDicomImage(data);
             _scheduleMPRRefresh();
+        }
+
+        function _setFrameUIState() {
+            const wrap = document.getElementById('frameControls');
+            const slider = document.getElementById('frameSlider');
+            const val = document.getElementById('frameValue');
+            const total = document.getElementById('totalFrames');
+            const overlay = document.getElementById('frameOverlay');
+            if (!wrap || !slider || !val || !total) return;
+            const n = Math.max(1, Number(currentFrameCount || 1));
+            if (n <= 1) {
+                wrap.style.display = 'none';
+                if (overlay) overlay.style.display = 'none';
+                currentFrameIndex = 0;
+                return;
+            }
+            wrap.style.display = 'block';
+            if (overlay) overlay.style.display = 'block';
+            slider.min = '0';
+            slider.max = String(n - 1);
+            currentFrameIndex = Math.max(0, Math.min(n - 1, Number(currentFrameIndex || 0)));
+            slider.value = String(currentFrameIndex);
+            val.textContent = String(currentFrameIndex + 1);
+            total.textContent = String(n);
         }
 
         function scheduleLoadCurrentImage(index = currentImageIndex) {

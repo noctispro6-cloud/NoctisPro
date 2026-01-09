@@ -799,6 +799,7 @@ def api_image_data(request, image_id):
     warnings = {}
     ds = None
     pixel_array = None
+    number_of_frames = 1
 
     # Read DICOM dataset (prefer storage-safe open over filesystem path).
     #
@@ -855,6 +856,11 @@ def api_image_data(request, image_id):
             except Exception:
                 pass
 
+            try:
+                number_of_frames = int(getattr(ds, 'NumberOfFrames', 1) or 1)
+            except Exception:
+                number_of_frames = 1
+
             # For color images, prefer server-rendered PNG path (client renderer is grayscale-only).
             if _is_color_pixel_array(pixel_array):
                 warnings["color_mode"] = "server_render"
@@ -881,6 +887,12 @@ def api_image_data(request, image_id):
             except Exception as _e:
                 pixel_decode_error = str(_e) or str(e)
                 pixel_array = None
+
+    if ds is not None:
+        try:
+            number_of_frames = int(getattr(ds, 'NumberOfFrames', number_of_frames) or 1)
+        except Exception:
+            pass
 
     # Normalize pixel array shape to a 2D grayscale frame (best-effort).
     # The canvas-based viewer expects rows*cols samples per image.
@@ -1000,6 +1012,8 @@ def api_image_data(request, image_id):
             resp['X-Noctis-Window-Center'] = str(float(window_center) if window_center is not None else 40.0)
             resp['X-Noctis-Pixel-DType'] = 'float32'
             resp['X-Noctis-Pixel-Endian'] = 'little'
+            resp['X-Noctis-Number-Of-Frames'] = str(int(number_of_frames) if number_of_frames else 1)
+            resp['X-Noctis-Frame-Index'] = str(int(frame_index))
             try:
                 ps = _jsonify_dicom_value(getattr(ds, 'PixelSpacing', None)) if ds is not None else None
                 if ps is not None:
@@ -1046,6 +1060,9 @@ def api_image_data(request, image_id):
             'photometric_interpretation': _jsonify_dicom_value(getattr(ds, 'PhotometricInterpretation', None)) if ds is not None else None,
             'bits_allocated': _jsonify_dicom_value(getattr(ds, 'BitsAllocated', None)) if ds is not None else None,
             'bits_stored': _jsonify_dicom_value(getattr(ds, 'BitsStored', None)) if ds is not None else None,
+            'number_of_frames': int(number_of_frames) if number_of_frames else 1,
+            'frame_index': int(frame_index),
+            'is_color': bool(str(getattr(ds, 'PhotometricInterpretation', '') or '').upper().startswith(('RGB', 'YBR'))) if ds is not None else False,
         }
 
         if packed_b64:
@@ -1073,6 +1090,9 @@ def api_image_data(request, image_id):
             # Even without pixels, expose sensible defaults so the server-render fallback picks good W/L.
             'window_width': float(window_width) if window_width is not None else (2500.0 if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG') else 400.0),
             'window_center': float(window_center) if window_center is not None else (1200.0 if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG') else 40.0),
+            'number_of_frames': int(number_of_frames) if number_of_frames else 1,
+            'frame_index': int(frame_index),
+            'is_color': bool(str(getattr(ds, 'PhotometricInterpretation', '') or '').upper().startswith(('RGB', 'YBR'))) if ds is not None else False,
         })
 
     if pixel_decode_error or warnings:

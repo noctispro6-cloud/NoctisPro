@@ -833,12 +833,15 @@
                 if (data.success) {
                     studiesData = data.studies || [];
                     filteredData = [...studiesData];
+
+                    // Make modality filter reflect what is actually in the system (production-safe).
+                    _populateModalityFilterFromData(studiesData);
                     
                     if (studiesData.length === 0) {
                         showNoDataMessage();
                         showToast('No studies found. Upload DICOM files to get started.', 'info', 5000);
                     } else {
-                        renderStudiesTable();
+                        applyFilters(); // render with any active filters
                         updateStatusCounts();
                         showToast(`Loaded ${studiesData.length} studies`, 'success', 2000);
                     }
@@ -1267,9 +1270,8 @@
         }
 
         function resetFilters() {
-            // Reset to current date
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('dateFilter').value = today;
+            // Reset all filters (do NOT force date=Today; that hides older studies and breaks search expectations)
+            document.getElementById('dateFilter').value = '';
             document.getElementById('statusFilter').value = '';
             document.getElementById('modalityFilter').value = '';
             document.getElementById('priorityFilter').value = '';
@@ -1314,10 +1316,51 @@
         }
 
         // Enhanced initialization with better auto-refresh and upload detection
+        function _populateModalityFilterFromData(items) {
+            const el = document.getElementById('modalityFilter');
+            if (!el) return;
+            const prev = el.value || '';
+            const codes = new Set();
+            try {
+                (items || []).forEach((s) => {
+                    const m = (s && s.modality) ? String(s.modality).trim().toUpperCase() : '';
+                    if (m) codes.add(m);
+                });
+            } catch (e) {}
+
+            const labelMap = {
+                CT: 'CT',
+                MR: 'MRI',
+                DX: 'X-Ray',
+                CR: 'X-Ray',
+                DR: 'X-Ray',
+                XR: 'X-Ray',
+                US: 'Ultrasound',
+                NM: 'Nuclear Medicine',
+                PT: 'PET',
+                MG: 'Mammography',
+                XA: 'Angio',
+                RF: 'Fluoro',
+            };
+
+            // Rebuild options: keep "All" first
+            el.innerHTML = '<option value="">All Modalities</option>';
+            Array.from(codes).sort().forEach((code) => {
+                const opt = document.createElement('option');
+                opt.value = code;
+                opt.textContent = labelMap[code] ? `${labelMap[code]} (${code})` : code;
+                el.appendChild(opt);
+            });
+
+            // Preserve selection when possible
+            if (prev && Array.from(codes).includes(prev.toUpperCase())) {
+                el.value = prev.toUpperCase();
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
-            // Set current date in date filter
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('dateFilter').value = today;
+            // Leave date filter empty by default so the dashboard shows all studies.
+            document.getElementById('dateFilter').value = '';
             
             // Load initial data
             loadStudiesData();

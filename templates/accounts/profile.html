@@ -68,7 +68,9 @@
               <thead>
                 <tr>
                   <th>Login time</th>
-                  <th>IP</th>
+                  {% if user.is_admin or user.is_staff or user.is_superuser %}
+                    <th>IP</th>
+                  {% endif %}
                   <th>Active</th>
                 </tr>
               </thead>
@@ -76,7 +78,9 @@
                 {% for s in recent_sessions %}
                 <tr>
                   <td>{{ s.login_time|date:"Y-m-d H:i" }}</td>
-                  <td>{{ s.ip_address }}</td>
+                  {% if user.is_admin or user.is_staff or user.is_superuser %}
+                    <td>{{ s.ip_address }}</td>
+                  {% endif %}
                   <td>{% if s.is_active %}Yes{% else %}No{% endif %}</td>
                 </tr>
                 {% endfor %}

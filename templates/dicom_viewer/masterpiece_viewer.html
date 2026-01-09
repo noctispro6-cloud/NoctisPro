@@ -929,9 +929,17 @@
                         <div class="mpr-label">3D Bone Reconstruction</div>
                         <canvas id="bone3DCanvas"></canvas>
                         <div class="controls-3d" id="controls3D">
-                            <button class="control-3d-btn" onclick="reset3DView()">Reset</button>
-                            <button class="control-3d-btn" onclick="toggle3DRotation()">Auto Rotate</button>
-                            <button class="control-3d-btn" onclick="export3DModel()">Export</button>
+                            <button class="control-3d-btn" onclick="reset3DView()" title="Reset view">Reset</button>
+                            <button class="control-3d-btn" onclick="toggle3DRotation()" title="Toggle auto-rotate">Auto Rotate</button>
+                            <button class="control-3d-btn" onclick="toggleBoneWireframe()" title="Toggle wireframe">Wire</button>
+                            <button class="control-3d-btn" onclick="boneZoomIn()" title="Zoom in">+</button>
+                            <button class="control-3d-btn" onclick="boneZoomOut()" title="Zoom out">−</button>
+                            <button class="control-3d-btn" onclick="boneRotate(0,-1)" title="Rotate left">⟲</button>
+                            <button class="control-3d-btn" onclick="boneRotate(0,1)" title="Rotate right">⟳</button>
+                            <button class="control-3d-btn" onclick="boneRotate(-1,0)" title="Tilt up">↑</button>
+                            <button class="control-3d-btn" onclick="boneRotate(1,0)" title="Tilt down">↓</button>
+                            <button class="control-3d-btn" onclick="boneCenter()" title="Center/pan reset">Center</button>
+                            <button class="control-3d-btn" onclick="export3DModel()" title="Export STL">Export</button>
                         </div>
                     </div>
                 </div>
@@ -5679,34 +5687,74 @@
 
             const _isPanGesture = (e) => (e.button === 1 || e.button === 2 || e.shiftKey);
 
-            c.addEventListener('mousedown', (e) => {
+            // Pointer events (mouse + touch). Supports:
+            // - 1 pointer: rotate (drag) or pan (shift/middle/right mouse)
+            // - 2 pointers (touch): pinch zoom + pan
+            bone3D._ptr = new Map(); // pointerId -> {x,y}
+            bone3D._pinchDist = null;
+
+            c.addEventListener('pointerdown', (e) => {
                 if (viewMode !== 'mpr') return;
+                try { c.setPointerCapture(e.pointerId); } catch (_) {}
+                bone3D._ptr.set(e.pointerId, { x: e.clientX, y: e.clientY });
                 bone3D.dragging = true;
                 bone3D.wasDragged = false;
                 bone3D.dragMode = _isPanGesture(e) ? 'pan' : 'rotate';
-                bone3D.lastX = e.clientX;
-                bone3D.lastY = e.clientY;
             });
-            window.addEventListener('mouseup', () => {
-                bone3D.dragging = false;
-                bone3D.dragMode = null;
-            });
-            window.addEventListener('mousemove', (e) => {
-                if (!bone3D.dragging || !bone3D.mesh) return;
-                const dx = e.clientX - bone3D.lastX;
-                const dy = e.clientY - bone3D.lastY;
-                bone3D.lastX = e.clientX;
-                bone3D.lastY = e.clientY;
-                if (Math.abs(dx) + Math.abs(dy) > 2) {
-                    bone3D.wasDragged = true;
+            c.addEventListener('pointerup', (e) => {
+                bone3D._ptr.delete(e.pointerId);
+                if (bone3D._ptr.size === 0) {
+                    bone3D.dragging = false;
+                    bone3D.dragMode = null;
+                    bone3D._pinchDist = null;
                 }
-                if (bone3D.dragMode === 'pan') {
-                    // Pan in screen pixels; scaled to model size in render loop.
-                    bone3D.panX += dx;
-                    bone3D.panY -= dy;
+            });
+            c.addEventListener('pointercancel', (e) => {
+                bone3D._ptr.delete(e.pointerId);
+                if (bone3D._ptr.size === 0) {
+                    bone3D.dragging = false;
+                    bone3D.dragMode = null;
+                    bone3D._pinchDist = null;
+                }
+            });
+            c.addEventListener('pointermove', (e) => {
+                if (!bone3D.dragging || !bone3D.mesh) return;
+                if (!bone3D._ptr.has(e.pointerId)) return;
+                const prev = bone3D._ptr.get(e.pointerId);
+                const cur = { x: e.clientX, y: e.clientY };
+                bone3D._ptr.set(e.pointerId, cur);
+
+                // Two-pointer touch: pinch zoom + pan
+                if (bone3D._ptr.size >= 2) {
+                    const pts = Array.from(bone3D._ptr.values()).slice(0, 2);
+                    const a = pts[0], b = pts[1];
+                    const dx = b.x - a.x;
+                    const dy = b.y - a.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (bone3D._pinchDist == null) bone3D._pinchDist = dist;
+                    const ratio = dist / Math.max(1, bone3D._pinchDist);
+                    if (Number.isFinite(ratio) && Math.abs(ratio - 1) > 0.01) {
+                        bone3D.targetZoom = Math.max(0.25, Math.min(6.0, (Number(bone3D.targetZoom || 1.0)) * ratio));
+                        bone3D._pinchDist = dist;
+                        bone3D.wasDragged = true;
+                    }
+                    // Pan: best-effort using this pointer's delta
+                    bone3D.panX += (cur.x - prev.x);
+                    bone3D.panY -= (cur.y - prev.y);
+                    return;
+                }
+                bone3D._pinchDist = null;
+
+                // Single pointer rotate/pan
+                const dx1 = cur.x - prev.x;
+                const dy1 = cur.y - prev.y;
+                if (Math.abs(dx1) + Math.abs(dy1) > 2) bone3D.wasDragged = true;
+                if (bone3D.dragMode === 'pan' || e.pointerType === 'touch') {
+                    bone3D.panX += dx1;
+                    bone3D.panY -= dy1;
                 } else {
-                    bone3D.targetRotY += dx * 0.01;
-                    bone3D.targetRotX += dy * 0.01;
+                    bone3D.targetRotY += dx1 * 0.01;
+                    bone3D.targetRotX += dy1 * 0.01;
                 }
             });
             c.addEventListener('wheel', (e) => {
@@ -5731,9 +5779,18 @@
             const geom = new THREE.BufferGeometry();
             const pos = new Float32Array(vertices.length * 3);
             for (let i = 0; i < vertices.length; i++) {
-                pos[i * 3 + 0] = vertices[i][0];
-                pos[i * 3 + 1] = vertices[i][1];
-                pos[i * 3 + 2] = vertices[i][2];
+                // Backend marching cubes vertices are in (z, y, x) voxel space.
+                // Map to Three.js as:
+                // - X: x (columns)
+                // - Y: z (slices)   [so superior/inferior feels "up/down"]
+                // - Z: y (rows)
+                // Also flip Y so the initial orientation matches the viewer's "superior at top" convention.
+                const vz = vertices[i][0];
+                const vy = vertices[i][1];
+                const vx = vertices[i][2];
+                pos[i * 3 + 0] = vx;
+                pos[i * 3 + 1] = -vz;
+                pos[i * 3 + 2] = vy;
             }
             const idx = new Uint32Array(faces.length * 3);
             for (let i = 0; i < faces.length; i++) {
@@ -5849,6 +5906,48 @@
                 renderBoneFrame();
             };
             bone3D.animRaf = requestAnimationFrame(tick);
+        }
+
+        // Bone controls (buttons in the 3D quadrant)
+        function boneRotate(dPitch, dYaw) {
+            try {
+                if (!bone3D) return;
+                const step = 0.25; // radians per click (fast but controllable)
+                bone3D.targetRotX = Number(bone3D.targetRotX || 0) + (Number(dPitch || 0) * step);
+                bone3D.targetRotY = Number(bone3D.targetRotY || 0) + (Number(dYaw || 0) * step);
+            } catch (e) {}
+        }
+        function boneZoomIn() {
+            try {
+                bone3D.targetZoom = Math.max(0.25, Math.min(6.0, (Number(bone3D.targetZoom || 1.0)) * 1.2));
+            } catch (e) {}
+        }
+        function boneZoomOut() {
+            try {
+                bone3D.targetZoom = Math.max(0.25, Math.min(6.0, (Number(bone3D.targetZoom || 1.0)) * 0.85));
+            } catch (e) {}
+        }
+        function boneCenter() {
+            try {
+                bone3D.panX = 0;
+                bone3D.panY = 0;
+                bone3D.targetRotX = 0;
+                bone3D.targetRotY = 0;
+                bone3D.targetZoom = 1.0;
+                if (bone3D.mesh) {
+                    bone3D.mesh.position.set(0, 0, 0);
+                    bone3D.mesh.rotation.set(0, 0, 0);
+                }
+                renderBoneFrame();
+            } catch (e) {}
+        }
+        function toggleBoneWireframe() {
+            try {
+                if (!bone3D || !bone3D.mesh || !bone3D.mesh.material) return;
+                bone3D.mesh.material.wireframe = !bone3D.mesh.material.wireframe;
+                bone3D.mesh.material.needsUpdate = true;
+                renderBoneFrame();
+            } catch (e) {}
         }
 
         function stopBoneAnimationLoop() {

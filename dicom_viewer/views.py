@@ -5076,6 +5076,9 @@ def print_dicom_image(request):
         printer_name = request.POST.get('printer_name', '')
         layout_type = request.POST.get('layout_type', 'single')
         print_medium = request.POST.get('print_medium', 'paper')  # paper or film
+        # Grid controls (used by 'grid' / modality-specific grids)
+        grid_rows = request.POST.get('grid_rows')
+        grid_cols = request.POST.get('grid_cols')
         
         # Get patient and study information
         patient_name = request.POST.get('patient_name', 'Unknown Patient')
@@ -5180,15 +5183,28 @@ def print_dicom_image(request):
         try:
             # Create PDF with medical image and metadata using selected layout
             create_medical_print_pdf_enhanced(
-                tmp_paths, pdf_temp_path, paper_size, layout_type, 
-                print_medium, modality, patient_name, study_date, 
-                series_description, institution_name
+                tmp_paths,
+                pdf_temp_path,
+                paper_size,
+                layout_type,
+                print_medium,
+                modality,
+                patient_name,
+                study_date,
+                series_description,
+                institution_name,
+                grid_rows=(int(grid_rows) if (grid_rows and str(grid_rows).strip()) else None),
+                grid_cols=(int(grid_cols) if (grid_cols and str(grid_cols).strip()) else None),
             )
             
             # Print the PDF
             print_result = send_to_printer(
-                pdf_temp_path, printer_name, paper_type, 
-                print_quality, copies
+                pdf_temp_path,
+                printer_name,
+                paper_size,
+                paper_type,
+                print_quality,
+                copies,
             )
             
             if print_result['success']:
@@ -5218,7 +5234,7 @@ def print_dicom_image(request):
         logger.error(f"Error in print_dicom_image: {str(e)}")
         return JsonResponse({'success': False, 'error': str(e)})
 
-def create_medical_print_pdf_enhanced(image_paths, output_path, paper_size, layout_type, print_medium, modality, patient_name, study_date, series_description, institution_name):
+def create_medical_print_pdf_enhanced(image_paths, output_path, paper_size, layout_type, print_medium, modality, patient_name, study_date, series_description, institution_name, grid_rows: int | None = None, grid_cols: int | None = None):
     """
     Create a PDF optimized for medical image printing with multiple layout options for different modalities.
     Supports both paper and film printing with modality-specific layouts.
@@ -5271,16 +5287,108 @@ def create_medical_print_pdf_enhanced(image_paths, output_path, paper_size, layo
         )
     elif layout_type == 'grid':
         # Generic grid controlled by optional rows/cols (fallback: 3x3)
+        try:
+            r = int(grid_rows) if grid_rows is not None else 3
+        except Exception:
+            r = 3
+        try:
+            cl = int(grid_cols) if grid_cols is not None else 3
+        except Exception:
+            cl = 3
         create_grid_layout(
             c,
             images,
             width,
             height,
-            rows=3,
-            cols=3,
+            rows=max(1, min(8, r)),
+            cols=max(1, min(8, cl)),
             margin=20 if print_medium == 'film' else 40,
             header_lines=header_lines,
             footer_text=footer_text + " | Grid",
+        )
+    elif layout_type in ('ct_mpr_trio', 'mri_mpr_trio'):
+        # 1x3 layout (axial/sagittal/coronal) – expects 3 images
+        create_grid_layout(
+            c,
+            images[:3],
+            width,
+            height,
+            rows=1,
+            cols=3,
+            margin=20 if print_medium == 'film' else 35,
+            header_lines=header_lines,
+            footer_text=footer_text + " | MPR Trio",
+            cell_labels=['Axial', 'Sagittal', 'Coronal'],
+        )
+    elif layout_type == 'mri_sequences':
+        # Common MR “sheet” feel: 2x2 or 3x3 depending on how many images are provided
+        n = len(images)
+        rows = 2 if n <= 4 else 3
+        cols = 2 if n <= 4 else 3
+        create_grid_layout(
+            c,
+            images[: (rows * cols)],
+            width,
+            height,
+            rows=rows,
+            cols=cols,
+            margin=20 if print_medium == 'film' else 35,
+            header_lines=header_lines,
+            footer_text=footer_text + " | MRI Sequences",
+        )
+    elif layout_type == 'xray_pa_lateral':
+        # PA + Lateral (1x2)
+        create_grid_layout(
+            c,
+            images[:2],
+            width,
+            height,
+            rows=1,
+            cols=2,
+            margin=20 if print_medium == 'film' else 35,
+            header_lines=header_lines,
+            footer_text=footer_text + " | PA & Lateral",
+            cell_labels=['PA', 'Lateral'],
+        )
+    elif layout_type == 'mammo_cc_mlo':
+        # CC + MLO (1x2)
+        create_grid_layout(
+            c,
+            images[:2],
+            width,
+            height,
+            rows=1,
+            cols=2,
+            margin=20 if print_medium == 'film' else 35,
+            header_lines=header_lines,
+            footer_text=footer_text + " | CC & MLO",
+            cell_labels=['CC', 'MLO'],
+        )
+    elif layout_type == 'us_measurements':
+        # Ultrasound sheet: 2x2 (4 frames)
+        create_grid_layout(
+            c,
+            images[:4],
+            width,
+            height,
+            rows=2,
+            cols=2,
+            margin=20 if print_medium == 'film' else 35,
+            header_lines=header_lines,
+            footer_text=footer_text + " | US",
+        )
+    elif layout_type == 'pet_fusion':
+        # PET fusion sheet: 2x2 (PET/CT/fusion/ROI) – generic
+        create_grid_layout(
+            c,
+            images[:4],
+            width,
+            height,
+            rows=2,
+            cols=2,
+            margin=20 if print_medium == 'film' else 35,
+            header_lines=header_lines,
+            footer_text=footer_text + " | PET Fusion",
         )
     elif layout_type == 'single':
         create_single_image_layout(c, images[0], width, height, print_medium, modality, patient_name, study_date, series_description, institution_name)
@@ -5584,14 +5692,14 @@ def get_print_layouts(request):
         'modality': modality
     })
 
-def send_to_printer(pdf_path, printer_name, paper_type, print_quality, copies):
+def send_to_printer(pdf_path, printer_name, paper_size, paper_type, print_quality, copies):
     """
     Send PDF to printer with optimized settings for glossy paper.
     """
     try:
         if cups is None:
             # Fallback to lp command if pycups is not available
-            return send_to_printer_fallback(pdf_path, printer_name, paper_type, print_quality, copies)
+            return send_to_printer_fallback(pdf_path, printer_name, paper_size, paper_type, print_quality, copies)
         
         # Initialize CUPS connection
         conn = cups.Connection()
@@ -5611,7 +5719,8 @@ def send_to_printer(pdf_path, printer_name, paper_type, print_quality, copies):
         # Set print options optimized for medical images and glossy paper
         print_options = {
             'copies': str(copies),
-            'media': 'A4' if paper_type == 'A4' else 'Letter',
+            # IMPORTANT: `paper_type` is glossy/matte/etc; `paper_size` is A4/Letter/film sizes.
+            'media': str(paper_size).upper(),
             'print-quality': '5' if print_quality == 'high' else '4',  # Highest quality
             'print-color-mode': 'color',
             'orientation-requested': '3',  # Portrait
@@ -5642,9 +5751,9 @@ def send_to_printer(pdf_path, printer_name, paper_type, print_quality, copies):
     except Exception as e:
         logger.error(f"CUPS printing error: {str(e)}")
         # Fallback to command line printing
-        return send_to_printer_fallback(pdf_path, printer_name, paper_type, print_quality, copies)
+        return send_to_printer_fallback(pdf_path, printer_name, paper_size, paper_type, print_quality, copies)
 
-def send_to_printer_fallback(pdf_path, printer_name, paper_type, print_quality, copies):
+def send_to_printer_fallback(pdf_path, printer_name, paper_size, paper_type, print_quality, copies):
     """
     Fallback printing method using lp command.
     """
@@ -5663,6 +5772,9 @@ def send_to_printer_fallback(pdf_path, printer_name, paper_type, print_quality, 
         if paper_type == 'glossy':
             cmd.extend(['-o', 'media-type=photographic-glossy'])
             cmd.extend(['-o', 'print-quality=5'])
+        # Media size (best-effort; depends on printer PPD)
+        if paper_size:
+            cmd.extend(['-o', f'media={str(paper_size).upper()}'])
         
         cmd.append(pdf_path)
         

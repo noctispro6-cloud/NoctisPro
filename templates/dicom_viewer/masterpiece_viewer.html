@@ -317,6 +317,30 @@
             backdrop-filter: blur(10px);
         }
 
+        /* Collapsible right-panel sections (keeps existing IDs/buttons intact) */
+        details.panel-section {
+            padding: 0;
+            overflow: hidden;
+        }
+        details.panel-section > summary.panel-title {
+            list-style: none;
+            cursor: pointer;
+            user-select: none;
+            padding: 16px 18px;
+            margin: 0;
+        }
+        details.panel-section > summary.panel-title::-webkit-details-marker { display: none; }
+        details.panel-section > summary.panel-title::after {
+            content: '▾';
+            margin-left: auto;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+        details.panel-section:not([open]) > summary.panel-title::after { content: '▸'; }
+        details.panel-section .panel-body {
+            padding: 0 18px 16px 18px;
+        }
+
         .panel-title {
             font-size: 16px;
             font-weight: 600;
@@ -954,11 +978,12 @@
         <!-- Right Panel -->
         <div class="right-panel">
             <!-- Series Selection -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section" open>
+                <summary class="panel-title">
                     <i class="fas fa-list"></i>
                     Series
-                </div>
+                </summary>
+                <div class="panel-body">
                 <div class="series-nav">
                     <button class="series-nav-btn" id="prevSeriesBtn" type="button" title="Previous series ([)">
                         <i class="fas fa-chevron-left"></i>
@@ -975,14 +1000,16 @@
                         <div class="series-details">Load a study first</div>
                     </div>
                 </div>
-            </div>
+                </div>
+            </details>
 
             <!-- Window/Level Controls -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section" open>
+                <summary class="panel-title">
                     <i class="fas fa-adjust"></i>
                     Window/Level
-                </div>
+                </summary>
+                <div class="panel-body">
                 
                 <div class="slider-group">
                     <div class="slider-header">
@@ -1008,14 +1035,16 @@
                     <button class="preset-btn" onclick="applyPreset('soft')">Soft Tissue</button>
                     <button class="preset-btn" onclick="applyPreset('brain')">Brain</button>
                 </div>
-            </div>
+                </div>
+            </details>
 
             <!-- Navigation -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section" open>
+                <summary class="panel-title">
                     <i class="fas fa-arrows-alt"></i>
                     Navigation
-                </div>
+                </summary>
+                <div class="panel-body">
                 
                 <div class="slider-group">
                     <div class="slider-header">
@@ -1034,14 +1063,16 @@
                     <input type="range" class="custom-slider" id="zoomSlider" 
                            min="25" max="500" value="100" oninput="updateZoom(this.value)">
                 </div>
-            </div>
+                </div>
+            </details>
 
             <!-- 3D Reconstruction Controls -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section" open>
+                <summary class="panel-title">
                     <i class="fas fa-cube"></i>
                     3D Reconstruction
-                </div>
+                </summary>
+                <div class="panel-body">
                 
                 <div class="recon-controls">
                     <button class="recon-btn" onclick="generateMPR()">
@@ -1081,14 +1112,16 @@
                         </label>
                     </div>
                 </div>
-            </div>
+                </div>
+            </details>
 
             <!-- Image Information -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section">
+                <summary class="panel-title">
                     <i class="fas fa-info-circle"></i>
                     Image Info
-                </div>
+                </summary>
+                <div class="panel-body">
                 
                 <div class="info-card">
                     <div class="info-label">Dimensions</div>
@@ -1109,14 +1142,16 @@
                     <div class="info-label">Institution</div>
                     <div class="info-value" id="institutionName">-</div>
                 </div>
-            </div>
+                </div>
+            </details>
 
             <!-- Measurements -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section">
+                <summary class="panel-title">
                     <i class="fas fa-ruler-combined"></i>
                     Measurements
-                </div>
+                </summary>
+                <div class="panel-body">
                 
                 <button class="clear-btn" onclick="clearAllMeasurements()">
                     <i class="fas fa-trash"></i> Clear All
@@ -1127,14 +1162,16 @@
                         No measurements yet. Use the measure tool to add measurements.
                     </div>
                 </div>
-            </div>
+                </div>
+            </details>
 
             <!-- Related References -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section">
+                <summary class="panel-title">
                     <i class="fas fa-book-medical"></i>
                     Related References
-                </div>
+                </summary>
+                <div class="panel-body">
                 <div style="display:flex; gap:6px; margin-bottom:8px;">
                     <input id="refQuery" class="form-control" placeholder="e.g., CT head hemorrhage" style="flex:1;">
                     <button class="btn" onclick="fetchReferences()"><i class="fas fa-search"></i></button>
@@ -1142,7 +1179,8 @@
                 <div id="referencesList" style="max-height:180px; overflow:auto; font-size:12px; color: var(--text-secondary);">
                     Enter a query or load a study to see suggestions.
                 </div>
-            </div>
+                </div>
+            </details>
         </div>
     </div>
 

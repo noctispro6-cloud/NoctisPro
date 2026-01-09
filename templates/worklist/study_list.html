@@ -160,7 +160,8 @@
 			<option value="{{ m.code }}" {% if modality_filter == m.code %}selected{% endif %}>{{ m.code }}</option>
 			{% endfor %}
 		</select>
-		<button type="button" class="btn-control" id="applyFilters" title="Apply Filters"><i class="fas fa-filter"></i></button>
+		<button type="button" class="btn-control" id="applyFilters" title="Apply filters"><i class="fas fa-filter"></i></button>
+		<button type="button" class="btn-control" id="resetFilters" title="Clear filters"><i class="fas fa-filter-circle-xmark"></i></button>
 	</div>
 
 	<div class="table-card">
@@ -324,6 +325,20 @@
 		}
 		document.getElementById('applyFilters').addEventListener('click', go);
 		document.getElementById('search').addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); go(); }});
+		// Auto-apply on dropdown changes (matches dashboard feel)
+		['status','priority','modality'].forEach((id) => {
+			const el = document.getElementById(id);
+			if (el) el.addEventListener('change', go);
+		});
+		// Reset filters
+		const resetBtn = document.getElementById('resetFilters');
+		if (resetBtn) resetBtn.addEventListener('click', function(){
+			document.getElementById('search').value = '';
+			document.getElementById('status').value = '';
+			document.getElementById('priority').value = '';
+			document.getElementById('modality').value = '';
+			location.search = '';
+		});
 	})();
 
 	// Delete study functionality (admin/radiologist only)

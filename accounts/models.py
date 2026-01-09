@@ -76,3 +76,47 @@ class UserSession(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.login_time}"
+
+
+class AuditLog(models.Model):
+    """
+    Lightweight audit trail for PHI-accessing actions.
+    This is intended for operational/forensic visibility (who accessed what, when, from where).
+    """
+
+    ACTION_CHOICES = (
+        ("dicomweb_stow", "DICOMweb STOW-RS upload"),
+        ("dicomweb_qido", "DICOMweb QIDO-RS query"),
+        ("dicomweb_wado", "DICOMweb WADO-RS retrieve"),
+        ("viewer_export", "Viewer export"),
+        ("viewer_print", "Viewer print"),
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="audit_logs")
+    facility = models.ForeignKey(Facility, on_delete=models.SET_NULL, null=True, blank=True, related_name="audit_logs")
+    action = models.CharField(max_length=40, choices=ACTION_CHOICES)
+
+    # Resource pointers (UIDs preferred; ids allowed)
+    study_instance_uid = models.CharField(max_length=128, blank=True, default="")
+    series_instance_uid = models.CharField(max_length=128, blank=True, default="")
+    sop_instance_uid = models.CharField(max_length=128, blank=True, default="")
+    image_id = models.BigIntegerField(null=True, blank=True)
+    series_id = models.BigIntegerField(null=True, blank=True)
+    study_id = models.BigIntegerField(null=True, blank=True)
+
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, default="")
+    extra = models.JSONField(blank=True, default=dict)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["created_at"], name="acc_aud_ct"),
+            models.Index(fields=["action", "created_at"], name="acc_aud_act_ct"),
+            models.Index(fields=["study_instance_uid"], name="acc_aud_st_uid"),
+            models.Index(fields=["series_instance_uid"], name="acc_aud_se_uid"),
+            models.Index(fields=["sop_instance_uid"], name="acc_aud_si_uid"),
+        ]
+
+    def __str__(self):
+        return f"{self.created_at} {self.action} user={getattr(self.user, 'username', None) or 'unknown'}"

@@ -5,10 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token }}">
     <title>Noctis Pro DICOM Viewer - Masterpiece Edition</title>
+    {% load static %}
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    {% load static %}
+    <!-- Prefer vendored Three.js so 3D works even without CDN access -->
+    <script src="{% static 'js/vendor/three/three.min.js' %}"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -314,6 +315,30 @@
             padding: 20px;
             border: 1px solid rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
+        }
+
+        /* Collapsible right-panel sections (keeps existing IDs/buttons intact) */
+        details.panel-section {
+            padding: 0;
+            overflow: hidden;
+        }
+        details.panel-section > summary.panel-title {
+            list-style: none;
+            cursor: pointer;
+            user-select: none;
+            padding: 16px 18px;
+            margin: 0;
+        }
+        details.panel-section > summary.panel-title::-webkit-details-marker { display: none; }
+        details.panel-section > summary.panel-title::after {
+            content: '▾';
+            margin-left: auto;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+        details.panel-section:not([open]) > summary.panel-title::after { content: '▸'; }
+        details.panel-section .panel-body {
+            padding: 0 18px 16px 18px;
         }
 
         .panel-title {
@@ -903,6 +928,7 @@
                         <div>WW: <span id="windowWidth">400</span></div>
                         <div>WL: <span id="windowLevel">40</span></div>
                         <div>Slice: <span id="currentSlice">1</span>/<span id="totalSlices">1</span></div>
+                        <div id="frameOverlay" style="display:none;">Frame: <span id="frameValue">1</span>/<span id="totalFrames">1</span></div>
                         <div>HU: <span id="hounsfield">-</span></div>
                     </div>
                     <div class="zoom-info" id="zoomInfo">
@@ -928,9 +954,17 @@
                         <div class="mpr-label">3D Bone Reconstruction</div>
                         <canvas id="bone3DCanvas"></canvas>
                         <div class="controls-3d" id="controls3D">
-                            <button class="control-3d-btn" onclick="reset3DView()">Reset</button>
-                            <button class="control-3d-btn" onclick="toggle3DRotation()">Auto Rotate</button>
-                            <button class="control-3d-btn" onclick="export3DModel()">Export</button>
+                            <button class="control-3d-btn" onclick="reset3DView()" title="Reset view">Reset</button>
+                            <button class="control-3d-btn" onclick="toggle3DRotation()" title="Toggle auto-rotate">Auto Rotate</button>
+                            <button class="control-3d-btn" onclick="toggleBoneWireframe()" title="Toggle wireframe">Wire</button>
+                            <button class="control-3d-btn" onclick="boneZoomIn()" title="Zoom in">+</button>
+                            <button class="control-3d-btn" onclick="boneZoomOut()" title="Zoom out">−</button>
+                            <button class="control-3d-btn" onclick="boneRotate(0,-1)" title="Rotate left">⟲</button>
+                            <button class="control-3d-btn" onclick="boneRotate(0,1)" title="Rotate right">⟳</button>
+                            <button class="control-3d-btn" onclick="boneRotate(-1,0)" title="Tilt up">↑</button>
+                            <button class="control-3d-btn" onclick="boneRotate(1,0)" title="Tilt down">↓</button>
+                            <button class="control-3d-btn" onclick="boneCenter()" title="Center/pan reset">Center</button>
+                            <button class="control-3d-btn" onclick="export3DModel()" title="Export STL">Export</button>
                         </div>
                     </div>
                 </div>
@@ -945,11 +979,12 @@
         <!-- Right Panel -->
         <div class="right-panel">
             <!-- Series Selection -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section" open>
+                <summary class="panel-title">
                     <i class="fas fa-list"></i>
                     Series
-                </div>
+                </summary>
+                <div class="panel-body">
                 <div class="series-nav">
                     <button class="series-nav-btn" id="prevSeriesBtn" type="button" title="Previous series ([)">
                         <i class="fas fa-chevron-left"></i>
@@ -966,14 +1001,16 @@
                         <div class="series-details">Load a study first</div>
                     </div>
                 </div>
-            </div>
+                </div>
+            </details>
 
             <!-- Window/Level Controls -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section" open>
+                <summary class="panel-title">
                     <i class="fas fa-adjust"></i>
                     Window/Level
-                </div>
+                </summary>
+                <div class="panel-body">
                 
                 <div class="slider-group">
                     <div class="slider-header">
@@ -999,14 +1036,16 @@
                     <button class="preset-btn" onclick="applyPreset('soft')">Soft Tissue</button>
                     <button class="preset-btn" onclick="applyPreset('brain')">Brain</button>
                 </div>
-            </div>
+                </div>
+            </details>
 
             <!-- Navigation -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section" open>
+                <summary class="panel-title">
                     <i class="fas fa-arrows-alt"></i>
                     Navigation
-                </div>
+                </summary>
+                <div class="panel-body">
                 
                 <div class="slider-group">
                     <div class="slider-header">
@@ -1017,6 +1056,31 @@
                            min="0" max="0" value="0" oninput="updateSlice(this.value)">
                 </div>
 
+                <div class="slider-group" id="frameControls" style="display:none;">
+                    <div class="slider-header">
+                        <span class="slider-label">Frame</span>
+                        <span class="slider-value"><span id="frameValue">1</span>/<span id="totalFrames">1</span></span>
+                    </div>
+                    <input type="range" class="custom-slider" id="frameSlider"
+                           min="0" max="0" value="0"
+                           oninput="updateFrame(this.value)">
+                    <div style="display:flex; gap: 8px; margin-top: 8px; align-items:center; justify-content: space-between;">
+                        <button class="btn" style="padding: 6px 10px;" onclick="toggleCineMode()" title="Play/Pause cine">
+                            <i class="fas fa-play"></i> Cine
+                        </button>
+                        <div style="display:flex; gap: 8px; align-items:center;">
+                            <span style="color: var(--text-secondary); font-size: 11px;">FPS</span>
+                            <select id="cineFpsSelect" class="btn" style="padding: 6px 10px;" onchange="setCineFps(this.value)">
+                                <option value="3">3</option>
+                                <option value="5" selected>5</option>
+                                <option value="10">10</option>
+                                <option value="15">15</option>
+                                <option value="24">24</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="slider-group">
                     <div class="slider-header">
                         <span class="slider-label">Zoom</span>
@@ -1025,14 +1089,16 @@
                     <input type="range" class="custom-slider" id="zoomSlider" 
                            min="25" max="500" value="100" oninput="updateZoom(this.value)">
                 </div>
-            </div>
+                </div>
+            </details>
 
             <!-- 3D Reconstruction Controls -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section" open>
+                <summary class="panel-title">
                     <i class="fas fa-cube"></i>
                     3D Reconstruction
-                </div>
+                </summary>
+                <div class="panel-body">
                 
                 <div class="recon-controls">
                     <button class="recon-btn" onclick="generateMPR()">
@@ -1072,14 +1138,16 @@
                         </label>
                     </div>
                 </div>
-            </div>
+                </div>
+            </details>
 
             <!-- Image Information -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section">
+                <summary class="panel-title">
                     <i class="fas fa-info-circle"></i>
                     Image Info
-                </div>
+                </summary>
+                <div class="panel-body">
                 
                 <div class="info-card">
                     <div class="info-label">Dimensions</div>
@@ -1100,14 +1168,16 @@
                     <div class="info-label">Institution</div>
                     <div class="info-value" id="institutionName">-</div>
                 </div>
-            </div>
+                </div>
+            </details>
 
             <!-- Measurements -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section">
+                <summary class="panel-title">
                     <i class="fas fa-ruler-combined"></i>
                     Measurements
-                </div>
+                </summary>
+                <div class="panel-body">
                 
                 <button class="clear-btn" onclick="clearAllMeasurements()">
                     <i class="fas fa-trash"></i> Clear All
@@ -1118,14 +1188,16 @@
                         No measurements yet. Use the measure tool to add measurements.
                     </div>
                 </div>
-            </div>
+                </div>
+            </details>
 
             <!-- Related References -->
-            <div class="panel-section">
-                <div class="panel-title">
+            <details class="panel-section">
+                <summary class="panel-title">
                     <i class="fas fa-book-medical"></i>
                     Related References
-                </div>
+                </summary>
+                <div class="panel-body">
                 <div style="display:flex; gap:6px; margin-bottom:8px;">
                     <input id="refQuery" class="form-control" placeholder="e.g., CT head hemorrhage" style="flex:1;">
                     <button class="btn" onclick="fetchReferences()"><i class="fas fa-search"></i></button>
@@ -1133,7 +1205,8 @@
                 <div id="referencesList" style="max-height:180px; overflow:auto; font-size:12px; color: var(--text-secondary);">
                     Enter a query or load a study to see suggestions.
                 </div>
-            </div>
+                </div>
+            </details>
         </div>
     </div>
 
@@ -1305,6 +1378,10 @@
         let _crosshairRotateHover = false;
         let cineMode = false;
         let cineInterval = null;
+        // Multi-frame cine (Enhanced MR/US, etc.)
+        let currentFrameIndex = 0;
+        let currentFrameCount = 1;
+        let cineFps = 5; // default FPS for both slice cine and frame cine
 
         // Fallback rendering: if raw pixel decoding isn't available (compressed transfer syntaxes, missing decoders, etc),
         // we can still display images using the server-rendered PNG endpoint.
@@ -1873,13 +1950,27 @@
         }
 
         function startCine() {
+            // Prefer frame-cine if current image is multi-frame; otherwise slice-cine for series stacks.
+            const isMultiFrame = Number(currentFrameCount || 1) > 1;
+            const fps = Math.max(1, Number(cineFps || 5));
+            const intervalMs = Math.round(1000 / fps);
+
+            if (isMultiFrame) {
+                cineInterval = setInterval(() => {
+                    currentFrameIndex = (currentFrameIndex + 1) % Math.max(1, Number(currentFrameCount || 1));
+                    _setFrameUIState();
+                    // Reload same image ID but different frame
+                    loadCurrentImage(currentImageIndex).catch(() => {});
+                }, intervalMs);
+                return;
+            }
+
             if (imageData.length <= 1) return;
-            
             cineInterval = setInterval(() => {
                 currentImageIndex = (currentImageIndex + 1) % imageData.length;
                 document.getElementById('sliceSlider').value = currentImageIndex;
                 updateSlice(currentImageIndex);
-            }, 200); // 5 FPS
+            }, intervalMs);
         }
 
         function stopCine() {
@@ -1887,6 +1978,26 @@
                 clearInterval(cineInterval);
                 cineInterval = null;
             }
+        }
+
+        function setCineFps(v) {
+            try {
+                const n = Number(v);
+                if (Number.isFinite(n) && n > 0) cineFps = n;
+            } catch (e) {}
+            // If cine is already running, restart with new FPS.
+            if (cineMode) {
+                stopCine();
+                startCine();
+            }
+        }
+
+        function updateFrame(v) {
+            const n = Math.max(1, Number(currentFrameCount || 1));
+            currentFrameIndex = Math.max(0, Math.min(n - 1, Number(v || 0)));
+            _setFrameUIState();
+            // Reload the same image ID but different frame
+            loadCurrentImage(currentImageIndex).catch(() => {});
         }
 
         function toggleMPRView() {
@@ -2293,7 +2404,8 @@
         }
 
         async function _fetchImagePayloadBinary(imageId, signal) {
-            const url = `/dicom-viewer/api/image/${imageId}/data/?packed=bin`;
+            const frameQs = (Number(currentFrameIndex || 0) > 0) ? `&frame=${encodeURIComponent(String(Number(currentFrameIndex || 0)))}` : '';
+            const url = `/dicom-viewer/api/image/${imageId}/data/?packed=bin${frameQs}`;
             const resp = await fetch(url, {
                 signal,
                 credentials: 'same-origin',
@@ -2314,6 +2426,8 @@
             const ps = _parsePixelSpacingHeader(resp.headers);
             const st = _parseHeaderNum(resp.headers, 'X-Noctis-Slice-Thickness');
             const modality = _parseHeaderStr(resp.headers, 'X-Noctis-Modality');
+            const nFrames = _parseHeaderNum(resp.headers, 'X-Noctis-Number-Of-Frames');
+            const fIdx = _parseHeaderNum(resp.headers, 'X-Noctis-Frame-Index');
 
             const buf = await resp.arrayBuffer();
             const pixel_data = _decodeArrayBufferToFloat32LE(buf);
@@ -2327,6 +2441,8 @@
                 pixel_spacing: ps != null ? ps : undefined,
                 slice_thickness: st != null ? st : undefined,
                 modality: modality != null ? modality : undefined,
+                number_of_frames: nFrames != null ? nFrames : undefined,
+                frame_index: fIdx != null ? fIdx : undefined,
                 pixel_data,
                 pixel_data_b64: null,
                 pixel_dtype: 'float32',
@@ -2335,7 +2451,8 @@
         }
 
         async function _fetchImagePayloadJsonPacked(imageId, signal) {
-            const url = `/dicom-viewer/api/image/${imageId}/data/?packed=1`;
+            const frameQs = (Number(currentFrameIndex || 0) > 0) ? `&frame=${encodeURIComponent(String(Number(currentFrameIndex || 0)))}` : '';
+            const url = `/dicom-viewer/api/image/${imageId}/data/?packed=1${frameQs}`;
             const response = await fetch(url, {
                 signal,
                 credentials: 'same-origin',
@@ -2398,6 +2515,10 @@
             }
 
             // First pass: omit invert so backend can apply MONOCHROME1 defaults.
+            // Preserve multi-frame selection if applicable.
+            try {
+                if (Number(currentFrameIndex || 0) > 0) params.set('frame', String(Number(currentFrameIndex || 0)));
+            } catch (e) {}
             let url = `/dicom-viewer/api/image/${encodeURIComponent(id)}/display/${params.toString() ? `?${params.toString()}` : ''}`;
             let resp = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
             let data = await resp.json().catch(() => ({}));
@@ -2504,8 +2625,40 @@
             updateSliders();
             lastLoadedImagePayload = data;
             lastLoadedImageId = imageId;
+            try {
+                // Multi-frame: keep UI state in sync with backend payload.
+                const n = Number(data && (data.number_of_frames ?? data.NumberOfFrames ?? data.frames));
+                currentFrameCount = (Number.isFinite(n) && n >= 1) ? Math.floor(n) : 1;
+                const fi = Number(data && (data.frame_index ?? data.frame));
+                if (Number.isFinite(fi) && fi >= 0) currentFrameIndex = Math.floor(fi);
+                _setFrameUIState();
+            } catch (e) {}
             renderDicomImage(data);
             _scheduleMPRRefresh();
+        }
+
+        function _setFrameUIState() {
+            const wrap = document.getElementById('frameControls');
+            const slider = document.getElementById('frameSlider');
+            const val = document.getElementById('frameValue');
+            const total = document.getElementById('totalFrames');
+            const overlay = document.getElementById('frameOverlay');
+            if (!wrap || !slider || !val || !total) return;
+            const n = Math.max(1, Number(currentFrameCount || 1));
+            if (n <= 1) {
+                wrap.style.display = 'none';
+                if (overlay) overlay.style.display = 'none';
+                currentFrameIndex = 0;
+                return;
+            }
+            wrap.style.display = 'block';
+            if (overlay) overlay.style.display = 'block';
+            slider.min = '0';
+            slider.max = String(n - 1);
+            currentFrameIndex = Math.max(0, Math.min(n - 1, Number(currentFrameIndex || 0)));
+            slider.value = String(currentFrameIndex);
+            val.textContent = String(currentFrameIndex + 1);
+            total.textContent = String(n);
         }
 
         function scheduleLoadCurrentImage(index = currentImageIndex) {
@@ -5678,34 +5831,74 @@
 
             const _isPanGesture = (e) => (e.button === 1 || e.button === 2 || e.shiftKey);
 
-            c.addEventListener('mousedown', (e) => {
+            // Pointer events (mouse + touch). Supports:
+            // - 1 pointer: rotate (drag) or pan (shift/middle/right mouse)
+            // - 2 pointers (touch): pinch zoom + pan
+            bone3D._ptr = new Map(); // pointerId -> {x,y}
+            bone3D._pinchDist = null;
+
+            c.addEventListener('pointerdown', (e) => {
                 if (viewMode !== 'mpr') return;
+                try { c.setPointerCapture(e.pointerId); } catch (_) {}
+                bone3D._ptr.set(e.pointerId, { x: e.clientX, y: e.clientY });
                 bone3D.dragging = true;
                 bone3D.wasDragged = false;
                 bone3D.dragMode = _isPanGesture(e) ? 'pan' : 'rotate';
-                bone3D.lastX = e.clientX;
-                bone3D.lastY = e.clientY;
             });
-            window.addEventListener('mouseup', () => {
-                bone3D.dragging = false;
-                bone3D.dragMode = null;
-            });
-            window.addEventListener('mousemove', (e) => {
-                if (!bone3D.dragging || !bone3D.mesh) return;
-                const dx = e.clientX - bone3D.lastX;
-                const dy = e.clientY - bone3D.lastY;
-                bone3D.lastX = e.clientX;
-                bone3D.lastY = e.clientY;
-                if (Math.abs(dx) + Math.abs(dy) > 2) {
-                    bone3D.wasDragged = true;
+            c.addEventListener('pointerup', (e) => {
+                bone3D._ptr.delete(e.pointerId);
+                if (bone3D._ptr.size === 0) {
+                    bone3D.dragging = false;
+                    bone3D.dragMode = null;
+                    bone3D._pinchDist = null;
                 }
-                if (bone3D.dragMode === 'pan') {
-                    // Pan in screen pixels; scaled to model size in render loop.
-                    bone3D.panX += dx;
-                    bone3D.panY -= dy;
+            });
+            c.addEventListener('pointercancel', (e) => {
+                bone3D._ptr.delete(e.pointerId);
+                if (bone3D._ptr.size === 0) {
+                    bone3D.dragging = false;
+                    bone3D.dragMode = null;
+                    bone3D._pinchDist = null;
+                }
+            });
+            c.addEventListener('pointermove', (e) => {
+                if (!bone3D.dragging || !bone3D.mesh) return;
+                if (!bone3D._ptr.has(e.pointerId)) return;
+                const prev = bone3D._ptr.get(e.pointerId);
+                const cur = { x: e.clientX, y: e.clientY };
+                bone3D._ptr.set(e.pointerId, cur);
+
+                // Two-pointer touch: pinch zoom + pan
+                if (bone3D._ptr.size >= 2) {
+                    const pts = Array.from(bone3D._ptr.values()).slice(0, 2);
+                    const a = pts[0], b = pts[1];
+                    const dx = b.x - a.x;
+                    const dy = b.y - a.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (bone3D._pinchDist == null) bone3D._pinchDist = dist;
+                    const ratio = dist / Math.max(1, bone3D._pinchDist);
+                    if (Number.isFinite(ratio) && Math.abs(ratio - 1) > 0.01) {
+                        bone3D.targetZoom = Math.max(0.25, Math.min(6.0, (Number(bone3D.targetZoom || 1.0)) * ratio));
+                        bone3D._pinchDist = dist;
+                        bone3D.wasDragged = true;
+                    }
+                    // Pan: best-effort using this pointer's delta
+                    bone3D.panX += (cur.x - prev.x);
+                    bone3D.panY -= (cur.y - prev.y);
+                    return;
+                }
+                bone3D._pinchDist = null;
+
+                // Single pointer rotate/pan
+                const dx1 = cur.x - prev.x;
+                const dy1 = cur.y - prev.y;
+                if (Math.abs(dx1) + Math.abs(dy1) > 2) bone3D.wasDragged = true;
+                if (bone3D.dragMode === 'pan' || e.pointerType === 'touch') {
+                    bone3D.panX += dx1;
+                    bone3D.panY -= dy1;
                 } else {
-                    bone3D.targetRotY += dx * 0.01;
-                    bone3D.targetRotX += dy * 0.01;
+                    bone3D.targetRotY += dx1 * 0.01;
+                    bone3D.targetRotX += dy1 * 0.01;
                 }
             });
             c.addEventListener('wheel', (e) => {
@@ -5730,9 +5923,18 @@
             const geom = new THREE.BufferGeometry();
             const pos = new Float32Array(vertices.length * 3);
             for (let i = 0; i < vertices.length; i++) {
-                pos[i * 3 + 0] = vertices[i][0];
-                pos[i * 3 + 1] = vertices[i][1];
-                pos[i * 3 + 2] = vertices[i][2];
+                // Backend marching cubes vertices are in (z, y, x) voxel space.
+                // Map to Three.js as:
+                // - X: x (columns)
+                // - Y: z (slices)   [so superior/inferior feels "up/down"]
+                // - Z: y (rows)
+                // Also flip Y so the initial orientation matches the viewer's "superior at top" convention.
+                const vz = vertices[i][0];
+                const vy = vertices[i][1];
+                const vx = vertices[i][2];
+                pos[i * 3 + 0] = vx;
+                pos[i * 3 + 1] = -vz;
+                pos[i * 3 + 2] = vy;
             }
             const idx = new Uint32Array(faces.length * 3);
             for (let i = 0; i < faces.length; i++) {
@@ -5848,6 +6050,48 @@
                 renderBoneFrame();
             };
             bone3D.animRaf = requestAnimationFrame(tick);
+        }
+
+        // Bone controls (buttons in the 3D quadrant)
+        function boneRotate(dPitch, dYaw) {
+            try {
+                if (!bone3D) return;
+                const step = 0.25; // radians per click (fast but controllable)
+                bone3D.targetRotX = Number(bone3D.targetRotX || 0) + (Number(dPitch || 0) * step);
+                bone3D.targetRotY = Number(bone3D.targetRotY || 0) + (Number(dYaw || 0) * step);
+            } catch (e) {}
+        }
+        function boneZoomIn() {
+            try {
+                bone3D.targetZoom = Math.max(0.25, Math.min(6.0, (Number(bone3D.targetZoom || 1.0)) * 1.2));
+            } catch (e) {}
+        }
+        function boneZoomOut() {
+            try {
+                bone3D.targetZoom = Math.max(0.25, Math.min(6.0, (Number(bone3D.targetZoom || 1.0)) * 0.85));
+            } catch (e) {}
+        }
+        function boneCenter() {
+            try {
+                bone3D.panX = 0;
+                bone3D.panY = 0;
+                bone3D.targetRotX = 0;
+                bone3D.targetRotY = 0;
+                bone3D.targetZoom = 1.0;
+                if (bone3D.mesh) {
+                    bone3D.mesh.position.set(0, 0, 0);
+                    bone3D.mesh.rotation.set(0, 0, 0);
+                }
+                renderBoneFrame();
+            } catch (e) {}
+        }
+        function toggleBoneWireframe() {
+            try {
+                if (!bone3D || !bone3D.mesh || !bone3D.mesh.material) return;
+                bone3D.mesh.material.wireframe = !bone3D.mesh.material.wireframe;
+                bone3D.mesh.material.needsUpdate = true;
+                renderBoneFrame();
+            } catch (e) {}
         }
 
         function stopBoneAnimationLoop() {
@@ -6014,13 +6258,156 @@
             }
         }
 
-        // Print and Export Functions
+        // Print and Export Functions (production: backend wired)
+        function _getActiveImageId() {
+            try {
+                return imageData && imageData[currentImageIndex] ? imageData[currentImageIndex].id : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function _getCurrentModality() {
+            try {
+                return (currentSeries && currentSeries.modality) || (currentStudy && currentStudy.modality) || '';
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function _getPatientNameForPrint() {
+            try {
+                return (currentStudy && (currentStudy.patient_name || currentStudy.patient || currentStudy.patient_full_name)) || '';
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function _getStudyDateForPrint() {
+            try {
+                return (currentStudy && (currentStudy.study_date || currentStudy.date)) || '';
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function _openModal(id) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'flex';
+        }
+
+        function _closeModal(id) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        }
+
+        async function _populatePrintModal() {
+            const modal = document.getElementById('printExportModal');
+            if (!modal) return;
+
+            const modality = _getCurrentModality();
+            const seriesId = (currentSeries && currentSeries.id != null) ? String(currentSeries.id) : '';
+            const total = Array.isArray(imageData) ? imageData.length : 0;
+
+            const seriesEl = document.getElementById('pe_series_id');
+            const modalityEl = document.getElementById('pe_modality');
+            const sliceStartEl = document.getElementById('pe_slice_start');
+            const sliceStepEl = document.getElementById('pe_slice_step');
+            const sliceCountEl = document.getElementById('pe_slice_count');
+
+            if (seriesEl) seriesEl.value = seriesId;
+            if (modalityEl) modalityEl.value = modality;
+            if (sliceStartEl) sliceStartEl.value = String(Math.max(0, Math.floor(total / 2) - 8));
+            if (sliceStepEl) sliceStepEl.value = '1';
+            if (sliceCountEl) sliceCountEl.value = String(Math.min(16, Math.max(1, total)));
+
+            // Load printers (best-effort; can still download PDF if none)
+            try {
+                const resp = await fetch('/dicom-viewer/print/printers/', { credentials: 'same-origin' });
+                const data = await resp.json();
+                const sel = document.getElementById('pe_printer_name');
+                if (sel) {
+                    sel.innerHTML = '';
+                    const opt0 = document.createElement('option');
+                    opt0.value = '';
+                    opt0.textContent = (data && data.success && Array.isArray(data.printers) && data.printers.length) ? 'Select a printer…' : 'No printers detected (download PDF instead)';
+                    sel.appendChild(opt0);
+                    if (data && data.success && Array.isArray(data.printers)) {
+                        data.printers.forEach((p) => {
+                            const o = document.createElement('option');
+                            o.value = p.name || '';
+                            o.textContent = `${p.name || 'Printer'}${p.description ? ' - ' + p.description : ''}`;
+                            sel.appendChild(o);
+                        });
+                    }
+                }
+            } catch (e) {
+                // ignore
+            }
+
+            // Load layouts for the current modality
+            try {
+                const resp = await fetch(`/dicom-viewer/print/layouts/?modality=${encodeURIComponent(modality)}`, { credentials: 'same-origin' });
+                const data = await resp.json();
+                const sel = document.getElementById('pe_layout_type');
+                if (sel) {
+                    sel.innerHTML = '';
+                    const layouts = (data && data.success && Array.isArray(data.layouts)) ? data.layouts : [];
+                    const fallback = [
+                        { id: 'single', name: 'Single Image' },
+                        { id: 'grid', name: 'Grid (custom rows/cols)' },
+                    ];
+                    const list = layouts.length ? layouts : fallback;
+                    list.forEach((l) => {
+                        const o = document.createElement('option');
+                        o.value = l.id || 'single';
+                        o.textContent = l.name || l.id || 'Layout';
+                        sel.appendChild(o);
+                    });
+                    // Prefer grid for stacks
+                    if (total > 1) {
+                        sel.value = (list.find((x) => x.id === 'grid') ? 'grid' : (list[0] && list[0].id) || 'single');
+                    }
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+
         function printCurrentImage() {
-            if (!canvas) return;
-            
+            // Open modal (backend print/download + grid options)
+            _openModal('printExportModal');
+            _populatePrintModal();
+        }
+
+        function exportCurrentImage() {
+            // Open modal (backend export w/ burn-in)
+            _openModal('printExportModal');
+            _populatePrintModal();
+            const tab = document.getElementById('pe_tab_export');
+            if (tab) tab.click();
+        }
+
+        async function pe_downloadExport() {
+            const imageId = _getActiveImageId();
+            if (!imageId) {
+                showToast('No image loaded', 'warning');
+                return;
+            }
+            const fmt = (document.getElementById('pe_export_format') || {}).value || 'png';
+            const burn = (document.getElementById('pe_burn_in') || {}).checked ? '1' : '0';
+            const inv = inverted ? '1' : '0';
+            const url = `/dicom-viewer/api/image/${encodeURIComponent(imageId)}/export/?format=${encodeURIComponent(fmt)}&burn_in=${encodeURIComponent(burn)}&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inv)}`;
+            window.location.href = url;
+        }
+
+        function pe_browserPrintQuick() {
+            if (!canvas) {
+                showToast('No image to print', 'warning');
+                return;
+            }
             const printWindow = window.open('', '_blank');
             const imageDataUrl = canvas.toDataURL('image/png');
-            
             printWindow.document.write(`
                 <html>
                     <head><title>DICOM Image Print</title></head>
@@ -6029,27 +6416,127 @@
                     </body>
                 </html>
             `);
-            
             printWindow.document.close();
             printWindow.focus();
-            
             setTimeout(() => {
-                printWindow.print();
-                printWindow.close();
+                try { printWindow.print(); } catch (e) {}
+                try { printWindow.close(); } catch (e) {}
             }, 250);
-            
-            showToast('Print dialog opened', 'success');
         }
 
-        function exportCurrentImage() {
-            if (!canvas) return;
-            
-            const link = document.createElement('a');
-            link.download = `dicom_image_${Date.now()}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-            
-            showToast('Image exported', 'success');
+        function _pe_buildPrintFormData({ downloadPdf }) {
+            const fd = new FormData();
+            const seriesId = (document.getElementById('pe_series_id') || {}).value || '';
+            const layoutType = (document.getElementById('pe_layout_type') || {}).value || 'single';
+            const paperSize = (document.getElementById('pe_paper_size') || {}).value || 'A4';
+            const paperType = (document.getElementById('pe_paper_type') || {}).value || 'glossy';
+            const quality = (document.getElementById('pe_print_quality') || {}).value || 'high';
+            const copies = (document.getElementById('pe_copies') || {}).value || '1';
+            const printer = (document.getElementById('pe_printer_name') || {}).value || '';
+            const medium = (document.getElementById('pe_print_medium') || {}).value || 'paper';
+            const rows = (document.getElementById('pe_grid_rows') || {}).value || '';
+            const cols = (document.getElementById('pe_grid_cols') || {}).value || '';
+            const sliceStart = (document.getElementById('pe_slice_start') || {}).value || '';
+            const sliceStep = (document.getElementById('pe_slice_step') || {}).value || '';
+            const sliceCount = (document.getElementById('pe_slice_count') || {}).value || '';
+
+            // Prefer server-rendered grids if seriesId present; otherwise fall back to single image_data from canvas.
+            if (seriesId) {
+                fd.append('series_id', seriesId);
+                if (sliceStart !== '') fd.append('slice_start', sliceStart);
+                if (sliceStep !== '') fd.append('slice_step', sliceStep);
+                if (sliceCount !== '') fd.append('slice_count', sliceCount);
+            } else if (canvas) {
+                fd.append('image_data', canvas.toDataURL('image/png'));
+            }
+
+            fd.append('layout_type', layoutType);
+            fd.append('paper_size', paperSize);
+            fd.append('paper_type', paperType);
+            fd.append('print_quality', quality);
+            fd.append('copies', String(Math.max(1, parseInt(copies || '1', 10) || 1)));
+            fd.append('printer_name', printer);
+            fd.append('print_medium', medium);
+            if (rows !== '') fd.append('grid_rows', rows);
+            if (cols !== '') fd.append('grid_cols', cols);
+
+            // Metadata + windowing (burn-in happens in PDF generator)
+            fd.append('modality', (document.getElementById('pe_modality') || {}).value || _getCurrentModality());
+            fd.append('patient_name', _getPatientNameForPrint() || '');
+            fd.append('study_date', _getStudyDateForPrint() || '');
+            fd.append('series_description', (currentSeries && currentSeries.description) ? String(currentSeries.description) : '');
+            fd.append('window_width', String(windowWidth));
+            fd.append('window_level', String(windowLevel));
+            fd.append('inverted', inverted ? '1' : '0');
+
+            if (downloadPdf) fd.append('download_pdf', '1');
+            return fd;
+        }
+
+        async function pe_downloadPrintPdf() {
+            try {
+                if (!currentSeries && !canvas) {
+                    showToast('Load an image/series first', 'warning');
+                    return;
+                }
+                showLoading(true);
+                const fd = _pe_buildPrintFormData({ downloadPdf: true });
+                const resp = await fetch('/dicom-viewer/print/image/', {
+                    method: 'POST',
+                    body: fd,
+                    headers: { 'X-CSRFToken': getCookie('csrftoken') },
+                    credentials: 'same-origin',
+                });
+                if (!resp.ok) {
+                    let msg = `Print PDF failed (${resp.status})`;
+                    try {
+                        const j = await resp.json();
+                        if (j && j.error) msg = j.error;
+                    } catch (e) {}
+                    showToast(msg, 'error');
+                    return;
+                }
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `dicom_print_${Date.now()}.pdf`;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1500);
+                showToast('Downloaded print PDF', 'success');
+            } catch (e) {
+                showToast(`Failed to download PDF: ${e?.message || e}`, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function pe_sendToPrinter() {
+            try {
+                const printer = (document.getElementById('pe_printer_name') || {}).value || '';
+                if (!printer) {
+                    showToast('Select a printer, or use Download PDF', 'warning');
+                    return;
+                }
+                showLoading(true);
+                const fd = _pe_buildPrintFormData({ downloadPdf: false });
+                const resp = await fetch('/dicom-viewer/print/image/', {
+                    method: 'POST',
+                    body: fd,
+                    headers: { 'X-CSRFToken': getCookie('csrftoken') },
+                    credentials: 'same-origin',
+                });
+                const j = await resp.json();
+                if (!j || !j.success) {
+                    showToast((j && j.error) ? j.error : 'Print failed', 'error');
+                    return;
+                }
+                showToast('Sent to printer', 'success');
+            } catch (e) {
+                showToast(`Print failed: ${e?.message || e}`, 'error');
+            } finally {
+                showLoading(false);
+            }
         }
 
         // Utility Functions
@@ -6196,6 +6683,7 @@
             }
             if (e.key === 'Escape') {
                 hideDirectoryLoader();
+                try { _closeModal('printExportModal'); } catch (e) {}
             }
         });
     </script>
@@ -6231,6 +6719,168 @@
                 • /home/user/Downloads/patient_study/<br>
                 <br>
                 <strong>Tip:</strong> Use Ctrl+O to quickly open this dialog
+            </div>
+        </div>
+    </div>
+
+    <!-- Print / Export Modal -->
+    <div id="printExportModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); z-index: 10001; justify-content: center; align-items: center;">
+        <div style="background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color); max-width: 760px; width: 92%; max-height: 88vh; overflow: auto;">
+            <div style="display:flex; align-items:center; justify-content: space-between; gap: 12px; margin-bottom: 10px;">
+                <h3 style="color: var(--text-primary); margin: 0;">
+                    <i class="fas fa-print"></i> Print / Export
+                </h3>
+                <button onclick="_closeModal('printExportModal')" style="border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-secondary); padding: 8px 10px; border-radius: 8px; cursor: pointer;">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div style="display:flex; gap: 10px; margin-bottom: 14px;">
+                <button id="pe_tab_print" onclick="document.getElementById('pe_print_panel').style.display='block'; document.getElementById('pe_export_panel').style.display='none';" style="flex:1; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
+                    <i class="fas fa-print"></i> Print
+                </button>
+                <button id="pe_tab_export" onclick="document.getElementById('pe_print_panel').style.display='none'; document.getElementById('pe_export_panel').style.display='block';" style="flex:1; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
+                    <i class="fas fa-download"></i> Export
+                </button>
+            </div>
+
+            <!-- PRINT PANEL -->
+            <div id="pe_print_panel" style="display:block;">
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Printer (optional)</label>
+                        <select id="pe_printer_name" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="">Loading printers…</option>
+                        </select>
+                        <div style="color: var(--text-muted); font-size: 11px; margin-top: 6px;">
+                            If no printers are available, use <strong>Download PDF</strong>.
+                        </div>
+                    </div>
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Layout</label>
+                        <select id="pe_layout_type" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="single">Single Image</option>
+                            <option value="grid">Grid (custom)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Paper / Film size</label>
+                        <select id="pe_paper_size" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="A4">A4</option>
+                            <option value="Letter">Letter</option>
+                            <option value="FILM_14X17">Film 14×17</option>
+                            <option value="FILM_11X14">Film 11×14</option>
+                            <option value="FILM_10X12">Film 10×12</option>
+                            <option value="FILM_8X10">Film 8×10</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Medium</label>
+                        <select id="pe_print_medium" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="paper">Paper</option>
+                            <option value="film">Film</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Paper type</label>
+                        <select id="pe_paper_type" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="glossy">Glossy</option>
+                            <option value="matte">Matte</option>
+                            <option value="plain">Plain</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Quality</label>
+                        <select id="pe_print_quality" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="high">High</option>
+                            <option value="normal">Normal</option>
+                            <option value="draft">Draft</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="margin-top: 14px; padding: 12px; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(255,255,255,0.02);">
+                    <div style="color: var(--text-primary); font-size: 12px; margin-bottom: 8px;">
+                        Multi-slice (server-rendered grid from current series)
+                    </div>
+                    <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap: 10px;">
+                        <div style="grid-column: span 2;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Series ID</label>
+                            <input id="pe_series_id" type="text" placeholder="(auto)" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary); font-family: monospace;">
+                        </div>
+                        <div style="grid-column: span 1;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Rows</label>
+                            <input id="pe_grid_rows" type="number" min="1" max="8" value="4" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        </div>
+                        <div style="grid-column: span 1;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Cols</label>
+                            <input id="pe_grid_cols" type="number" min="1" max="8" value="4" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        </div>
+                        <div style="grid-column: span 1;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Start</label>
+                            <input id="pe_slice_start" type="number" min="0" value="0" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        </div>
+                        <div style="grid-column: span 1;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Step</label>
+                            <input id="pe_slice_step" type="number" min="1" value="1" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        </div>
+                        <div style="grid-column: span 2;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Count</label>
+                            <input id="pe_slice_count" type="number" min="1" max="96" value="16" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        </div>
+                        <div style="grid-column: span 2;">
+                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Copies</label>
+                            <input id="pe_copies" type="number" min="1" max="20" value="1" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        </div>
+                    </div>
+                    <input id="pe_modality" type="hidden" value="">
+                </div>
+
+                <div style="display:flex; gap: 10px; justify-content: space-between; flex-wrap: wrap; margin-top: 16px;">
+                    <button onclick="pe_browserPrintQuick()" style="padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
+                        <i class="fas fa-window-maximize"></i> Browser Print (quick)
+                    </button>
+                    <div style="display:flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
+                        <button onclick="pe_downloadPrintPdf()" style="padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
+                            <i class="fas fa-file-pdf"></i> Download PDF
+                        </button>
+                        <button onclick="pe_sendToPrinter()" style="padding: 10px 14px; border-radius: 8px; border: none; background: var(--accent-color); color: white; cursor:pointer;">
+                            <i class="fas fa-print"></i> Send to Printer
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EXPORT PANEL -->
+            <div id="pe_export_panel" style="display:none;">
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px;">
+                    <div>
+                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Format</label>
+                        <select id="pe_export_format" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <option value="png">PNG</option>
+                            <option value="jpg">JPG</option>
+                            <option value="tiff">TIFF</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; align-items:flex-end; gap: 10px;">
+                        <label style="display:flex; align-items:center; gap: 8px; color: var(--text-primary); font-size: 12px;">
+                            <input id="pe_burn_in" type="checkbox" checked>
+                            Burn-in patient/study info
+                        </label>
+                    </div>
+                </div>
+                <div style="color: var(--text-muted); font-size: 11px; margin-top: 10px;">
+                    Export uses the server renderer (includes correct WW/WL and optional burn-in overlays).
+                </div>
+                <div style="display:flex; gap: 10px; justify-content: flex-end; margin-top: 14px;">
+                    <button onclick="pe_downloadExport()" style="padding: 10px 14px; border-radius: 8px; border: none; background: var(--accent-color); color: white; cursor:pointer;">
+                        <i class="fas fa-download"></i> Download Export
+                    </button>
+                </div>
             </div>
         </div>
     </div>

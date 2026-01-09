@@ -1,0 +1,82 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${DB_NAME:-noctispro}
+      POSTGRES_USER: ${DB_USER:-noctispro}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}
+    volumes:
+      - noctis_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-noctispro} -d ${DB_NAME:-noctispro}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - noctis_redis:/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+    env_file:
+      - .env.docker
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-noctispro}
+      DB_USER: ${DB_USER:-noctispro}
+      DB_PASSWORD: ${DB_PASSWORD:-change-me}
+
+      # Redis for Channels (websockets / realtime)
+      REDIS_URL: redis://redis:6379/0
+
+      # Persist uploads/static outside the image so rebuilds never delete data.
+      MEDIA_ROOT: /data/media
+      STATIC_ROOT: /data/staticfiles
+
+      # Behind nginx TLS terminator
+      SSL_ENABLED: "true"
+      USE_X_FORWARDED_HOST: "true"
+      USE_X_FORWARDED_PORT: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    expose:
+      - "8000"
+    volumes:
+      - noctis_media:/data/media
+      - noctis_static:/data/staticfiles
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.25-alpine
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN_NAME: ${DOMAIN_NAME:-example.com}
+    volumes:
+      # nginx image will envsubst *.template into /etc/nginx/conf.d/
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/www:/var/www/certbot:ro
+      - ./nginx/letsencrypt:/etc/letsencrypt:ro
+      - noctis_static:/static:ro
+    restart: unless-stopped
+
+volumes:
+  noctis_pgdata:
+  noctis_media:
+  noctis_static:
+  noctis_redis:
+

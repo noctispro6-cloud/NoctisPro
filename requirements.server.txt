@@ -15,10 +15,12 @@ django-cors-headers
 fastapi
 daphne
 channels
+channels-redis
 
 # Production serving
 gunicorn
 whitenoise
+reportlab
 
 # Database (optional; project defaults to SQLite if unset)
 psycopg2-binary

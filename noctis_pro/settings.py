@@ -22,10 +22,25 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 import os
-SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-7x!8k@m$z9h#4p&x3w2v6t@n5q8r7y#3e$6u9i%m&o^2d1f0g')
+from django.core.exceptions import ImproperlyConfigured
+
+# SECURITY:
+# - In production, SECRET_KEY must be set via environment (no hard-coded fallback).
+# - In production, DEBUG must default to False unless explicitly enabled.
+SECRET_KEY = os.environ.get('SECRET_KEY', '').strip()
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
+DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
+
+if DEBUG and not SECRET_KEY:
+    # Development convenience only (never rely on this in production).
+    SECRET_KEY = "django-insecure-dev-only-change-this-for-production"
+elif not DEBUG:
+    # Fail fast if deployment is missing secure configuration.
+    if not SECRET_KEY or SECRET_KEY.lower() in {'change-me', 'changeme'} or SECRET_KEY.startswith('django-insecure'):
+        raise ImproperlyConfigured(
+            "SECRET_KEY must be set to a strong, non-default value when DEBUG=False"
+        )
 
 # Tunnel / public URL detection for automatic configuration
 #
@@ -222,6 +237,9 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # Re-enabled
     'django.middleware.security.SecurityMiddleware',
+    # Serve static files efficiently when running without nginx (e.g. simple Docker deployments).
+    # In production behind nginx, nginx should serve /static; WhiteNoise remains harmless.
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -264,12 +282,26 @@ ASGI_APPLICATION = 'noctis_pro.asgi.application'  # Re-enabled for Daphne
 #     },
 # }
 
-# Use in-memory channel layer for now
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
-    },
-}
+# Channels / WebSockets
+#
+# Production should use Redis so multiple web workers share state.
+REDIS_URL = os.environ.get("REDIS_URL", "").strip()
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+            },
+        }
+    }
+else:
+    # Dev/local fallback
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
 
 # Celery Configuration - Disabled for now to fix login
 # CELERY_BROKER_URL = 'redis://localhost:6379'
@@ -319,7 +351,12 @@ _extra_static_dir = os.path.join(BASE_DIR, 'static')
 os.makedirs(_extra_static_dir, exist_ok=True)
 STATICFILES_DIRS = [_extra_static_dir]
 
-SERVE_MEDIA_FILES = os.environ.get('SERVE_MEDIA_FILES', 'True').lower() == 'true'
+# IMPORTANT:
+# Serving MEDIA (uploads, including DICOM) directly from Django is not safe for public production
+# deployments because it bypasses per-object authorization (anyone who can guess a URL can fetch it).
+#
+# Default: OFF. Enable only for local/dev demos (or if you put MEDIA behind auth yourself).
+SERVE_MEDIA_FILES = os.environ.get('SERVE_MEDIA_FILES', 'False').lower() == 'true'
 
 # Configure MIME types for static files
 import mimetypes
@@ -414,36 +451,79 @@ if TUNNEL_URL:
         TUNNEL_URL.replace('https://', 'http://') if TUNNEL_URL.startswith('https://') else TUNNEL_URL.replace('http://', 'https://')
     ])
 
-# Add ngrok support dynamically
-CORS_ALLOW_ALL_ORIGINS = DEBUG or IS_TUNNEL  # Allow all origins in debug mode or when using a tunnel
+# CORS:
+# - In production, do NOT allow all origins.
+# - Allow-all is only for local development unless explicitly overridden.
+_cors_allow_all_env = os.environ.get("CORS_ALLOW_ALL_ORIGINS", "").strip().lower()
+CORS_ALLOW_ALL_ORIGINS = bool(DEBUG) or (_cors_allow_all_env in ("1", "true", "yes", "on"))
 
 CORS_ALLOW_CREDENTIALS = True
 
-# CSRF trusted origins - Fix for 403 errors and ngrok support
-CSRF_TRUSTED_ORIGINS = [
-    f"http://{DOMAIN_NAME}",
-    f"https://{DOMAIN_NAME}",
-    "https://*.ngrok.io",
-    "https://*.ngrok-free.app",
-    "https://*.ngrok.app",
-    "http://*.ngrok.io",
-    "http://*.ngrok-free.app", 
-    "http://*.ngrok.app",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "http://localhost:80",
-    "http://127.0.0.1:80",
-    "http://localhost",
-    "http://127.0.0.1",
-    "https://localhost:8000",
-    "https://127.0.0.1:8000",
-    "https://*.duckdns.org",
-    "https://*.trycloudflare.com",
-    "http://*.trycloudflare.com",
-    "https://*.loca.lt",
-    "http://*.loca.lt",
-    "http://*.duckdns.org",
-]
+# CSRF trusted origins
+#
+# SECURITY:
+# - Keep this tight for public production.
+# - Add tunnel wildcard origins only when explicitly using a tunnel.
+CSRF_TRUSTED_ORIGINS = []
+
+# Canonical public domain(s)
+if DOMAIN_HOSTS:
+    CSRF_TRUSTED_ORIGINS.extend([f"https://{h}" for h in DOMAIN_HOSTS])
+    # Allow http only for dev/bootstrapping HTTP-only setups.
+    if DEBUG or not SSL_ENABLED:
+        CSRF_TRUSTED_ORIGINS.extend([f"http://{h}" for h in DOMAIN_HOSTS])
+
+# Local dev convenience
+if DEBUG:
+    CSRF_TRUSTED_ORIGINS.extend(
+        [
+            f"http://localhost:{WEB_PORT}",
+            f"http://127.0.0.1:{WEB_PORT}",
+            f"https://localhost:{WEB_PORT}",
+            f"https://127.0.0.1:{WEB_PORT}",
+            "http://localhost",
+            "http://127.0.0.1",
+        ]
+    )
+
+# Tunnel convenience (only when actually using a tunnel)
+if IS_TUNNEL or IS_NGROK:
+    CSRF_TRUSTED_ORIGINS.extend(
+        [
+            "https://*.ngrok.io",
+            "https://*.ngrok-free.app",
+            "https://*.ngrok.app",
+            "http://*.ngrok.io",
+            "http://*.ngrok-free.app",
+            "http://*.ngrok.app",
+            "https://*.duckdns.org",
+            "https://*.trycloudflare.com",
+            "http://*.trycloudflare.com",
+            "https://*.loca.lt",
+            "http://*.loca.lt",
+            "http://*.duckdns.org",
+        ]
+    )
+
+    # Add specific tunnel URL(s) as exact origins if provided
+    if NGROK_URL:
+        CSRF_TRUSTED_ORIGINS.extend(
+            [
+                NGROK_URL,
+                NGROK_URL.replace("https://", "http://")
+                if NGROK_URL.startswith("https://")
+                else NGROK_URL.replace("http://", "https://"),
+            ]
+        )
+    if TUNNEL_URL:
+        CSRF_TRUSTED_ORIGINS.extend(
+            [
+                TUNNEL_URL,
+                TUNNEL_URL.replace("https://", "http://")
+                if TUNNEL_URL.startswith("https://")
+                else TUNNEL_URL.replace("http://", "https://"),
+            ]
+        )
 
 # Allow overriding/adding CSRF trusted origins via env (comma-separated).
 _csrf_trusted_origins_env = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
@@ -452,35 +532,15 @@ if _csrf_trusted_origins_env.strip():
         [o.strip() for o in _csrf_trusted_origins_env.split(",") if o.strip()]
     )
 
-# Ensure the configured local web port is trusted (common when WEB_PORT != 8000).
-for _origin in (
-    f"http://localhost:{WEB_PORT}",
-    f"http://127.0.0.1:{WEB_PORT}",
-    f"https://localhost:{WEB_PORT}",
-    f"https://127.0.0.1:{WEB_PORT}",
-):
-    if _origin not in CSRF_TRUSTED_ORIGINS:
-        CSRF_TRUSTED_ORIGINS.append(_origin)
+# De-duplicate while preserving order
+try:
+    CSRF_TRUSTED_ORIGINS = list(dict.fromkeys([o for o in CSRF_TRUSTED_ORIGINS if o]))
+except Exception:
+    CSRF_TRUSTED_ORIGINS = list({o for o in CSRF_TRUSTED_ORIGINS if o})
 
-# Add configured domain(s) to CSRF trusted origins
-if DOMAIN_HOSTS:
-    CSRF_TRUSTED_ORIGINS.extend(
-        [f"https://{h}" for h in DOMAIN_HOSTS] + [f"http://{h}" for h in DOMAIN_HOSTS]
-    )
-
-# Add specific ngrok URL to CSRF trusted origins if provided
-if NGROK_URL:
-    CSRF_TRUSTED_ORIGINS.extend([
-        NGROK_URL,
-        NGROK_URL.replace('https://', 'http://') if NGROK_URL.startswith('https://') else NGROK_URL.replace('http://', 'https://')
-    ])
-
-# Add specific tunnel URL to CSRF trusted origins if provided
-if TUNNEL_URL:
-    CSRF_TRUSTED_ORIGINS.extend([
-        TUNNEL_URL,
-        TUNNEL_URL.replace('https://', 'http://') if TUNNEL_URL.startswith('https://') else TUNNEL_URL.replace('http://', 'https://')
-    ])
+# If HTTPS is enabled, do not trust http origins in production unless explicitly allowed.
+if SSL_ENABLED and not DEBUG and os.environ.get("ALLOW_HTTP_CSRF", "").lower() not in ("1", "true", "yes", "on"):
+    CSRF_TRUSTED_ORIGINS = [o for o in CSRF_TRUSTED_ORIGINS if not o.startswith("http://")]
 
 # Custom user model
 AUTH_USER_MODEL = 'accounts.User'
@@ -513,6 +573,16 @@ SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'SAMEORIGIN' if DEBUG or IS_TUNNEL else 'DENY'  # Allow embedding for tunnels/dev
 
+# Sensible, production-safe cookie defaults (can be overridden via env)
+SESSION_COOKIE_HTTPONLY = True
+# CSRF cookie must be readable by JS because the frontend sends `X-CSRFToken` headers.
+CSRF_COOKIE_HTTPONLY = False
+SESSION_COOKIE_SAMESITE = os.environ.get("SESSION_COOKIE_SAMESITE", "Lax")
+CSRF_COOKIE_SAMESITE = os.environ.get("CSRF_COOKIE_SAMESITE", "Lax")
+
+# Referrer policy: reduce accidental data leakage in Referer headers
+SECURE_REFERRER_POLICY = os.environ.get("SECURE_REFERRER_POLICY", "strict-origin-when-cross-origin")
+
 # Tunnel-specific security adjustments
 if IS_TUNNEL:
     # Disable some security features that interfere with tunnels (host/origin changes)
@@ -521,7 +591,7 @@ if IS_TUNNEL:
     CSRF_COOKIE_SECURE = False
     # But keep others for security
     SESSION_COOKIE_HTTPONLY = True
-    CSRF_COOKIE_HTTPONLY = True
+    CSRF_COOKIE_HTTPONLY = False
     SESSION_COOKIE_SAMESITE = 'Lax'
     CSRF_COOKIE_SAMESITE = 'Lax'
 
@@ -536,7 +606,7 @@ if not DEBUG and not IS_NGROK:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = SSL_ENABLED and os.environ.get('SECURE_HSTS_INCLUDE_SUBDOMAINS', 'True').lower() == 'true'
     SECURE_HSTS_PRELOAD = SSL_ENABLED and os.environ.get('SECURE_HSTS_PRELOAD', 'True').lower() == 'true'
     SESSION_COOKIE_HTTPONLY = True
-    CSRF_COOKIE_HTTPONLY = True
+    CSRF_COOKIE_HTTPONLY = False
 
 # Emergency escape hatch for deployments that are HTTP-only (or tunnels) where
 # secure cookies cause a post-login redirect loop. Prefer enabling HTTPS and
@@ -633,7 +703,9 @@ if not DEBUG:
     DATABASES['default']['CONN_MAX_AGE'] = 60
     
     # Cache static file serving
-    STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage'
+    # WhiteNoise: compressed + hashed static assets
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+    WHITENOISE_MAX_AGE = int(os.environ.get("WHITENOISE_MAX_AGE", "31536000"))
 
 # Ngrok-specific settings for better performance
 if IS_NGROK:

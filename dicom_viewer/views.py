@@ -5,6 +5,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
 from worklist.models import Study, Series, DicomImage, Patient, Modality
 from accounts.models import User, Facility
+from accounts.audit import log_audit
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 import json
@@ -39,6 +40,125 @@ from .models import WindowLevelPreset, HangingProtocol
 
 # Initialize logger
 logger = logging.getLogger(__name__)
+
+
+def _get_requested_frame_index(request, *, default_index: int = 0) -> int:
+    """
+    Parse a frame selector from query params.
+    Accepts:
+      - frame / frame_index: 0-based
+      - frame_number: 1-based
+    """
+    try:
+        if request is None:
+            return int(default_index)
+        if request.GET.get("frame_number") is not None:
+            n = int(float(request.GET.get("frame_number")))
+            return max(0, n - 1)
+        if request.GET.get("frame") is not None:
+            return max(0, int(float(request.GET.get("frame"))))
+        if request.GET.get("frame_index") is not None:
+            return max(0, int(float(request.GET.get("frame_index"))))
+    except Exception:
+        return int(default_index)
+    return int(default_index)
+
+
+def _is_color_pixel_array(arr) -> bool:
+    try:
+        if arr is None:
+            return False
+        if getattr(arr, "ndim", 0) == 3 and arr.shape[-1] in (3, 4):
+            return True
+        if getattr(arr, "ndim", 0) == 4 and arr.shape[-1] in (3, 4):
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def _select_frame(arr, *, frame_index: int = 0):
+    """
+    Reduce a decoded pixel array to a single frame.
+    Handles common shapes:
+      - (rows, cols)
+      - (rows, cols, channels)
+      - (frames, rows, cols)
+      - (frames, rows, cols, channels)
+      - (1, rows, cols) / (1, rows, cols, channels)
+    """
+    if arr is None:
+        return None
+    try:
+        import numpy as _np
+
+        a = arr
+        if getattr(a, "ndim", 0) == 4 and a.shape[0] == 1:
+            a = a[0]
+        if getattr(a, "ndim", 0) == 3 and a.shape[0] == 1 and a.shape[-1] not in (3, 4):
+            a = a[0]
+
+        # Multi-frame (frames, rows, cols) or (frames, rows, cols, channels)
+        if getattr(a, "ndim", 0) == 4:
+            fi = int(frame_index)
+            fi = max(0, min(fi, int(a.shape[0]) - 1))
+            a = a[fi]
+        elif getattr(a, "ndim", 0) == 3 and a.shape[-1] not in (3, 4):
+            # Treat as (frames, rows, cols)
+            fi = int(frame_index)
+            fi = max(0, min(fi, int(a.shape[0]) - 1))
+            a = a[fi]
+
+        return _np.asarray(a)
+    except Exception:
+        return arr
+
+
+def _convert_color_to_rgb_uint8(arr, ds=None):
+    """
+    Convert a decoded color pixel array into uint8 RGB for PNG/JPG export.
+    Best-effort conversion for YBR* -> RGB.
+    """
+    if arr is None:
+        return None
+    try:
+        import numpy as _np
+
+        a = _np.asarray(arr)
+        if a.ndim != 3 or a.shape[-1] not in (3, 4):
+            return None
+        a = a[..., :3]
+
+        # Convert YBR -> RGB when possible.
+        try:
+            photo = str(getattr(ds, "PhotometricInterpretation", "") or "").upper() if ds is not None else ""
+            if photo.startswith("YBR"):
+                try:
+                    from pydicom.pixel_data_handlers.util import convert_color_space as _ccs
+
+                    a = _ccs(a, current=photo, desired="RGB")
+                except Exception:
+                    # If conversion fails, fall back to using raw channels.
+                    pass
+        except Exception:
+            pass
+
+        if a.dtype != _np.uint8:
+            af = a.astype(_np.float32, copy=False)
+            # Robust normalization (per-image) to 0..255
+            lo = float(_np.percentile(af, 1))
+            hi = float(_np.percentile(af, 99))
+            if hi <= lo:
+                lo = float(_np.min(af))
+                hi = float(_np.max(af))
+            if hi > lo:
+                af = (af - lo) / (hi - lo) * 255.0
+            else:
+                af = _np.zeros_like(af, dtype=_np.float32)
+            a = _np.clip(af, 0, 255).astype(_np.uint8)
+        return a
+    except Exception:
+        return None
 
 #
 # Persistent (on-disk) MPR cache
@@ -679,6 +799,7 @@ def api_image_data(request, image_id):
     warnings = {}
     ds = None
     pixel_array = None
+    number_of_frames = 1
 
     # Read DICOM dataset (prefer storage-safe open over filesystem path).
     #
@@ -715,6 +836,8 @@ def api_image_data(request, image_id):
             warnings['dicom_read_error_fallback'] = str(e2)
             ds = None
 
+    frame_index = _get_requested_frame_index(request, default_index=0)
+
     # Decode pixels (best-effort)
     pixel_decode_error = None
     if ds is not None:
@@ -727,7 +850,23 @@ def api_image_data(request, image_id):
                     pixel_array = apply_voi_lut(pixel_array, ds)
             except Exception:
                 pass
-            pixel_array = pixel_array.astype(np.float32)
+            # If multi-frame, select a single frame (default first; caller can pass ?frame=)
+            try:
+                pixel_array = _select_frame(pixel_array, frame_index=frame_index)
+            except Exception:
+                pass
+
+            try:
+                number_of_frames = int(getattr(ds, 'NumberOfFrames', 1) or 1)
+            except Exception:
+                number_of_frames = 1
+
+            # For color images, prefer server-rendered PNG path (client renderer is grayscale-only).
+            if _is_color_pixel_array(pixel_array):
+                warnings["color_mode"] = "server_render"
+                pixel_array = None
+            else:
+                pixel_array = pixel_array.astype(np.float32)
         except Exception as e:
             # Fallback for compressed DICOMs without a working pixel handler: try SimpleITK if we have a local path.
             try:
@@ -737,12 +876,23 @@ def api_image_data(request, image_id):
                     pixel_array = sitk.GetArrayFromImage(sitk_image)
                     if pixel_array.ndim == 3 and pixel_array.shape[0] == 1:
                         pixel_array = pixel_array[0]
-                    pixel_array = pixel_array.astype(np.float32)
+                    pixel_array = _select_frame(pixel_array, frame_index=frame_index)
+                    if _is_color_pixel_array(pixel_array):
+                        warnings["color_mode"] = "server_render"
+                        pixel_array = None
+                    else:
+                        pixel_array = pixel_array.astype(np.float32)
                 else:
                     raise RuntimeError("No local path available for SimpleITK fallback")
             except Exception as _e:
                 pixel_decode_error = str(_e) or str(e)
                 pixel_array = None
+
+    if ds is not None:
+        try:
+            number_of_frames = int(getattr(ds, 'NumberOfFrames', number_of_frames) or 1)
+        except Exception:
+            pass
 
     # Normalize pixel array shape to a 2D grayscale frame (best-effort).
     # The canvas-based viewer expects rows*cols samples per image.
@@ -862,6 +1012,8 @@ def api_image_data(request, image_id):
             resp['X-Noctis-Window-Center'] = str(float(window_center) if window_center is not None else 40.0)
             resp['X-Noctis-Pixel-DType'] = 'float32'
             resp['X-Noctis-Pixel-Endian'] = 'little'
+            resp['X-Noctis-Number-Of-Frames'] = str(int(number_of_frames) if number_of_frames else 1)
+            resp['X-Noctis-Frame-Index'] = str(int(frame_index))
             try:
                 ps = _jsonify_dicom_value(getattr(ds, 'PixelSpacing', None)) if ds is not None else None
                 if ps is not None:
@@ -908,6 +1060,9 @@ def api_image_data(request, image_id):
             'photometric_interpretation': _jsonify_dicom_value(getattr(ds, 'PhotometricInterpretation', None)) if ds is not None else None,
             'bits_allocated': _jsonify_dicom_value(getattr(ds, 'BitsAllocated', None)) if ds is not None else None,
             'bits_stored': _jsonify_dicom_value(getattr(ds, 'BitsStored', None)) if ds is not None else None,
+            'number_of_frames': int(number_of_frames) if number_of_frames else 1,
+            'frame_index': int(frame_index),
+            'is_color': bool(str(getattr(ds, 'PhotometricInterpretation', '') or '').upper().startswith(('RGB', 'YBR'))) if ds is not None else False,
         }
 
         if packed_b64:
@@ -935,6 +1090,9 @@ def api_image_data(request, image_id):
             # Even without pixels, expose sensible defaults so the server-render fallback picks good W/L.
             'window_width': float(window_width) if window_width is not None else (2500.0 if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG') else 400.0),
             'window_center': float(window_center) if window_center is not None else (1200.0 if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG') else 40.0),
+            'number_of_frames': int(number_of_frames) if number_of_frames else 1,
+            'frame_index': int(frame_index),
+            'is_color': bool(str(getattr(ds, 'PhotometricInterpretation', '') or '').upper().startswith(('RGB', 'YBR'))) if ds is not None else False,
         })
 
     if pixel_decode_error or warnings:
@@ -1750,18 +1908,25 @@ def api_dicom_image_display(request, image_id):
                 warnings['dicom_read_error_fallback'] = str(e2)
                 ds = None
 
+        frame_index = _get_requested_frame_index(request, default_index=0)
+
         pixel_array = None
         pixel_decode_error = None
         if ds is not None:
             try:
                 pixel_array = ds.pixel_array
+                pixel_array = _select_frame(pixel_array, frame_index=frame_index)
                 try:
                     modality = str(getattr(ds, 'Modality', '')).upper()
                     if modality in ['DX','CR','XA','RF','MG']:
                         pixel_array = apply_voi_lut(pixel_array, ds)
                 except Exception:
                     pass
-                pixel_array = pixel_array.astype(np.float32)
+                # Color => prefer server-rendered PNG path (skip grayscale conversion)
+                if _is_color_pixel_array(pixel_array):
+                    warnings["color_mode"] = "server_render"
+                else:
+                    pixel_array = pixel_array.astype(np.float32)
             except Exception as e:
                 # Pixel decode failed (often due to compressed transfer syntaxes).
                 # Fallback: try SimpleITK (local path only). Keep both error messages for diagnostics.
@@ -1773,7 +1938,11 @@ def api_dicom_image_display(request, image_id):
                         pixel_array = sitk.GetArrayFromImage(sitk_image)
                         if pixel_array.ndim == 3 and pixel_array.shape[0] == 1:
                             pixel_array = pixel_array[0]
-                        pixel_array = pixel_array.astype(np.float32)
+                        pixel_array = _select_frame(pixel_array, frame_index=frame_index)
+                        if _is_color_pixel_array(pixel_array):
+                            warnings["color_mode"] = "server_render"
+                        else:
+                            pixel_array = pixel_array.astype(np.float32)
                         warnings['pixel_decode_fallback'] = 'SimpleITK'
                         warnings['pydicom_pixel_decode_error'] = pydicom_decode_error
                     else:
@@ -1789,8 +1958,8 @@ def api_dicom_image_display(request, image_id):
             except Exception:
                 pass
 
-        # Normalize to a 2D grayscale frame (handles DX/CR that decode as (rows, cols, 1))
-        if pixel_array is not None:
+        # Normalize to a 2D grayscale frame (skip for color)
+        if pixel_array is not None and (not _is_color_pixel_array(pixel_array)):
             try:
                 arr = pixel_array
                 if getattr(arr, "ndim", 0) == 4 and arr.shape[0] == 1:
@@ -1911,20 +2080,31 @@ def api_dicom_image_display(request, image_id):
 
         # Always include a render URL (when possible) so the browser can stream PNG bytes without data-URLs.
         image_url = None
-        if pixel_array is not None:
+        if ds is not None:
             try:
                 params = {
                     'ww': str(window_width),
                     'wl': str(window_level),
                     'invert': 'true' if bool(inverted) else 'false',
                 }
+                # Preserve frame selection for multi-frame objects
+                try:
+                    if request.GET.get("frame") is not None:
+                        params["frame"] = str(int(float(request.GET.get("frame"))))
+                    elif request.GET.get("frame_index") is not None:
+                        params["frame"] = str(int(float(request.GET.get("frame_index"))))
+                    elif request.GET.get("frame_number") is not None:
+                        params["frame"] = str(max(0, int(float(request.GET.get("frame_number"))) - 1))
+                except Exception:
+                    pass
                 image_url = f"/dicom-viewer/api/image/{int(image.id)}/render.png?{urlencode(params)}"
             except Exception:
                 image_url = None
 
         # Generate embedded base64 image only when requested/needed (legacy behavior).
         image_data_url = None
-        if (not want_url_only) and pixel_array is not None:
+        # For color images, always return URL-only (avoid grayscale conversion/data-URLs)
+        if (not want_url_only) and pixel_array is not None and (not _is_color_pixel_array(pixel_array)):
             try:
                 image_data_url = _array_to_base64_image(pixel_array, window_width, window_level, inverted)
             except Exception as e:
@@ -1968,6 +2148,12 @@ def api_dicom_image_display(request, image_id):
             'bits_allocated': _jsonify_dicom_value(getattr(ds, 'BitsAllocated', 16)) if ds is not None else 16,
             'bits_stored': _jsonify_dicom_value(getattr(ds, 'BitsStored', 16)) if ds is not None else 16,
             'photometric_interpretation': _jsonify_dicom_value(getattr(ds, 'PhotometricInterpretation', '')) if ds is not None else '',
+            'number_of_frames': int(getattr(ds, 'NumberOfFrames', 1) or 1) if ds is not None else 1,
+            'frame_index': int(frame_index),
+            'is_color': (
+                (pixel_array is not None and _is_color_pixel_array(pixel_array))
+                or (str(getattr(ds, "PhotometricInterpretation", "") or "").upper() in ("RGB", "YBR_FULL", "YBR_FULL_422", "YBR_PARTIAL_422", "YBR_PARTIAL_420"))
+            ),
         }
         
         payload = {
@@ -2069,16 +2255,31 @@ def api_dicom_image_png(request, image_id):
         if ds is None:
             return HttpResponse(status=404)
 
+        frame_index = _get_requested_frame_index(request, default_index=0)
+
         # Decode pixels (best-effort)
         pixel_array = None
         try:
             pixel_array = ds.pixel_array
+            pixel_array = _select_frame(pixel_array, frame_index=frame_index)
             try:
                 modality = str(getattr(ds, 'Modality', '')).upper()
                 if modality in ['DX', 'CR', 'XA', 'RF', 'MG']:
                     pixel_array = apply_voi_lut(pixel_array, ds)
             except Exception:
                 pass
+            # Color images: render as RGB PNG directly (no W/L).
+            if _is_color_pixel_array(pixel_array):
+                rgb = _convert_color_to_rgb_uint8(pixel_array, ds=ds)
+                if rgb is None:
+                    return HttpResponse(status=404)
+                img = Image.fromarray(rgb, mode="RGB")
+                buffer = BytesIO()
+                img.save(buffer, format="PNG", optimize=False, compress_level=1)
+                resp = HttpResponse(buffer.getvalue(), content_type="image/png")
+                resp["Cache-Control"] = "private, max-age=3600"
+                return resp
+
             pixel_array = pixel_array.astype(np.float32)
         except Exception as e:
             # SimpleITK fallback requires local path
@@ -2089,6 +2290,17 @@ def api_dicom_image_png(request, image_id):
                     px = sitk.GetArrayFromImage(sitk_image)
                     if px.ndim == 3 and px.shape[0] == 1:
                         px = px[0]
+                    px = _select_frame(px, frame_index=frame_index)
+                    if _is_color_pixel_array(px):
+                        rgb = _convert_color_to_rgb_uint8(px, ds=ds)
+                        if rgb is None:
+                            return HttpResponse(status=404)
+                        img = Image.fromarray(rgb, mode="RGB")
+                        buffer = BytesIO()
+                        img.save(buffer, format="PNG", optimize=False, compress_level=1)
+                        resp = HttpResponse(buffer.getvalue(), content_type="image/png")
+                        resp["Cache-Control"] = "private, max-age=3600"
+                        return resp
                     pixel_array = px.astype(np.float32)
                 else:
                     raise RuntimeError("No local path available for SimpleITK fallback")
@@ -2164,7 +2376,6 @@ def api_dicom_image_png(request, image_id):
         return HttpResponse(status=500)
 
 @login_required
-@csrf_exempt
 def api_measurements(request, study_id=None):
     """API endpoint for saving/loading measurements"""
     if study_id:
@@ -2222,7 +2433,6 @@ def api_measurements(request, study_id=None):
         return JsonResponse({'success': True, 'message': 'Measurements cleared'})
 
 @login_required
-@csrf_exempt
 def api_reconstruction(request, study_id):
     """API endpoint for 3D reconstruction processing"""
     study = get_object_or_404(Study, id=study_id)
@@ -2257,7 +2467,6 @@ def api_reconstruction(request, study_id):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 @login_required
-@csrf_exempt
 def api_hounsfield_units(request):
     """API endpoint for Hounsfield Unit calculations"""
     if request.method == 'POST':
@@ -2499,21 +2708,227 @@ def api_export_image(request, image_id):
     if user.is_facility_user() and study.facility != user.facility:
         return JsonResponse({'error': 'Permission denied'}, status=403)
     
-    export_format = request.GET.get('format', 'png')  # png, jpg, tiff, dicom
-    
-    # This would export the image in the requested format
-    # For now, we'll return a success message
-    result = {
-        'success': True,
-        'download_url': f'/media/exports/image_{image_id}.{export_format}',
-        'format': export_format,
-        'filename': f'image_{image_id}.{export_format}'
-    }
-    
-    return JsonResponse(result)
+    export_format = (request.GET.get('format', 'png') or 'png').strip().lower()  # png, jpg, tiff
+    burn_in = (request.GET.get('burn_in', '1') or '1').strip().lower() not in ('0', 'false', 'no', 'off')
+    ww = request.GET.get('window_width')
+    wl = request.GET.get('window_level')
+    inverted = (request.GET.get('inverted', 'false') or 'false').strip().lower() in ('1', 'true', 'yes', 'on')
+    frame_index = _get_requested_frame_index(request, default_index=0)
+
+    # Render a windowed slice (server-side) and optionally burn-in metadata.
+    try:
+        # Read DICOM dataset (reuse robust logic from api_dicom_image_png / api_dicom_image_display)
+        ds = None
+        warnings = {}
+        try:
+            if not image.file_path:
+                warnings['dicom_read_error'] = "Image file_path is missing"
+            else:
+                try:
+                    with image.file_path.open('rb') as f:
+                        try:
+                            ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
+                        except Exception as e_strict:
+                            warnings['dicom_read_error'] = str(e_strict)
+                            f.seek(0)
+                            ds = pydicom.dcmread(f, stop_before_pixels=False, force=True)
+                            warnings['dicom_read_forced'] = True
+                except Exception as e_open:
+                    warnings['dicom_open_error'] = str(e_open)
+        except Exception:
+            ds = None
+
+        # Decode pixel data (best-effort)
+        pixel_array = None
+        if ds is not None:
+            try:
+                px0 = ds.pixel_array
+                px0 = _select_frame(px0, frame_index=frame_index)
+
+                # Color: export as RGB (no W/L windowing)
+                if _is_color_pixel_array(px0):
+                    rgb = _convert_color_to_rgb_uint8(px0, ds=ds)
+                    if rgb is None:
+                        return JsonResponse({'error': 'Could not decode color pixel data'}, status=500)
+                    pil = Image.fromarray(rgb, mode="RGB")
+                    pixel_array = None
+                else:
+                    pixel_array = px0.astype(np.float32)
+            except Exception as e_px:
+                # Fallback to SimpleITK if available and we have a filesystem path
+                try:
+                    import SimpleITK as sitk
+                    dicom_path = os.path.join(settings.MEDIA_ROOT, str(image.file_path))
+                    sitk_image = sitk.ReadImage(dicom_path)
+                    px = sitk.GetArrayFromImage(sitk_image)
+                    if px.ndim == 3 and px.shape[0] == 1:
+                        px = px[0]
+                    px = _select_frame(px, frame_index=frame_index)
+                    if _is_color_pixel_array(px):
+                        rgb = _convert_color_to_rgb_uint8(px, ds=ds)
+                        if rgb is None:
+                            return JsonResponse({'error': 'Could not decode color pixel data'}, status=500)
+                        pil = Image.fromarray(rgb, mode="RGB")
+                        pixel_array = None
+                    else:
+                        pixel_array = px.astype(np.float32)
+                    warnings['sitk_fallback'] = True
+                except Exception:
+                    pixel_array = None
+
+        if pixel_array is None and 'pil' not in locals():
+            return JsonResponse({'error': 'Could not decode pixel data'}, status=500)
+
+        # Apply rescale (HU) if present
+        try:
+            if ds is not None and hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
+                pixel_array = pixel_array * float(getattr(ds, 'RescaleSlope', 1.0)) + float(getattr(ds, 'RescaleIntercept', 0.0))
+        except Exception:
+            pass
+
+        # Window/level defaults
+        def _as_float(v, default):
+            try:
+                if v is None or v == '':
+                    return float(default)
+                return float(v)
+            except Exception:
+                return float(default)
+
+        default_ww = 400.0
+        default_wl = 40.0
+        try:
+            if ds is not None and hasattr(ds, 'WindowWidth') and hasattr(ds, 'WindowCenter'):
+                default_ww = float(ds.WindowWidth[0] if hasattr(ds.WindowWidth, '__iter__') else ds.WindowWidth)
+                default_wl = float(ds.WindowCenter[0] if hasattr(ds.WindowCenter, '__iter__') else ds.WindowCenter)
+        except Exception:
+            pass
+
+        window_width = _as_float(ww, default_ww)
+        window_level = _as_float(wl, default_wl)
+        # Default invert for MONOCHROME1 unless explicitly provided
+        if (request.GET.get('inverted') is None) and (ds is not None) and (str(getattr(ds, 'PhotometricInterpretation', '') or '') == 'MONOCHROME1'):
+            inverted = True
+
+        if 'pil' not in locals():
+            processor = DicomProcessor()
+            windowed = processor.apply_windowing(pixel_array, window_width, window_level, inverted, enhanced_contrast=True)
+            pil = Image.fromarray(windowed)
+
+        if burn_in:
+            from PIL import ImageDraw, ImageFont
+
+            draw = ImageDraw.Draw(pil)
+            # Font: best-effort; Pillow default is fine if truetype not present.
+            try:
+                font = ImageFont.truetype("DejaVuSans.ttf", 14)
+                font_b = ImageFont.truetype("DejaVuSans.ttf", 16)
+            except Exception:
+                font = None
+                font_b = None
+
+            study = image.series.study
+            patient = study.patient
+            facility = getattr(study, 'facility', None)
+            inst = (str(getattr(ds, 'InstitutionName', '') or '').strip() if ds is not None else '') or (getattr(facility, 'name', '') if facility else '')
+
+            # Strings (match “machine burn-in” feel)
+            top_left = [
+                f"{inst}".strip(),
+                f"Patient: {patient.full_name}  ID: {patient.patient_id}",
+                f"Accession: {study.accession_number}  Mod: {getattr(getattr(study, 'modality', None), 'code', '')}",
+            ]
+            top_right = [
+                f"Study: {study.study_date.strftime('%Y-%m-%d %H:%M') if getattr(study, 'study_date', None) else ''}".strip(),
+                f"Series: {image.series.series_description or ''}".strip(),
+                f"Instance: {getattr(image, 'instance_number', '')}".strip(),
+            ]
+            bottom_left = [
+                f"WW/WL: {int(round(window_width))}/{int(round(window_level))}  {'INV' if inverted else ''}".strip(),
+            ]
+
+            # Draw with a dark backing box
+            def _draw_block(lines, x, y, align='left'):
+                lines2 = [l for l in lines if l]
+                if not lines2:
+                    return
+                pad = 6
+                # measure
+                try:
+                    widths = [draw.textlength(l, font=font_b if i == 0 else font) for i, l in enumerate(lines2)]
+                    line_h = 18
+                    w = int(max(widths)) + pad * 2
+                except Exception:
+                    line_h = 16
+                    w = 360
+                h = line_h * len(lines2) + pad * 2
+                bx0 = x
+                by0 = y
+                if align == 'right':
+                    bx0 = x - w
+                draw.rectangle([bx0, by0, bx0 + w, by0 + h], fill=(0, 0, 0, 140))
+                ty = by0 + pad
+                for i, l in enumerate(lines2):
+                    f = font_b if (i == 0 and font_b) else font
+                    tx = bx0 + pad
+                    if align == 'right':
+                        try:
+                            tw = draw.textlength(l, font=f)
+                            tx = bx0 + w - pad - tw
+                        except Exception:
+                            pass
+                    draw.text((tx, ty), l, fill=(255, 255, 255), font=f)
+                    ty += line_h
+
+            W, H = pil.size
+            _draw_block(top_left, 10, 10, 'left')
+            _draw_block(top_right, W - 10, 10, 'right')
+            _draw_block(bottom_left, 10, H - 10 - 40, 'left')
+
+        # Encode
+        out = BytesIO()
+        filename = f"image_{image_id}.{export_format}"
+        if export_format in ('jpg', 'jpeg'):
+            pil.convert('RGB').save(out, format='JPEG', quality=95)
+            ctype = 'image/jpeg'
+        elif export_format in ('tif', 'tiff'):
+            pil.save(out, format='TIFF')
+            ctype = 'image/tiff'
+        else:
+            pil.save(out, format='PNG')
+            ctype = 'image/png'
+            filename = f"image_{image_id}.png"
+        out.seek(0)
+        resp = HttpResponse(out.getvalue(), content_type=ctype)
+        resp['Content-Disposition'] = f'attachment; filename="{filename}"'
+        resp['Cache-Control'] = 'private, max-age=0, no-store'
+        try:
+            log_audit(
+                request=request,
+                action="viewer_export",
+                user=request.user,
+                facility=getattr(study, "facility", None),
+                study_instance_uid=getattr(study, "study_instance_uid", "") or "",
+                series_instance_uid=getattr(image.series, "series_instance_uid", "") or "",
+                sop_instance_uid=getattr(image, "sop_instance_uid", "") or "",
+                image_id=int(image.id),
+                series_id=int(image.series.id) if getattr(image, "series_id", None) else None,
+                study_id=int(study.id),
+                extra={
+                    "format": export_format,
+                    "burn_in": bool(burn_in),
+                    "window_width": window_width,
+                    "window_level": window_level,
+                    "inverted": bool(inverted),
+                },
+            )
+        except Exception:
+            pass
+        return resp
+    except Exception as e:
+        return JsonResponse({'error': f'Export failed: {str(e)}'}, status=500)
 
 @login_required
-@csrf_exempt
 def api_annotations(request, study_id):
     """API endpoint for saving/loading annotations"""
     study = get_object_or_404(Study, id=study_id)
@@ -2976,7 +3391,6 @@ def process_dicom_study(study_uid, series_map, rep_ds, user, upload_id):
     return study_obj
 
 @login_required
-@csrf_exempt
 def upload_dicom(request):
     """Upload DICOM files for processing"""
     if request.method == 'POST':
@@ -3276,7 +3690,6 @@ def upload_dicom(request):
     return JsonResponse({'success': False, 'error': 'Use POST to upload DICOM files'})
 
 @login_required
-@csrf_exempt
 def api_upload_progress(request, upload_id):
     """API endpoint to check upload progress"""
     try:
@@ -3298,7 +3711,6 @@ def api_upload_progress(request, upload_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 @login_required
-@csrf_exempt
 def api_process_study(request, study_id):
     """API endpoint to process/reprocess a study"""
     study = get_object_or_404(Study, id=study_id)
@@ -3333,7 +3745,6 @@ def api_process_study(request, study_id):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 @login_required
-@csrf_exempt
 def launch_standalone_viewer(request):
     """Launch the standalone DICOM viewer application (Python PyQt)."""
     import subprocess
@@ -3678,13 +4089,15 @@ def web_dicom_image(request, image_id):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
 def web_save_measurement(request):
     try:
         data = json.loads(request.body)
         image_id = data.get('image_id')
-        measurement_type = data.get('type')
+        # Frontend sends `measurement_type`; accept legacy `type` too.
+        measurement_type = (data.get('measurement_type') or data.get('type') or '').strip()
+        if measurement_type not in {'length', 'area', 'angle', 'cobb_angle'}:
+            measurement_type = 'length'
         points = data.get('points')
         value = data.get('value')
         unit = data.get('unit', 'mm')
@@ -3700,7 +4113,20 @@ def web_save_measurement(request):
             unit=unit,
             notes=notes,
         )
-        measurement.set_points(points or [])
+        # Normalize `points` to a JSON array of points.
+        # Some callers send a JSON string or a richer object (e.g. {points: [...], type: ...}).
+        points_list = []
+        try:
+            raw = points
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            if isinstance(raw, dict) and isinstance(raw.get('points'), list):
+                points_list = raw.get('points') or []
+            elif isinstance(raw, list):
+                points_list = raw
+        except Exception:
+            points_list = []
+        measurement.set_points(points_list)
         measurement.save()
         return JsonResponse({'success': True, 'id': measurement.id})
     except Exception as e:
@@ -3708,7 +4134,6 @@ def web_save_measurement(request):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
 def web_save_annotation(request):
     try:
@@ -3770,7 +4195,6 @@ def web_get_annotations(request, image_id):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
 def web_save_viewer_session(request):
     try:
@@ -3780,11 +4204,21 @@ def web_save_viewer_session(request):
         study = get_object_or_404(Study, id=study_id)
         if hasattr(request.user, 'is_facility_user') and request.user.is_facility_user() and study.facility != request.user.facility:
             return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+        # Frontend often sends session_data as a JSON string; normalize to a dict.
+        session_obj = {}
+        try:
+            if isinstance(session_data, str):
+                session_obj = json.loads(session_data) if session_data.strip() else {}
+            elif isinstance(session_data, dict):
+                session_obj = session_data
+        except Exception:
+            session_obj = {}
+
         session, created = ViewerSession.objects.get_or_create(
-            user=request.user, study=study, defaults={'session_data': json.dumps(session_data or {})}
+            user=request.user, study=study, defaults={'session_data': json.dumps(session_obj)}
         )
         if not created:
-            session.set_session_data(session_data or {})
+            session.set_session_data(session_obj)
             session.save()
         return JsonResponse({'success': True})
     except Exception as e:
@@ -3802,7 +4236,6 @@ def web_load_viewer_session(request, study_id):
 
 
 @login_required
-@csrf_exempt
 @require_http_methods(["POST"])
 def web_start_reconstruction(request):
     try:
@@ -4362,7 +4795,6 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
         return volume, spacing
 
 @login_required
-@csrf_exempt
 def api_user_presets(request):
     """CRUD for per-user window/level presets.
     GET: list presets (optionally filter by modality/body_part)
@@ -4581,7 +5013,6 @@ def hu_calibration_dashboard(request):
 
 @login_required
 @user_passes_test(lambda u: u.is_admin() or u.is_technician())
-@csrf_exempt
 def validate_hu_calibration(request, study_id):
     """Validate Hounsfield unit calibration for a study"""
     from .models import HounsfieldCalibration
@@ -4729,16 +5160,163 @@ def manage_qa_phantoms(request):
 
 # DICOM Image Printing Functionality
 import tempfile
-# from reportlab.pdfgen import canvas
-# from reportlab.lib.pagesizes import letter, A4
-# from reportlab.lib.units import inch
-# from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
 import subprocess
 try:
     import cups
 except ImportError:
     cups = None
 from django.views.decorators.http import require_POST
+
+def _decode_data_url_image(data_url: str) -> bytes:
+    """Return raw image bytes from a data URL or base64 payload."""
+    if not data_url:
+        raise ValueError("empty image data")
+    s = data_url.strip()
+    if s.startswith("data:image"):
+        s = s.split(",", 1)[1]
+    return base64.b64decode(s)
+
+def _ordered_series_images_for_print(series):
+    """Return queryset of DicomImage ordered for cine/print."""
+    try:
+        return series.images.all().order_by('instance_number', 'slice_location', 'id')
+    except Exception:
+        return series.images.all().order_by('id')
+
+def _render_dicom_image_for_print(image_obj: DicomImage, *, window_width: float, window_level: float, inverted: bool) -> Image.Image:
+    """Render a single DicomImage to a PIL Image (uint8 windowed)."""
+    ds = None
+    try:
+        if image_obj.file_path:
+            with image_obj.file_path.open('rb') as f:
+                try:
+                    ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
+                except Exception:
+                    f.seek(0)
+                    ds = pydicom.dcmread(f, stop_before_pixels=False, force=True)
+    except Exception:
+        ds = None
+
+    if ds is None:
+        raise ValueError("Cannot read DICOM dataset")
+
+    try:
+        px0 = ds.pixel_array
+        px0 = _select_frame(px0, frame_index=0)
+        # Color => return RGB directly (printing as-is)
+        if _is_color_pixel_array(px0):
+            rgb = _convert_color_to_rgb_uint8(px0, ds=ds)
+            if rgb is None:
+                raise ValueError("Could not decode color pixel data")
+            return Image.fromarray(rgb, mode="RGB")
+        px = px0.astype(np.float32)
+    except Exception:
+        # Fallback to SimpleITK when pydicom pixel handlers fail
+        import SimpleITK as sitk
+        dicom_path = os.path.join(settings.MEDIA_ROOT, str(image_obj.file_path))
+        sitk_image = sitk.ReadImage(dicom_path)
+        arr = sitk.GetArrayFromImage(sitk_image)
+        if arr.ndim == 3 and arr.shape[0] == 1:
+            arr = arr[0]
+        arr = _select_frame(arr, frame_index=0)
+        if _is_color_pixel_array(arr):
+            rgb = _convert_color_to_rgb_uint8(arr, ds=ds)
+            if rgb is None:
+                raise ValueError("Could not decode color pixel data")
+            return Image.fromarray(rgb, mode="RGB")
+        px = arr.astype(np.float32)
+
+    # HU rescale if present
+    try:
+        if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
+            px = px * float(getattr(ds, 'RescaleSlope', 1.0)) + float(getattr(ds, 'RescaleIntercept', 0.0))
+    except Exception:
+        pass
+
+    # MONOCHROME1 defaults to inverted unless explicitly overridden by caller
+    try:
+        if str(getattr(ds, 'PhotometricInterpretation', '') or '') == 'MONOCHROME1':
+            inverted = True if inverted is None else bool(inverted)
+    except Exception:
+        pass
+
+    processor = DicomProcessor()
+    windowed = processor.apply_windowing(px, float(window_width), float(window_level), bool(inverted), enhanced_contrast=True)
+    return Image.fromarray(windowed)
+
+def create_grid_layout(c, image_paths, width, height, *, rows: int, cols: int, margin: int, header_lines: list[str], footer_text: str, cell_labels: list[str] | None = None):
+    """Generic NxM grid layout for multi-slice printing."""
+    rows = max(1, int(rows))
+    cols = max(1, int(cols))
+    margin = max(10, int(margin))
+
+    # Header
+    y_top = height - margin
+    c.setFont("Helvetica-Bold", 12)
+    if header_lines:
+        c.drawString(margin, y_top - 12, header_lines[0])
+        c.setFont("Helvetica", 9)
+        y = y_top - 26
+        for line in header_lines[1:3]:
+            if line:
+                c.drawString(margin, y, line)
+                y -= 12
+    header_h = 58
+
+    # Footer
+    c.setFont("Helvetica", 8)
+    c.drawString(margin, 14, footer_text)
+    footer_h = 24
+
+    # Grid box
+    grid_top = height - header_h
+    grid_bottom = footer_h
+    grid_h = max(10.0, float(grid_top - grid_bottom))
+    grid_w = float(width - (margin * 2))
+
+    cell_w = grid_w / cols
+    cell_h = grid_h / rows
+    pad = 6
+
+    # Draw each image
+    img_count = min(len(image_paths), rows * cols)
+    for i in range(img_count):
+        r = i // cols
+        cl = i % cols
+        x0 = margin + cl * cell_w
+        y0 = grid_top - (r + 1) * cell_h
+
+        try:
+            img = ImageReader(image_paths[i])
+            iw, ih = img.getSize()
+            # Fit image within cell
+            avail_w = cell_w - pad * 2
+            avail_h = cell_h - pad * 2
+            scale = min(avail_w / iw, avail_h / ih)
+            dw = iw * scale
+            dh = ih * scale
+            dx = x0 + (cell_w - dw) / 2
+            dy = y0 + (cell_h - dh) / 2
+            c.drawImage(img, dx, dy, dw, dh)
+        except Exception:
+            pass
+
+        # Optional per-tile label
+        label = None
+        if cell_labels and i < len(cell_labels):
+            label = cell_labels[i]
+        if label:
+            c.setFont("Helvetica", 7)
+            c.setFillColorRGB(1, 1, 1)
+            # Small dark background strip
+            c.setFillColorRGB(0, 0, 0)
+            c.rect(x0 + 2, y0 + cell_h - 12, 80, 10, fill=1, stroke=0)
+            c.setFillColorRGB(1, 1, 1)
+            c.drawString(x0 + 5, y0 + cell_h - 10, str(label)[:28])
 
 @login_required
 @require_POST
@@ -4748,16 +5326,16 @@ def print_dicom_image(request):
     Supports various paper sizes and printer configurations.
     """
     try:
-        # Get image data from request
-        image_data = request.POST.get('image_data')
-        if not image_data:
-            return JsonResponse({'success': False, 'error': 'No image data provided'})
-        
-        # Parse image data (base64 encoded)
-        if image_data.startswith('data:image'):
-            image_data = image_data.split(',')[1]
-        
-        image_bytes = base64.b64decode(image_data)
+        # Printing can be:
+        # - single image: image_data (legacy)
+        # - multi image: image_data_list (JSON list of data URLs/base64)
+        # - server-rendered multi-slice grid: series_id + slice_start/step/count
+        image_data = (request.POST.get('image_data') or '').strip()
+        image_data_list_raw = (request.POST.get('image_data_list') or '').strip()
+        series_id = (request.POST.get('series_id') or '').strip()
+        slice_start = request.POST.get('slice_start')
+        slice_step = request.POST.get('slice_step')
+        slice_count = request.POST.get('slice_count')
         
         # Get printing options
         paper_size = request.POST.get('paper_size', 'A4')
@@ -4767,6 +5345,9 @@ def print_dicom_image(request):
         printer_name = request.POST.get('printer_name', '')
         layout_type = request.POST.get('layout_type', 'single')
         print_medium = request.POST.get('print_medium', 'paper')  # paper or film
+        # Grid controls (used by 'grid' / modality-specific grids)
+        grid_rows = request.POST.get('grid_rows')
+        grid_cols = request.POST.get('grid_cols')
         
         # Get patient and study information
         patient_name = request.POST.get('patient_name', 'Unknown Patient')
@@ -4775,10 +5356,95 @@ def print_dicom_image(request):
         series_description = request.POST.get('series_description', '')
         institution_name = request.POST.get('institution_name', request.user.facility.name if hasattr(request.user, 'facility') and request.user.facility else 'Medical Facility')
         
-        # Create temporary files
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as img_temp:
-            img_temp.write(image_bytes)
-            img_temp_path = img_temp.name
+        # Optional windowing overrides for server-rendered slices
+        try:
+            ww = float(request.POST.get('window_width', '2000' if modality in ('CT',) else '400'))
+        except Exception:
+            ww = 400.0
+        try:
+            wl = float(request.POST.get('window_level', '300' if modality in ('CT',) else '40'))
+        except Exception:
+            wl = 40.0
+        inv_raw = (request.POST.get('inverted') or '').strip().lower()
+        inverted = inv_raw in ('1', 'true', 'yes', 'on')
+
+        # Create temporary PNG(s)
+        tmp_paths = []
+        try:
+            if image_data_list_raw:
+                # Client-provided list of already-rendered slice images
+                try:
+                    items = json.loads(image_data_list_raw)
+                except Exception:
+                    items = []
+                if not isinstance(items, list) or not items:
+                    return JsonResponse({'success': False, 'error': 'Invalid image_data_list'})
+                for b64 in items[:96]:  # safety cap
+                    png = _decode_data_url_image(str(b64))
+                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as t:
+                        t.write(png)
+                        tmp_paths.append(t.name)
+            elif series_id:
+                # Server-render a slice grid directly from stored DICOMs
+                from worklist.models import Series as _Series
+                series = get_object_or_404(_Series, id=int(series_id))
+                # Permissions: facility users restricted
+                if request.user.is_facility_user() and getattr(request.user, 'facility', None) and series.study.facility != request.user.facility:
+                    return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+
+                images_qs = _ordered_series_images_for_print(series)
+                total = images_qs.count()
+                if total < 1:
+                    return JsonResponse({'success': False, 'error': 'No images in series'}, status=400)
+                try:
+                    st = int(float(slice_start)) if slice_start is not None and slice_start != '' else max(0, total // 2 - 8)
+                except Exception:
+                    st = max(0, total // 2 - 8)
+                try:
+                    step = int(float(slice_step)) if slice_step is not None and slice_step != '' else 1
+                except Exception:
+                    step = 1
+                step = max(1, step)
+                try:
+                    cnt = int(float(slice_count)) if slice_count is not None and slice_count != '' else 16
+                except Exception:
+                    cnt = 16
+                cnt = max(1, min(96, cnt))
+
+                # Build index list within bounds
+                idxs = []
+                i = max(0, min(total - 1, st))
+                while len(idxs) < cnt and i < total:
+                    idxs.append(i)
+                    i += step
+
+                # Render selected slices
+                chosen = list(images_qs[idxs[0]:idxs[-1] + 1]) if idxs else list(images_qs[:cnt])
+                # If we used slicing window, still pick by exact indices to avoid step mismatch
+                chosen_map = {j: chosen[j - idxs[0]] for j in range(idxs[0], idxs[-1] + 1)} if idxs and chosen else {}
+                for j in idxs:
+                    img_obj = chosen_map.get(j) if chosen_map else images_qs[j]
+                    pil = _render_dicom_image_for_print(img_obj, window_width=ww, window_level=wl, inverted=inverted)
+                    out = BytesIO()
+                    pil.save(out, format='PNG')
+                    out.seek(0)
+                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as t:
+                        t.write(out.getvalue())
+                        tmp_paths.append(t.name)
+            else:
+                # Legacy single image_data
+                if not image_data:
+                    return JsonResponse({'success': False, 'error': 'No image data provided'})
+                png = _decode_data_url_image(image_data)
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as t:
+                    t.write(png)
+                    tmp_paths.append(t.name)
+        except Exception as e:
+            # Cleanup any partial temps
+            for p in tmp_paths:
+                try: os.unlink(p)
+                except Exception: pass
+            return JsonResponse({'success': False, 'error': f'Failed to prepare images: {str(e)}'})
         
         with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as pdf_temp:
             pdf_temp_path = pdf_temp.name
@@ -4786,20 +5452,125 @@ def print_dicom_image(request):
         try:
             # Create PDF with medical image and metadata using selected layout
             create_medical_print_pdf_enhanced(
-                img_temp_path, pdf_temp_path, paper_size, layout_type, 
-                print_medium, modality, patient_name, study_date, 
-                series_description, institution_name
+                tmp_paths,
+                pdf_temp_path,
+                paper_size,
+                layout_type,
+                print_medium,
+                modality,
+                patient_name,
+                study_date,
+                series_description,
+                institution_name,
+                grid_rows=(int(grid_rows) if (grid_rows and str(grid_rows).strip()) else None),
+                grid_cols=(int(grid_cols) if (grid_cols and str(grid_cols).strip()) else None),
             )
-            
-            # Print the PDF
+
+            # Optionally return the generated PDF to the browser instead of sending to CUPS.
+            download_pdf = (request.POST.get('download_pdf') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+            if download_pdf:
+                try:
+                    with open(pdf_temp_path, 'rb') as f:
+                        pdf_bytes = f.read()
+                    resp = HttpResponse(pdf_bytes, content_type='application/pdf')
+                    resp["Content-Disposition"] = f'attachment; filename="dicom_print_{timezone.now().strftime("%Y%m%d_%H%M%S")}.pdf"'
+                    resp['Cache-Control'] = 'private, max-age=0, no-store'
+                    try:
+                        # Best-effort linkage to the underlying series/study when server-rendered printing is used.
+                        _study_uid = ""
+                        _series_uid = ""
+                        _study_id = None
+                        _series_db_id = None
+                        if series_id:
+                            try:
+                                from worklist.models import Series as _Series
+                                _s = _Series.objects.select_related("study").get(id=int(series_id))
+                                _study_uid = getattr(_s.study, "study_instance_uid", "") or ""
+                                _series_uid = getattr(_s, "series_instance_uid", "") or ""
+                                _study_id = int(_s.study.id)
+                                _series_db_id = int(_s.id)
+                            except Exception:
+                                pass
+                        log_audit(
+                            request=request,
+                            action="viewer_print",
+                            user=request.user,
+                            facility=getattr(request.user, "facility", None),
+                            study_instance_uid=_study_uid,
+                            series_instance_uid=_series_uid,
+                            study_id=_study_id,
+                            series_id=_series_db_id,
+                            extra={
+                                "mode": "download_pdf",
+                                "paper_size": paper_size,
+                                "paper_type": paper_type,
+                                "print_quality": print_quality,
+                                "copies": copies,
+                                "layout_type": layout_type,
+                                "grid_rows": grid_rows,
+                                "grid_cols": grid_cols,
+                                "modality": modality,
+                            },
+                        )
+                    except Exception:
+                        pass
+                    return resp
+                except Exception as e:
+                    return JsonResponse({'success': False, 'error': f'Failed to prepare PDF download: {str(e)}'})
+
+            # Print the PDF via CUPS/lp
             print_result = send_to_printer(
-                pdf_temp_path, printer_name, paper_type, 
-                print_quality, copies
+                pdf_temp_path,
+                printer_name,
+                paper_size,
+                paper_type,
+                print_quality,
+                copies,
             )
             
             if print_result['success']:
                 # Log successful print
                 logger.info(f"Successfully printed DICOM image for patient {patient_name}")
+                try:
+                    _study_uid = ""
+                    _series_uid = ""
+                    _study_id = None
+                    _series_db_id = None
+                    if series_id:
+                        try:
+                            from worklist.models import Series as _Series
+                            _s = _Series.objects.select_related("study").get(id=int(series_id))
+                            _study_uid = getattr(_s.study, "study_instance_uid", "") or ""
+                            _series_uid = getattr(_s, "series_instance_uid", "") or ""
+                            _study_id = int(_s.study.id)
+                            _series_db_id = int(_s.id)
+                        except Exception:
+                            pass
+                    log_audit(
+                        request=request,
+                        action="viewer_print",
+                        user=request.user,
+                        facility=getattr(request.user, "facility", None),
+                        study_instance_uid=_study_uid,
+                        series_instance_uid=_series_uid,
+                        study_id=_study_id,
+                        series_id=_series_db_id,
+                        extra={
+                            "mode": "cups",
+                            "printer_name": printer_name,
+                            "paper_size": paper_size,
+                            "paper_type": paper_type,
+                            "print_quality": print_quality,
+                            "copies": copies,
+                            "layout_type": layout_type,
+                            "grid_rows": grid_rows,
+                            "grid_cols": grid_cols,
+                            "modality": modality,
+                            "job_id": print_result.get("job_id"),
+                        },
+                    )
+                except Exception:
+                    pass
                 return JsonResponse({
                     'success': True, 
                     'message': f'Image sent to printer successfully. Job ID: {print_result.get("job_id", "N/A")}'
@@ -4813,7 +5584,9 @@ def print_dicom_image(request):
         finally:
             # Clean up temporary files
             try:
-                os.unlink(img_temp_path)
+                for p in tmp_paths:
+                    try: os.unlink(p)
+                    except Exception: pass
                 os.unlink(pdf_temp_path)
             except:
                 pass
@@ -4822,7 +5595,7 @@ def print_dicom_image(request):
         logger.error(f"Error in print_dicom_image: {str(e)}")
         return JsonResponse({'success': False, 'error': str(e)})
 
-def create_medical_print_pdf_enhanced(image_path, output_path, paper_size, layout_type, print_medium, modality, patient_name, study_date, series_description, institution_name):
+def create_medical_print_pdf_enhanced(image_paths, output_path, paper_size, layout_type, print_medium, modality, patient_name, study_date, series_description, institution_name, grid_rows: int | None = None, grid_cols: int | None = None):
     """
     Create a PDF optimized for medical image printing with multiple layout options for different modalities.
     Supports both paper and film printing with modality-specific layouts.
@@ -4842,19 +5615,153 @@ def create_medical_print_pdf_enhanced(image_path, output_path, paper_size, layou
     # Create PDF
     c = canvas.Canvas(output_path, pagesize=page_size)
     width, height = page_size
+
+    # Normalize input to list
+    if isinstance(image_paths, (list, tuple)):
+        images = [p for p in image_paths if p]
+    else:
+        images = [image_paths] if image_paths else []
+    if not images:
+        raise ValueError("No images provided to print")
+
+    header_lines = [
+        f"{institution_name}".strip(),
+        f"Patient: {patient_name}".strip(),
+        f"Study: {study_date} | Modality: {modality} | Series: {series_description}".strip(),
+    ]
+    footer_text = f"Printed: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')} | NoctisPro Medical Imaging"
     
     # Apply layout based on type and modality
-    if layout_type == 'single':
-        create_single_image_layout(c, image_path, width, height, print_medium, modality, patient_name, study_date, series_description, institution_name)
+    if layout_type == 'ct_axial_grid':
+        # Default 4x4 grid (16 slices) for CT axial printing
+        create_grid_layout(
+            c,
+            images,
+            width,
+            height,
+            rows=4,
+            cols=4,
+            margin=20 if print_medium == 'film' else 40,
+            header_lines=header_lines,
+            footer_text=footer_text + " | CT Axial Grid",
+            cell_labels=[f"#{i+1}" for i in range(min(len(images), 16))],
+        )
+    elif layout_type == 'grid':
+        # Generic grid controlled by optional rows/cols (fallback: 3x3)
+        try:
+            r = int(grid_rows) if grid_rows is not None else 3
+        except Exception:
+            r = 3
+        try:
+            cl = int(grid_cols) if grid_cols is not None else 3
+        except Exception:
+            cl = 3
+        create_grid_layout(
+            c,
+            images,
+            width,
+            height,
+            rows=max(1, min(8, r)),
+            cols=max(1, min(8, cl)),
+            margin=20 if print_medium == 'film' else 40,
+            header_lines=header_lines,
+            footer_text=footer_text + " | Grid",
+        )
+    elif layout_type in ('ct_mpr_trio', 'mri_mpr_trio'):
+        # 1x3 layout (axial/sagittal/coronal) – expects 3 images
+        create_grid_layout(
+            c,
+            images[:3],
+            width,
+            height,
+            rows=1,
+            cols=3,
+            margin=20 if print_medium == 'film' else 35,
+            header_lines=header_lines,
+            footer_text=footer_text + " | MPR Trio",
+            cell_labels=['Axial', 'Sagittal', 'Coronal'],
+        )
+    elif layout_type == 'mri_sequences':
+        # Common MR “sheet” feel: 2x2 or 3x3 depending on how many images are provided
+        n = len(images)
+        rows = 2 if n <= 4 else 3
+        cols = 2 if n <= 4 else 3
+        create_grid_layout(
+            c,
+            images[: (rows * cols)],
+            width,
+            height,
+            rows=rows,
+            cols=cols,
+            margin=20 if print_medium == 'film' else 35,
+            header_lines=header_lines,
+            footer_text=footer_text + " | MRI Sequences",
+        )
+    elif layout_type == 'xray_pa_lateral':
+        # PA + Lateral (1x2)
+        create_grid_layout(
+            c,
+            images[:2],
+            width,
+            height,
+            rows=1,
+            cols=2,
+            margin=20 if print_medium == 'film' else 35,
+            header_lines=header_lines,
+            footer_text=footer_text + " | PA & Lateral",
+            cell_labels=['PA', 'Lateral'],
+        )
+    elif layout_type == 'mammo_cc_mlo':
+        # CC + MLO (1x2)
+        create_grid_layout(
+            c,
+            images[:2],
+            width,
+            height,
+            rows=1,
+            cols=2,
+            margin=20 if print_medium == 'film' else 35,
+            header_lines=header_lines,
+            footer_text=footer_text + " | CC & MLO",
+            cell_labels=['CC', 'MLO'],
+        )
+    elif layout_type == 'us_measurements':
+        # Ultrasound sheet: 2x2 (4 frames)
+        create_grid_layout(
+            c,
+            images[:4],
+            width,
+            height,
+            rows=2,
+            cols=2,
+            margin=20 if print_medium == 'film' else 35,
+            header_lines=header_lines,
+            footer_text=footer_text + " | US",
+        )
+    elif layout_type == 'pet_fusion':
+        # PET fusion sheet: 2x2 (PET/CT/fusion/ROI) – generic
+        create_grid_layout(
+            c,
+            images[:4],
+            width,
+            height,
+            rows=2,
+            cols=2,
+            margin=20 if print_medium == 'film' else 35,
+            header_lines=header_lines,
+            footer_text=footer_text + " | PET Fusion",
+        )
+    elif layout_type == 'single':
+        create_single_image_layout(c, images[0], width, height, print_medium, modality, patient_name, study_date, series_description, institution_name)
     elif layout_type == 'quad':
-        create_quad_layout(c, image_path, width, height, print_medium, modality, patient_name, study_date, series_description, institution_name)
+        create_quad_layout(c, images[0], width, height, print_medium, modality, patient_name, study_date, series_description, institution_name)
     elif layout_type == 'comparison':
-        create_comparison_layout(c, image_path, width, height, print_medium, modality, patient_name, study_date, series_description, institution_name)
+        create_comparison_layout(c, images[0], width, height, print_medium, modality, patient_name, study_date, series_description, institution_name)
     elif layout_type == 'film_standard':
-        create_film_standard_layout(c, image_path, width, height, modality, patient_name, study_date, series_description, institution_name)
+        create_film_standard_layout(c, images[0], width, height, modality, patient_name, study_date, series_description, institution_name)
     else:
         # Default to single layout
-        create_single_image_layout(c, image_path, width, height, print_medium, modality, patient_name, study_date, series_description, institution_name)
+        create_single_image_layout(c, images[0], width, height, print_medium, modality, patient_name, study_date, series_description, institution_name)
     
     c.save()
 
@@ -5146,14 +6053,14 @@ def get_print_layouts(request):
         'modality': modality
     })
 
-def send_to_printer(pdf_path, printer_name, paper_type, print_quality, copies):
+def send_to_printer(pdf_path, printer_name, paper_size, paper_type, print_quality, copies):
     """
     Send PDF to printer with optimized settings for glossy paper.
     """
     try:
         if cups is None:
             # Fallback to lp command if pycups is not available
-            return send_to_printer_fallback(pdf_path, printer_name, paper_type, print_quality, copies)
+            return send_to_printer_fallback(pdf_path, printer_name, paper_size, paper_type, print_quality, copies)
         
         # Initialize CUPS connection
         conn = cups.Connection()
@@ -5173,7 +6080,8 @@ def send_to_printer(pdf_path, printer_name, paper_type, print_quality, copies):
         # Set print options optimized for medical images and glossy paper
         print_options = {
             'copies': str(copies),
-            'media': 'A4' if paper_type == 'A4' else 'Letter',
+            # IMPORTANT: `paper_type` is glossy/matte/etc; `paper_size` is A4/Letter/film sizes.
+            'media': str(paper_size).upper(),
             'print-quality': '5' if print_quality == 'high' else '4',  # Highest quality
             'print-color-mode': 'color',
             'orientation-requested': '3',  # Portrait
@@ -5204,9 +6112,9 @@ def send_to_printer(pdf_path, printer_name, paper_type, print_quality, copies):
     except Exception as e:
         logger.error(f"CUPS printing error: {str(e)}")
         # Fallback to command line printing
-        return send_to_printer_fallback(pdf_path, printer_name, paper_type, print_quality, copies)
+        return send_to_printer_fallback(pdf_path, printer_name, paper_size, paper_type, print_quality, copies)
 
-def send_to_printer_fallback(pdf_path, printer_name, paper_type, print_quality, copies):
+def send_to_printer_fallback(pdf_path, printer_name, paper_size, paper_type, print_quality, copies):
     """
     Fallback printing method using lp command.
     """
@@ -5225,6 +6133,9 @@ def send_to_printer_fallback(pdf_path, printer_name, paper_type, print_quality, 
         if paper_type == 'glossy':
             cmd.extend(['-o', 'media-type=photographic-glossy'])
             cmd.extend(['-o', 'print-quality=5'])
+        # Media size (best-effort; depends on printer PPD)
+        if paper_size:
+            cmd.extend(['-o', f'media={str(paper_size).upper()}'])
         
         cmd.append(pdf_path)
         

@@ -41,6 +41,125 @@ from .models import WindowLevelPreset, HangingProtocol
 # Initialize logger
 logger = logging.getLogger(__name__)
 
+
+def _get_requested_frame_index(request, *, default_index: int = 0) -> int:
+    """
+    Parse a frame selector from query params.
+    Accepts:
+      - frame / frame_index: 0-based
+      - frame_number: 1-based
+    """
+    try:
+        if request is None:
+            return int(default_index)
+        if request.GET.get("frame_number") is not None:
+            n = int(float(request.GET.get("frame_number")))
+            return max(0, n - 1)
+        if request.GET.get("frame") is not None:
+            return max(0, int(float(request.GET.get("frame"))))
+        if request.GET.get("frame_index") is not None:
+            return max(0, int(float(request.GET.get("frame_index"))))
+    except Exception:
+        return int(default_index)
+    return int(default_index)
+
+
+def _is_color_pixel_array(arr) -> bool:
+    try:
+        if arr is None:
+            return False
+        if getattr(arr, "ndim", 0) == 3 and arr.shape[-1] in (3, 4):
+            return True
+        if getattr(arr, "ndim", 0) == 4 and arr.shape[-1] in (3, 4):
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def _select_frame(arr, *, frame_index: int = 0):
+    """
+    Reduce a decoded pixel array to a single frame.
+    Handles common shapes:
+      - (rows, cols)
+      - (rows, cols, channels)
+      - (frames, rows, cols)
+      - (frames, rows, cols, channels)
+      - (1, rows, cols) / (1, rows, cols, channels)
+    """
+    if arr is None:
+        return None
+    try:
+        import numpy as _np
+
+        a = arr
+        if getattr(a, "ndim", 0) == 4 and a.shape[0] == 1:
+            a = a[0]
+        if getattr(a, "ndim", 0) == 3 and a.shape[0] == 1 and a.shape[-1] not in (3, 4):
+            a = a[0]
+
+        # Multi-frame (frames, rows, cols) or (frames, rows, cols, channels)
+        if getattr(a, "ndim", 0) == 4:
+            fi = int(frame_index)
+            fi = max(0, min(fi, int(a.shape[0]) - 1))
+            a = a[fi]
+        elif getattr(a, "ndim", 0) == 3 and a.shape[-1] not in (3, 4):
+            # Treat as (frames, rows, cols)
+            fi = int(frame_index)
+            fi = max(0, min(fi, int(a.shape[0]) - 1))
+            a = a[fi]
+
+        return _np.asarray(a)
+    except Exception:
+        return arr
+
+
+def _convert_color_to_rgb_uint8(arr, ds=None):
+    """
+    Convert a decoded color pixel array into uint8 RGB for PNG/JPG export.
+    Best-effort conversion for YBR* -> RGB.
+    """
+    if arr is None:
+        return None
+    try:
+        import numpy as _np
+
+        a = _np.asarray(arr)
+        if a.ndim != 3 or a.shape[-1] not in (3, 4):
+            return None
+        a = a[..., :3]
+
+        # Convert YBR -> RGB when possible.
+        try:
+            photo = str(getattr(ds, "PhotometricInterpretation", "") or "").upper() if ds is not None else ""
+            if photo.startswith("YBR"):
+                try:
+                    from pydicom.pixel_data_handlers.util import convert_color_space as _ccs
+
+                    a = _ccs(a, current=photo, desired="RGB")
+                except Exception:
+                    # If conversion fails, fall back to using raw channels.
+                    pass
+        except Exception:
+            pass
+
+        if a.dtype != _np.uint8:
+            af = a.astype(_np.float32, copy=False)
+            # Robust normalization (per-image) to 0..255
+            lo = float(_np.percentile(af, 1))
+            hi = float(_np.percentile(af, 99))
+            if hi <= lo:
+                lo = float(_np.min(af))
+                hi = float(_np.max(af))
+            if hi > lo:
+                af = (af - lo) / (hi - lo) * 255.0
+            else:
+                af = _np.zeros_like(af, dtype=_np.float32)
+            a = _np.clip(af, 0, 255).astype(_np.uint8)
+        return a
+    except Exception:
+        return None
+
 #
 # Persistent (on-disk) MPR cache
 # - In-memory caches speed up repeated requests within a single process.
@@ -716,6 +835,8 @@ def api_image_data(request, image_id):
             warnings['dicom_read_error_fallback'] = str(e2)
             ds = None
 
+    frame_index = _get_requested_frame_index(request, default_index=0)
+
     # Decode pixels (best-effort)
     pixel_decode_error = None
     if ds is not None:
@@ -728,7 +849,18 @@ def api_image_data(request, image_id):
                     pixel_array = apply_voi_lut(pixel_array, ds)
             except Exception:
                 pass
-            pixel_array = pixel_array.astype(np.float32)
+            # If multi-frame, select a single frame (default first; caller can pass ?frame=)
+            try:
+                pixel_array = _select_frame(pixel_array, frame_index=frame_index)
+            except Exception:
+                pass
+
+            # For color images, prefer server-rendered PNG path (client renderer is grayscale-only).
+            if _is_color_pixel_array(pixel_array):
+                warnings["color_mode"] = "server_render"
+                pixel_array = None
+            else:
+                pixel_array = pixel_array.astype(np.float32)
         except Exception as e:
             # Fallback for compressed DICOMs without a working pixel handler: try SimpleITK if we have a local path.
             try:
@@ -738,7 +870,12 @@ def api_image_data(request, image_id):
                     pixel_array = sitk.GetArrayFromImage(sitk_image)
                     if pixel_array.ndim == 3 and pixel_array.shape[0] == 1:
                         pixel_array = pixel_array[0]
-                    pixel_array = pixel_array.astype(np.float32)
+                    pixel_array = _select_frame(pixel_array, frame_index=frame_index)
+                    if _is_color_pixel_array(pixel_array):
+                        warnings["color_mode"] = "server_render"
+                        pixel_array = None
+                    else:
+                        pixel_array = pixel_array.astype(np.float32)
                 else:
                     raise RuntimeError("No local path available for SimpleITK fallback")
             except Exception as _e:
@@ -1751,18 +1888,25 @@ def api_dicom_image_display(request, image_id):
                 warnings['dicom_read_error_fallback'] = str(e2)
                 ds = None
 
+        frame_index = _get_requested_frame_index(request, default_index=0)
+
         pixel_array = None
         pixel_decode_error = None
         if ds is not None:
             try:
                 pixel_array = ds.pixel_array
+                pixel_array = _select_frame(pixel_array, frame_index=frame_index)
                 try:
                     modality = str(getattr(ds, 'Modality', '')).upper()
                     if modality in ['DX','CR','XA','RF','MG']:
                         pixel_array = apply_voi_lut(pixel_array, ds)
                 except Exception:
                     pass
-                pixel_array = pixel_array.astype(np.float32)
+                # Color => prefer server-rendered PNG path (skip grayscale conversion)
+                if _is_color_pixel_array(pixel_array):
+                    warnings["color_mode"] = "server_render"
+                else:
+                    pixel_array = pixel_array.astype(np.float32)
             except Exception as e:
                 # Pixel decode failed (often due to compressed transfer syntaxes).
                 # Fallback: try SimpleITK (local path only). Keep both error messages for diagnostics.
@@ -1774,7 +1918,11 @@ def api_dicom_image_display(request, image_id):
                         pixel_array = sitk.GetArrayFromImage(sitk_image)
                         if pixel_array.ndim == 3 and pixel_array.shape[0] == 1:
                             pixel_array = pixel_array[0]
-                        pixel_array = pixel_array.astype(np.float32)
+                        pixel_array = _select_frame(pixel_array, frame_index=frame_index)
+                        if _is_color_pixel_array(pixel_array):
+                            warnings["color_mode"] = "server_render"
+                        else:
+                            pixel_array = pixel_array.astype(np.float32)
                         warnings['pixel_decode_fallback'] = 'SimpleITK'
                         warnings['pydicom_pixel_decode_error'] = pydicom_decode_error
                     else:
@@ -1790,8 +1938,8 @@ def api_dicom_image_display(request, image_id):
             except Exception:
                 pass
 
-        # Normalize to a 2D grayscale frame (handles DX/CR that decode as (rows, cols, 1))
-        if pixel_array is not None:
+        # Normalize to a 2D grayscale frame (skip for color)
+        if pixel_array is not None and (not _is_color_pixel_array(pixel_array)):
             try:
                 arr = pixel_array
                 if getattr(arr, "ndim", 0) == 4 and arr.shape[0] == 1:
@@ -1912,20 +2060,31 @@ def api_dicom_image_display(request, image_id):
 
         # Always include a render URL (when possible) so the browser can stream PNG bytes without data-URLs.
         image_url = None
-        if pixel_array is not None:
+        if ds is not None:
             try:
                 params = {
                     'ww': str(window_width),
                     'wl': str(window_level),
                     'invert': 'true' if bool(inverted) else 'false',
                 }
+                # Preserve frame selection for multi-frame objects
+                try:
+                    if request.GET.get("frame") is not None:
+                        params["frame"] = str(int(float(request.GET.get("frame"))))
+                    elif request.GET.get("frame_index") is not None:
+                        params["frame"] = str(int(float(request.GET.get("frame_index"))))
+                    elif request.GET.get("frame_number") is not None:
+                        params["frame"] = str(max(0, int(float(request.GET.get("frame_number"))) - 1))
+                except Exception:
+                    pass
                 image_url = f"/dicom-viewer/api/image/{int(image.id)}/render.png?{urlencode(params)}"
             except Exception:
                 image_url = None
 
         # Generate embedded base64 image only when requested/needed (legacy behavior).
         image_data_url = None
-        if (not want_url_only) and pixel_array is not None:
+        # For color images, always return URL-only (avoid grayscale conversion/data-URLs)
+        if (not want_url_only) and pixel_array is not None and (not _is_color_pixel_array(pixel_array)):
             try:
                 image_data_url = _array_to_base64_image(pixel_array, window_width, window_level, inverted)
             except Exception as e:
@@ -1969,6 +2128,12 @@ def api_dicom_image_display(request, image_id):
             'bits_allocated': _jsonify_dicom_value(getattr(ds, 'BitsAllocated', 16)) if ds is not None else 16,
             'bits_stored': _jsonify_dicom_value(getattr(ds, 'BitsStored', 16)) if ds is not None else 16,
             'photometric_interpretation': _jsonify_dicom_value(getattr(ds, 'PhotometricInterpretation', '')) if ds is not None else '',
+            'number_of_frames': int(getattr(ds, 'NumberOfFrames', 1) or 1) if ds is not None else 1,
+            'frame_index': int(frame_index),
+            'is_color': (
+                (pixel_array is not None and _is_color_pixel_array(pixel_array))
+                or (str(getattr(ds, "PhotometricInterpretation", "") or "").upper() in ("RGB", "YBR_FULL", "YBR_FULL_422", "YBR_PARTIAL_422", "YBR_PARTIAL_420"))
+            ),
         }
         
         payload = {
@@ -2070,16 +2235,31 @@ def api_dicom_image_png(request, image_id):
         if ds is None:
             return HttpResponse(status=404)
 
+        frame_index = _get_requested_frame_index(request, default_index=0)
+
         # Decode pixels (best-effort)
         pixel_array = None
         try:
             pixel_array = ds.pixel_array
+            pixel_array = _select_frame(pixel_array, frame_index=frame_index)
             try:
                 modality = str(getattr(ds, 'Modality', '')).upper()
                 if modality in ['DX', 'CR', 'XA', 'RF', 'MG']:
                     pixel_array = apply_voi_lut(pixel_array, ds)
             except Exception:
                 pass
+            # Color images: render as RGB PNG directly (no W/L).
+            if _is_color_pixel_array(pixel_array):
+                rgb = _convert_color_to_rgb_uint8(pixel_array, ds=ds)
+                if rgb is None:
+                    return HttpResponse(status=404)
+                img = Image.fromarray(rgb, mode="RGB")
+                buffer = BytesIO()
+                img.save(buffer, format="PNG", optimize=False, compress_level=1)
+                resp = HttpResponse(buffer.getvalue(), content_type="image/png")
+                resp["Cache-Control"] = "private, max-age=3600"
+                return resp
+
             pixel_array = pixel_array.astype(np.float32)
         except Exception as e:
             # SimpleITK fallback requires local path
@@ -2090,6 +2270,17 @@ def api_dicom_image_png(request, image_id):
                     px = sitk.GetArrayFromImage(sitk_image)
                     if px.ndim == 3 and px.shape[0] == 1:
                         px = px[0]
+                    px = _select_frame(px, frame_index=frame_index)
+                    if _is_color_pixel_array(px):
+                        rgb = _convert_color_to_rgb_uint8(px, ds=ds)
+                        if rgb is None:
+                            return HttpResponse(status=404)
+                        img = Image.fromarray(rgb, mode="RGB")
+                        buffer = BytesIO()
+                        img.save(buffer, format="PNG", optimize=False, compress_level=1)
+                        resp = HttpResponse(buffer.getvalue(), content_type="image/png")
+                        resp["Cache-Control"] = "private, max-age=3600"
+                        return resp
                     pixel_array = px.astype(np.float32)
                 else:
                     raise RuntimeError("No local path available for SimpleITK fallback")
@@ -2502,6 +2693,7 @@ def api_export_image(request, image_id):
     ww = request.GET.get('window_width')
     wl = request.GET.get('window_level')
     inverted = (request.GET.get('inverted', 'false') or 'false').strip().lower() in ('1', 'true', 'yes', 'on')
+    frame_index = _get_requested_frame_index(request, default_index=0)
 
     # Render a windowed slice (server-side) and optionally burn-in metadata.
     try:
@@ -2530,7 +2722,18 @@ def api_export_image(request, image_id):
         pixel_array = None
         if ds is not None:
             try:
-                pixel_array = ds.pixel_array.astype(np.float32)
+                px0 = ds.pixel_array
+                px0 = _select_frame(px0, frame_index=frame_index)
+
+                # Color: export as RGB (no W/L windowing)
+                if _is_color_pixel_array(px0):
+                    rgb = _convert_color_to_rgb_uint8(px0, ds=ds)
+                    if rgb is None:
+                        return JsonResponse({'error': 'Could not decode color pixel data'}, status=500)
+                    pil = Image.fromarray(rgb, mode="RGB")
+                    pixel_array = None
+                else:
+                    pixel_array = px0.astype(np.float32)
             except Exception as e_px:
                 # Fallback to SimpleITK if available and we have a filesystem path
                 try:
@@ -2540,12 +2743,20 @@ def api_export_image(request, image_id):
                     px = sitk.GetArrayFromImage(sitk_image)
                     if px.ndim == 3 and px.shape[0] == 1:
                         px = px[0]
-                    pixel_array = px.astype(np.float32)
+                    px = _select_frame(px, frame_index=frame_index)
+                    if _is_color_pixel_array(px):
+                        rgb = _convert_color_to_rgb_uint8(px, ds=ds)
+                        if rgb is None:
+                            return JsonResponse({'error': 'Could not decode color pixel data'}, status=500)
+                        pil = Image.fromarray(rgb, mode="RGB")
+                        pixel_array = None
+                    else:
+                        pixel_array = px.astype(np.float32)
                     warnings['sitk_fallback'] = True
                 except Exception:
                     pixel_array = None
 
-        if pixel_array is None:
+        if pixel_array is None and 'pil' not in locals():
             return JsonResponse({'error': 'Could not decode pixel data'}, status=500)
 
         # Apply rescale (HU) if present
@@ -2579,9 +2790,10 @@ def api_export_image(request, image_id):
         if (request.GET.get('inverted') is None) and (ds is not None) and (str(getattr(ds, 'PhotometricInterpretation', '') or '') == 'MONOCHROME1'):
             inverted = True
 
-        processor = DicomProcessor()
-        windowed = processor.apply_windowing(pixel_array, window_width, window_level, inverted, enhanced_contrast=True)
-        pil = Image.fromarray(windowed)
+        if 'pil' not in locals():
+            processor = DicomProcessor()
+            windowed = processor.apply_windowing(pixel_array, window_width, window_level, inverted, enhanced_contrast=True)
+            pil = Image.fromarray(windowed)
 
         if burn_in:
             from PIL import ImageDraw, ImageFont
@@ -4973,7 +5185,15 @@ def _render_dicom_image_for_print(image_obj: DicomImage, *, window_width: float,
         raise ValueError("Cannot read DICOM dataset")
 
     try:
-        px = ds.pixel_array.astype(np.float32)
+        px0 = ds.pixel_array
+        px0 = _select_frame(px0, frame_index=0)
+        # Color => return RGB directly (printing as-is)
+        if _is_color_pixel_array(px0):
+            rgb = _convert_color_to_rgb_uint8(px0, ds=ds)
+            if rgb is None:
+                raise ValueError("Could not decode color pixel data")
+            return Image.fromarray(rgb, mode="RGB")
+        px = px0.astype(np.float32)
     except Exception:
         # Fallback to SimpleITK when pydicom pixel handlers fail
         import SimpleITK as sitk
@@ -4982,6 +5202,12 @@ def _render_dicom_image_for_print(image_obj: DicomImage, *, window_width: float,
         arr = sitk.GetArrayFromImage(sitk_image)
         if arr.ndim == 3 and arr.shape[0] == 1:
             arr = arr[0]
+        arr = _select_frame(arr, frame_index=0)
+        if _is_color_pixel_array(arr):
+            rgb = _convert_color_to_rgb_uint8(arr, ds=ds)
+            if rgb is None:
+                raise ValueError("Could not decode color pixel data")
+            return Image.fromarray(rgb, mode="RGB")
         px = arr.astype(np.float32)
 
     # HU rescale if present

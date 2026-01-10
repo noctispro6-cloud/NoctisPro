@@ -156,7 +156,7 @@ PY
 describe_port_owner() {
   local port="${1:?}"
   if command -v ss >/dev/null 2>&1; then
-    ss -ltnp "sport = :${port}" 2>/dev/null || true
+    as_root ss -ltnp "sport = :${port}" 2>/dev/null || true
   else
     return 0
   fi
@@ -176,16 +176,19 @@ kill_port_listeners() {
      local pids=""
      if command -v ss >/dev/null 2>&1; then
          # Output format: users:(("process",pid=123,fd=4),...)
-         pids=$(ss -ltnp "sport = :${port}" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u | tr '\n' ' ')
+         # NOTE: when not root, `ss -p` may omit pid info; don't fail the script under pipefail.
+         pids="$(as_root ss -ltnp "sport = :${port}" 2>/dev/null | { grep -o 'pid=[0-9]*' || true; } | cut -d= -f2 | sort -u | tr '\n' ' ' || true)"
      elif command -v netstat >/dev/null 2>&1; then
          # Output format: 1234/processname
-         pids=$(netstat -ltnp 2>/dev/null | grep ":${port} " | awk '{print $NF}' | cut -d/ -f1 | grep -E '^[0-9]+$' | sort -u | tr '\n' ' ')
+         pids="$(as_root netstat -ltnp 2>/dev/null | { grep ":${port} " || true; } | awk '{print $NF}' | cut -d/ -f1 | { grep -E '^[0-9]+$' || true; } | sort -u | tr '\n' ' ' || true)"
      fi
      
      if [[ -n "$pids" ]]; then
          info "Force killing process(es) holding port ${port}: ${pids}"
          as_root kill -9 ${pids} >/dev/null 2>&1 || true
          sleep 1 # Give it a moment to die
+     else
+         info "Port ${port} is in use but owning PID couldn't be determined (try running with sudo)."
      fi
   fi
 

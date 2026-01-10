@@ -190,14 +190,14 @@ window.WorklistUtils = {
                 element.value = '';
             }
         });
-        
-        // Set date to today if date filter exists
-        const dateFilter = document.getElementById('dateFilter');
-        if (dateFilter) {
-            const today = new Date().toISOString().split('T')[0];
-            dateFilter.value = today;
-        }
-        
+
+        // If the page provides a filtering/rendering hook (e.g. dashboard), trigger it.
+        try {
+            if (typeof window.applyFilters === 'function') {
+                window.applyFilters();
+            }
+        } catch (_) { /* ignore */ }
+
         this.showToast('Filters reset', 'success');
     },
     
@@ -331,40 +331,36 @@ window.WorklistUtils = {
 };
 
 // Global convenience functions for backward compatibility
-window.refreshData = function(event) {
+//
+// IMPORTANT:
+// Some templates (notably `templates/worklist/dashboard.html`) define their own
+// implementations for these functions. Do NOT override them.
+const _defineIfMissing = (name, fn) => {
+    try {
+        if (typeof window[name] !== 'function') {
+            window[name] = fn;
+        }
+    } catch (_) { /* ignore */ }
+};
+
+_defineIfMissing('refreshData', (event) => {
     const button = event ? event.target.closest('button') : null;
     return WorklistUtils.refreshData(button);
-};
+});
 
-window.resetFilters = function() {
-    return WorklistUtils.resetFilters();
-};
-
-window.uploadStudies = function() {
-    return WorklistUtils.uploadStudies();
-};
-
-window.openStudyInViewer = function(studyId, event = null) {
+_defineIfMissing('resetFilters', () => WorklistUtils.resetFilters());
+_defineIfMissing('uploadStudies', () => WorklistUtils.uploadStudies());
+_defineIfMissing('openStudyInViewer', (studyId, event = null) => {
     const button = event ? event.target.closest('button, a') : null;
     return WorklistUtils.openStudyInViewer(studyId, button);
-};
-
-window.deleteStudy = function(studyId, accessionNumber, event = null) {
+});
+_defineIfMissing('deleteStudy', (studyId, accessionNumber, event = null) => {
     const button = event ? event.target.closest('button') : null;
     return WorklistUtils.deleteStudy(studyId, accessionNumber, button);
-};
-
-window.openReport = function(studyId) {
-    return WorklistUtils.openReport(studyId);
-};
-
-window.printStudy = function(studyId) {
-    return WorklistUtils.printStudy(studyId);
-};
-
-window.redirectToDashboard = function() {
-    return WorklistUtils.redirectToDashboard();
-};
+});
+_defineIfMissing('openReport', (studyId) => WorklistUtils.openReport(studyId));
+_defineIfMissing('printStudy', (studyId) => WorklistUtils.printStudy(studyId));
+_defineIfMissing('redirectToDashboard', () => WorklistUtils.redirectToDashboard());
 
 // Auto-initialize when DOM is ready
 if (document.readyState === 'loading') {

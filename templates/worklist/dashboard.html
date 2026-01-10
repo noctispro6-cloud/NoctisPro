@@ -1424,6 +1424,41 @@
                     }
                 })
                 .catch(() => {});
+
+            // ---- Background upload integration (Service Worker) ----
+            // If the user leaves the upload page while the background uploader is still running,
+            // we should reflect progress here and refresh automatically on completion.
+            try {
+                let _bgLastRefresh = 0;
+                const _bgRefreshMinIntervalMs = 15000; // avoid hammering the API
+
+                function _maybeRefreshFromBg(reason) {
+                    const now = Date.now();
+                    if ((now - _bgLastRefresh) < _bgRefreshMinIntervalMs) return;
+                    _bgLastRefresh = now;
+                    loadStudiesData();
+                    try { showToast(`Worklist refreshed (${reason})`, 'info', 1500); } catch (_) {}
+                }
+
+                if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.addEventListener('message', (event) => {
+                        const msg = event && event.data ? event.data : {};
+                        if (msg.type === 'UPLOAD_PROGRESS') {
+                            // Refresh occasionally so new studies/images appear as they are created.
+                            _maybeRefreshFromBg('background upload');
+                        }
+                        if (msg.type === 'UPLOAD_STATUS' && msg.status === 'completed') {
+                            // Refresh immediately when background upload completes.
+                            _bgLastRefresh = 0;
+                            _maybeRefreshFromBg('upload completed');
+                            try { showToast('Background upload finished — new studies should now be visible.', 'success', 3500); } catch (_) {}
+                        }
+                        if (msg.type === 'UPLOAD_STATUS' && msg.status === 'failed') {
+                            try { showToast('Background upload failed: ' + (msg.error || 'Unknown error'), 'error', 5000); } catch (_) {}
+                        }
+                    });
+                }
+            } catch (_) {}
         });
 
         // Filter functionality

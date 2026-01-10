@@ -875,6 +875,10 @@
                 <i class="fas fa-cube"></i>
                 <span>3D</span>
             </button>
+            <button class="tool-btn" data-tool="ai" title="AI Analysis" onclick="toggleAIPanel()">
+                <i class="fas fa-brain"></i>
+                <span>AI</span>
+            </button>
             <button class="tool-btn" data-tool="print" title="Print">
                 <i class="fas fa-print"></i>
                 <span>Print</span>
@@ -1001,6 +1005,29 @@
                         <div class="series-details">Load a study first</div>
                     </div>
                 </div>
+                </div>
+            </details>
+
+            <!-- AI Analysis Panel -->
+            <details class="panel-section ai-panel" style="display:none;">
+                <summary class="panel-title">
+                    <i class="fas fa-brain"></i>
+                    AI Analysis
+                </summary>
+                <div class="panel-body">
+                    <div style="margin-bottom: 6px;">
+                        <select class="select" id="aiModelSelect" style="width: 100%;">
+                            <option value="">Select AI Model (Loading...)</option>
+                        </select>
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="runQuickAI()" style="width: 100%;">
+                        <i class="fas fa-bolt"></i> Quick AI Scan
+                    </button>
+                    
+                    <div id="aiFindingsList" style="margin-top: 10px; font-size: 12px; color: var(--text-primary);">
+                        <!-- Results will appear here -->
+                    </div>
                 </div>
             </details>
 

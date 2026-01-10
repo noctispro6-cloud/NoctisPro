@@ -19,6 +19,7 @@ class DicomViewerEnhanced {
         this.setupTools();
         this.setupEventListeners();
         this.setupUI();
+        this.populateAIModels();
     }
 
     setupCornerstone() {
@@ -72,6 +73,36 @@ class DicomViewerEnhanced {
     setupUI() {
         // Ensure all tool buttons are properly initialized
         this.updateToolButtons();
+    }
+
+    async populateAIModels() {
+        try {
+            const response = await fetch('/ai_analysis/api/models/');
+            if (!response.ok) return; // Might not be authorized or available
+            
+            const data = await response.json();
+            const models = data.models || [];
+            
+            const select = document.getElementById('aiModelSelect');
+            if (select && models.length > 0) {
+                // Keep default option
+                const defaultOption = select.options[0];
+                select.innerHTML = '';
+                select.appendChild(defaultOption);
+                
+                models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.id;
+                    option.textContent = `${model.name} (${model.type})`;
+                    if (model.requires_subscription) {
+                        option.textContent += ' [Pro]';
+                    }
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.warn('Failed to populate AI models', error);
+        }
     }
 
     setTool(toolName) {
@@ -639,21 +670,26 @@ class DicomViewerEnhanced {
                 return;
             }
 
-            const response = await fetch(`/ai/api/series/${seriesId}/analyze/`, {
+            const formData = new FormData();
+            const modelSelect = document.getElementById('aiModelSelect');
+            if (modelSelect && modelSelect.value) {
+                formData.append('model_id', modelSelect.value);
+            }
+
+            const response = await fetch(`/ai_analysis/api/series/${seriesId}/analyze/`, {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') || {}).content,
                     'X-Requested-With': 'XMLHttpRequest'
-                }
+                },
+                body: formData
             });
 
             const data = await response.json();
             
             if (data.success) {
                 this.showToast('AI Analysis Complete', 'success');
-                if (data.findings && data.findings.length > 0) {
-                    this.showFindingsPanel(data.findings);
-                }
+                this.showFindingsPanel(data);
                 
                 if (data.overlays && data.overlays.length > 0) {
                     this.renderAIOverlays(data.overlays);
@@ -729,21 +765,54 @@ class DicomViewerEnhanced {
         }
     }
 
-    showFindingsPanel(findings) {
-        // Simple alert/modal for now, or update a DOM element
-        const findingsText = findings.map(f => `${f.type}: ${f.description} (${Math.round(f.confidence*100)}%)`).join('\n');
-        // If there's a findings panel, populate it
-        const panel = document.getElementById('aiFindingsList');
-        if (panel) {
-             panel.innerHTML = findings.map(f => 
+    showFindingsPanel(data) {
+        // Data contains findings, online_references, etc.
+        const findings = data.findings || [];
+        const references = data.online_references || [];
+        
+        let content = '';
+        
+        // Findings
+        if (findings.length > 0) {
+            content += '<h4>Findings</h4>';
+            content += findings.map(f => 
                 `<div class="finding-item">
                     <strong>${f.type}</strong>: ${f.description} 
                     <span class="confidence badge badge-${f.confidence > 0.8 ? 'success' : 'warning'}">${Math.round(f.confidence*100)}%</span>
                 </div>`
-             ).join('');
-             this.toggleAIPanel(); // Make sure it's visible
+            ).join('');
         } else {
-             alert(`AI Findings:\n${findingsText}`);
+            content += '<div class="no-results">No specific findings detected.</div>';
+        }
+        
+        // Online References
+        if (references.length > 0) {
+            content += '<h4 style="margin-top: 15px;">Medical References</h4>';
+            content += references.map(ref => 
+                `<div class="reference-item">
+                    <a href="${ref.url}" target="_blank" style="color: var(--accent-color); text-decoration: none;">
+                        <i class="fas fa-book-medical"></i> ${ref.title}
+                    </a>
+                    <div style="font-size: 11px; color: var(--text-secondary);">${ref.source}</div>
+                </div>`
+            ).join('');
+        }
+        
+        // Update panel
+        const panel = document.getElementById('aiFindingsList');
+        if (panel) {
+             panel.innerHTML = content;
+             // Ensure AI panel is visible
+             const aiPanel = document.querySelector('.ai-panel');
+             if (aiPanel && aiPanel.style.display === 'none') {
+                 this.toggleAIPanel();
+             }
+        } else {
+             // Fallback alert if no panel structure exists
+             if (findings.length > 0) {
+                 const findingsText = findings.map(f => `${f.type}: ${f.description} (${Math.round(f.confidence*100)}%)`).join('\n');
+                 alert(`AI Findings:\n${findingsText}`);
+             }
         }
     }
 

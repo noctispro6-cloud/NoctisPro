@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+<div style="padding: 16px; max-width: 1400px; margin: 0 auto;">
+  <div style="display:flex; align-items:flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+    <div style="min-width: 260px; flex: 1 1 520px;">
+      <h2 style="margin: 0 0 6px 0;">Responsive QA</h2>
+      <div style="color: var(--text-secondary, #b3b3b3); font-size: 13px; line-height: 1.4;">
+        Preview the DICOM viewer in common device sizes (phone/tablet/desktop) and run quick layout checks.
+        This is same-origin and uses your current session.
+      </div>
+    </div>
+    <div style="flex: 0 0 auto; display:flex; gap: 8px; flex-wrap: wrap;">
+      <a class="btn" href="{% url 'admin_panel:dashboard' %}">Back to Admin</a>
+      <a class="btn" href="/dicom-viewer/" target="_blank" rel="noopener">Open Viewer</a>
+    </div>
+  </div>
+
+  <div style="margin-top: 14px; display:grid; grid-template-columns: minmax(260px, 360px) minmax(0, 1fr); gap: 12px;">
+    <!-- Controls -->
+    <div style="background: var(--card-bg, #252525); border: 1px solid var(--border-color, #404040); border-radius: 10px; padding: 12px;">
+      <div style="font-weight: 600; margin-bottom: 10px;">Target</div>
+
+      <label style="display:block; color: var(--text-secondary,#b3b3b3); font-size: 12px; margin-bottom: 6px;">Viewer variant</label>
+      <select id="qa_target" class="control-select" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color,#404040); background: var(--secondary-bg,#1a1a1a); color: var(--text-primary,#fff);">
+        <option value="/dicom-viewer/">Masterpiece (default)</option>
+        <option value="/dicom-viewer/legacy/">Legacy</option>
+        <option value="/dicom-viewer/masterpiece/">Masterpiece (/masterpiece/)</option>
+        <option value="/dicom-viewer/web/viewer/">Web viewer (/web/viewer/)</option>
+      </select>
+
+      <div style="display:flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
+        <div style="flex: 1 1 160px;">
+          <label style="display:block; color: var(--text-secondary,#b3b3b3); font-size: 12px; margin-bottom: 6px;">Study id (optional)</label>
+          <input id="qa_study" type="text" value="{{ study_id|default:'' }}" placeholder="e.g. 123"
+                 style="width:100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color,#404040); background: var(--secondary-bg,#1a1a1a); color: var(--text-primary,#fff);">
+        </div>
+      </div>
+
+      <div style="display:flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
+        <button class="btn" type="button" onclick="QA.load()">Load</button>
+        <button class="btn" type="button" onclick="QA.reload()">Reload</button>
+        <button class="btn" type="button" onclick="QA.openNewTab()">Open in new tab</button>
+      </div>
+
+      <hr style="border:none; border-top: 1px solid var(--border-color,#404040); margin: 12px 0;">
+
+      <div style="font-weight: 600; margin-bottom: 10px;">Device presets</div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <button class="btn" type="button" onclick="QA.setSize(375, 667)">iPhone SE (375×667)</button>
+        <button class="btn" type="button" onclick="QA.setSize(390, 844)">iPhone 12/13/14 (390×844)</button>
+        <button class="btn" type="button" onclick="QA.setSize(412, 915)">Android large (412×915)</button>
+        <button class="btn" type="button" onclick="QA.setSize(768, 1024)">iPad (768×1024)</button>
+        <button class="btn" type="button" onclick="QA.setSize(1024, 768)">iPad landscape (1024×768)</button>
+        <button class="btn" type="button" onclick="QA.setSize(1366, 768)">Laptop (1366×768)</button>
+        <button class="btn" type="button" onclick="QA.setSize(1440, 900)">Laptop (1440×900)</button>
+        <button class="btn" type="button" onclick="QA.setSize(1920, 1080)">Desktop (1920×1080)</button>
+      </div>
+
+      <div style="display:flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
+        <button class="btn" type="button" onclick="QA.rotate()">Rotate</button>
+        <button class="btn" type="button" onclick="QA.fit()">Fit to page</button>
+      </div>
+
+      <hr style="border:none; border-top: 1px solid var(--border-color,#404040); margin: 12px 0;">
+
+      <div style="font-weight: 600; margin-bottom: 10px;">Quick checks</div>
+      <div style="display:flex; gap: 8px; flex-wrap: wrap;">
+        <button class="btn" type="button" onclick="QA.runChecks()">Run checks</button>
+        <button class="btn" type="button" onclick="QA.clearChecks()">Clear</button>
+      </div>
+      <div id="qa_results" style="margin-top: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; color: var(--text-secondary,#b3b3b3); white-space: pre-wrap;"></div>
+
+      <div style="margin-top: 10px; color: var(--text-muted,#888); font-size: 12px; line-height: 1.4;">
+        Notes:
+        <ul style="margin: 6px 0 0 16px;">
+          <li>Use <strong>Ctrl+Shift+R</strong> in your browser to bypass cache if styles look stale.</li>
+          <li>Check both portrait and landscape for phones/tablets.</li>
+          <li>macOS trackpads can generate smooth wheel deltas; verify slice scrolling and Ctrl+wheel zoom.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Preview -->
+    <div style="background: var(--card-bg, #252525); border: 1px solid var(--border-color, #404040); border-radius: 10px; padding: 12px; min-width: 0;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap: 10px; flex-wrap: wrap;">
+        <div style="font-weight: 600;">Preview</div>
+        <div style="display:flex; gap: 10px; flex-wrap: wrap; color: var(--text-secondary,#b3b3b3); font-size: 12px;">
+          <div>Size: <span id="qa_size_label">—</span></div>
+          <div>URL: <span id="qa_url_label">—</span></div>
+        </div>
+      </div>
+
+      <div style="margin-top: 10px; display:flex; justify-content:center;">
+        <div id="qa_frame"
+             style="width: 1024px; height: 768px; border: 2px solid var(--border-color,#404040); border-radius: 12px; overflow: hidden; background: #000; resize: both; max-width: 100%; max-height: calc(100dvh - 210px); min-width: 320px; min-height: 320px;">
+          <iframe id="qa_iframe" title="QA preview" style="width:100%; height:100%; border:0; background:#000;" src="about:blank"></iframe>
+        </div>
+      </div>
+      <div style="margin-top: 8px; color: var(--text-muted,#888); font-size: 12px;">
+        Tip: Drag the lower-right corner of the frame to test arbitrary sizes.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const QA = (() => {
+    const frame = () => document.getElementById('qa_frame');
+    const iframe = () => document.getElementById('qa_iframe');
+    const target = () => document.getElementById('qa_target');
+    const study = () => document.getElementById('qa_study');
+    const results = () => document.getElementById('qa_results');
+    const sizeLabel = () => document.getElementById('qa_size_label');
+    const urlLabel = () => document.getElementById('qa_url_label');
+
+    function buildUrl() {
+      const base = String(target().value || '/dicom-viewer/');
+      const s = String(study().value || '').trim();
+      if (!s) return base;
+      // Most viewers accept ?study=<id>
+      return base.includes('?') ? (base + '&study=' + encodeURIComponent(s)) : (base + '?study=' + encodeURIComponent(s));
+    }
+
+    function setSize(w, h) {
+      frame().style.width = w + 'px';
+      frame().style.height = h + 'px';
+      updateLabels();
+    }
+
+    function rotate() {
+      const rect = frame().getBoundingClientRect();
+      const w = Math.round(rect.width);
+      const h = Math.round(rect.height);
+      setSize(h, w);
+    }
+
+    function fit() {
+      frame().style.width = '100%';
+      frame().style.height = 'calc(100dvh - 210px)';
+      updateLabels();
+    }
+
+    function updateLabels() {
+      try {
+        const rect = frame().getBoundingClientRect();
+        sizeLabel().textContent = Math.round(rect.width) + '×' + Math.round(rect.height);
+      } catch (_) {
+        sizeLabel().textContent = '—';
+      }
+      try {
+        urlLabel().textContent = buildUrl();
+      } catch (_) {
+        urlLabel().textContent = '—';
+      }
+    }
+
+    function load() {
+      const url = buildUrl();
+      iframe().src = url;
+      updateLabels();
+      clearChecks();
+      log('Loading: ' + url);
+    }
+
+    function reload() {
+      try {
+        iframe().contentWindow.location.reload();
+      } catch (_) {
+        // fallback
+        iframe().src = iframe().src;
+      }
+      clearChecks();
+      log('Reload requested');
+    }
+
+    function openNewTab() {
+      const url = buildUrl();
+      window.open(url, '_blank', 'noopener');
+    }
+
+    function clearChecks() {
+      results().textContent = '';
+    }
+
+    function log(line) {
+      results().textContent = (results().textContent ? results().textContent + '\n' : '') + line;
+    }
+
+    function runChecks() {
+      clearChecks();
+      const url = buildUrl();
+      log('Checks for: ' + url);
+
+      let doc;
+      try {
+        doc = iframe().contentDocument;
+      } catch (e) {
+        log('FAIL: Cannot access iframe document (not same-origin?)');
+        return;
+      }
+      if (!doc) {
+        log('FAIL: Iframe not loaded yet');
+        return;
+      }
+
+      const viewer = doc.querySelector('.viewer-container') || doc.querySelector('.center-area') || doc.body;
+      log(viewer ? 'OK: Root container found' : 'WARN: Root container not detected');
+
+      // Basic “is something visible” checks
+      const vp = doc.querySelector('.viewport') || doc.querySelector('#viewport') || doc.querySelector('.viewport-content');
+      if (!vp) {
+        log('WARN: Viewport element not detected');
+      } else {
+        const r = vp.getBoundingClientRect();
+        log((r.width > 10 && r.height > 10) ? 'OK: Viewport has size' : 'FAIL: Viewport collapsed (too small)');
+      }
+
+      // Check for unintended horizontal overflow
+      const body = doc.documentElement || doc.body;
+      const overflowX = (body.scrollWidth - body.clientWidth);
+      if (overflowX > 2) {
+        log('WARN: Horizontal overflow detected (scrollWidth > clientWidth by ' + Math.round(overflowX) + 'px)');
+      } else {
+        log('OK: No significant horizontal overflow');
+      }
+
+      // Check crosshair overlay sizing if present (for legacy/complete viewers)
+      const crosshair = doc.querySelector('#crosshairOverlay');
+      if (crosshair) {
+        const cr = crosshair.getBoundingClientRect();
+        log((cr.width > 10 && cr.height > 10) ? 'OK: Crosshair overlay sized' : 'WARN: Crosshair overlay has no size');
+      }
+
+      log('Done.');
+    }
+
+    // Keep labels updated if user resizes the frame manually.
+    const ro = new ResizeObserver(() => updateLabels());
+    window.addEventListener('load', () => {
+      try { ro.observe(frame()); } catch (_) {}
+      updateLabels();
+      // Auto-load default viewer for convenience
+      load();
+    });
+
+    return { setSize, rotate, fit, load, reload, openNewTab, runChecks, clearChecks };
+  })();
+</script>
+{% endblock %}
+

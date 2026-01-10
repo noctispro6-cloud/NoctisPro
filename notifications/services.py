@@ -153,8 +153,6 @@ Env vars:
 - TWILIO_FROM_NUMBER  (E.164, used for SMS and Calls)
 """
 
-from __future__ import annotations
-
 import os
 from typing import Optional
 

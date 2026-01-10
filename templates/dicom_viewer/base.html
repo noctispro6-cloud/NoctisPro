@@ -419,6 +419,10 @@
 
         .crosshair-overlay {
             position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
             pointer-events: none;
             z-index: 10;
         }
@@ -2316,6 +2320,12 @@
 
         function setupKeyboardShortcuts() {
             document.addEventListener('keydown', function(e) {
+                // Don't steal keystrokes while typing in inputs/selects/textareas.
+                const ae = document.activeElement;
+                const tag = (ae && ae.tagName) ? ae.tagName.toUpperCase() : '';
+                const isTyping = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (ae && ae.isContentEditable));
+                if (isTyping && e.key !== 'Escape') return;
+
                 switch(e.key) {
                     case 'w':
                     case 'W':
@@ -2356,6 +2366,37 @@
                             resetView();
                         }
                         break;
+                    case '0':
+                        // 0: Reset entire view
+                        e.preventDefault();
+                        resetView();
+                        break;
+                    case '+':
+                    case '=':
+                        // Zoom in
+                        e.preventDefault();
+                        try {
+                            const s = document.getElementById('zoomSlider');
+                            if (s) {
+                                const v = Math.min(parseInt(s.max || '500', 10), (parseInt(s.value || '100', 10) + 10));
+                                s.value = String(v);
+                                if (typeof updateZoom === 'function') updateZoom(v);
+                            }
+                        } catch (_) {}
+                        break;
+                    case '-':
+                    case '_':
+                        // Zoom out
+                        e.preventDefault();
+                        try {
+                            const s = document.getElementById('zoomSlider');
+                            if (s) {
+                                const v = Math.max(parseInt(s.min || '10', 10), (parseInt(s.value || '100', 10) - 10));
+                                s.value = String(v);
+                                if (typeof updateZoom === 'function') updateZoom(v);
+                            }
+                        } catch (_) {}
+                        break;
                     case 'h':
                     case 'H':
                         // H: Flip horizontal
@@ -2382,10 +2423,62 @@
                         e.preventDefault();
                         changeSlice(1);
                         break;
+                    case '?':
+                        // On-screen shortcut help (Shift+/)
+                        e.preventDefault();
+                        try {
+                            const id = 'noctisShortcutHelp';
+                            let el = document.getElementById(id);
+                            if (!el) {
+                                el = document.createElement('div');
+                                el.id = id;
+                                el.style.cssText = `
+                                    position: fixed;
+                                    right: 16px;
+                                    bottom: 56px;
+                                    z-index: 20000;
+                                    background: rgba(0,0,0,0.88);
+                                    border: 1px solid var(--border-color, #404040);
+                                    border-left: 3px solid var(--accent-color, #00d4ff);
+                                    border-radius: 10px;
+                                    padding: 12px 14px;
+                                    width: min(340px, calc(100vw - 32px));
+                                    color: var(--text-primary, #fff);
+                                    font-size: 12px;
+                                    line-height: 1.5;
+                                    backdrop-filter: blur(6px);
+                                `;
+                                el.innerHTML = `
+                                    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
+                                        <strong>Keyboard shortcuts</strong>
+                                        <button type="button" aria-label="Close"
+                                            style="background:transparent;border:1px solid var(--border-color,#404040);color:var(--text-secondary,#b3b3b3);border-radius:8px;padding:2px 8px;cursor:pointer"
+                                            onclick="this.parentElement.parentElement.remove()">Esc</button>
+                                    </div>
+                                    <div><strong>W</strong> Window/Level &nbsp; <strong>Z</strong> Zoom &nbsp; <strong>P</strong> Pan</div>
+                                    <div><strong>M</strong> Measure &nbsp; <strong>A</strong> Annotate</div>
+                                    <div><strong>C</strong> Crosshair &nbsp; <strong>I</strong> Invert</div>
+                                    <div><strong>R</strong>/<strong>0</strong> Reset view &nbsp; <strong>Ctrl+R</strong> Reset transforms</div>
+                                    <div><strong>+</strong>/<strong>-</strong> Zoom in/out</div>
+                                    <div><strong>H</strong>/<strong>V</strong> Flip &nbsp; <strong>T</strong> Rotate</div>
+                                    <div><strong>↑</strong>/<strong>↓</strong> Previous/Next slice</div>
+                                    <div><strong>Ctrl+P</strong> Print &nbsp; <strong>Esc</strong> Close panels</div>
+                                    <div style="margin-top:6px;color:var(--text-muted,#888)">Press <strong>?</strong> again to hide.</div>
+                                `;
+                                document.body.appendChild(el);
+                            } else {
+                                el.remove();
+                            }
+                        } catch (_) {}
+                        break;
                     case 'Escape':
                         if (document.getElementById('threeDModal').classList.contains('active')) {
                             close3DModal();
                         }
+                        try {
+                            const el = document.getElementById('noctisShortcutHelp');
+                            if (el) { el.remove(); e.preventDefault(); }
+                        } catch (_) {}
                         break;
                 }
             });

@@ -129,6 +129,22 @@ def dashboard(request):
     
     return render(request, 'admin_panel/dashboard.html', context)
 
+
+@login_required
+@user_passes_test(can_access_admin_panel)
+def responsive_qa(request):
+    """
+    Lightweight responsive/layout QA page.
+
+    Purpose:
+    - Quickly preview key UI pages (viewer variants) in an iframe at common device sizes.
+    - Provide basic, same-origin layout sanity checks without adding new dependencies.
+    """
+    return render(request, 'admin_panel/responsive_qa.html', {
+        "study_id": (request.GET.get("study") or "").strip(),
+    })
+
+
 @login_required
 @user_passes_test(can_view_logs)
 def system_logs(request):

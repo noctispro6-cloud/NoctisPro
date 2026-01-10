@@ -51,6 +51,53 @@ read_env_kv() {
   done < "$file"
 }
 
+set_env_kv() {
+  # set_env_kv KEY VALUE /path/to/env
+  # Uses python for portability (avoids sed -i differences).
+  local key="${1:?}" val="${2-}" file="${3:?}"
+  python3 - <<PY
+from pathlib import Path
+
+key = ${key!r}
+val = ${val!r}
+path = Path(${file!r})
+
+if not path.exists():
+    path.write_text(f"{key}={val}\n", encoding="utf-8")
+    raise SystemExit(0)
+
+lines = path.read_text(encoding="utf-8").splitlines(True)
+out = []
+replaced = False
+for ln in lines:
+    if ln.startswith(key + "=") and not replaced:
+        out.append(f"{key}={val}\n")
+        replaced = True
+    else:
+        out.append(ln)
+if not replaced:
+    if out and not out[-1].endswith("\n"):
+        out[-1] = out[-1] + "\n"
+    out.append(f"{key}={val}\n")
+path.write_text("".join(out), encoding="utf-8")
+PY
+}
+
+gen_secret_key() {
+  python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(50))
+PY
+}
+
+gen_password() {
+  python3 - <<'PY'
+import secrets, string
+alphabet = string.ascii_letters + string.digits
+print("".join(secrets.choice(alphabet) for _ in range(32)))
+PY
+}
+
 stop_systemd_if_running() {
   local unit="${1:?}"
   command -v systemctl >/dev/null 2>&1 || return 0
@@ -152,6 +199,8 @@ usage() {
 Usage:
   ./deploy-docker.sh
   ./deploy-docker.sh --ngrok
+  ./deploy-docker.sh --production
+  ./deploy-docker.sh --production --ngrok
 
 What this does:
 - Builds and starts the Noctis Pro stack via docker compose
@@ -161,13 +210,20 @@ Notes:
 - DB persistence is in the docker volume "noctis_pgdata"
   Updating code: docker compose up -d --build   (SAFE)
   Destroying DB: docker compose down -v         (DELETES volumes)
+
+Production notes:
+- If DEBUG=False, SECRET_KEY must be set to a strong value.
+- If DB_PASSWORD is left as "change-me", Postgres is insecure.
+- Use --production to auto-generate missing secrets into .env.docker.
 EOF
 }
 
 want_ngrok=0
+want_production=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ngrok) want_ngrok=1; shift ;;
+    --production|--prod) want_production=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) err "Unknown arg: $1"; usage; exit 2 ;;
   esac
@@ -191,6 +247,65 @@ if [[ ! -f ".env.docker" ]]; then
     err "Missing .env.docker and .env.docker.example."
     exit 2
   fi
+fi
+
+#
+# Production-safe env validation / initialization
+#
+debug_val="$(read_env_kv DEBUG .env.docker)"
+secret_key_val="$(read_env_kv SECRET_KEY .env.docker)"
+db_pw_val="$(read_env_kv DB_PASSWORD .env.docker)"
+
+debug_is_true=0
+if [[ "${debug_val:-False}" =~ ^([Tt][Rr][Uu][Ee]|1|yes|on)$ ]]; then
+  debug_is_true=1
+fi
+
+secret_is_bad=0
+if [[ -z "${secret_key_val}" ]]; then
+  secret_is_bad=1
+elif [[ "${secret_key_val,,}" == "change-me" || "${secret_key_val,,}" == "changeme" ]]; then
+  secret_is_bad=1
+elif [[ "${secret_key_val}" == django-insecure* ]]; then
+  secret_is_bad=1
+fi
+
+db_pw_is_bad=0
+if [[ -z "${db_pw_val}" ]]; then
+  db_pw_is_bad=1
+elif [[ "${db_pw_val,,}" == "change-me" || "${db_pw_val,,}" == "changeme" ]]; then
+  db_pw_is_bad=1
+fi
+
+if [[ "$want_production" == "1" ]]; then
+  # Force DEBUG=False for production deployments.
+  set_env_kv DEBUG False .env.docker
+  debug_is_true=0
+
+  if [[ "$secret_is_bad" == "1" ]]; then
+    info "Generating strong SECRET_KEY into .env.docker (production mode)..."
+    set_env_kv SECRET_KEY "$(gen_secret_key)" .env.docker
+    secret_is_bad=0
+  fi
+
+  if [[ "$db_pw_is_bad" == "1" ]]; then
+    info "Generating strong DB_PASSWORD into .env.docker (production mode)..."
+    set_env_kv DB_PASSWORD "$(gen_password)" .env.docker
+    db_pw_is_bad=0
+  fi
+fi
+
+# Refuse unsafe production config (common cause of "connection refused" behind ngrok).
+if [[ "$debug_is_true" == "0" && "$secret_is_bad" == "1" ]]; then
+  err "DEBUG=False but SECRET_KEY is missing/weak in .env.docker."
+  err "Fix: set SECRET_KEY to a strong value, or run: ./deploy-docker.sh --production"
+  exit 2
+fi
+
+if [[ "$want_production" == "1" && "$db_pw_is_bad" == "1" ]]; then
+  err "DB_PASSWORD is missing/weak in .env.docker (production mode)."
+  err "Fix: set DB_PASSWORD, or re-run: ./deploy-docker.sh --production"
+  exit 2
 fi
 
 dicom_port="$(read_env_kv DICOM_PORT .env.docker)"

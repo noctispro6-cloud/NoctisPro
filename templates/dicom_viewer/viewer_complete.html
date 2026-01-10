@@ -1794,13 +1794,16 @@
                 showLoading('Processing image...');
                 
                 // Get processed image with current window/level settings
-                const url = `/dicom-viewer/api/image/${currentImage.id}/display/?ww=${windowWidth}&wl=${windowLevel}&invert=${inverted}`;
+                // Prefer a streamed PNG URL to avoid huge base64 payloads and to support color DICOMs.
+                const url = `/dicom-viewer/api/image/${currentImage.id}/display/?ww=${windowWidth}&wl=${windowLevel}&invert=${inverted}&return=url`;
                 
-                const response = await fetch(url);
+                const response = await fetch(url, { credentials: 'same-origin' });
                 const data = await response.json();
                 
-                if (data.image_data) {
-                    const dicomImage = document.getElementById('dicomImage');
+                const dicomImage = document.getElementById('dicomImage');
+                const srcUrl = (data && (data.image_url || data.image_data)) || null;
+                
+                if (srcUrl && dicomImage) {
                     
                     // Hide welcome screen and show image view
                     const welcomeScreen = document.getElementById('welcomeScreen');
@@ -1808,7 +1811,7 @@
                     if (welcomeScreen) welcomeScreen.style.display = 'none';
                     if (singleView) singleView.style.display = 'flex';
                     
-                    dicomImage.src = data.image_data;
+                    // Attach handlers BEFORE setting src (cached loads can fire immediately).
                     dicomImage.onload = function() {
                         hideLoading();
                         updateImageInfo(data.image_info);
@@ -1825,12 +1828,13 @@
                         hideLoading();
                         showToast('Failed to load image', 'error');
                     };
+                    dicomImage.src = srcUrl;
                 } else {
                     hideLoading();
                     if (data.warnings?.pixel_decode_error) {
                         showToast('Image format not supported: ' + data.warnings.pixel_decode_error, 'warning');
                     } else {
-                        showToast('Failed to load image data', 'error');
+                        showToast('Failed to load image', 'error');
                     }
                 }
                 

@@ -81,6 +81,13 @@ def trigger_ai_analysis_on_upload(sender, instance, created, **kwargs):
 
         analyses_to_run = []
         for ai_model in ai_models:
+            # Subscription check for auto-analysis
+            if ai_model.requires_subscription:
+                if not study.facility or not study.facility.has_ai_subscription:
+                    continue
+                if study.facility.subscription_expires_at and study.facility.subscription_expires_at < timezone.now():
+                    continue
+
             # Check if analysis already exists/running to avoid duplicates
             existing = AIAnalysis.objects.filter(
                 study=study,

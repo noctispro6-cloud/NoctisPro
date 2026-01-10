@@ -310,6 +310,8 @@ CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
+# Celery 6.0+ replaced CELERY_BROKER_URL with CELERY_BROKER_URL, but older versions use BROKER_URL
+BROKER_URL = CELERY_BROKER_URL
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators

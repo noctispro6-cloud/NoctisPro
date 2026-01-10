@@ -211,11 +211,23 @@ def analyze_study(request, study_id):
     # GET request - show analysis form
     available_models = []
     if is_admin_or_radiologist(user):
+        # Filter models
         available_models = AIModel.objects.filter(
             is_active=True,
             modality__in=[study.modality.code, 'ALL']
         )
-    
+        
+        # Enforce Subscription
+        # If user is admin/radiologist, check their facility subscription if applicable.
+        # If no facility linked (e.g. platform admin), allow access.
+        if user.facility and not user.facility.has_ai_subscription:
+             # Hide models that require subscription
+             available_models = available_models.filter(requires_subscription=False)
+        
+        # If subscription expired, treat as no subscription
+        if user.facility and user.facility.subscription_expires_at and user.facility.subscription_expires_at < timezone.now():
+             available_models = available_models.filter(requires_subscription=False)
+
     # Get existing analyses
     existing_analyses = AIAnalysis.objects.filter(
         study=study
@@ -339,14 +351,29 @@ def api_analyze_series(request, series_id):
             status=403,
         )
 
+    # Subscription Check for Quick AI
+    if user.facility:
+        has_sub = user.facility.has_ai_subscription
+        is_expired = user.facility.subscription_expires_at and user.facility.subscription_expires_at < timezone.now()
+        if not has_sub or is_expired:
+             # Only allow free models if any exists, but for "Quick AI" we typically want the best one.
+             # We will check the selected model later, but if they have NO subscription, we might block early or limit choices.
+             pass
+
     # Pick one suitable active model for this modality
     modality_code = getattr(study.modality, 'code', None)
-    ai_model = (
-        AIModel.objects.filter(is_active=True, modality__in=[modality_code, 'ALL'])
-        .order_by('model_type', '-created_at')
-        .first()
-    )
+    models_query = AIModel.objects.filter(is_active=True, modality__in=[modality_code, 'ALL'])
+    
+    # Enforce subscription filter on model selection
+    if user.facility and (not user.facility.has_ai_subscription or (user.facility.subscription_expires_at and user.facility.subscription_expires_at < timezone.now())):
+        models_query = models_query.filter(requires_subscription=False)
+
+    ai_model = models_query.order_by('model_type', '-created_at').first()
+    
     if not ai_model:
+        if user.facility and not user.facility.has_ai_subscription:
+             return JsonResponse({'success': False, 'error': 'AI Subscription required for this analysis.'}, status=403)
+        
         return JsonResponse(
             {'success': False, 'error': f'No active AI models available for modality {modality_code}'},
             status=400,

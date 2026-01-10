@@ -368,7 +368,17 @@ def api_analyze_series(request, series_id):
     if user.facility and (not user.facility.has_ai_subscription or (user.facility.subscription_expires_at and user.facility.subscription_expires_at < timezone.now())):
         models_query = models_query.filter(requires_subscription=False)
 
-    ai_model = models_query.order_by('model_type', '-created_at').first()
+    # Allow model selection via POST
+    requested_model_id = request.POST.get('model_id')
+    ai_model = None
+    if requested_model_id:
+        try:
+            ai_model = models_query.get(id=requested_model_id)
+        except AIModel.DoesNotExist:
+            pass # Fallback to auto-selection if invalid/unauthorized
+    
+    if not ai_model:
+        ai_model = models_query.order_by('model_type', '-created_at').first()
     
     if not ai_model:
         if user.facility and not user.facility.has_ai_subscription:
@@ -429,6 +439,24 @@ def api_analyze_series(request, series_id):
                     }
                 )
 
+        # Handle online references for Quick AI too
+        online_refs = analysis.measurements.get('online_references') or []
+        if not online_refs:
+            # Try to fetch them if we have findings but no cached refs
+            keywords = []
+            abnormalities = analysis.abnormalities_detected or []
+            for a in abnormalities:
+                label = _normalize_abnormality_label(a).lower()
+                if label:
+                    clean = re.sub(r'suspicion|possible|probable', '', label).strip()
+                    if clean: keywords.append(clean)
+            
+            if keywords:
+                online_refs = _get_online_references(keywords)
+                if online_refs:
+                    analysis.measurements['online_references'] = online_refs
+                    analysis.save(update_fields=['measurements'])
+
         return JsonResponse(
             {
                 'success': True,
@@ -437,6 +465,7 @@ def api_analyze_series(request, series_id):
                 'annotations': [],
                 'measurements': analysis.measurements or {},
                 'overlays': (analysis.measurements or {}).get('overlays', []),
+                'online_references': online_refs,
             }
         )
     except Exception as e:
@@ -444,6 +473,41 @@ def api_analyze_series(request, series_id):
         analysis.error_message = str(e)
         analysis.save(update_fields=['status', 'error_message'])
         return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+@login_required
+def api_list_models(request):
+    """List available AI models for the viewer"""
+    user = request.user
+    if not is_admin_or_radiologist(user):
+        return JsonResponse({'models': []})
+        
+    modality = request.GET.get('modality')
+    
+    models_query = AIModel.objects.filter(is_active=True)
+    if modality:
+        models_query = models_query.filter(modality__in=[modality, 'ALL'])
+        
+    # Enforce subscription
+    if user.facility:
+        is_sub_valid = user.facility.has_ai_subscription
+        if user.facility.subscription_expires_at and user.facility.subscription_expires_at < timezone.now():
+            is_sub_valid = False
+            
+        if not is_sub_valid:
+            models_query = models_query.filter(requires_subscription=False)
+            
+    models_data = []
+    for m in models_query:
+        models_data.append({
+            'id': m.id,
+            'name': m.name,
+            'type': m.model_type,
+            'modality': m.modality,
+            'description': m.description,
+            'requires_subscription': m.requires_subscription
+        })
+        
+    return JsonResponse({'models': models_data})
 
 @login_required
 @user_passes_test(is_admin_or_radiologist)
@@ -968,4 +1032,3 @@ def api_medical_references(request):
         
     references = _get_online_references(keywords)
     return JsonResponse({'references': references})
-

@@ -13,6 +13,11 @@ class Facility(models.Model):
     # DICOM networking identifier so studies can be attributed to facilities
     ae_title = models.CharField(max_length=32, blank=True, default='')
     is_active = models.BooleanField(default=True)
+    
+    # Subscription Management
+    has_ai_subscription = models.BooleanField(default=False, help_text="Access to AI features")
+    subscription_expires_at = models.DateTimeField(null=True, blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

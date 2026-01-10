@@ -618,15 +618,132 @@ class DicomViewerEnhanced {
         }
     }
 
-    runQuickAI() {
+    async runQuickAI() {
         try {
             this.showToast('Running AI analysis...', 'info');
-            // Simulate AI processing
-            setTimeout(() => {
-                this.showToast('AI analysis complete', 'success');
-            }, 2000);
+            
+            // Get current series ID from global context or DOM
+            let seriesId = null;
+            if (typeof currentSeries !== 'undefined' && currentSeries.id) {
+                seriesId = currentSeries.id;
+            } else if (window.currentSeries && window.currentSeries.id) {
+                seriesId = window.currentSeries.id;
+            } else {
+                // Fallback: try to find it in the URL or DOM elements
+                const urlParams = new URLSearchParams(window.location.search);
+                seriesId = urlParams.get('series_id');
+            }
+
+            if (!seriesId) {
+                this.showToast('No active series found for analysis', 'warning');
+                return;
+            }
+
+            const response = await fetch(`/ai/api/series/${seriesId}/analyze/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') || {}).content,
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showToast('AI Analysis Complete', 'success');
+                if (data.findings && data.findings.length > 0) {
+                    this.showFindingsPanel(data.findings);
+                }
+                
+                if (data.overlays && data.overlays.length > 0) {
+                    this.renderAIOverlays(data.overlays);
+                }
+            } else {
+                this.showToast(`AI Error: ${data.error}`, 'error');
+            }
         } catch (error) {
+            console.error(error);
             this.showToast('AI analysis failed', 'error');
+        }
+    }
+
+    renderAIOverlays(overlays) {
+        if (typeof cornerstone !== 'undefined' && this.currentElement) {
+            // Clear existing AI tool state
+            cornerstoneTools.clearToolState(this.currentElement, 'RectangleRoi');
+            
+            overlays.forEach(overlay => {
+                if (overlay.type === 'rectangle') {
+                    const [x1, y1, x2, y2] = overlay.points;
+                    
+                    // Add tool state for Cornerstone
+                    const measurementData = {
+                        visible: true,
+                        active: false,
+                        color: overlay.color || 'red',
+                        invalidated: true,
+                        handles: {
+                            start: { x: x1, y: y1, highlight: true, active: false },
+                            end: { x: x2, y: y2, highlight: true, active: false },
+                            textBox: {
+                                active: false,
+                                hasMoved: false,
+                                movesIndependently: false,
+                                drawnIndependently: true,
+                                allowedOutsideImage: true,
+                                hasBoundingBox: true
+                            }
+                        },
+                        cachedStats: {
+                            area: (Math.abs(x2-x1) * Math.abs(y2-y1)).toFixed(2)
+                        },
+                        text: overlay.label || 'AI Finding'
+                    };
+                    
+                    cornerstoneTools.addToolState(this.currentElement, 'RectangleRoi', measurementData);
+                }
+            });
+            
+            cornerstone.updateImage(this.currentElement);
+            this.showToast(`Displayed ${overlays.length} AI findings`, 'info');
+        } else {
+            // Fallback for custom canvas renderer
+            const canvas = document.getElementById('dicomCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            
+            overlays.forEach(overlay => {
+                 if (overlay.type === 'rectangle') {
+                    const [x1, y1, x2, y2] = overlay.points;
+                    ctx.strokeStyle = overlay.color || 'red';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+                    
+                    if (overlay.label) {
+                        ctx.fillStyle = overlay.color || 'red';
+                        ctx.font = '14px Arial';
+                        ctx.fillText(overlay.label, x1, y1 - 5);
+                    }
+                 }
+            });
+        }
+    }
+
+    showFindingsPanel(findings) {
+        // Simple alert/modal for now, or update a DOM element
+        const findingsText = findings.map(f => `${f.type}: ${f.description} (${Math.round(f.confidence*100)}%)`).join('\n');
+        // If there's a findings panel, populate it
+        const panel = document.getElementById('aiFindingsList');
+        if (panel) {
+             panel.innerHTML = findings.map(f => 
+                `<div class="finding-item">
+                    <strong>${f.type}</strong>: ${f.description} 
+                    <span class="confidence badge badge-${f.confidence > 0.8 ? 'success' : 'warning'}">${Math.round(f.confidence*100)}%</span>
+                </div>`
+             ).join('');
+             this.toggleAIPanel(); // Make sure it's visible
+        } else {
+             alert(`AI Findings:\n${findingsText}`);
         }
     }
 

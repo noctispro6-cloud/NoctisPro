@@ -303,12 +303,15 @@ else:
         },
     }
 
-# Celery Configuration - Disabled for now to fix login
-# CELERY_BROKER_URL = 'redis://localhost:6379'
-# CELERY_RESULT_BACKEND = 'redis://localhost:6379'
-# CELERY_ACCEPT_CONTENT = ['application/json']
-# CELERY_TASK_SERIALIZER = 'json'
-# CELERY_RESULT_SERIALIZER = 'json'
+# Celery Configuration
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+# Celery 6.0+ replaced CELERY_BROKER_URL with CELERY_BROKER_URL, but older versions use BROKER_URL
+BROKER_URL = CELERY_BROKER_URL
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators

@@ -42,6 +42,9 @@ class AIModel(models.Model):
     avg_processing_time = models.FloatField(default=0)  # in seconds
     success_rate = models.FloatField(default=0)  # percentage
     
+    # Subscription Enforcement
+    requires_subscription = models.BooleanField(default=True, help_text="If true, only users with active AI subscription can use this model")
+    
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

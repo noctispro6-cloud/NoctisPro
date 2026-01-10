@@ -20,6 +20,7 @@ from PIL import Image
 from io import BytesIO
 import logging
 import re
+import time
 from django.conf import settings
 from celery.result import AsyncResult
 from .models import (
@@ -32,6 +33,47 @@ from reports.models import Report
 
 # Module logger for robust error reporting
 logger = logging.getLogger('noctis_pro.worklist')
+
+# -----------------------------------------------------------------------------
+# Celery availability (best-effort)
+#
+# Uploads can run in "async ingestion" mode where we store files under
+# MEDIA_ROOT/dicom/incoming/<session>/ and enqueue a Celery task to create
+# Study/Series/DicomImage rows.
+#
+# If the broker is reachable but *no worker is running*, `.delay()` will succeed
+# and return a task id, but the task will never execute — users see "uploaded"
+# yet nothing appears on the worklist.
+#
+# To prevent that, we only use async ingestion when at least one worker responds
+# to a ping. Otherwise we fall back to synchronous ingestion in this request.
+# -----------------------------------------------------------------------------
+_CELERY_PING_CACHE = {"ts": 0.0, "ok": False}
+
+
+def _celery_workers_available(ttl_seconds: float = 5.0, timeout_seconds: float = 0.5) -> bool:
+	"""Return True if at least one Celery worker responds to ping (cached briefly)."""
+	now = time.time()
+	try:
+		ts = float(_CELERY_PING_CACHE.get("ts", 0.0) or 0.0)
+	except Exception:
+		ts = 0.0
+	if ttl_seconds > 0 and (now - ts) < ttl_seconds:
+		return bool(_CELERY_PING_CACHE.get("ok", False))
+
+	ok = False
+	try:
+		from celery import current_app
+		# Inspect can raise if broker is misconfigured/unreachable; treat as unavailable.
+		insp = current_app.control.inspect(timeout=timeout_seconds)
+		resp = insp.ping() if insp else None
+		ok = bool(resp)
+	except Exception:
+		ok = False
+
+	_CELERY_PING_CACHE["ts"] = now
+	_CELERY_PING_CACHE["ok"] = ok
+	return ok
 
 # Concurrency guard: background post-processing (e.g., MPR precache) can be CPU-heavy.
 # If many facilities upload at once, spawning unlimited threads can stall the whole server.
@@ -375,6 +417,15 @@ def upload_study(request):
 				async_enabled = (os.environ.get('UPLOAD_PROCESS_ASYNC', 'true') or '').strip().lower() in ('1', 'true', 'yes', 'on')
 			except Exception:
 				async_enabled = True
+
+			# Only use async ingestion when a Celery worker is actually reachable.
+			# Otherwise we risk "uploaded but not in worklist" (queued tasks never executed).
+			if async_enabled and not _celery_workers_available():
+				logger.warning(
+					"UPLOAD_PROCESS_ASYNC is enabled but no Celery workers responded to ping; "
+					"falling back to synchronous ingestion for this upload request."
+				)
+				async_enabled = False
 
 			if async_enabled:
 				import uuid as _uuid

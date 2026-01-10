@@ -81,7 +81,18 @@ def _auto_start_ai_for_study(study: Study) -> None:
 				pass
 
 		modality_code = getattr(study.modality, 'code', None)
-		candidates = AIModel.objects.filter(is_active=True).filter(Q(modality=modality_code) | Q(modality='ALL'))
+		modality_code = (str(modality_code).strip().upper() if modality_code else '')
+
+		# Prefer modality-matched models first; if none exist, fall back to any active models so
+		# uploads still get an AI run for less common modalities (e.g. US/NM/PT/SR/OT).
+		active = AIModel.objects.filter(is_active=True)
+		if modality_code:
+			candidates = active.filter(Q(modality=modality_code) | Q(modality='ALL'))
+		else:
+			candidates = active.filter(modality='ALL')
+		# If the system has no modality-specific or ALL models for this study, still run something.
+		if not candidates.exists():
+			candidates = active
 		# Prefer classification/detection first for triage signal.
 		order = {'classification': 0, 'detection': 1, 'segmentation': 2, 'quality_assessment': 3, 'report_generation': 4, 'reconstruction': 5}
 		models = sorted(list(candidates), key=lambda x: order.get(getattr(x, 'model_type', ''), 99))[:3]

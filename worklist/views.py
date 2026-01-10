@@ -21,6 +21,7 @@ from io import BytesIO
 import logging
 import re
 from django.conf import settings
+from celery.result import AsyncResult
 from .models import (
     Study, Patient, Modality, Series, DicomImage, StudyAttachment, 
     AttachmentComment, AttachmentVersion
@@ -365,6 +366,119 @@ def upload_study(request):
 					'timestamp': timezone.now().isoformat(),
 					'user': request.user.username
 				}, status=400)
+
+			# -------------------------------------------------------------------------
+			# FAST PATH: store files + enqueue background processing (Celery).
+			# This keeps the HTTP request short and makes uploads feel fast.
+			# -------------------------------------------------------------------------
+			try:
+				async_enabled = (os.environ.get('UPLOAD_PROCESS_ASYNC', 'true') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+			except Exception:
+				async_enabled = True
+
+			if async_enabled:
+				import uuid as _uuid
+
+				# Chunk/session metadata (used to defer processing until the last chunk arrives).
+				try:
+					raw_session = (request.POST.get('upload_session_id', '') or '').strip()
+				except Exception:
+					raw_session = ''
+				upload_session_id = re.sub(r'[^a-zA-Z0-9_-]+', '', raw_session)[:128] if raw_session else _uuid.uuid4().hex
+
+				try:
+					chunk_index = int((request.POST.get('chunk_index', '0') or '0').strip())
+				except Exception:
+					chunk_index = 0
+				total_chunks = 0
+				has_total_chunks = False
+				try:
+					raw_total_chunks = (request.POST.get('total_chunks', '') or '').strip()
+					if raw_total_chunks:
+						has_total_chunks = True
+						total_chunks = int(raw_total_chunks)
+				except Exception:
+					total_chunks = 0
+
+				finalize = False
+				try:
+					finalize = (request.POST.get('finalize', '') or '').strip() in ('1', 'true', 'True', 'yes', 'on')
+				except Exception:
+					finalize = False
+				# Back-compat: if client doesn't send any chunking metadata, treat this as a complete upload.
+				if not finalize and not has_total_chunks:
+					finalize = True
+				if not finalize and total_chunks > 0:
+					finalize = chunk_index >= (total_chunks - 1)
+
+				# Save incoming files under MEDIA_ROOT/dicom/incoming/<session>/
+				incoming_dir = os.path.join('dicom', 'incoming', upload_session_id)
+				saved = 0
+				file_size_total = 0.0
+				for in_file in uploaded_files:
+					try:
+						file_size_total += float(getattr(in_file, 'size', 0) or 0) / (1024 * 1024)
+					except Exception:
+						pass
+					try:
+						orig = os.path.basename(getattr(in_file, 'name', '') or '') or 'image.dcm'
+						orig = re.sub(r'[^a-zA-Z0-9._-]+', '_', orig)[:160]
+						name = f"{_uuid.uuid4().hex}_{orig}"
+						rel = os.path.join(incoming_dir, name)
+						default_storage.save(rel, in_file)
+						saved += 1
+					except Exception:
+						continue
+
+				processing_started = False
+				task_id = None
+				if finalize:
+					try:
+						from .tasks import process_upload_session
+						r = process_upload_session.delay(
+							session_id=upload_session_id,
+							user_id=int(request.user.id),
+							override_facility_id=override_facility_id,
+							assign_to_me=bool(assign_to_me),
+							priority=str(priority or 'normal'),
+							clinical_info=str(clinical_info or ''),
+						)
+						processing_started = True
+						task_id = getattr(r, 'id', None)
+					except Exception as e:
+						logger.warning(f"Async upload enqueue failed; continuing in sync mode: {e}")
+						processing_started = False
+
+				# If we couldn't enqueue, fall through to legacy synchronous processing below.
+				if processing_started or not finalize:
+					return JsonResponse({
+						'success': True,
+						'queued': True,
+						'processing_started': processing_started,
+						'upload_session_id': upload_session_id,
+						'chunk_index': chunk_index,
+						'total_chunks': total_chunks,
+						'task_id': task_id,
+						'message': 'Upload received. Processing will continue in the background.' if finalize else 'Chunk received.',
+						'processed_files': int(saved),
+						'images_uploaded': int(saved),
+						'studies_created': 0,
+						'total_series': 0,
+						'total_images': 0,
+						'images_created': 0,
+						'statistics': {
+							'total_files': len(uploaded_files),
+							'processed_files': int(saved),
+							'invalid_files': 0,
+							'created_studies': 0,
+							'created_series': 0,
+							'created_images': 0,
+							'total_size_mb': round(float(file_size_total), 2),
+							'processing_time_ms': round((time.time() - upload_start_time) * 1000, 1),
+							'user': request.user.username,
+							'timestamp': timezone.now().isoformat(),
+						},
+					})
 			
 			# Professional upload statistics tracking
 			upload_stats = {
@@ -2374,6 +2488,39 @@ def api_get_upload_stats(request):
             'period': '7 days'
         }
     })
+
+
+@login_required
+def api_upload_processing_status(request):
+	"""
+	Poll endpoint for the async upload pipeline.
+
+	Client sends ?task_id=<celery-task-id>
+	Returns:
+	  - state: PENDING/STARTED/SUCCESS/FAILURE/REVOKED/UNKNOWN
+	  - result: task return dict (on SUCCESS) when result backend is configured
+	"""
+	task_id = (request.GET.get('task_id', '') or '').strip()
+	if not task_id:
+		return JsonResponse({'success': False, 'error': 'Missing task_id'}, status=400)
+
+	try:
+		res = AsyncResult(task_id)
+		state = str(getattr(res, 'state', 'UNKNOWN') or 'UNKNOWN')
+		out = {'success': True, 'task_id': task_id, 'state': state}
+		if state == 'SUCCESS':
+			try:
+				out['result'] = res.result
+			except Exception:
+				out['result'] = None
+		elif state == 'FAILURE':
+			try:
+				out['error'] = str(res.result)
+			except Exception:
+				out['error'] = 'Task failed'
+		return JsonResponse(out)
+	except Exception as e:
+		return JsonResponse({'success': False, 'error': f'Unable to read task status: {e}'}, status=500)
 
 @login_required
 @csrf_exempt

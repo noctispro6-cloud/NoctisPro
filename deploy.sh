@@ -551,13 +551,28 @@ server {
     server_name ${DOMAIN} www.${DOMAIN};
 
     client_max_body_size 5120M;
+    client_body_timeout 3600;
+    client_header_timeout 60;
+    send_timeout 3600;
 
     location / {
         proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        # `map $http_upgrade $connection_upgrade { ... }` is defined at the http{} level,
+        # but this deploy script writes a single server block. Keep it simple.
+        proxy_set_header Connection "upgrade";
+
+        # Stream large uploads (avoid nginx buffering to temp files)
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_connect_timeout 60;
+        proxy_read_timeout 3600;
+        proxy_send_timeout 3600;
     }
 }
 EOF

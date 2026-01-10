@@ -87,6 +87,25 @@ print(secrets.token_urlsafe(48))
 PY
 }
 
+port_in_use() {
+  # Returns 0 if a port is already bound on the host, non-zero otherwise.
+  local port="${1:?}"
+  python3 - <<PY >/dev/null 2>&1
+import socket
+port = int("${port}")
+s = socket.socket()
+try:
+    s.bind(("0.0.0.0", port))
+    ok = True
+except OSError:
+    ok = False
+finally:
+    try: s.close()
+    except Exception: pass
+raise SystemExit(0 if (not ok) else 1)
+PY
+}
+
 install_os_packages() {
   export DEBIAN_FRONTEND=noninteractive
   info "Installing OS packages..."
@@ -264,6 +283,24 @@ EOF
   if [[ "$MODE" == "ngrok" ]]; then
     # Used by settings + tunnel unit
     echo "NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}" >> "$ENV_FILE"
+    # ngrok local API (used to discover the public URL when not using a reserved domain).
+    # Default 4040 can be taken on some hosts; pick a nearby free port automatically.
+    local ngrok_port=""
+    for p in $(seq 4040 4050); do
+      if ! port_in_use "$p"; then
+        ngrok_port="$p"
+        break
+      fi
+    done
+    if [[ -z "$ngrok_port" ]]; then
+      err "No free port found for ngrok local API in range 4040-4050."
+      err "Free one of these ports or set NGROK_WEB_ADDR manually in ${ENV_FILE}."
+      exit 2
+    fi
+    if [[ "$ngrok_port" != "4040" ]]; then
+      info "Port 4040 is in use; configuring ngrok web API on 127.0.0.1:${ngrok_port}."
+    fi
+    echo "NGROK_WEB_ADDR=127.0.0.1:${ngrok_port}" >> "$ENV_FILE"
     if [[ -n "$NGROK_DOMAIN" ]]; then
       echo "NGROK_DOMAIN=${NGROK_DOMAIN}" >> "$ENV_FILE"
       echo "NGROK_URL=https://${NGROK_DOMAIN}" >> "$ENV_FILE"

@@ -51,6 +51,19 @@ read_env_kv() {
   done < "$file"
 }
 
+sanitize_env_value() {
+  # Trim whitespace and strip one layer of surrounding quotes.
+  # Useful because docker compose env files treat quotes as literal characters.
+  local v
+  v="$(printf '%s' "${1:-}" | xargs || true)"
+  if [[ "$v" == \"*\" && "$v" == *\" ]]; then
+    v="${v#\"}"; v="${v%\"}"
+  elif [[ "$v" == \'*\' && "$v" == *\' ]]; then
+    v="${v#\'}"; v="${v%\'}"
+  fi
+  printf '%s' "$v"
+}
+
 is_truthy() {
   # Returns 0 if value looks like "true/1/yes/on" (case-insensitive).
   local v
@@ -143,7 +156,7 @@ PY
 describe_port_owner() {
   local port="${1:?}"
   if command -v ss >/dev/null 2>&1; then
-    ss -ltnp "sport = :${port}" 2>/dev/null || true
+    as_root ss -ltnp "sport = :${port}" 2>/dev/null || true
   else
     return 0
   fi
@@ -163,16 +176,19 @@ kill_port_listeners() {
      local pids=""
      if command -v ss >/dev/null 2>&1; then
          # Output format: users:(("process",pid=123,fd=4),...)
-         pids=$(ss -ltnp "sport = :${port}" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u | tr '\n' ' ')
+         # NOTE: when not root, `ss -p` may omit pid info; don't fail the script under pipefail.
+         pids="$(as_root ss -ltnp "sport = :${port}" 2>/dev/null | { grep -o 'pid=[0-9]*' || true; } | cut -d= -f2 | sort -u | tr '\n' ' ' || true)"
      elif command -v netstat >/dev/null 2>&1; then
          # Output format: 1234/processname
-         pids=$(netstat -ltnp 2>/dev/null | grep ":${port} " | awk '{print $NF}' | cut -d/ -f1 | grep -E '^[0-9]+$' | sort -u | tr '\n' ' ')
+         pids="$(as_root netstat -ltnp 2>/dev/null | { grep ":${port} " || true; } | awk '{print $NF}' | cut -d/ -f1 | { grep -E '^[0-9]+$' || true; } | sort -u | tr '\n' ' ' || true)"
      fi
      
      if [[ -n "$pids" ]]; then
          info "Force killing process(es) holding port ${port}: ${pids}"
          as_root kill -9 ${pids} >/dev/null 2>&1 || true
          sleep 1 # Give it a moment to die
+     else
+         info "Port ${port} is in use but owning PID couldn't be determined (try running with sudo)."
      fi
   fi
 
@@ -296,6 +312,23 @@ info "Ensuring host port ${dicom_port} is available..."
 ensure_port_free "${dicom_port}"
 
 if [[ "$want_ngrok" == "1" ]]; then
+  token_raw="$(read_env_kv NGROK_AUTHTOKEN .env.docker || true)"
+  token_val="$(sanitize_env_value "${token_raw:-}")"
+  if [[ -z "$token_val" || "$token_val" == "your_ngrok_authtoken" ]]; then
+    err "NGROK_AUTHTOKEN is required when using --ngrok."
+    err "Edit .env.docker and set: NGROK_AUTHTOKEN=your_actual_token (no quotes)."
+    err "Then re-run: ./deploy-docker.sh --ngrok"
+    exit 2
+  fi
+  domain_raw="$(read_env_kv NGROK_DOMAIN .env.docker || true)"
+  domain_val="$(sanitize_env_value "${domain_raw:-}")"
+  if [[ -n "$domain_val" && "$domain_val" == "reserved.ngrok.app" ]]; then
+    err "NGROK_DOMAIN is set to the example value 'reserved.ngrok.app'."
+    err "If you don't have a reserved domain, delete/comment NGROK_DOMAIN in .env.docker."
+    err "If you do, set it to your actual reserved hostname (no quotes)."
+    exit 2
+  fi
+
   info "Ensuring host port 4040 is available (ngrok local API)..."
   ensure_port_free "4040"
 fi

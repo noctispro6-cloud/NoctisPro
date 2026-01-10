@@ -1033,30 +1033,83 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // -------- Background upload (Service Worker + IndexedDB) --------
     const BG_UPLOAD = {
-        supported: ('serviceWorker' in navigator) && ('indexedDB' in window),
-        enabled: true,
+        // Service workers require a secure context (HTTPS) except on localhost.
+        supported: ('serviceWorker' in navigator) && ('indexedDB' in window) && (window.isSecureContext || ['localhost', '127.0.0.1'].includes(location.hostname)),
+        // Default to direct upload unless we successfully handshake with the SW.
+        enabled: false,
         swReady: false,
+        handshakeOk: false,
+        lastMessageAt: 0,
+        warned: false,
     };
+
+    async function swPostMessage(msg) {
+        try {
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage(msg);
+                return true;
+            }
+            const reg = await navigator.serviceWorker.ready;
+            if (reg && reg.active) {
+                reg.active.postMessage(msg);
+                return true;
+            }
+        } catch (_) {}
+        return false;
+    }
+
+    async function swHandshake(timeoutMs = 1200) {
+        return new Promise(async (resolve) => {
+            let done = false;
+            const onMsg = (event) => {
+                const msg = event.data || {};
+                if (msg.type === 'PONG') {
+                    done = true;
+                    try { navigator.serviceWorker.removeEventListener('message', onMsg); } catch (_) {}
+                    resolve(true);
+                }
+            };
+            try { navigator.serviceWorker.addEventListener('message', onMsg); } catch (_) {}
+            const sent = await swPostMessage({ type: 'PING' });
+            if (!sent) {
+                try { navigator.serviceWorker.removeEventListener('message', onMsg); } catch (_) {}
+                resolve(false);
+                return;
+            }
+            setTimeout(() => {
+                if (done) return;
+                try { navigator.serviceWorker.removeEventListener('message', onMsg); } catch (_) {}
+                resolve(false);
+            }, timeoutMs);
+        });
+    }
 
     async function registerBackgroundUploader() {
         if (!BG_UPLOAD.supported) return;
         try {
-            const reg = await navigator.serviceWorker.register('/worklist/sw-dicom-upload.js', { scope: '/worklist/' });
+            await navigator.serviceWorker.register('/worklist/sw-dicom-upload.js', { scope: '/worklist/' });
+            // Wait for activation/claim so messaging works reliably.
+            await navigator.serviceWorker.ready;
             BG_UPLOAD.swReady = true;
             // Best-effort background sync registration (not supported everywhere)
             try {
-                if (reg && reg.sync && typeof reg.sync.register === 'function') {
-                    await reg.sync.register('noctis-dicom-upload');
+                const reg2 = await navigator.serviceWorker.ready;
+                if (reg2 && reg2.sync && typeof reg2.sync.register === 'function') {
+                    await reg2.sync.register('noctis-dicom-upload');
                 }
             } catch (_) {}
+            // Validate SW can receive/respond before enabling background mode.
+            BG_UPLOAD.handshakeOk = await swHandshake();
+            BG_UPLOAD.enabled = !!BG_UPLOAD.handshakeOk;
+            if (!BG_UPLOAD.enabled && !BG_UPLOAD.warned) {
+                BG_UPLOAD.warned = true;
+                showNotification('Background uploader is unavailable in this browser/session. Using direct upload with progress instead.', 'info');
+            }
             // Ask SW to process any pending sessions (resume after navigation)
-            try {
-                if (navigator.serviceWorker.controller) {
-                    navigator.serviceWorker.controller.postMessage({ type: 'PROCESS_PENDING' });
-                }
-            } catch (_) {}
+            try { await swPostMessage({ type: 'PROCESS_PENDING' }); } catch (_) {}
         } catch (e) {
             BG_UPLOAD.swReady = false;
+            BG_UPLOAD.enabled = false;
         }
     }
 
@@ -1085,8 +1138,36 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    async function _idbGetSession(sessionId) {
+        const db = await _idbOpen();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(['sessions'], 'readonly');
+            const req = tx.objectStore('sessions').get(sessionId);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    async function cancelBackgroundSession(sessionId, totalFiles) {
+        try {
+            const db = await _idbOpen();
+            // Delete session record
+            {
+                const tx = db.transaction(['sessions'], 'readwrite');
+                tx.objectStore('sessions').delete(sessionId);
+                await _txDone(tx);
+            }
+            // Best-effort delete file blobs by known keys
+            for (let i = 0; i < totalFiles; i++) {
+                const tx = db.transaction(['files'], 'readwrite');
+                tx.objectStore('files').delete(`${sessionId}:${i}`);
+                await _txDone(tx);
+            }
+        } catch (_) {}
+    }
+
     async function enqueueBackgroundUpload() {
-        if (!BG_UPLOAD.supported || !BG_UPLOAD.swReady) return false;
+        if (!BG_UPLOAD.supported || !BG_UPLOAD.swReady || !BG_UPLOAD.enabled) return false;
         if (!selectedFiles || !selectedFiles.length) return false;
 
         const url = '{% url "worklist:upload_study" %}';
@@ -1153,15 +1234,27 @@ document.addEventListener('DOMContentLoaded', function() {
         uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Uploading in background...';
         updateProgress(100, `0 / ${totalFiles} images`, 'Background upload started — you can leave this page.');
 
-        // Kick off worker immediately
-        try {
-            if (navigator.serviceWorker.controller) {
-                navigator.serviceWorker.controller.postMessage({ type: 'START_UPLOAD', sessionId });
-            } else {
-                const reg = await navigator.serviceWorker.ready;
-                reg.active && reg.active.postMessage({ type: 'PROCESS_PENDING' });
-            }
-        } catch (_) {}
+        // Kick off worker immediately (explicitly start this session).
+        try { await swPostMessage({ type: 'START_UPLOAD', sessionId }); } catch (_) {}
+
+        // Watchdog: if the SW never flips the session out of "pending", fall back to direct upload.
+        // This prevents users seeing "queued" forever when SW messaging/background execution is blocked.
+        setTimeout(async () => {
+            try {
+                if (!isUploading) return;
+                const s = await _idbGetSession(sessionId);
+                const status = (s && s.status) ? String(s.status) : '';
+                const uploaded = Number((s && s.uploadedFiles) || 0);
+                if ((status === 'pending' || !status) && uploaded === 0) {
+                    showNotification('Background upload did not start (browser blocked background execution). Switching to direct upload…', 'warning');
+                    BG_UPLOAD.enabled = false;
+                    await cancelBackgroundSession(sessionId, totalFiles);
+                    resetUploadState();
+                    // Force direct upload path
+                    uploadFilesInChunks({ forceDirect: true });
+                }
+            } catch (_) {}
+        }, 8000);
 
         showNotification(
             'Upload has started in the background. You can leave this page, but studies/images will appear on the Worklist only as the background upload finishes processing.',
@@ -1174,6 +1267,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (BG_UPLOAD.supported) {
         navigator.serviceWorker?.addEventListener('message', (event) => {
             const msg = event.data || {};
+            BG_UPLOAD.lastMessageAt = Date.now();
             if (msg.type === 'UPLOAD_PROGRESS') {
                 const total = Number(msg.totalFiles || 0);
                 const done = Number(msg.uploadedFiles || 0);
@@ -1195,9 +1289,10 @@ document.addEventListener('DOMContentLoaded', function() {
         registerBackgroundUploader();
     }
 
-    async function uploadFilesInChunks() {
+    async function uploadFilesInChunks(opts = {}) {
+        const forceDirect = !!(opts && opts.forceDirect);
         // Prefer background mode if available (keeps working after navigation)
-        if (BG_UPLOAD.supported && BG_UPLOAD.swReady && BG_UPLOAD.enabled) {
+        if (!forceDirect && BG_UPLOAD.supported && BG_UPLOAD.swReady && BG_UPLOAD.enabled) {
             try {
                 const started = await enqueueBackgroundUpload();
                 if (started) return;

@@ -153,6 +153,16 @@ async function uploadSession(sessionId) {
 
       // Build request.
       const formData = new FormData();
+      // Server uses this to group chunks and only start processing when finalize=1.
+      session.serverUploadSessionId = session.serverUploadSessionId || String(sessionId);
+      session.batchIndex = Number(session.batchIndex || 0);
+      const willFinish = (session.nextIndex + batchKeys.length) >= totalFiles;
+      formData.append('upload_session_id', String(session.serverUploadSessionId));
+      formData.append('chunk_index', String(session.batchIndex));
+      // Avoid accidental finalize-by-default on the server for intermediate chunks.
+      formData.append('total_chunks', '1000000000');
+      if (willFinish) formData.append('finalize', '1');
+
       for (const key of batchKeys) {
         // eslint-disable-next-line no-await-in-loop
         const rec = await idbGetFileByKey(db, key);
@@ -218,6 +228,7 @@ async function uploadSession(sessionId) {
         await idbDeleteFile(db, key);
       }
       session.nextIndex = Math.min(totalFiles, session.nextIndex + batchKeys.length);
+      session.batchIndex = Number(session.batchIndex || 0) + 1;
       session.updatedAt = Date.now();
       await idbPutSession(db, session);
 

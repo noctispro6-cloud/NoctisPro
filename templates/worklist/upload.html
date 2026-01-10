@@ -1328,9 +1328,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const MAX_CHUNK_BYTES = isTunnelHost ? (4 * 1024 * 1024) : (48 * 1024 * 1024); // 4MB on tunnels, 48MB otherwise
         const MAX_CHUNK_FILES = isTunnelHost ? 80 : 600;
 
-        // Tunnels are fragile; keep them single-threaded.
-        // Off-tunnel, Postgres handles concurrency fine, so we allow modest parallelism.
-        const MAX_PARALLEL = isTunnelHost ? 1 : 2;
+        // IMPORTANT:
+        // The server defers DICOM parsing/DB work until the *final* chunk arrives (background processing).
+        // Parallel chunk uploads can cause the final chunk to arrive early and start processing before
+        // earlier chunks have finished transferring. Keep it single-threaded for correctness.
+        const MAX_PARALLEL = 1;
 
         let chunks = [];
         let currentChunk = [];
@@ -1348,6 +1350,11 @@ document.addEventListener('DOMContentLoaded', function() {
             currentBytes += fsize;
         }
         if (currentChunk.length) chunks.push(currentChunk);
+
+        // Stable upload session ID across chunks (server uses this to group files).
+        const uploadSessionId = (window.crypto && window.crypto.randomUUID)
+            ? window.crypto.randomUUID()
+            : (`sess_${Date.now()}_${Math.random().toString(16).slice(2)}`);
 
         let uploadedCount = 0;
         let uploadedBytes = 0;
@@ -1379,6 +1386,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 formData.append('clinical_info', clinicalInfoInput.value || '');
                 if (facilitySelect) { formData.append('facility_id', facilitySelect.value || ''); }
                 if (assignToMe) { formData.append('assign_to_me', assignToMe.checked ? '1' : '0'); }
+                formData.append('upload_session_id', uploadSessionId);
+                formData.append('chunk_index', String(chunkIdx));
+                formData.append('total_chunks', String(chunks.length));
+                if (chunkIdx === (chunks.length - 1)) formData.append('finalize', '1');
 
                 const xhr = new XMLHttpRequest();
                 xhr.open('POST', url, true);
@@ -1434,6 +1445,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     } else {
                                         totalImagesUploaded += processed;
                                     }
+                                    const queuedMsg = (data && data.queued) ? 'Queued for background processing…' : null;
                                     if (Array.isArray(data.created_study_ids)) {
                                         createdStudyIds.push(...data.created_study_ids);
                                     }
@@ -1441,7 +1453,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     updateProgress(
                                         Math.max(percentFiles, (uploadedBytes / Math.max(1, totalBytes)) * 100),
                                         `${uploadedCount} / ${totalFiles} images`,
-                                        `Created ${studiesCreated} studies, ${totalSeries} series • Uploaded ${totalImagesUploaded} images`
+                                        queuedMsg || `Created ${studiesCreated} studies, ${totalSeries} series • Uploaded ${totalImagesUploaded} images`
                                     );
                                     resolve({ ok: true });
                                 } else {

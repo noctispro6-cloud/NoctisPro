@@ -16,13 +16,14 @@ as_root() {
 get_ngrok_https_url() {
   # Best-effort: read the public HTTPS URL from the local ngrok API.
   # Returns 0 and prints the URL if available; otherwise returns non-zero.
-  python3 - <<'PY'
+  python3 - "${1:-4040}" <<'PY'
 import json
 import sys
 import urllib.request
 
 try:
-    with urllib.request.urlopen("http://127.0.0.1:4040/api/tunnels", timeout=2) as resp:
+    port = int((sys.argv[1] if len(sys.argv) > 1 else "4040").strip() or "4040")
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/tunnels", timeout=2) as resp:
         data = json.load(resp)
 except Exception:
     sys.exit(1)
@@ -236,6 +237,18 @@ finally:
 PY
 }
 
+pick_free_port_in_range() {
+  # pick_free_port_in_range START END -> prints a free port or empty string
+  local start="${1:?}" end="${2:?}" p
+  for p in $(seq "${start}" "${end}"); do
+    if ! port_in_use "${p}"; then
+      printf '%s' "${p}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -302,6 +315,9 @@ web_port="$(read_env_kv WEB_PORT .env.docker)"
 web_port="$(sanitize_env_value "${web_port:-}")"
 web_port="${web_port:-8000}"
 
+ngrok_web_port="$(read_env_kv NGROK_WEB_PORT .env.docker || true)"
+ngrok_web_port="$(sanitize_env_value "${ngrok_web_port:-}")"
+
 # Validate ports early (avoid confusing failures later in ensure_port_free()).
 if [[ ! "${web_port}" =~ ^[0-9]+$ ]] || (( web_port < 1 || web_port > 65535 )); then
   err "Invalid WEB_PORT in .env.docker: '${web_port}' (expected 1-65535, no quotes)."
@@ -341,13 +357,27 @@ if [[ "$want_ngrok" == "1" ]]; then
     exit 2
   fi
 
-  info "Ensuring host port 4040 is available (ngrok local API)..."
-  # 4040 is fixed for ngrok's local API; validate for completeness.
-  if [[ ! "4040" =~ ^[0-9]+$ ]] || (( 4040 < 1 || 4040 > 65535 )); then
-    err "Internal error: invalid ngrok port"
+  # Prefer NGROK_WEB_PORT if set; otherwise auto-pick a free port near 4040.
+  if [[ -n "$ngrok_web_port" ]]; then
+    if [[ ! "${ngrok_web_port}" =~ ^[0-9]+$ ]] || (( ngrok_web_port < 1 || ngrok_web_port > 65535 )); then
+      err "Invalid NGROK_WEB_PORT in .env.docker: '${ngrok_web_port}' (expected 1-65535, no quotes)."
+      exit 2
+    fi
+    if port_in_use "${ngrok_web_port}"; then
+      info "Host port ${ngrok_web_port} (NGROK_WEB_PORT) is in use; selecting a free port (4040-4050) instead..."
+      ngrok_web_port="$(pick_free_port_in_range 4040 4050 || true)"
+    fi
+  else
+    ngrok_web_port="$(pick_free_port_in_range 4040 4050 || true)"
+  fi
+
+  if [[ -z "$ngrok_web_port" ]]; then
+    err "No free host port found for ngrok API in range 4040-4050."
+    err "Free a port in that range or set NGROK_WEB_PORT in .env.docker to a free port."
     exit 2
   fi
-  ensure_port_free "4040"
+
+  info "Using ngrok local API on host port ${ngrok_web_port} -> container 4040."
 fi
 
 args=(--env-file .env.docker up -d --build)
@@ -356,7 +386,7 @@ if [[ "$want_ngrok" == "1" ]]; then
 fi
 
 info "Starting containers..."
-docker compose "${args[@]}"
+NGROK_WEB_PORT="${ngrok_web_port:-}" docker compose "${args[@]}"
 
 info "Running a quick health check (web logs tail)..."
 docker compose ps || true
@@ -392,7 +422,7 @@ if [[ "$want_ngrok" == "1" ]]; then
   # ngrok allocates the public URL asynchronously; poll the local API briefly.
   ngrok_url=""
   for _ in $(seq 1 60); do
-    ngrok_url="$(get_ngrok_https_url 2>/dev/null || true)"
+    ngrok_url="$(get_ngrok_https_url "${ngrok_web_port:-4040}" 2>/dev/null || true)"
     if [[ -n "$ngrok_url" ]]; then
       break
     fi
@@ -402,9 +432,9 @@ if [[ "$want_ngrok" == "1" ]]; then
   if [[ -n "$ngrok_url" ]]; then
     printf '%s' "$ngrok_url" > .tunnel-url 2>/dev/null || true
     info "Ngrok: ${ngrok_url}"
-    info "Ngrok API: http://localhost:4040"
+    info "Ngrok API: http://localhost:${ngrok_web_port:-4040}"
   else
     info "Ngrok: (starting) check: docker compose logs --tail=200 ngrok"
-    info "Ngrok API: http://localhost:4040 (should show the public URL once ready)"
+    info "Ngrok API: http://localhost:${ngrok_web_port:-4040} (should show the public URL once ready)"
   fi
 fi

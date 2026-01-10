@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   db:
     image: postgres:16
@@ -31,10 +33,6 @@ services:
       # Persist uploads/static outside the image so rebuilds never delete patient data.
       MEDIA_ROOT: /data/media
       STATIC_ROOT: /data/staticfiles
-
-      # If you run the optional ngrok service, set these in .env.docker:
-      # NGROK_AUTHTOKEN=...
-      # NGROK_DOMAIN=reserved.ngrok.app
     depends_on:
       db:
         condition: service_healthy
@@ -65,7 +63,8 @@ services:
     restart: unless-stopped
 
   ngrok:
-    profiles: ["ngrok"]
+    profiles:
+      - ngrok
     image: ngrok/ngrok:latest
     depends_on:
       - web
@@ -81,6 +80,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  noctis_pgdata:
-  noctis_media:
-  noctis_static:
+  noctis_pgdata: {}
+  noctis_media: {}
+  noctis_static: {}

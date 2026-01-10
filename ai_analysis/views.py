@@ -955,3 +955,17 @@ def run_model_test(request, model_id):
             })
     
     return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+@login_required
+@csrf_exempt
+def api_medical_references(request):
+    """Get medical references for given keywords"""
+    keywords = request.GET.get('keywords', '').split(',')
+    keywords = [k.strip() for k in keywords if k.strip()]
+    
+    if not keywords:
+        return JsonResponse({'references': []})
+        
+    references = _get_online_references(keywords)
+    return JsonResponse({'references': references})
+

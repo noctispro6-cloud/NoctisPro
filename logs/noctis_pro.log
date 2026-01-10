@@ -1,2 +1,9 @@
 [INFO] 2025-12-17 08:11:23,753 noctis_pro.user_management views 4185 139971627917440 Professional user creation initiated by admin
 [INFO] 2025-12-17 08:11:23,975 noctis_pro.user_management views 4185 139971627917440 Professional user created successfully: smoke_user1 in 248.2ms
+[INFO] 2026-01-10 14:27:17,725 noctis_pro.upload views 4209 140321725862016 Professional DICOM upload started: 1 files by admin
+[INFO] 2026-01-10 14:27:17,726 noctis_pro.upload views 4209 140321725862016 Starting professional DICOM metadata extraction and validation
+[INFO] 2026-01-10 14:27:17,726 noctis_pro.upload views 4209 140321725862016 Processing study: 1.3.6.1.4.1.5962.1.2.1.20040119072730.12322
+[INFO] 2026-01-10 14:27:17,728 noctis_pro.upload views 4209 140321725862016 New patient created: CT1 CompressedSamples (ID: 1CT1)
+[ERROR] 2026-01-10 14:27:17,732 noctis_pro.upload views 4209 140321725862016 Professional DICOM upload failed: no such column: accounts_facility.has_ai_subscription
+[ERROR] 2026-01-10 14:27:17,732 noctis_pro.upload views 4209 140321725862016 Upload attempt by: admin
+[ERROR] 2026-01-10 14:27:17,732 noctis_pro.upload views 4209 140321725862016 Files attempted: 1

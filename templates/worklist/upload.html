@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load static %}
 
 {% block title %}Upload Study - Noctis Pro PACS{% endblock %}
 
@@ -620,6 +621,19 @@
                 <h3 class="text-light" style="margin-bottom: 0.25rem;">Secure DICOM Upload</h3>
                 <div class="helper-text">Supports <strong>all DICOM modalities</strong> (CT/MR/US/CR/DX/MG/SR/etc). The server will validate DICOM content.</div>
             </div>
+
+            {% if db_schema_error %}
+            <div class="alert alert-danger" style="margin: 0 0 1rem 0;">
+                <strong>Server configuration issue:</strong> the database schema looks out of date, so uploads may fail.
+                <div class="mt-2" style="font-size: 0.9rem;">
+                    Fix: run <code>python manage.py migrate</code> on the server, then reload this page.
+                </div>
+                <details class="mt-2">
+                    <summary style="cursor: pointer;">Technical details</summary>
+                    <pre style="white-space: pre-wrap; margin-top: 0.5rem;">{{ db_schema_error }}</pre>
+                </details>
+            </div>
+            {% endif %}
 
         <form id="uploadForm" enctype="multipart/form-data">
             {% csrf_token %}

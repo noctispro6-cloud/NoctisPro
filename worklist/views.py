@@ -7,6 +7,7 @@ from django.db.models import Q, Count, Case, When, Value, IntegerField
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
+from django.db.utils import OperationalError, ProgrammingError
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 import os
@@ -323,7 +324,7 @@ def upload_study(request):
 					'details': 'Please select DICOM files to upload',
 					'timestamp': timezone.now().isoformat(),
 					'user': request.user.username
-				})
+				}, status=400)
 			
 			# Professional upload statistics tracking
 			upload_stats = {
@@ -674,7 +675,7 @@ def upload_study(request):
 					continue
 			
 			if not studies_map:
-				return JsonResponse({'success': False, 'error': 'No valid DICOM files found'})
+				return JsonResponse({'success': False, 'error': 'No valid DICOM files found'}, status=400)
 			
 			created_studies = []
 			total_series_processed = 0
@@ -1318,11 +1319,37 @@ def upload_study(request):
 					'Ensure proper network connectivity',
 					'Contact system administrator if issue persists'
 				]
-			})
+			}, status=500)
 	
-	# Provide facilities for admin/radiologist to target uploads
-	facilities = Facility.objects.filter(is_active=True).order_by('name') if ((hasattr(request.user, 'is_admin') and request.user.is_admin()) or (hasattr(request.user, 'is_radiologist') and request.user.is_radiologist())) else []
-	return render(request, 'worklist/upload.html', {'facilities': facilities})
+	# GET: render upload UI. This view is frequently the first place operators notice
+	# a DB/schema mismatch after deployments (e.g. migrations not applied).
+	#
+	# Without this guard, a missing column on Facility can raise OperationalError and
+	# present as a generic 500 "Server Error" when clicking "Upload".
+	db_schema_error = None
+	facilities = []
+	if (hasattr(request.user, 'is_admin') and request.user.is_admin()) or (hasattr(request.user, 'is_radiologist') and request.user.is_radiologist()):
+		try:
+			# Evaluate inside the try so schema issues are caught here, not later
+			# during template rendering (e.g. `{% if facilities %}`).
+			facilities = list(Facility.objects.filter(is_active=True).order_by('name'))
+		except (OperationalError, ProgrammingError) as e:
+			db_schema_error = str(e)
+			facilities = []
+			try:
+				messages.error(
+					request,
+					"Upload is temporarily unavailable because the database schema is out of date. "
+					"Please run migrations (python manage.py migrate) and retry."
+				)
+			except Exception:
+				pass
+		except Exception as e:
+			# Best-effort: don't 500 the page just because facility lookup failed.
+			db_schema_error = str(e)
+			facilities = []
+
+	return render(request, 'worklist/upload.html', {'facilities': facilities, 'db_schema_error': db_schema_error})
 
 @login_required
 def modern_worklist(request):

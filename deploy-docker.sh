@@ -103,6 +103,24 @@ kill_port_listeners() {
     as_root fuser -k -n tcp "${port}" >/dev/null 2>&1 || true
   fi
 
+  # Fallback: Identify PID via ss/netstat and kill explicitly
+  if port_in_use "${port}"; then
+     local pids=""
+     if command -v ss >/dev/null 2>&1; then
+         # Output format: users:(("process",pid=123,fd=4),...)
+         pids=$(ss -ltnp "sport = :${port}" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u | tr '\n' ' ')
+     elif command -v netstat >/dev/null 2>&1; then
+         # Output format: 1234/processname
+         pids=$(netstat -ltnp 2>/dev/null | grep ":${port} " | awk '{print $NF}' | cut -d/ -f1 | grep -E '^[0-9]+$' | sort -u | tr '\n' ' ')
+     fi
+     
+     if [[ -n "$pids" ]]; then
+         info "Force killing process(es) holding port ${port}: ${pids}"
+         as_root kill -9 ${pids} >/dev/null 2>&1 || true
+         sleep 1 # Give it a moment to die
+     fi
+  fi
+
   # If still in use and ss is available, show owner to help debugging.
   if port_in_use "${port}"; then
     info "Port ${port} is still in use; current listener(s):"

@@ -313,10 +313,31 @@ def upload_study(request):
 			import logging
 			import time
 			from datetime import datetime
+			from django.db.utils import OperationalError, ProgrammingError
 			
 			# Initialize professional logging
 			logger = logging.getLogger('noctis_pro.upload')
 			upload_start_time = time.time()
+
+			# Fail fast if the database schema is out of date.
+			# If migrations were not applied, *any* Facility ORM access can raise errors like:
+			#   "no such column: accounts_facility.has_ai_subscription"
+			# In that state uploads cannot be persisted reliably, so return an actionable error.
+			try:
+				Facility.objects.only('id').first()
+			except (OperationalError, ProgrammingError) as e:
+				logger.error(f"Upload blocked: database schema is out of date: {e}")
+				return JsonResponse(
+					{
+						'success': False,
+						'error': 'Upload is temporarily unavailable because the database schema is out of date.',
+						'details': 'Please run migrations (python manage.py migrate) and retry the upload.',
+						'db_error': str(e),
+						'error_code': 'DB_SCHEMA_OUT_OF_DATE',
+						'timestamp': timezone.now().isoformat(),
+					},
+					status=503,
+				)
 			
 			# Enhanced admin/radiologist options with professional validation
 			override_facility_id = (request.POST.get('facility_id', '') or '').strip()

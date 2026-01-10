@@ -74,6 +74,32 @@ services:
       - noctis_static:/static:ro
     restart: unless-stopped
 
+  ngrok:
+    profiles: ["ngrok"]
+    image: ngrok/ngrok:latest
+    depends_on:
+      - web
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+      NGROK_DOMAIN: ${NGROK_DOMAIN:-}
+    entrypoint: ["sh", "-lc"]
+    command: >
+      if [ -z "$${NGROK_AUTHTOKEN:-}" ]; then
+        echo "ERROR: NGROK_AUTHTOKEN is required (set it in .env.docker)" >&2;
+        exit 2;
+      fi;
+      if [ -n "$${NGROK_DOMAIN:-}" ]; then
+        # Accept either a bare hostname (reserved.ngrok.app) or a pasted URL (https://reserved.ngrok.app).
+        domain="$${NGROK_DOMAIN#http://}"; domain="$${domain#https://}"; domain="$${domain%%/*}"; domain="$${domain%.}";
+        exec ngrok http web:8000 --domain="$${domain}";
+      else
+        exec ngrok http web:8000;
+      fi
+    ports:
+      # Local ngrok API (optional; helpful for debugging)
+      - "${NGROK_API_PORT:-4040}:4040"
+    restart: unless-stopped
+
 volumes:
   noctis_pgdata:
   noctis_media:

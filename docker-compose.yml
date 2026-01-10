@@ -87,7 +87,7 @@ services:
       fi
     ports:
       # Local ngrok API (optional; helpful for debugging)
-      - "${NGROK_API_PORT:-4040}:4040"
+      - "4040:4040"
     restart: unless-stopped
 
 volumes:

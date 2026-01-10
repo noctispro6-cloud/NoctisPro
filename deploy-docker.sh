@@ -16,15 +16,13 @@ as_root() {
 get_ngrok_https_url() {
   # Best-effort: read the public HTTPS URL from the local ngrok API.
   # Returns 0 and prints the URL if available; otherwise returns non-zero.
-  NGROK_API_PORT="${NGROK_API_PORT:-4040}" python3 - <<'PY'
+  python3 - <<'PY'
 import json
-import os
 import sys
 import urllib.request
 
-port = int(os.environ.get("NGROK_API_PORT", "4040"))
 try:
-    with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/tunnels", timeout=2) as resp:
+    with urllib.request.urlopen("http://127.0.0.1:4040/api/tunnels", timeout=2) as resp:
         data = json.load(resp)
 except Exception:
     sys.exit(1)
@@ -103,19 +101,6 @@ kill_port_listeners() {
   if command -v fuser >/dev/null 2>&1; then
     info "Attempting to stop any process listening on port ${port}..."
     as_root fuser -k -n tcp "${port}" >/dev/null 2>&1 || true
-  elif command -v ss >/dev/null 2>&1; then
-    info "Attempting to stop any process listening on port ${port}..."
-    # Extract PIDs from: users:(("name",pid=123,fd=4))
-    local pids
-    pids="$(ss -ltnp "sport = :${port}" 2>/dev/null | awk -F'pid=' 'NF>1{split($2,a,","); print a[1]}' | awk 'NF' | sort -u || true)"
-    if [[ -n "$pids" ]]; then
-      # Try graceful, then force.
-      # shellcheck disable=SC2086
-      as_root kill ${pids} >/dev/null 2>&1 || true
-      sleep 0.2
-      # shellcheck disable=SC2086
-      as_root kill -9 ${pids} >/dev/null 2>&1 || true
-    fi
   fi
 
   # Fallback: Identify PID via ss/netstat and kill explicitly
@@ -148,8 +133,6 @@ ensure_port_free() {
 
   # Stop the known host-level DICOM receiver if it is running.
   stop_systemd_if_running "noctis-pro-dicom.service"
-  # Stop the known host-level ngrok tunnel if it is running.
-  stop_systemd_if_running "noctis-pro-tunnel.service"
 
   # Stop any docker containers (any stack) that already publish the port.
   local ids
@@ -187,8 +170,6 @@ usage() {
 Usage:
   ./deploy-docker.sh
   ./deploy-docker.sh --ngrok
-  ./deploy-docker.sh --production
-  ./deploy-docker.sh --production --ngrok
 
 What this does:
 - Builds and starts the Noctis Pro stack via docker compose
@@ -202,11 +183,9 @@ EOF
 }
 
 want_ngrok=0
-want_production=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ngrok) want_ngrok=1; shift ;;
-    --production|--prod) want_production=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) err "Unknown arg: $1"; usage; exit 2 ;;
   esac
@@ -232,16 +211,6 @@ if [[ ! -f ".env.docker" ]]; then
   fi
 fi
 
-ngrok_api_port="$(read_env_kv NGROK_API_PORT .env.docker)"
-ngrok_api_port="${ngrok_api_port:-4040}"
-
-compose_file="docker-compose.yml"
-if [[ "$want_production" == "1" ]]; then
-  compose_file="docker-compose.prod.yml"
-fi
-
-compose=(docker compose -f "${compose_file}")
-
 dicom_port="$(read_env_kv DICOM_PORT .env.docker)"
 dicom_port="${dicom_port:-11112}"
 
@@ -249,28 +218,19 @@ web_port="$(read_env_kv WEB_PORT .env.docker)"
 web_port="${web_port:-8000}"
 
 info "Cleaning up old compose resources (safe; volumes persist)..."
-"${compose[@]}" down --remove-orphans >/dev/null 2>&1 || true
+docker compose down --remove-orphans >/dev/null 2>&1 || true
 
-if [[ "$want_production" == "1" ]]; then
-  info "Ensuring host port 80 is available..."
-  stop_systemd_if_running "noctis-pro.service"
-  ensure_port_free "80"
+info "Ensuring host port ${web_port} is available..."
+# Stop the known host-level web service if it is running (to avoid port conflicts).
+stop_systemd_if_running "noctis-pro.service"
+ensure_port_free "${web_port}"
 
-  info "Ensuring host port 443 is available..."
-  ensure_port_free "443"
-else
-  info "Ensuring host port ${web_port} is available..."
-  # Stop the known host-level web service if it is running (to avoid port conflicts).
-  stop_systemd_if_running "noctis-pro.service"
-  ensure_port_free "${web_port}"
-
-  info "Ensuring host port ${dicom_port} is available..."
-  ensure_port_free "${dicom_port}"
-fi
+info "Ensuring host port ${dicom_port} is available..."
+ensure_port_free "${dicom_port}"
 
 if [[ "$want_ngrok" == "1" ]]; then
-  info "Ensuring host port ${ngrok_api_port} is available (ngrok local API)..."
-  ensure_port_free "${ngrok_api_port}"
+  info "Ensuring host port 4040 is available (ngrok local API)..."
+  ensure_port_free "4040"
 fi
 
 args=(--env-file .env.docker up -d --build)
@@ -279,23 +239,19 @@ if [[ "$want_ngrok" == "1" ]]; then
 fi
 
 info "Starting containers..."
-"${compose[@]}" "${args[@]}"
+docker compose "${args[@]}"
 
 info "Running a quick health check (web logs tail)..."
-"${compose[@]}" logs --tail=30 web || true
+docker compose logs --tail=30 web || true
 
 info "Done."
-if [[ "$want_production" == "1" ]]; then
-  info "Web:   http://localhost"
-else
-  info "Web:   http://localhost:${web_port}"
-  info "DICOM: <server-ip>:${dicom_port} (AE: NOCTIS_SCP)"
-fi
+info "Web:   http://localhost:${web_port}"
+info "DICOM: <server-ip>:${dicom_port} (AE: NOCTIS_SCP)"
 if [[ "$want_ngrok" == "1" ]]; then
   # ngrok allocates the public URL asynchronously; poll the local API briefly.
   ngrok_url=""
   for _ in $(seq 1 60); do
-    NGROK_API_PORT="${ngrok_api_port}" ngrok_url="$(get_ngrok_https_url 2>/dev/null || true)"
+    ngrok_url="$(get_ngrok_https_url 2>/dev/null || true)"
     if [[ -n "$ngrok_url" ]]; then
       break
     fi
@@ -305,9 +261,9 @@ if [[ "$want_ngrok" == "1" ]]; then
   if [[ -n "$ngrok_url" ]]; then
     printf '%s' "$ngrok_url" > .tunnel-url 2>/dev/null || true
     info "Ngrok: ${ngrok_url}"
-    info "Ngrok API: http://localhost:${ngrok_api_port}"
+    info "Ngrok API: http://localhost:4040"
   else
     info "Ngrok: (starting) check: docker compose logs --tail=200 ngrok"
-    info "Ngrok API: http://localhost:${ngrok_api_port} (should show the public URL once ready)"
+    info "Ngrok API: http://localhost:4040 (should show the public URL once ready)"
   fi
 fi

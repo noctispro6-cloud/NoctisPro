@@ -26,5 +26,5 @@ COPY . /app
 
 EXPOSE 8000 11112
 
-# Auto-detect worker count from CPU cores (override with WEB_CONCURRENCY).
-CMD ["bash", "-lc", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && WORKERS=\"${WEB_CONCURRENCY:-}\"; if [ -z \"$WORKERS\" ]; then WORKERS=\"$(python -c 'import os; print(os.cpu_count() or 1)')\"; fi; exec gunicorn noctis_pro.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers \"$WORKERS\" --timeout ${GUNICORN_TIMEOUT:-3600} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT:-30} --keep-alive ${GUNICORN_KEEPALIVE:-5}"]
+# Auto-tune worker count (override with WEB_CONCURRENCY).
+CMD ["bash", "-lc", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && WORKERS=\"${WEB_CONCURRENCY:-}\"; if [ -z \"$WORKERS\" ]; then WORKERS=\"$(python3 /app/tools/auto_concurrency.py web)\"; fi; exec gunicorn noctis_pro.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers \"$WORKERS\" --timeout ${GUNICORN_TIMEOUT:-3600} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT:-30} --keep-alive ${GUNICORN_KEEPALIVE:-5}"]

@@ -36,6 +36,9 @@ services:
 
       # Redis for Channels (websockets / realtime)
       REDIS_URL: redis://redis:6379/0
+      # Redis for Celery (background jobs / post-processing)
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
 
       # Persist uploads/static outside the image so rebuilds never delete data.
       MEDIA_ROOT: /data/media
@@ -52,6 +55,40 @@ services:
         condition: service_started
     expose:
       - "8000"
+    volumes:
+      - noctis_media:/data/media
+      - noctis_static:/data/staticfiles
+    restart: unless-stopped
+
+  celery:
+    build:
+      context: .
+    env_file:
+      - .env.docker
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-noctispro}
+      DB_USER: ${DB_USER:-noctispro}
+      DB_PASSWORD: ${DB_PASSWORD:-change-me}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      MEDIA_ROOT: /data/media
+      STATIC_ROOT: /data/staticfiles
+      DJANGO_SETTINGS_MODULE: noctis_pro.settings
+    command:
+      [
+        "bash",
+        "-lc",
+        "exec celery -A noctis_pro worker -l info --concurrency ${CELERY_CONCURRENCY:-4}",
+      ]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       - noctis_media:/data/media
       - noctis_static:/data/staticfiles

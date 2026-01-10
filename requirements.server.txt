@@ -48,3 +48,6 @@ SimpleITK
 requests
 python-magic
 
+# Background tasks
+celery
+

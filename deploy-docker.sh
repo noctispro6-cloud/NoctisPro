@@ -348,7 +348,7 @@ docker compose logs --tail=30 web || true
 # Best-effort reachability check from host -> published port (helps catch exited web container).
 python3 - <<PY || {
 import sys, time, urllib.request
-url = f"http://127.0.0.1:{web_port}/"
+url = "http://127.0.0.1:${web_port}/"
 deadline = time.time() + 45
 last_err = None
 while time.time() < deadline:

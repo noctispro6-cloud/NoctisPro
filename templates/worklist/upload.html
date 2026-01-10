@@ -406,92 +406,6 @@
         margin-bottom: 1rem;
     }
 
-    /* Local preview (before upload completes) */
-    .local-preview {
-        background: rgba(0, 212, 255, 0.06);
-        border: 1px solid rgba(0, 212, 255, 0.35);
-        border-radius: 12px;
-        padding: 1rem;
-        margin-top: 1.25rem;
-        display: none;
-    }
-
-    .local-preview-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        gap: 1rem;
-        margin-bottom: 0.75rem;
-    }
-
-    .local-preview-title {
-        margin: 0;
-        color: var(--text-primary);
-        font-weight: 700;
-        font-size: 0.95rem;
-        letter-spacing: 0.3px;
-        text-transform: uppercase;
-    }
-
-    .local-preview-help {
-        color: var(--text-secondary);
-        font-size: 0.85rem;
-    }
-
-    .local-preview-grid {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        gap: 0.75rem;
-    }
-
-    .local-preview-canvas-wrap {
-        background: rgba(0, 0, 0, 0.25);
-        border: 1px solid var(--border-color);
-        border-radius: 10px;
-        padding: 0.5rem;
-        display: grid;
-        place-items: center;
-        min-height: 220px;
-        overflow: hidden;
-    }
-
-    #localPreviewCanvas {
-        width: 100%;
-        height: auto;
-        max-height: 420px;
-        border-radius: 6px;
-        image-rendering: pixelated;
-        background: #000;
-    }
-
-    .local-preview-controls {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.75rem;
-        align-items: center;
-    }
-
-    .local-preview-control label {
-        display: flex;
-        justify-content: space-between;
-        gap: 0.75rem;
-        color: var(--text-secondary);
-        font-size: 0.85rem;
-        margin-bottom: 0.25rem;
-    }
-
-    .local-preview-control input[type="range"] {
-        width: 100%;
-    }
-
-    .local-preview-status {
-        color: var(--text-secondary);
-        font-size: 0.85rem;
-        margin-top: 0.5rem;
-    }
-
-    .local-preview-status strong { color: var(--text-primary); }
-
     /* Enhanced metadata form - Professional medical input styling */
     .meta-grid { 
         display: grid; 
@@ -726,40 +640,6 @@
                 <h6 class="text-light mb-2"><i class="fas fa-layer-group me-2"></i>Series Preview</h6>
                 <div id="seriesList"></div>
             </div>
-
-            <!-- Local preview (renders from selected files immediately; upload continues in background) -->
-            <div class="local-preview" id="localPreview">
-                <div class="local-preview-header">
-                    <h6 class="local-preview-title"><i class="fas fa-eye me-2"></i>Preview (local)</h6>
-                    <div class="local-preview-help">Shows a slice immediately while upload runs.</div>
-                </div>
-                <div class="local-preview-grid">
-                    <div class="local-preview-canvas-wrap">
-                        <canvas id="localPreviewCanvas"></canvas>
-                    </div>
-                    <div class="local-preview-controls">
-                        <div class="local-preview-control">
-                            <label for="sliceSlider"><span>Slice</span><span><strong id="sliceIndexText">1</strong> / <strong id="sliceTotalText">1</strong></span></label>
-                            <input id="sliceSlider" type="range" min="1" max="1" value="1" step="1">
-                        </div>
-                        <div class="local-preview-control">
-                            <label for="wwSlider"><span>Window Width</span><span id="wwText">—</span></label>
-                            <input id="wwSlider" type="range" min="1" max="4096" value="400" step="1">
-                        </div>
-                        <div class="local-preview-control">
-                            <label for="wlSlider"><span>Window Level</span><span id="wlText">—</span></label>
-                            <input id="wlSlider" type="range" min="-2048" max="2048" value="40" step="1">
-                        </div>
-                        <div class="local-preview-control">
-                            <label><span>Notes</span><span style="text-align:right;">Mouse wheel: scroll slices</span></label>
-                            <div class="text-secondary" style="font-size: 0.82rem;">
-                                If preview is unavailable (compressed transfer syntax), upload will still work.
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="local-preview-status" id="localPreviewStatus">Waiting for files…</div>
-            </div>
             
             <div class="file-list" id="fileList" style="display: none;">
                 <h5 class="text-light mb-3">Selected Files</h5>
@@ -812,7 +692,6 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{% static 'js/vendor/dicomParser.min.js' %}"></script>
 <script>
 let selectedFiles = [];
 let isUploading = false;
@@ -843,27 +722,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const clinicalInfoInput = document.getElementById('clinicalInfoInput');
     const facilitySelect = document.getElementById('facilitySelect');
     const assignToMe = document.getElementById('assignToMe');
-
-    // Local preview elements (render immediately from selected files)
-    const localPreview = document.getElementById('localPreview');
-    const localPreviewCanvas = document.getElementById('localPreviewCanvas');
-    const localPreviewStatus = document.getElementById('localPreviewStatus');
-    const sliceSlider = document.getElementById('sliceSlider');
-    const sliceIndexText = document.getElementById('sliceIndexText');
-    const sliceTotalText = document.getElementById('sliceTotalText');
-    const wwSlider = document.getElementById('wwSlider');
-    const wlSlider = document.getElementById('wlSlider');
-    const wwText = document.getElementById('wwText');
-    const wlText = document.getElementById('wlText');
-
-    const PREVIEW_MAX_SLICES = 60; // keep lightweight for big folder uploads
-    let previewFiles = [];
-    let previewIndex = 0;
-    let previewCache = new Map(); // index -> { rows, cols, pixels(Float32Array), ww, wl, invert }
-    let previewWW = null;
-    let previewWL = null;
-    let previewBusy = false;
-    let previewWheelBound = false;
 
     // Click to browse - prevent multiple triggers
     chooseFilesBtn.addEventListener('click', (e) => {
@@ -1045,9 +903,6 @@ document.addEventListener('DOMContentLoaded', function() {
         updateUploadStats();
         // Skip showing file list and immediately start upload
         analyzeFolderStructure();
-
-        // Show a local preview immediately (independent of upload progress)
-        try { setupLocalPreview(selectedFiles); } catch (_) {}
         
         // Hide initial actions and show upload in progress
         document.getElementById('initialActions').style.display = 'none';
@@ -1075,228 +930,6 @@ document.addEventListener('DOMContentLoaded', function() {
         estimatedStudiesCount.textContent = estimatedStudies;
 
         uploadStats.style.display = 'block';
-    }
-
-    // ---- Local DICOM preview (before upload completes) ----
-    function setupLocalPreview(files) {
-        // Only show preview if we have dicomParser loaded and a canvas exists
-        if (!localPreview || !localPreviewCanvas) return;
-        if (typeof dicomParser === 'undefined') {
-            localPreview.style.display = 'block';
-            localPreviewStatus.textContent = 'Preview unavailable: dicomParser not loaded.';
-            return;
-        }
-        const sorted = (files || []).slice().sort((a, b) => {
-            const ap = a.webkitRelativePath || a.name || '';
-            const bp = b.webkitRelativePath || b.name || '';
-            return ap.localeCompare(bp, undefined, { numeric: true, sensitivity: 'base' });
-        });
-        previewFiles = sorted.slice(0, PREVIEW_MAX_SLICES);
-        previewIndex = 0;
-        previewCache = new Map();
-        previewWW = null;
-        previewWL = null;
-
-        localPreview.style.display = previewFiles.length ? 'block' : 'none';
-        sliceSlider.min = 1;
-        sliceSlider.max = Math.max(1, previewFiles.length);
-        sliceSlider.value = 1;
-        sliceIndexText.textContent = '1';
-        sliceTotalText.textContent = String(Math.max(1, previewFiles.length));
-
-        // Bind controls once
-        if (!sliceSlider.dataset.bound) {
-            sliceSlider.dataset.bound = '1';
-            sliceSlider.addEventListener('input', () => {
-                const idx = Math.max(0, Math.min(previewFiles.length - 1, Number(sliceSlider.value || 1) - 1));
-                previewIndex = idx;
-                renderPreviewIndex(idx);
-            });
-        }
-        if (!wwSlider.dataset.bound) {
-            wwSlider.dataset.bound = '1';
-            wwSlider.addEventListener('input', () => {
-                previewWW = Number(wwSlider.value || previewWW);
-                renderPreviewIndex(previewIndex);
-            });
-        }
-        if (!wlSlider.dataset.bound) {
-            wlSlider.dataset.bound = '1';
-            wlSlider.addEventListener('input', () => {
-                previewWL = Number(wlSlider.value || previewWL);
-                renderPreviewIndex(previewIndex);
-            });
-        }
-
-        if (!previewWheelBound) {
-            previewWheelBound = true;
-            localPreviewCanvas.addEventListener('wheel', (e) => {
-                if (!previewFiles.length) return;
-                e.preventDefault();
-                const delta = e.deltaY > 0 ? 1 : -1;
-                const next = Math.max(0, Math.min(previewFiles.length - 1, previewIndex + delta));
-                if (next !== previewIndex) {
-                    previewIndex = next;
-                    sliceSlider.value = String(next + 1);
-                    renderPreviewIndex(next);
-                }
-            }, { passive: false });
-        }
-
-        localPreviewStatus.innerHTML = `Preparing preview… <span class="text-secondary">(${previewFiles.length} slice(s) sampled)</span>`;
-        renderPreviewIndex(0);
-    }
-
-    async function renderPreviewIndex(idx) {
-        if (!localPreviewCanvas || !previewFiles.length) return;
-        if (previewBusy) return;
-        previewBusy = true;
-        try {
-            const clamped = Math.max(0, Math.min(previewFiles.length - 1, idx));
-            sliceIndexText.textContent = String(clamped + 1);
-            sliceTotalText.textContent = String(previewFiles.length);
-
-            let parsed = previewCache.get(clamped);
-            if (!parsed) {
-                localPreviewStatus.textContent = `Loading preview slice ${clamped + 1}/${previewFiles.length}…`;
-                parsed = await parseDicomForPreview(previewFiles[clamped]);
-                if (parsed) previewCache.set(clamped, parsed);
-            }
-            if (!parsed) return;
-
-            if (previewWW == null || previewWL == null) {
-                previewWW = Number(parsed.ww) || 400;
-                previewWL = Number(parsed.wl) || 40;
-                wwSlider.value = String(Math.max(1, Math.min(4096, Math.round(previewWW))));
-                wlSlider.value = String(Math.max(-2048, Math.min(2048, Math.round(previewWL))));
-            }
-            wwText.textContent = String(Math.round(previewWW));
-            wlText.textContent = String(Math.round(previewWL));
-
-            drawGrayscaleToCanvas(localPreviewCanvas, parsed, previewWW, previewWL);
-            localPreviewStatus.innerHTML = `Previewing <strong>${previewFiles[clamped].name}</strong> — local render (upload still running).`;
-        } catch (e) {
-            localPreviewStatus.textContent = 'Preview failed: ' + (e && e.message ? e.message : String(e));
-        } finally {
-            previewBusy = false;
-        }
-    }
-
-    async function parseDicomForPreview(file) {
-        try {
-            if (!file) return null;
-            const buf = await file.arrayBuffer();
-            const bytes = new Uint8Array(buf);
-            const ds = dicomParser.parseDicom(bytes);
-
-            // Detect transfer syntax (if present) to warn on compressed previews.
-            let ts = '';
-            try { ts = ds.string('x00020010') || ''; } catch (_) {}
-            // Common compressed syntaxes won't be renderable with this lightweight preview.
-            const compressedTS = [
-                '1.2.840.10008.1.2.4', // JPEG family (prefix)
-                '1.2.840.10008.1.2.5', // RLE
-            ];
-            if (ts && compressedTS.some(prefix => ts.startsWith(prefix))) {
-                localPreviewStatus.textContent = `Preview unavailable for compressed transfer syntax (${ts}). Upload will still work.`;
-                return null;
-            }
-
-            const rows = ds.uint16('x00280010') || 0;
-            const cols = ds.uint16('x00280011') || 0;
-            const spp = ds.uint16('x00280002') || 1;
-            const bitsAllocated = ds.uint16('x00280100') || 16;
-            const pixelRep = ds.uint16('x00280103') || 0;
-            const photometric = (ds.string('x00280004') || '').toUpperCase();
-            const invert = photometric === 'MONOCHROME1';
-
-            const pixelEl = ds.elements && ds.elements.x7fe00010;
-            if (!pixelEl || spp !== 1 || !rows || !cols) {
-                localPreviewStatus.textContent = 'Preview unavailable: unsupported pixel data (RGB/multiframe/empty). Upload will still work.';
-                return null;
-            }
-
-            const raw = new Uint8Array(ds.byteArray.buffer, pixelEl.dataOffset, pixelEl.length);
-            let pixels;
-            if (bitsAllocated === 8) {
-                pixels = new Float32Array(raw.length);
-                for (let i = 0; i < raw.length; i++) pixels[i] = raw[i];
-            } else if (bitsAllocated === 16) {
-                const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
-                const len = Math.floor(raw.byteLength / 2);
-                pixels = new Float32Array(len);
-                for (let j = 0; j < len; j++) {
-                    const v = pixelRep === 1 ? view.getInt16(j * 2, true) : view.getUint16(j * 2, true);
-                    pixels[j] = v;
-                }
-            } else {
-                localPreviewStatus.textContent = `Preview unavailable: unsupported BitsAllocated=${bitsAllocated}. Upload will still work.`;
-                return null;
-            }
-
-            // Apply rescale slope/intercept if present (common for CT)
-            let slope = 1;
-            let intercept = 0;
-            try { slope = parseFloat(ds.string('x00281053') || '1'); } catch (_) {}
-            try { intercept = parseFloat(ds.string('x00281052') || '0'); } catch (_) {}
-            if (!isFinite(slope) || slope === 0) slope = 1;
-            if (!isFinite(intercept)) intercept = 0;
-            if (slope !== 1 || intercept !== 0) {
-                for (let i = 0; i < pixels.length; i++) pixels[i] = pixels[i] * slope + intercept;
-            }
-
-            // Window center/width (may be multi-valued; parse first)
-            const parseFirstNumber = (s) => {
-                if (!s) return null;
-                const part = String(s).split('\\')[0].trim();
-                const n = Number(part);
-                return isFinite(n) ? n : null;
-            };
-            let ww = parseFirstNumber(ds.string('x00281051'));
-            let wl = parseFirstNumber(ds.string('x00281050'));
-            if (!ww || !wl) {
-                // Fallback: compute min/max from sampled pixels (cheap enough for a single slice)
-                let min = Infinity, max = -Infinity;
-                for (let i = 0; i < pixels.length; i++) {
-                    const v = pixels[i];
-                    if (v < min) min = v;
-                    if (v > max) max = v;
-                }
-                ww = Math.max(1, (max - min));
-                wl = min + ww / 2;
-            }
-
-            return { rows, cols, pixels, ww, wl, invert };
-        } catch (e) {
-            localPreviewStatus.textContent = 'Preview unavailable for this file (possibly compressed/unsupported). Upload will still work.';
-            return null;
-        }
-    }
-
-    function drawGrayscaleToCanvas(canvas, parsed, ww, wl) {
-        const ctx = canvas.getContext('2d');
-        const W = parsed.cols, H = parsed.rows;
-        if (canvas.width !== W) canvas.width = W;
-        if (canvas.height !== H) canvas.height = H;
-        const imageData = ctx.createImageData(W, H);
-        const low = wl - ww / 2;
-        const high = wl + ww / 2;
-        const denom = (high - low) || 1;
-        const invert = !!parsed.invert;
-        for (let i = 0; i < W * H; i++) {
-            const v = parsed.pixels[i];
-            let g = Math.round(((v - low) / denom) * 255);
-            if (!isFinite(g)) g = 0;
-            if (g < 0) g = 0;
-            if (g > 255) g = 255;
-            if (invert) g = 255 - g;
-            const j = i * 4;
-            imageData.data[j] = g;
-            imageData.data[j + 1] = g;
-            imageData.data[j + 2] = g;
-            imageData.data[j + 3] = 255;
-        }
-        ctx.putImageData(imageData, 0, 0);
     }
 
     function analyzeFolderStructure() {

@@ -14,7 +14,13 @@ Environment=DJANGO_SETTINGS_MODULE=noctis_pro.settings
 # NOTE: Avoid systemd specifiers like %E{VAR} (not supported on older distros).
 # Use APP_DIR if provided, otherwise default to /opt/noctispro.
 WorkingDirectory=/
-ExecStart=/usr/bin/env bash -lc 'APP_DIR="${APP_DIR:-/opt/noctispro}"; cd "${APP_DIR}"; exec "${APP_DIR}/venv/bin/daphne" -b 127.0.0.1 -p 8000 noctis_pro.asgi:application'
+#
+# IMPORTANT:
+# - Always run migrations before starting the web server. If code is updated without running
+#   `manage.py migrate`, uploads can fail with errors like:
+#   "no such column: accounts_facility.has_ai_subscription"
+# - Use a multi-worker ASGI server so uploads (CPU-heavy header parsing) don't stall the whole system.
+ExecStart=/usr/bin/env bash -lc 'APP_DIR="${APP_DIR:-/opt/noctispro}"; cd "${APP_DIR}"; "${APP_DIR}/venv/bin/python" manage.py migrate --noinput && "${APP_DIR}/venv/bin/python" manage.py collectstatic --noinput && exec "${APP_DIR}/venv/bin/gunicorn" noctis_pro.asgi:application -k uvicorn.workers.UvicornWorker --bind 127.0.0.1:8000 --workers ${WEB_CONCURRENCY:-3} --timeout ${GUNICORN_TIMEOUT:-3600} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT:-30} --keep-alive ${GUNICORN_KEEPALIVE:-5}'
 Restart=always
 RestartSec=5
 

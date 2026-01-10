@@ -26,4 +26,4 @@ COPY . /app
 
 EXPOSE 8000 11112
 
-CMD ["bash", "-lc", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && exec daphne -b 0.0.0.0 -p 8000 noctis_pro.asgi:application"]
+CMD ["bash", "-lc", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && exec gunicorn noctis_pro.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${WEB_CONCURRENCY:-3} --timeout ${GUNICORN_TIMEOUT:-3600} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT:-30} --keep-alive ${GUNICORN_KEEPALIVE:-5}"]

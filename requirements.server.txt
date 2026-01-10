@@ -19,6 +19,7 @@ channels-redis
 
 # Production serving
 gunicorn
+uvicorn
 whitenoise
 reportlab
 

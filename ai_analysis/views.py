@@ -722,16 +722,28 @@ def api_realtime_analyses(request):
     except:
         last_update_time = timezone.now() - timezone.timedelta(minutes=5)
     
-    # Get analyses updated since last check
+    # Get analyses updated since last check.
+    #
+    # IMPORTANT:
+    # `requested_at` alone is not enough because status transitions happen later
+    # (started_at/completed_at). We treat those as "updates" too so dashboards
+    # can reflect background processing accurately.
+    base_q = Q(requested_at__gt=last_update_time) | Q(started_at__gt=last_update_time) | Q(completed_at__gt=last_update_time)
     if user.is_facility_user():
-        analyses = AIAnalysis.objects.filter(
-            study__facility=user.facility,
-            requested_at__gt=last_update_time
-        ).select_related('study', 'ai_model').order_by('-requested_at')[:20]
+        analyses = (
+            AIAnalysis.objects
+            .filter(study__facility=user.facility)
+            .filter(base_q)
+            .select_related('study', 'ai_model', 'study__patient')
+            .order_by('-requested_at')[:50]
+        )
     else:
-        analyses = AIAnalysis.objects.filter(
-            requested_at__gt=last_update_time
-        ).select_related('study', 'ai_model').order_by('-requested_at')[:20]
+        analyses = (
+            AIAnalysis.objects
+            .filter(base_q)
+            .select_related('study', 'ai_model', 'study__patient')
+            .order_by('-requested_at')[:50]
+        )
     
     clinician = is_admin_or_radiologist(user)
     analyses_data = []
@@ -751,10 +763,25 @@ def api_realtime_analyses(request):
             item['confidence_score'] = analysis.confidence_score
         analyses_data.append(item)
     
+    # Provide lightweight stats for dashboard polling
+    stats_qs = AIAnalysis.objects.all()
+    if user.is_facility_user():
+        stats_qs = stats_qs.filter(study__facility=user.facility)
+
+    active_analyses = stats_qs.filter(status__in=['pending', 'processing']).count()
+    completed_today = stats_qs.filter(completed_at__date=timezone.now().date(), status='completed').count()
+    failed_today = stats_qs.filter(completed_at__date=timezone.now().date(), status='failed').count()
+
     return JsonResponse({
         'analyses': analyses_data,
         'timestamp': timezone.now().isoformat(),
-        'count': len(analyses_data)
+        'count': len(analyses_data),
+        'stats': {
+            'active_analyses': active_analyses,
+            'processing_queue': active_analyses,
+            'completed_today': completed_today,
+            'failed_today': failed_today,
+        }
     })
 
 @login_required

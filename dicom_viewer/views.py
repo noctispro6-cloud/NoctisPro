@@ -1867,7 +1867,14 @@ def api_dicom_image_display(request, image_id):
         inverted_param = request.GET.get('inverted')
         if inverted_param is None:
             inverted_param = request.GET.get('invert')
+        inverted_provided = inverted_param is not None
         inverted = (inverted_param or 'false').lower() == 'true'
+
+        # Frontend can request a lightweight JSON response that returns an image URL rather than
+        # embedding a potentially huge base64 data URL.
+        # - return=url  OR  mode=url  => omit image_data and return image_url only
+        return_mode = (request.GET.get('return') or request.GET.get('mode') or '').strip().lower()
+        want_url_only = return_mode == 'url'
 
         # Read DICOM file (best-effort).
         # Prefer storage-safe access (works with local FS, S3, etc.). Fall back to local path if available.
@@ -1885,7 +1892,7 @@ def api_dicom_image_display(request, image_id):
             try:
                 with image.file_path.open('rb') as f:
                     try:
-                        ds = pydicom.dcmread(f, stop_before_pixels=False, force=False)
+                        ds = pydicom.dcmread(f, stop_before_pixels=want_url_only, force=False)
                     except Exception as e_strict:
                         warnings['dicom_read_error'] = str(e_strict)
                         # 2) Retry forced read on the same storage-backed stream
@@ -1893,7 +1900,7 @@ def api_dicom_image_display(request, image_id):
                             f.seek(0)
                         except Exception:
                             pass
-                        ds = pydicom.dcmread(f, stop_before_pixels=False, force=True)
+                        ds = pydicom.dcmread(f, stop_before_pixels=want_url_only, force=True)
                         warnings['dicom_read_forced'] = True
             except Exception as e_open:
                 warnings['dicom_open_error'] = str(e_open)
@@ -1902,13 +1909,127 @@ def api_dicom_image_display(request, image_id):
         if ds is None:
             try:
                 if image.file_path and hasattr(image.file_path, 'path'):
-                    ds = pydicom.dcmread(image.file_path.path, stop_before_pixels=False, force=True)
+                    ds = pydicom.dcmread(image.file_path.path, stop_before_pixels=want_url_only, force=True)
                     warnings['dicom_read_forced_path'] = True
             except Exception as e2:
                 warnings['dicom_read_error_fallback'] = str(e2)
                 ds = None
 
         frame_index = _get_requested_frame_index(request, default_index=0)
+
+        # Fast path for URL-only mode:
+        # Avoid decoding pixel data just to compute defaults. Use DICOM header tags when present,
+        # and conservative modality defaults otherwise. This keeps X-ray (often large) fast.
+        if want_url_only:
+            def _first_or_none(v):
+                try:
+                    if hasattr(v, '__iter__') and not isinstance(v, str):
+                        return v[0]
+                except Exception:
+                    pass
+                return v
+
+            modality_code = ''
+            try:
+                modality_code = str(getattr(ds, 'Modality', '') or '').strip().upper() if ds is not None else ''
+            except Exception:
+                modality_code = ''
+            if not modality_code:
+                try:
+                    modality_code = str(getattr(image.series, 'modality', '') or '').strip().upper()
+                except Exception:
+                    modality_code = ''
+
+            photo = ''
+            try:
+                photo = str(getattr(ds, 'PhotometricInterpretation', '') or '').strip().upper() if ds is not None else ''
+            except Exception:
+                photo = ''
+
+            default_window_width = _first_or_none(getattr(ds, 'WindowWidth', None)) if ds is not None else None
+            default_window_level = _first_or_none(getattr(ds, 'WindowCenter', None)) if ds is not None else None
+
+            if default_window_width is None or default_window_level is None:
+                if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG'):
+                    default_window_width = default_window_width if default_window_width is not None else 2500.0
+                    default_window_level = default_window_level if default_window_level is not None else 1200.0
+                else:
+                    default_window_width = default_window_width if default_window_width is not None else 400.0
+                    default_window_level = default_window_level if default_window_level is not None else 40.0
+
+            default_inverted = (photo == 'MONOCHROME1')
+
+            try:
+                window_width = float(window_width_param) if window_width_param is not None else float(default_window_width)
+            except Exception:
+                window_width = float(default_window_width) if default_window_width is not None else 400.0
+            try:
+                window_level = float(window_level_param) if window_level_param is not None else float(default_window_level)
+            except Exception:
+                window_level = float(default_window_level) if default_window_level is not None else 40.0
+
+            if not inverted_provided:
+                inverted = bool(default_inverted)
+
+            # Always include a render URL so the browser can stream PNG bytes.
+            image_url = None
+            try:
+                params = {
+                    'ww': str(window_width),
+                    'wl': str(window_level),
+                    'invert': 'true' if bool(inverted) else 'false',
+                    'frame': str(int(frame_index)),
+                }
+                image_url = f"/dicom-viewer/api/image/{int(image.id)}/render.png?{urlencode(params)}"
+            except Exception:
+                image_url = None
+
+            institution_name = ''
+            try:
+                if ds is not None:
+                    institution_name = str(getattr(ds, 'InstitutionName', '') or '').strip()
+            except Exception:
+                institution_name = ''
+            if not institution_name:
+                try:
+                    institution_name = str(getattr(getattr(image.series.study, 'facility', None), 'name', '') or '').strip()
+                except Exception:
+                    institution_name = ''
+
+            image_info = {
+                'id': image.id,
+                'instance_number': getattr(image, 'instance_number', None),
+                'slice_location': getattr(image, 'slice_location', None),
+                'dimensions': [int(getattr(ds, 'Rows', 0) or 0), int(getattr(ds, 'Columns', 0) or 0)] if ds is not None else [0, 0],
+                'pixel_spacing': _jsonify_dicom_value(getattr(ds, 'PixelSpacing', [1.0, 1.0])) if ds is not None else (image.series.pixel_spacing or [1.0, 1.0]),
+                'slice_thickness': _jsonify_dicom_value(getattr(ds, 'SliceThickness', 1.0)) if ds is not None else 1.0,
+                'default_window_width': float(default_window_width) if default_window_width is not None else 400.0,
+                'default_window_level': float(default_window_level) if default_window_level is not None else 40.0,
+                'modality': _jsonify_dicom_value(getattr(ds, 'Modality', '')) if ds is not None else (image.series.modality or ''),
+                'series_description': getattr(ds, 'SeriesDescription', '') if ds is not None else getattr(image.series, 'series_description', ''),
+                'patient_name': str(getattr(ds, 'PatientName', '')) if ds is not None else (getattr(image.series.study.patient, 'full_name', '') if hasattr(image.series.study, 'patient') else ''),
+                'study_date': str(getattr(ds, 'StudyDate', '')) if ds is not None else (getattr(image.series.study, 'study_date', '') or ''),
+                'institution': institution_name,
+                'bits_allocated': _jsonify_dicom_value(getattr(ds, 'BitsAllocated', 16)) if ds is not None else 16,
+                'bits_stored': _jsonify_dicom_value(getattr(ds, 'BitsStored', 16)) if ds is not None else 16,
+                'photometric_interpretation': _jsonify_dicom_value(getattr(ds, 'PhotometricInterpretation', '')) if ds is not None else '',
+                'number_of_frames': int(getattr(ds, 'NumberOfFrames', 1) or 1) if ds is not None else 1,
+                'frame_index': int(frame_index),
+                'is_color': bool(str(getattr(ds, "PhotometricInterpretation", "") or "").strip().upper().startswith(("RGB", "YBR"))) if ds is not None else False,
+            }
+
+            payload = {
+                'image_data': None,
+                'image_url': image_url,
+                'image_info': image_info,
+                'windowing': {
+                    'window_width': window_width,
+                    'window_level': window_level,
+                    'inverted': bool(inverted),
+                },
+                'warnings': (warnings or None),
+            }
+            return JsonResponse(payload)
 
         pixel_array = None
         pixel_decode_error = None
@@ -2023,7 +2144,8 @@ def api_dicom_image_display(request, image_id):
         
         # CR/DX defaults and MONOCHROME1 auto-invert
         modality = getattr(ds, 'Modality', '') if ds is not None else (image.series.modality or '')
-        photo = str(getattr(ds, 'PhotometricInterpretation', '')).upper() if ds is not None else ''
+        # DICOM CS values can contain padding spaces; normalize before comparisons (e.g. MONOCHROME1).
+        photo = str(getattr(ds, 'PhotometricInterpretation', '') or '').strip().upper() if ds is not None else ''
         default_inverted = False
         if str(modality).upper() in ['DX','CR','XA','RF']:
             # Enhanced X-ray windowing for better visibility
@@ -2072,12 +2194,6 @@ def api_dicom_image_display(request, image_id):
             window_width = float(default_window_width)
             window_level = float(default_window_level)
         
-        # Frontend can request a lightweight JSON response that returns an image URL rather than
-        # embedding a potentially huge base64 data URL.
-        # - return=url  OR  mode=url  => omit image_data and return image_url only
-        return_mode = (request.GET.get('return') or request.GET.get('mode') or '').strip().lower()
-        want_url_only = return_mode == 'url'
-
         # Always include a render URL (when possible) so the browser can stream PNG bytes without data-URLs.
         image_url = None
         if ds is not None:
@@ -2807,7 +2923,7 @@ def api_export_image(request, image_id):
         window_width = _as_float(ww, default_ww)
         window_level = _as_float(wl, default_wl)
         # Default invert for MONOCHROME1 unless explicitly provided
-        if (request.GET.get('inverted') is None) and (ds is not None) and (str(getattr(ds, 'PhotometricInterpretation', '') or '') == 'MONOCHROME1'):
+        if (request.GET.get('inverted') is None) and (ds is not None) and (str(getattr(ds, 'PhotometricInterpretation', '') or '').strip().upper() == 'MONOCHROME1'):
             inverted = True
 
         if 'pil' not in locals():
@@ -5239,7 +5355,7 @@ def _render_dicom_image_for_print(image_obj: DicomImage, *, window_width: float,
 
     # MONOCHROME1 defaults to inverted unless explicitly overridden by caller
     try:
-        if str(getattr(ds, 'PhotometricInterpretation', '') or '') == 'MONOCHROME1':
+        if str(getattr(ds, 'PhotometricInterpretation', '') or '').strip().upper() == 'MONOCHROME1':
             inverted = True if inverted is None else bool(inverted)
     except Exception:
         pass

@@ -130,23 +130,71 @@
     <div class="stats-grid">
         <div class="stat-card">
             <i class="fas fa-robot"></i>
-            <h3>{{ total_analyses|default:"0" }}</h3>
+            <h3 id="aiTotalAnalyses">{{ total_analyses|default:"0" }}</h3>
             <p>Total AI Analyses</p>
         </div>
         <div class="stat-card">
             <i class="fas fa-chart-line"></i>
-            <h3>{{ active_models|default:"5" }}</h3>
+            <h3 id="aiActiveModels">{{ active_models|default:"0" }}</h3>
             <p>Active AI Models</p>
         </div>
         <div class="stat-card">
             <i class="fas fa-clock"></i>
-            <h3>{{ processing_queue|default:"0" }}</h3>
+            <h3 id="aiProcessingQueue">{{ processing_queue|default:"0" }}</h3>
             <p>Processing Queue</p>
         </div>
         <div class="stat-card">
             <i class="fas fa-check-circle"></i>
-            <h3>{{ accuracy_rate|default:"94.5" }}%</h3>
+            <h3 id="aiAccuracyRate">{{ accuracy_rate|default:"0" }}%</h3>
             <p>Average Accuracy</p>
+        </div>
+    </div>
+
+    <div class="ai-features" style="margin-top: 0;">
+        <h2><i class="fas fa-list me-2"></i>Recent Analyses</h2>
+        <div style="overflow:auto;">
+            <table style="width:100%; border-collapse: collapse; font-size: 12px;">
+                <thead>
+                    <tr style="text-align:left; color: var(--text-secondary); font-size: 11px;">
+                        <th style="padding: 8px; border-bottom: 1px solid var(--border-color);">Requested</th>
+                        <th style="padding: 8px; border-bottom: 1px solid var(--border-color);">Study</th>
+                        <th style="padding: 8px; border-bottom: 1px solid var(--border-color);">Model</th>
+                        <th style="padding: 8px; border-bottom: 1px solid var(--border-color);">Status</th>
+                        <th style="padding: 8px; border-bottom: 1px solid var(--border-color);">Priority</th>
+                        <th style="padding: 8px; border-bottom: 1px solid var(--border-color); text-align:right;">{% if user.is_admin or user.is_radiologist %}Confidence{% else %}&nbsp;{% endif %}</th>
+                    </tr>
+                </thead>
+                <tbody id="aiRecentAnalyses">
+                    {% for a in recent_analyses %}
+                    <tr data-analysis-id="{{ a.id }}" style="border-bottom: 1px solid rgba(64,64,64,0.35);">
+                        <td style="padding: 8px; color: var(--text-secondary); white-space: nowrap;">{{ a.requested_at|date:"Y-m-d H:i:s" }}</td>
+                        <td style="padding: 8px;">
+                            <div style="color: var(--text-primary); font-weight: 600;">{{ a.study.accession_number }}</div>
+                            <div style="color: var(--text-secondary); font-size: 11px;">{{ a.study.patient.full_name }}</div>
+                        </td>
+                        <td style="padding: 8px; color: var(--text-secondary);">{{ a.ai_model.name }}</td>
+                        <td style="padding: 8px;">
+                            <span style="display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid var(--border-color); color: var(--text-secondary);" class="ai-status-pill">
+                                {{ a.status|title }}
+                            </span>
+                        </td>
+                        <td style="padding: 8px; color: var(--text-secondary);">{{ a.priority|title }}</td>
+                        <td style="padding: 8px; text-align:right; color: var(--text-secondary);">
+                            {% if user.is_admin or user.is_radiologist %}
+                                {% if a.confidence_score %}{{ a.confidence_score|floatformat:3 }}{% else %}-{% endif %}
+                            {% else %}
+                                &nbsp;
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6" style="padding: 10px; color: var(--text-secondary);">No analyses yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div style="margin-top: 10px; color: var(--text-muted); font-size: 11px;">
+            Live updates reflect background processing (pending → processing → completed/failed).
         </div>
     </div>
 
@@ -221,6 +269,78 @@
                 }, 60);
             }, index * 60);
         });
+
+        // Live polling for background AI status updates
+        let lastUpdate = new Date().toISOString();
+        const tbody = document.getElementById('aiRecentAnalyses');
+        const elQueue = document.getElementById('aiProcessingQueue');
+
+        function statusPillText(status) {
+            const s = (status || '').toString();
+            return s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Unknown';
+        }
+
+        async function poll() {
+            try {
+                const url = `{% url "ai_analysis:api_realtime_analyses" %}?last_update=${encodeURIComponent(lastUpdate)}`;
+                const res = await fetch(url, { credentials: 'same-origin' });
+                if (!res.ok) return;
+                const data = await res.json();
+                lastUpdate = (data && data.timestamp) ? data.timestamp : lastUpdate;
+
+                // Update queue count if provided
+                if (data && data.stats && typeof data.stats.processing_queue === 'number' && elQueue) {
+                    elQueue.textContent = String(data.stats.processing_queue);
+                }
+
+                // Update table rows (best-effort)
+                const items = (data && data.analyses) ? data.analyses : [];
+                if (!tbody || !Array.isArray(items) || items.length === 0) return;
+
+                items.forEach((a) => {
+                    if (!a || !a.id) return;
+                    const id = String(a.id);
+                    const existing = tbody.querySelector(`tr[data-analysis-id="${id}"]`);
+                    const requested = (a.requested_at || '').replace('T', ' ').replace('Z', '');
+                    const patient = a.patient_name || '';
+                    const acc = a.accession_number || '';
+                    const model = a.ai_model || '';
+                    const status = a.status || '';
+                    const priority = a.priority || '';
+                    const conf = (typeof a.confidence_score === 'number') ? a.confidence_score.toFixed(3) : '-';
+
+                    const rowHtml = `
+                        <td style="padding: 8px; color: var(--text-secondary); white-space: nowrap;">${requested}</td>
+                        <td style="padding: 8px;">
+                            <div style="color: var(--text-primary); font-weight: 600;">${acc}</div>
+                            <div style="color: var(--text-secondary); font-size: 11px;">${patient}</div>
+                        </td>
+                        <td style="padding: 8px; color: var(--text-secondary);">${model}</td>
+                        <td style="padding: 8px;">
+                            <span style="display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid var(--border-color); color: var(--text-secondary);" class="ai-status-pill">
+                                ${statusPillText(status)}
+                            </span>
+                        </td>
+                        <td style="padding: 8px; color: var(--text-secondary);">${statusPillText(priority)}</td>
+                        <td style="padding: 8px; text-align:right; color: var(--text-secondary);">{% if user.is_admin or user.is_radiologist %}${conf}{% else %}&nbsp;{% endif %}</td>
+                    `;
+
+                    if (existing) {
+                        existing.innerHTML = rowHtml;
+                    } else {
+                        const tr = document.createElement('tr');
+                        tr.setAttribute('data-analysis-id', id);
+                        tr.style.borderBottom = '1px solid rgba(64,64,64,0.35)';
+                        tr.innerHTML = rowHtml;
+                        tbody.prepend(tr);
+                    }
+                });
+            } catch (_) {
+                // ignore transient polling failures
+            }
+        }
+
+        setInterval(poll, 5000);
     });
 </script>
 {% endblock %}

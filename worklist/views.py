@@ -102,9 +102,17 @@ def _auto_start_ai_for_study(study: Study) -> None:
 		if not analyses:
 			return
 
-		# Run in background (same worker used elsewhere).
-		from ai_analysis.views import process_ai_analyses
-		threading.Thread(target=process_ai_analyses, args=(analyses,), daemon=True).start()
+		# Run in background via Celery (same mechanism as manual "Start Analysis").
+		try:
+			from ai_analysis.tasks import run_ai_analysis
+			for a in analyses:
+				try:
+					run_ai_analysis.delay(int(a.id))
+				except Exception:
+					continue
+		except Exception:
+			# Celery not configured/running; best-effort fallback is to leave the analyses pending.
+			pass
 	except Exception:
 		return
 

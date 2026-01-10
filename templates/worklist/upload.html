@@ -1324,13 +1324,13 @@ document.addEventListener('DOMContentLoaded', function() {
         // Performance vs reliability tradeoff:
         // - Larger chunks reduce request overhead and speed up uploads on stable connections.
         // - Tunnels/proxies often kill long requests; keep those small.
-        const MAX_CHUNK_BYTES = isTunnelHost ? (8 * 1024 * 1024) : (48 * 1024 * 1024); // 8MB on tunnels, 48MB otherwise
-        const MAX_CHUNK_FILES = isTunnelHost ? 200 : 600;
+        // ngrok/tunnels: keep requests short to avoid upstream idle timeouts and "status 0" network errors.
+        const MAX_CHUNK_BYTES = isTunnelHost ? (4 * 1024 * 1024) : (48 * 1024 * 1024); // 4MB on tunnels, 48MB otherwise
+        const MAX_CHUNK_FILES = isTunnelHost ? 80 : 600;
 
-        // Parallel chunk uploads can overwhelm single-writer databases (SQLite) and produce lock contention,
-        // which surfaces in the browser as intermittent "network error"/failed requests.
-        // Default to 1 for stability; increase only if you're sure the server DB can handle concurrent writes.
-        const MAX_PARALLEL = 1;
+        // Tunnels are fragile; keep them single-threaded.
+        // Off-tunnel, Postgres handles concurrency fine, so we allow modest parallelism.
+        const MAX_PARALLEL = isTunnelHost ? 1 : 2;
 
         let chunks = [];
         let currentChunk = [];

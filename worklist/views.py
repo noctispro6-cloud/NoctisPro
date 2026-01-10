@@ -32,6 +32,15 @@ from reports.models import Report
 # Module logger for robust error reporting
 logger = logging.getLogger('noctis_pro.worklist')
 
+# Concurrency guard: background post-processing (e.g., MPR precache) can be CPU-heavy.
+# If many facilities upload at once, spawning unlimited threads can stall the whole server.
+try:
+	_UPLOAD_POSTPROCESS_MAX = int(os.environ.get('UPLOAD_POSTPROCESS_MAX_CONCURRENCY', '1') or 1)
+except Exception:
+	_UPLOAD_POSTPROCESS_MAX = 1
+_UPLOAD_POSTPROCESS_MAX = max(1, _UPLOAD_POSTPROCESS_MAX)
+_UPLOAD_POSTPROCESS_SEM = threading.BoundedSemaphore(value=_UPLOAD_POSTPROCESS_MAX)
+
 
 def _auto_start_ai_for_study(study: Study) -> None:
 	"""
@@ -375,6 +384,10 @@ def upload_study(request):
 			
 			# Professional DICOM processing with medical-grade validation
 			studies_map = {}
+			# Performance: avoid retaining full pydicom Dataset objects for every file (high memory + slow GC).
+			# Store only the small subset of header fields we need for DB records + UI metadata.
+			study_meta_map = {}   # study_uid -> dict of study/patient header fields
+			series_meta_map = {}  # study_uid -> { series_key -> dict of series header fields }
 			invalid_files = 0
 			processed_files = 0
 			total_files = len(uploaded_files)
@@ -691,7 +704,81 @@ def upload_study(request):
 					
 					# Enhanced series grouping with medical imaging intelligence
 					series_key = f"{series_uid}_{modality}"
-					studies_map.setdefault(study_uid, {}).setdefault(series_key, []).append((ds, in_file))
+
+					# Capture minimal study-level metadata once (avoid keeping full Dataset objects).
+					if study_uid not in study_meta_map:
+						try:
+							first_name, last_name = _parse_patient_name(ds)
+						except Exception:
+							first_name, last_name = ('Unknown', 'Patient')
+
+						facility_candidates = []
+						try:
+							for attr in (
+								'ScheduledStationAETitle',
+								'StationAETitle',
+								'InstitutionName',
+								'InstitutionalDepartmentName',
+							):
+								val = str(getattr(ds, attr, '') or '').strip()
+								if val:
+									facility_candidates.append(val)
+						except Exception:
+							facility_candidates = []
+
+						study_meta_map[study_uid] = {
+							'patient_id': getattr(ds, 'PatientID', None),
+							'first_name': first_name,
+							'last_name': last_name,
+							'patient_birth_date': getattr(ds, 'PatientBirthDate', None),
+							'patient_sex': getattr(ds, 'PatientSex', None),
+							'accession_number': getattr(ds, 'AccessionNumber', None),
+							'study_description': getattr(ds, 'StudyDescription', None),
+							'referring_physician': getattr(ds, 'ReferringPhysicianName', None),
+							'study_date': getattr(ds, 'StudyDate', None),
+							'study_time': getattr(ds, 'StudyTime', None),
+							'body_part': getattr(ds, 'BodyPartExamined', None),
+							'default_modality': modality,
+							'facility_candidates': facility_candidates,
+						}
+
+					# Capture series-level metadata once per series_key.
+					series_meta_map.setdefault(study_uid, {})
+					if series_key not in series_meta_map[study_uid]:
+						try:
+							series_number = getattr(ds, 'SeriesNumber', 1) or 1
+						except Exception:
+							series_number = 1
+						try:
+							series_desc = getattr(ds, 'SeriesDescription', None)
+						except Exception:
+							series_desc = None
+						series_desc = series_desc or f'{modality} Series {series_number}'
+						series_meta_map[study_uid][series_key] = {
+							'series_instance_uid': str(series_uid),
+							'modality': modality,
+							'series_number': int(series_number),
+							'series_description': str(series_desc),
+							'slice_thickness': getattr(ds, 'SliceThickness', None),
+							'pixel_spacing': str(getattr(ds, 'PixelSpacing', '')),
+							'image_orientation': str(getattr(ds, 'ImageOrientationPatient', '')),
+							'body_part': str(getattr(ds, 'BodyPartExamined', '') or '').upper(),
+						}
+
+					# Per-image metadata (small + JSON-safe)
+					try:
+						instance_number = getattr(ds, 'InstanceNumber', 1) or 1
+						inst_num = int(instance_number)
+					except Exception:
+						inst_num = 1
+					image_meta = {
+						'sop_instance_uid': str(sop_uid),
+						'instance_number': inst_num,
+						'image_position': str(getattr(ds, 'ImagePositionPatient', '') or ''),
+						'slice_location': getattr(ds, 'SliceLocation', None),
+					}
+
+					studies_map.setdefault(study_uid, {}).setdefault(series_key, []).append((image_meta, in_file))
 					
 					processed_files += 1
 					file_processing_time = (time.time() - file_start_time) * 1000
@@ -712,19 +799,19 @@ def upload_study(request):
 			total_series_processed = 0
 			
 			for study_uid, series_map in studies_map.items():
-				# Extract representative dataset
-				first_series_key = next(iter(series_map))
-				rep_ds = series_map[first_series_key][0][0]
+				# Extract representative header metadata (captured during ingest loop)
+				rep_meta = study_meta_map.get(study_uid, {}) or {}
 				
 				# Professional patient information extraction with medical standards
 				logger.info(f"Processing study: {study_uid}")
 				
 				# Enhanced patient data extraction with medical validation
-				patient_id = getattr(rep_ds, 'PatientID', f'TEMP_{int(timezone.now().timestamp())}')
-				first_name, last_name = _parse_patient_name(rep_ds)
+				patient_id = (rep_meta.get('patient_id') or '').strip() or f'TEMP_{int(timezone.now().timestamp())}'
+				first_name = (rep_meta.get('first_name') or 'Unknown').strip() or 'Unknown'
+				last_name = (rep_meta.get('last_name') or 'Patient').strip() or 'Patient'
 				
 				# Professional date handling with medical precision
-				birth_date = getattr(rep_ds, 'PatientBirthDate', None)
+				birth_date = rep_meta.get('patient_birth_date')
 				if birth_date:
 					try:
 						dob = datetime.strptime(birth_date, '%Y%m%d').date()
@@ -736,7 +823,7 @@ def upload_study(request):
 					dob = timezone.now().date()
 				
 				# Professional gender validation with medical standards
-				gender = getattr(rep_ds, 'PatientSex', 'O').upper()
+				gender = str(rep_meta.get('patient_sex') or 'O').upper()
 				if gender not in ['M', 'F', 'O']:
 					logger.warning(f"Invalid gender value: {gender}, defaulting to 'O'")
 					gender = 'O'
@@ -801,7 +888,7 @@ def upload_study(request):
 				if len(non_ot) == 1:
 					modality_code = non_ot[0]
 				elif len(non_ot) == 0:
-					modality_code = _normalize_modality_code(rep_ds)
+					modality_code = str(rep_meta.get('default_modality') or 'OT').strip().upper() or 'OT'
 				else:
 					modality_code = 'OT'
 
@@ -813,11 +900,11 @@ def upload_study(request):
 					)
 
 					# Professional study metadata extraction with medical standards
-					study_description = getattr(rep_ds, 'StudyDescription', f'{modality_code} Study - Professional Upload')
-					referring_physician = str(getattr(rep_ds, 'ReferringPhysicianName', 'UNKNOWN')).replace('^', ' ')
+					study_description = (rep_meta.get('study_description') or f'{modality_code} Study - Professional Upload')
+					referring_physician = str(rep_meta.get('referring_physician') or 'UNKNOWN').replace('^', ' ')
 
 					# Professional accession number generation with collision handling
-					accession_number = getattr(rep_ds, 'AccessionNumber', None)
+					accession_number = rep_meta.get('accession_number')
 					if not accession_number or accession_number.strip() == '':
 						timestamp = int(timezone.now().timestamp())
 						accession_number = f"NOCTIS_{modality_code}_{timestamp}"
@@ -832,8 +919,8 @@ def upload_study(request):
 						accession_number = f"{base_acc}_V{suffix}"
 						logger.info(f"Accession number collision resolved: {original_accession} → {accession_number}")
 
-					study_date = getattr(rep_ds, 'StudyDate', None)
-					study_time = getattr(rep_ds, 'StudyTime', '000000')
+					study_date = rep_meta.get('study_date')
+					study_time = rep_meta.get('study_time') or '000000'
 					if study_date:
 						try:
 							sdt = datetime.strptime(f"{study_date}{study_time[:6]}", '%Y%m%d%H%M%S')
@@ -844,7 +931,7 @@ def upload_study(request):
 						sdt = timezone.now()
 
 					# Facility attribution with admin/radiologist override
-					def _infer_facility_from_dicom(ds) -> Facility | None:
+					def _infer_facility_from_meta(meta: dict) -> Facility | None:
 						"""
 						Best-effort facility inference from common DICOM fields.
 
@@ -852,16 +939,7 @@ def upload_study(request):
 						`accounts.Facility.ae_title` or `accounts.Facility.name`.
 						"""
 						try:
-							candidates = []
-							for attr in (
-								'ScheduledStationAETitle',
-								'StationAETitle',
-								'InstitutionName',
-								'InstitutionalDepartmentName',
-							):
-								val = str(getattr(ds, attr, '') or '').strip()
-								if val:
-									candidates.append(val)
+							candidates = list(meta.get('facility_candidates') or [])
 							# First: exact AE Title match
 							for c in candidates:
 								f = Facility.objects.filter(is_active=True).filter(ae_title__iexact=c).first()
@@ -888,7 +966,7 @@ def upload_study(request):
 							facility = Facility.objects.filter(id=override_facility_id, is_active=True).first()
 					# If admin/radiologist didn't explicitly choose a target facility, try to infer from DICOM.
 					if not facility:
-						facility = _infer_facility_from_dicom(rep_ds)
+						facility = _infer_facility_from_meta(rep_meta)
 					if not facility and getattr(request.user, 'facility', None):
 						facility = request.user.facility
 					if not facility:
@@ -928,7 +1006,7 @@ def upload_study(request):
 							'clinical_info': clinical_info,
 							'uploaded_by': request.user,
 							'radiologist': assigned_radiologist,
-							'body_part': getattr(rep_ds, 'BodyPartExamined', ''),
+							'body_part': str(rep_meta.get('body_part') or ''),
 							'study_comments': f'Professional upload by {request.user.get_full_name()} on {timezone.now().strftime("%Y-%m-%d %H:%M:%S")}',
 						},
 					)
@@ -964,17 +1042,20 @@ def upload_study(request):
 					# Parse series key to get series_uid and modality
 					series_uid, _series_mod_from_key = (str(series_key).split('_', 1) + [''])[:2]
 					
-					# Professional series metadata extraction
-					ds0 = items[0][0]
-					series_modality_code = _normalize_modality_code(ds0) or (str(_series_mod_from_key or '').strip().upper() or modality_code)
-					series_number = getattr(ds0, 'SeriesNumber', 1) or 1
-					series_desc = getattr(ds0, 'SeriesDescription', f'{series_modality_code} Series {series_number}')
-					slice_thickness = getattr(ds0, 'SliceThickness', None)
-					pixel_spacing = str(getattr(ds0, 'PixelSpacing', ''))
-					image_orientation = str(getattr(ds0, 'ImageOrientationPatient', ''))
+					# Professional series metadata extraction (from pre-captured headers)
+					smeta = (series_meta_map.get(study_uid, {}) or {}).get(series_key) or {}
+					series_modality_code = str(smeta.get('modality') or _series_mod_from_key or modality_code).strip().upper() or modality_code
+					try:
+						series_number = int(smeta.get('series_number') or 1)
+					except Exception:
+						series_number = 1
+					series_desc = str(smeta.get('series_description') or f'{series_modality_code} Series {series_number}')
+					slice_thickness = smeta.get('slice_thickness', None)
+					pixel_spacing = str(smeta.get('pixel_spacing', '') or '')
+					image_orientation = str(smeta.get('image_orientation', '') or '')
 					
 					# Enhanced medical imaging metadata for professional standards
-					body_part = getattr(ds0, 'BodyPartExamined', '').upper()
+					body_part = str(smeta.get('body_part', '') or '').upper()
 					
 					# Create/get the Series in a short transaction; keep file I/O outside of it.
 					with transaction.atomic():
@@ -1052,9 +1133,9 @@ def upload_study(request):
 					# SPEED: avoid per-image get_or_create (N+1). Do a bulk existence check by SOPInstanceUID,
 					# then bulk_create new rows and bulk_update only when re-linking is needed.
 					sop_uids = []
-					for _ds, _fobj in items:
+					for _meta, _fobj in items:
 						try:
-							uid = getattr(_ds, 'SOPInstanceUID', None)
+							uid = (_meta or {}).get('sop_instance_uid')
 							if uid:
 								sop_uids.append(str(uid))
 						except Exception:
@@ -1076,14 +1157,13 @@ def upload_study(request):
 					to_update = []
 					images_processed = 0
 
-					for image_index, (ds, fobj) in enumerate(items):
+					for image_index, (meta, fobj) in enumerate(items):
 						image_start_time = time.time()
 						sop_uid = None
 						try:
-							sop_uid = str(getattr(ds, 'SOPInstanceUID'))
-							instance_number = getattr(ds, 'InstanceNumber', 1) or 1
+							sop_uid = str((meta or {}).get('sop_instance_uid') or '')
 							try:
-								inst_num = int(instance_number)
+								inst_num = int((meta or {}).get('instance_number') or 1)
 							except Exception:
 								inst_num = 1
 
@@ -1126,8 +1206,8 @@ def upload_study(request):
 
 							saved_path = default_storage.save(rel_path, fobj)
 
-							image_position = str(getattr(ds, 'ImagePositionPatient', ''))
-							slice_location = getattr(ds, 'SliceLocation', None)
+							image_position = str((meta or {}).get('image_position') or '')
+							slice_location = (meta or {}).get('slice_location', None)
 
 							to_create.append(
 								DicomImage(
@@ -1297,6 +1377,14 @@ def upload_study(request):
 				uids = uids[:max_series]
 				if uids:
 					def _precache(series_uids):
+						acquired = False
+						try:
+							acquired = _UPLOAD_POSTPROCESS_SEM.acquire(blocking=False)
+							if not acquired:
+								# System is busy with other post-processing; skip to keep uploads responsive.
+								return
+						except Exception:
+							acquired = False
 						try:
 							from django.db import close_old_connections
 							close_old_connections()
@@ -1320,6 +1408,12 @@ def upload_study(request):
 							close_old_connections()
 						except Exception:
 							pass
+						finally:
+							try:
+								if acquired:
+									_UPLOAD_POSTPROCESS_SEM.release()
+							except Exception:
+								pass
 					threading.Thread(target=_precache, args=(uids,), daemon=True).start()
 			except Exception:
 				pass
@@ -2011,12 +2105,27 @@ def api_study_detail(request, study_id):
         series_count = Series.objects.filter(study=study).count()
         images_count = DicomImage.objects.filter(series__study=study).count()
 
+        # Some deployments can temporarily have an out-of-date schema after upgrades (missing columns).
+        # This endpoint is used as a lightweight "can I open this study" check by the worklist UI.
+        # It must be resilient and should not 500 just because an optional related model changed.
+        try:
+            facility_name = study.facility.name if study.facility else None
+        except (OperationalError, ProgrammingError):
+            facility_name = None
+        except Exception:
+            facility_name = None
+
+        try:
+            modality_name = study.modality.name if study.modality else None
+        except Exception:
+            modality_name = None
+
         study_data = {
             'id': study.id,
             'accession_number': study.accession_number,
             'study_date': study.study_date.isoformat() if study.study_date else None,
             'study_time': study.study_date.isoformat() if study.study_date else None,
-            'modality': study.modality.name if study.modality else None,
+            'modality': modality_name,
             'study_description': study.study_description,
             'patient': {
                 'name': study.patient.full_name if study.patient else 'Unknown',
@@ -2028,7 +2137,7 @@ def api_study_detail(request, study_id):
             'priority': study.priority,
             'series_count': series_count,
             'images_count': images_count,
-            'facility': study.facility.name if study.facility else None
+            'facility': facility_name,
         }
         
         return JsonResponse({

@@ -2135,8 +2135,10 @@
                     // Auto-load the "best" series (largest diagnostic stack) so local uploads
                     // look identical to worklist-opened studies. First series is often a low-res scout/localizer.
                     if (data.series.length > 0) {
-                        const best = pickBestSeriesForDisplay(data.series);
-                        await loadSeries((best && best.id) ? best.id : data.series[0].id);
+                        const withImages = (data.series || []).filter(s => Number(s && s.image_count) > 0);
+                        const candidateList = withImages.length ? withImages : data.series;
+                        const best = pickBestSeriesForDisplay(candidateList);
+                        await loadSeries((best && best.id) ? best.id : candidateList[0].id);
                     }
                     
                     showToast(`Loaded study: ${currentStudy.patient_name}`, 'success');
@@ -2166,6 +2168,9 @@
                     const count = Number(s && s.image_count) || 0;
                     const modality = String((s && s.modality) || '').toUpperCase();
                     const desc = String((s && (s.description || s.series_description)) || '').toUpperCase();
+
+                    // Never auto-select an empty series (common during in-flight uploads or corrupted metadata).
+                    if (count <= 0) return -1e12;
 
                     // Base on stack size (main diagnostic series is usually largest)
                     let v = count;
@@ -2271,9 +2276,9 @@
                 }
                 const response = await fetch(`/dicom-viewer/series/${seriesId}/images/`);
                 const data = await response.json();
-                
-                currentSeries = data.series;
-                imageData = data.images;
+
+                currentSeries = data && data.series ? data.series : null;
+                imageData = Array.isArray(data && data.images) ? data.images : [];
                 currentImageIndex = 0;
 
                 // Restore persisted WW/WL/invert for this series if present.
@@ -2284,10 +2289,24 @@
                 
                 // Update UI
                 _setActiveSeriesListItem(seriesId);
-                document.getElementById('sliceSlider').max = imageData.length - 1;
-                document.getElementById('totalSlices').textContent = imageData.length;
+                const sliceSlider = document.getElementById('sliceSlider');
+                const totalSlicesEl = document.getElementById('totalSlices');
+                const currentSliceEl = document.getElementById('currentSlice');
+                if (sliceSlider) {
+                    sliceSlider.min = '0';
+                    sliceSlider.max = String(Math.max(0, imageData.length - 1));
+                    sliceSlider.value = '0';
+                    sliceSlider.disabled = imageData.length <= 1;
+                }
+                if (totalSlicesEl) totalSlicesEl.textContent = String(imageData.length);
+                if (currentSliceEl) currentSliceEl.textContent = imageData.length ? '1' : '0';
                 
                 updateImageInfo(currentSeries);
+                if (!imageData.length) {
+                    showLoading(false);
+                    showToast('This series has no images yet (upload may still be processing)', 'warning', 4000);
+                    return;
+                }
                 await loadCurrentImage();
 
                 // If already in MPR mode, refresh MPR views for the new series automatically.

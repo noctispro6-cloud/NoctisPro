@@ -7,3 +7,6 @@
 [ERROR] 2026-01-10 14:27:17,732 noctis_pro.upload views 4209 140321725862016 Professional DICOM upload failed: no such column: accounts_facility.has_ai_subscription
 [ERROR] 2026-01-10 14:27:17,732 noctis_pro.upload views 4209 140321725862016 Upload attempt by: admin
 [ERROR] 2026-01-10 14:27:17,732 noctis_pro.upload views 4209 140321725862016 Files attempted: 1
+[ERROR] 2026-01-10 15:52:01,246 noctis_pro.upload views 5350 139804000403584 Upload blocked: database schema is out of date: no such column: accounts_facility.has_ai_subscription
+[ERROR] 2026-01-10 15:52:01,247 django.request log 5350 139804000403584 Service Unavailable: /worklist/upload/
+[ERROR] 2026-01-10 15:52:17,237 django.request log 5536 140155850944640 Internal Server Error: /worklist/api/study/5/

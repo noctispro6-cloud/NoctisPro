@@ -1171,6 +1171,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!selectedFiles || !selectedFiles.length) return false;
 
         const url = '{% url "worklist:upload_study" %}';
+        const statusUrlBase = '{% url "worklist:api_upload_processing_status" %}';
         const totalFiles = selectedFiles.length;
         const totalBytes = selectedFiles.reduce((s, f) => s + (f.size || 0), 0);
 
@@ -1361,6 +1362,7 @@ document.addEventListener('DOMContentLoaded', function() {
         let errors = [];
         let studiesCreated = 0;
         let totalSeries = 0;
+        let processingTaskId = null;
         // "Uploaded images" should track how many DICOM objects we successfully sent/processed,
         // not how many new DB rows were created (dedup can make created_images=0).
         let totalImagesUploaded = 0;
@@ -1377,6 +1379,23 @@ document.addEventListener('DOMContentLoaded', function() {
         // UI state
         progressSection.style.display = 'block';
         updateProgress(0, `0 / ${totalFiles} files`, isTunnelHost ? 'Preparing upload (tunnel mode)...' : 'Preparing upload...');
+
+        async function pollProcessing(taskId) {
+            const startedAt = Date.now();
+            const timeoutMs = 30 * 60 * 1000; // 30 minutes
+            while (true) {
+                if ((Date.now() - startedAt) > timeoutMs) {
+                    throw new Error('Processing is taking too long. Refresh the Worklist; it may still be running.');
+                }
+                const resp = await fetch(`${statusUrlBase}?task_id=${encodeURIComponent(taskId)}`, { credentials: 'include', cache: 'no-store' });
+                const data = await resp.json().catch(() => ({}));
+                const state = (data && data.state) ? String(data.state) : 'UNKNOWN';
+                if (state === 'SUCCESS') return (data && data.result) || {};
+                if (state === 'FAILURE') throw new Error((data && data.error) || 'Background processing failed');
+                updateProgress(99, `${uploadedCount} / ${totalFiles} images`, `Processing on server… (${state})`);
+                await new Promise(r => setTimeout(r, 1500));
+            }
+        }
 
         function uploadChunkXHR(chunkIdx, chunk, attempt = 1) {
             return new Promise((resolve) => {
@@ -1455,7 +1474,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                         `${uploadedCount} / ${totalFiles} images`,
                                         queuedMsg || `Created ${studiesCreated} studies, ${totalSeries} series • Uploaded ${totalImagesUploaded} images`
                                     );
-                                    resolve({ ok: true });
+                                    resolve({ ok: true, data });
                                 } else {
                                     handleFailure((data && data.error) || 'Unknown error');
                                 }
@@ -1497,7 +1516,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     let idx;
                     if (currentIndex >= chunks.length) break;
                     idx = currentIndex++;
-                    await uploadChunkXHR(idx, chunks[idx]);
+                    const r = await uploadChunkXHR(idx, chunks[idx]);
+                    if (idx === (chunks.length - 1) && r && r.data && r.data.processing_started && r.data.task_id) {
+                        processingTaskId = String(r.data.task_id);
+                        updateProgress(99, `${uploadedCount} / ${totalFiles} images`, 'Processing on server…');
+                        const result = await pollProcessing(String(r.data.task_id));
+                        const cs = Array.isArray(result.created_study_ids) ? result.created_study_ids.length : Number(result.created_studies || 0);
+                        const cser = Number(result.created_series || 0);
+                        const cimg = Number(result.created_images || 0);
+                        studiesCreated = cs || studiesCreated;
+                        totalSeries = cser || totalSeries;
+                        updateProgress(100, `${uploadedCount} / ${totalFiles} images`, `Processing complete • Created ${cs} studies, ${cser} series, ${cimg} images`);
+                    }
                 }
             });
 
@@ -1529,7 +1559,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                 </div>
                 <div class="background-processing-info" style="margin-top: 15px; padding: 10px; background: var(--card-bg); border-radius: 6px; border-left: 3px solid var(--accent-color);">
-                    <i class="fas fa-info-circle"></i> <strong>Background Processing:</strong> DICOM images are being processed in the background.
+                    <i class="fas fa-info-circle"></i> <strong>Processing:</strong> Completed on server.
                 </div>
             `;
 

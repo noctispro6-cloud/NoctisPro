@@ -180,6 +180,7 @@ async function uploadSession(sessionId) {
 
       let ok = false;
       let lastErr = null;
+      let lastData = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           const resp = await fetch(session.url, {
@@ -195,6 +196,7 @@ async function uploadSession(sessionId) {
           }
           const data = await resp.json().catch(() => ({}));
           if (!data || data.success !== true) throw new Error((data && data.error) || 'upload failed');
+          lastData = data;
 
           // Update stats (server-side dedup can make created_images 0; prefer images_uploaded/processed_files).
           const processed = (typeof data.images_uploaded === 'number') ? data.images_uploaded
@@ -245,10 +247,55 @@ async function uploadSession(sessionId) {
       });
     }
 
-    session.status = 'completed';
-    session.updatedAt = Date.now();
-    await idbPutSession(db, session);
-    await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'completed', session });
+    // If the final request started server-side processing, poll until it completes.
+    // This avoids the UI claiming "done" before studies/images exist in DB.
+    const taskId = lastData && lastData.processing_started && lastData.task_id ? String(lastData.task_id) : '';
+    if (taskId) {
+      session.taskId = taskId;
+      session.status = 'processing';
+      session.updatedAt = Date.now();
+      await idbPutSession(db, session);
+      await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'processing', taskId });
+
+      const statusUrl = `/worklist/api/upload-processing-status/?task_id=${encodeURIComponent(taskId)}`;
+      const startedAt = Date.now();
+      const timeoutMs = 30 * 60 * 1000;
+      while (true) {
+        if ((Date.now() - startedAt) > timeoutMs) throw new Error('Server processing timeout');
+        const resp = await fetch(statusUrl, { credentials: 'include', cache: 'no-store' });
+        const st = await resp.json().catch(() => ({}));
+        const state = (st && st.state) ? String(st.state) : 'UNKNOWN';
+        await broadcast({ type: 'UPLOAD_PROGRESS', sessionId, status: 'processing', uploadedFiles: session.uploadedFiles, totalFiles, studiesCreated: session.studiesCreated, totalSeries: session.totalSeries, processingState: state });
+        if (state === 'SUCCESS') {
+          const result = (st && st.result) || {};
+          session.processingResult = result;
+          // If result has real counts, prefer them.
+          try { session.studiesCreated = Number(result.created_studies || session.studiesCreated || 0); } catch (_) {}
+          try { session.totalSeries = Number(result.created_series || session.totalSeries || 0); } catch (_) {}
+          session.status = 'completed';
+          session.updatedAt = Date.now();
+          await idbPutSession(db, session);
+          await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'completed', session });
+          break;
+        }
+        if (state === 'FAILURE') {
+          const msg = (st && st.error) ? String(st.error) : 'Background processing failed';
+          session.status = 'failed';
+          session.errors = session.errors || [];
+          session.errors.push(msg);
+          session.updatedAt = Date.now();
+          await idbPutSession(db, session);
+          await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'failed', error: msg });
+          break;
+        }
+        await sleep(1500);
+      }
+    } else {
+      session.status = 'completed';
+      session.updatedAt = Date.now();
+      await idbPutSession(db, session);
+      await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'completed', session });
+    }
   } catch (e) {
     const msg = (e && (e.message || String(e))) || 'Upload failed';
     try {

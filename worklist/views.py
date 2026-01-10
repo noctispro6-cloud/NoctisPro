@@ -21,6 +21,7 @@ from io import BytesIO
 import logging
 import re
 from django.conf import settings
+from celery.result import AsyncResult
 from .models import (
     Study, Patient, Modality, Series, DicomImage, StudyAttachment, 
     AttachmentComment, AttachmentVersion
@@ -2487,6 +2488,39 @@ def api_get_upload_stats(request):
             'period': '7 days'
         }
     })
+
+
+@login_required
+def api_upload_processing_status(request):
+	"""
+	Poll endpoint for the async upload pipeline.
+
+	Client sends ?task_id=<celery-task-id>
+	Returns:
+	  - state: PENDING/STARTED/SUCCESS/FAILURE/REVOKED/UNKNOWN
+	  - result: task return dict (on SUCCESS) when result backend is configured
+	"""
+	task_id = (request.GET.get('task_id', '') or '').strip()
+	if not task_id:
+		return JsonResponse({'success': False, 'error': 'Missing task_id'}, status=400)
+
+	try:
+		res = AsyncResult(task_id)
+		state = str(getattr(res, 'state', 'UNKNOWN') or 'UNKNOWN')
+		out = {'success': True, 'task_id': task_id, 'state': state}
+		if state == 'SUCCESS':
+			try:
+				out['result'] = res.result
+			except Exception:
+				out['result'] = None
+		elif state == 'FAILURE':
+			try:
+				out['error'] = str(res.result)
+			except Exception:
+				out['error'] = 'Task failed'
+		return JsonResponse(out)
+	except Exception as e:
+		return JsonResponse({'success': False, 'error': f'Unable to read task status: {e}'}, status=500)
 
 @login_required
 @csrf_exempt

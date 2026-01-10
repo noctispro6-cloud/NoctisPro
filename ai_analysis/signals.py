@@ -3,8 +3,7 @@ from django.dispatch import receiver
 from notifications.models import Notification
 from worklist.models import Study
 from .models import AIModel, AIAnalysis, AIFeedback, AITrainingData
-from .views import process_ai_analyses
-import threading
+from .tasks import run_ai_analysis
 import logging
 
 logger = logging.getLogger(__name__)
@@ -105,12 +104,9 @@ def trigger_ai_analysis_on_upload(sender, instance, created, **kwargs):
         
         if analyses_to_run:
             logger.info(f"Triggering auto-analysis for Study {study.accession_number} with {len(analyses_to_run)} models.")
-            # Run in background
-            threading.Thread(
-                target=process_ai_analyses,
-                args=(analyses_to_run,),
-                daemon=True
-            ).start()
+            # Run in background via Celery
+            for analysis in analyses_to_run:
+                run_ai_analysis.delay(analysis.id)
             
     except Exception as e:
         logger.error(f"Error triggering AI analysis for notification {instance.id}: {e}")

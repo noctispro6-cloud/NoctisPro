@@ -1722,8 +1722,11 @@ def sw_dicom_upload(request):
         return HttpResponse(f"// Failed to load service worker: {e}", content_type="application/javascript", status=500)
 
     resp = HttpResponse(js, content_type="application/javascript")
-    # Reasonably cacheable, but allow quick rollouts.
-    resp["Cache-Control"] = "public, max-age=300"
+    # Service worker scripts should be revalidated frequently so fixes roll out quickly.
+    # Browsers already do SW update checks, but an explicit no-cache avoids intermediary caching surprises.
+    resp["Cache-Control"] = "no-cache"
+    # Allow the SW to control the full worklist scope.
+    resp["Service-Worker-Allowed"] = "/worklist/"
     return resp
 
 @login_required

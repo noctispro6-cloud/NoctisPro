@@ -106,130 +106,146 @@ async function uploadSession(sessionId) {
   let session = await idbGetSession(db, sessionId);
   if (!session) return;
 
-  if (session.status === 'completed') return;
-  session.status = 'uploading';
-  session.updatedAt = Date.now();
-  session.errors = session.errors || [];
-  session.uploadedFiles = session.uploadedFiles || 0;
-  session.uploadedBytes = session.uploadedBytes || 0;
-  session.createdStudyIds = session.createdStudyIds || [];
-  session.studiesCreated = session.studiesCreated || 0;
-  session.totalSeries = session.totalSeries || 0;
-  await idbPutSession(db, session);
+  try {
+    if (session.status === 'completed') return;
+    session.status = 'uploading';
+    session.updatedAt = Date.now();
+    session.errors = session.errors || [];
+    session.uploadedFiles = session.uploadedFiles || 0;
+    session.uploadedBytes = session.uploadedBytes || 0;
+    session.createdStudyIds = session.createdStudyIds || [];
+    session.studiesCreated = session.studiesCreated || 0;
+    session.totalSeries = session.totalSeries || 0;
+    await idbPutSession(db, session);
 
-  const totalFiles = Number(session.totalFiles || 0);
-  const totalBytes = Number(session.totalBytes || 0);
+    const totalFiles = Number(session.totalFiles || 0);
+    const totalBytes = Number(session.totalBytes || 0);
 
-  // Conservative batching: avoid very large FormData requests.
-  const MAX_CHUNK_BYTES = 16 * 1024 * 1024; // 16MB
-  const MAX_CHUNK_FILES = 200;
+    // Conservative batching: avoid very large FormData requests.
+    const MAX_CHUNK_BYTES = 16 * 1024 * 1024; // 16MB
+    const MAX_CHUNK_FILES = 200;
 
-  await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'uploading', uploadedFiles: session.uploadedFiles, totalFiles });
+    await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'uploading', uploadedFiles: session.uploadedFiles, totalFiles });
 
-  while (session.nextIndex < totalFiles) {
-    // Build a batch from sequential indices.
-    let batchKeys = [];
-    let batchBytes = 0;
-    for (let i = session.nextIndex; i < totalFiles; i++) {
-      const key = `${sessionId}:${i}`;
-      // Stop if the file doesn't exist (e.g., already uploaded and deleted); skip forward.
-      // This makes the uploader resume-safe.
-      // eslint-disable-next-line no-await-in-loop
-      const rec = await idbGetFileByKey(db, key);
-      if (!rec) {
-        session.nextIndex = i + 1;
-        continue;
+    while (session.nextIndex < totalFiles) {
+      // Build a batch from sequential indices.
+      let batchKeys = [];
+      let batchBytes = 0;
+      for (let i = session.nextIndex; i < totalFiles; i++) {
+        const key = `${sessionId}:${i}`;
+        // Stop if the file doesn't exist (e.g., already uploaded and deleted); skip forward.
+        // This makes the uploader resume-safe.
+        // eslint-disable-next-line no-await-in-loop
+        const rec = await idbGetFileByKey(db, key);
+        if (!rec) {
+          session.nextIndex = i + 1;
+          continue;
+        }
+        const sz = Number(rec.size || 0);
+        if (batchKeys.length && (batchBytes + sz > MAX_CHUNK_BYTES || batchKeys.length >= MAX_CHUNK_FILES)) break;
+        batchKeys.push(key);
+        batchBytes += sz;
       }
-      const sz = Number(rec.size || 0);
-      if (batchKeys.length && (batchBytes + sz > MAX_CHUNK_BYTES || batchKeys.length >= MAX_CHUNK_FILES)) break;
-      batchKeys.push(key);
-      batchBytes += sz;
-    }
-    if (!batchKeys.length) break;
+      if (!batchKeys.length) break;
 
-    // Build request.
-    const formData = new FormData();
-    for (const key of batchKeys) {
-      // eslint-disable-next-line no-await-in-loop
-      const rec = await idbGetFileByKey(db, key);
-      if (!rec) continue;
-      // Reconstruct a File so Django sees a name.
-      const file = new File([rec.blob], rec.name || 'image.dcm', { type: rec.type || 'application/dicom' });
-      formData.append('dicom_files', file);
-    }
-    // Options from the page (priority, clinical_info, facility, assign_to_me)
-    if (session.options) {
-      for (const [k, v] of Object.entries(session.options)) {
-        if (v != null && String(v).length) formData.append(k, String(v));
+      // Build request.
+      const formData = new FormData();
+      for (const key of batchKeys) {
+        // eslint-disable-next-line no-await-in-loop
+        const rec = await idbGetFileByKey(db, key);
+        if (!rec || !rec.blob) continue;
+        // IMPORTANT: avoid `new File(...)` because it's not reliably available in all SW contexts.
+        // FormData.append(name, blob, filename) is widely supported and preserves the filename for Django.
+        formData.append('dicom_files', rec.blob, rec.name || 'image.dcm');
       }
-    }
-
-    let ok = false;
-    let lastErr = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const resp = await fetch(session.url, {
-          method: 'POST',
-          body: formData,
-          credentials: 'same-origin',
-          cache: 'no-store',
-        });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json().catch(() => ({}));
-        if (!data || data.success !== true) throw new Error((data && data.error) || 'upload failed');
-
-        // Update stats (server-side dedup can make created_images 0; prefer images_uploaded/processed_files).
-        const processed = (typeof data.images_uploaded === 'number') ? data.images_uploaded
-          : (typeof data.processed_files === 'number') ? data.processed_files
-          : batchKeys.length;
-        session.uploadedFiles += processed;
-        session.uploadedBytes += batchBytes;
-        session.studiesCreated += Number(data.studies_created || 0);
-        session.totalSeries += Number(data.total_series || 0);
-        if (Array.isArray(data.created_study_ids)) session.createdStudyIds.push(...data.created_study_ids);
-        ok = true;
-        break;
-      } catch (e) {
-        lastErr = e;
-        if (attempt < 3) await sleep(800 * Math.pow(2, attempt - 1));
+      // Options from the page (priority, clinical_info, facility, assign_to_me)
+      if (session.options) {
+        for (const [k, v] of Object.entries(session.options)) {
+          if (v != null && String(v).length) formData.append(k, String(v));
+        }
       }
+
+      let ok = false;
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const resp = await fetch(session.url, {
+            method: 'POST',
+            body: formData,
+            // Be explicit: ensure auth cookies are included.
+            credentials: 'include',
+            cache: 'no-store',
+          });
+          if (!resp.ok) {
+            // Common failure modes: 302 to login, 401/403 auth, 413 payload too large
+            throw new Error(`HTTP ${resp.status}`);
+          }
+          const data = await resp.json().catch(() => ({}));
+          if (!data || data.success !== true) throw new Error((data && data.error) || 'upload failed');
+
+          // Update stats (server-side dedup can make created_images 0; prefer images_uploaded/processed_files).
+          const processed = (typeof data.images_uploaded === 'number') ? data.images_uploaded
+            : (typeof data.processed_files === 'number') ? data.processed_files
+            : batchKeys.length;
+          session.uploadedFiles += processed;
+          session.uploadedBytes += batchBytes;
+          session.studiesCreated += Number(data.studies_created || 0);
+          session.totalSeries += Number(data.total_series || 0);
+          if (Array.isArray(data.created_study_ids)) session.createdStudyIds.push(...data.created_study_ids);
+          ok = true;
+          break;
+        } catch (e) {
+          lastErr = e;
+          if (attempt < 3) await sleep(800 * Math.pow(2, attempt - 1));
+        }
+      }
+      if (!ok) {
+        const msg = (lastErr && (lastErr.message || String(lastErr))) || 'Upload failed';
+        session.status = 'failed';
+        session.errors.push(msg);
+        session.updatedAt = Date.now();
+        await idbPutSession(db, session);
+        await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'failed', error: msg });
+        return;
+      }
+
+      // Delete uploaded files and advance index.
+      for (const key of batchKeys) {
+        // eslint-disable-next-line no-await-in-loop
+        await idbDeleteFile(db, key);
+      }
+      session.nextIndex = Math.min(totalFiles, session.nextIndex + batchKeys.length);
+      session.updatedAt = Date.now();
+      await idbPutSession(db, session);
+
+      await broadcast({
+        type: 'UPLOAD_PROGRESS',
+        sessionId,
+        status: 'uploading',
+        uploadedFiles: session.uploadedFiles,
+        totalFiles,
+        uploadedBytes: session.uploadedBytes,
+        totalBytes,
+        studiesCreated: session.studiesCreated,
+        totalSeries: session.totalSeries,
+      });
     }
-    if (!ok) {
-      const msg = (lastErr && (lastErr.message || String(lastErr))) || 'Upload failed';
+
+    session.status = 'completed';
+    session.updatedAt = Date.now();
+    await idbPutSession(db, session);
+    await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'completed', session });
+  } catch (e) {
+    const msg = (e && (e.message || String(e))) || 'Upload failed';
+    try {
       session.status = 'failed';
+      session.errors = session.errors || [];
       session.errors.push(msg);
       session.updatedAt = Date.now();
       await idbPutSession(db, session);
-      await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'failed', error: msg });
-      return;
-    }
-
-    // Delete uploaded files and advance index.
-    for (const key of batchKeys) {
-      // eslint-disable-next-line no-await-in-loop
-      await idbDeleteFile(db, key);
-    }
-    session.nextIndex = Math.min(totalFiles, session.nextIndex + batchKeys.length);
-    session.updatedAt = Date.now();
-    await idbPutSession(db, session);
-
-    await broadcast({
-      type: 'UPLOAD_PROGRESS',
-      sessionId,
-      status: 'uploading',
-      uploadedFiles: session.uploadedFiles,
-      totalFiles,
-      uploadedBytes: session.uploadedBytes,
-      totalBytes,
-      studiesCreated: session.studiesCreated,
-      totalSeries: session.totalSeries,
-    });
+    } catch (_) {}
+    await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'failed', error: msg });
   }
-
-  session.status = 'completed';
-  session.updatedAt = Date.now();
-  await idbPutSession(db, session);
-  await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'completed', session });
 }
 
 async function processPending() {
@@ -245,7 +261,8 @@ async function processPending() {
       await broadcast({ type: 'UPLOAD_STATUS', sessionId: s.id, status: 'completed', session: s });
       continue;
     }
-    if (s.status === 'pending' || s.status === 'uploading') {
+    // If there are remaining files, try to resume even from "failed" (e.g. after a SW update).
+    if (s.status === 'pending' || s.status === 'uploading' || s.status === 'failed') {
       // eslint-disable-next-line no-await-in-loop
       await uploadSession(s.id);
     }
@@ -261,6 +278,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     await self.clients.claim();
+    // Best-effort resume: if there are pending sessions, kick processing when SW activates.
+    try { await processPending(); } catch (_) {}
   })());
 });
 

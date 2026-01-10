@@ -33,6 +33,37 @@ from .models import (
     AITrainingData, AIPerformanceMetric, AIFeedback
 )
 
+# Comprehensive medical book references for reporting
+MEDICAL_BOOK_REFERENCES = {
+    'general': [
+        "Brant & Helms – Fundamentals of Diagnostic Radiology",
+        "Grainger & Allison’s Diagnostic Radiology",
+    ],
+    'neuroradiology': [
+        "Osborn’s Brain: Imaging, Pathology, and Anatomy",
+        "Neuroradiology: The Requisites (Nadgir & Yousem)",
+    ],
+    'chest': [
+        "Felson’s Principles of Chest Roentgenology",
+        "Thoracic Imaging: Pulmonary and Cardiovascular Radiology (Webb & Higgins)",
+    ],
+    'msk': [
+        "Resnick’s Diagnosis of Bone and Joint Disorders",
+        "Musculoskeletal MRI (Helms, Kaplan, et al.)",
+    ],
+    'abdomen': [
+        "CT and MRI of the Whole Body (Haaga)",
+        "Diagnostic Ultrasound (Rumack)",
+    ],
+    'pediatric': [
+        "Caffey’s Pediatric Diagnostic Imaging",
+    ],
+    'emergency': [
+        "Harris & Harris’ The Radiology of Emergency Medicine",
+        "Emergency Radiology: The Requisites",
+    ]
+}
+
 def is_admin_or_radiologist(user):
     """Check if user is admin or radiologist"""
     return user.is_authenticated and (user.is_admin() or user.is_radiologist())
@@ -1057,26 +1088,24 @@ def _notify_ai_triage(analysis: AIAnalysis, triage: dict) -> None:
             f"AI triage level: {triage_level.upper()} (score {triage_score}). "
             f"Please review the study promptly. Findings: {analysis.findings[:200]}"
         )
-        # If masses/tumors/lesions are detected, include practical reference suggestions for radiologists.
-        try:
-            labels = [(_normalize_abnormality_label(a) or '').lower() for a in (analysis.abnormalities_detected or [])]
-            labels = [l for l in labels if l]
-            if any(k in l for l in labels for k in ('mass', 'tumor', 'lesion', 'neoplasm')):
-                refs = [
-                    "Brant & Helms – Fundamentals of Diagnostic Radiology (mass workup frameworks)",
-                    "Dähnert – Radiology Review Manual (differentials & imaging patterns)",
-                    "Grainger & Allison’s Diagnostic Radiology (systematic interpretation)",
-                    "Osborn’s Brain / Head & Neck Imaging (if CNS/head-neck mass)",
-                    "Diagnostic Imaging series (e.g., Brain/Chest/Abdomen) for pattern-based mass differentials",
-                ]
-                msg += "  | Suggested references for mass evaluation: " + "; ".join(refs)
-        except Exception:
-            pass
+        
+        # Add references if present in analysis measurements
+        if analysis.measurements and 'reference_suggestions' in analysis.measurements:
+            refs = analysis.measurements['reference_suggestions']
+            if refs:
+                msg += " | References: " + "; ".join(refs[:3])
 
         action_url = f"/worklist/study/{study.id}/"
         # Dedupe key prevents duplicate alerts per recipient/triage level.
         dedupe_key = f"ai_triage:{study.id}:{analysis.id}:{triage_level}"
+        
         for recipient in recipients:
+            # Check for offline status (last_login > 15 mins ago or None)
+            is_offline = True
+            if recipient.last_login:
+                if (timezone.now() - recipient.last_login).total_seconds() < 900:
+                    is_offline = False
+            
             # Avoid duplicating the same alert repeatedly.
             if Notification.objects.filter(
                 recipient=recipient,
@@ -1103,14 +1132,29 @@ def _notify_ai_triage(analysis: AIAnalysis, triage: dict) -> None:
                 },
             )
 
-            # For CRITICAL (urgent) cases: attempt out-of-band alerts (SMS/Call) based on user preference.
+            # Notification Logic based on Urgency and Presence
+            # Urgent -> Always Call/SMS if configured.
+            # High -> Call/SMS if configured AND user is offline.
+            # Normal -> Web notification only (handled by creation above).
+            
+            should_notify_out_of_band = False
             if triage_level == 'urgent':
+                should_notify_out_of_band = True
+            elif triage_level == 'high' and is_offline:
+                should_notify_out_of_band = True
+
+            if should_notify_out_of_band:
                 try:
                     pref = NotificationPreference.objects.filter(user=recipient).first()
-                    method = (getattr(pref, 'preferred_method', None) or 'web').lower()
+                    # Default to SMS if not specified for urgent alerts
+                    method = (getattr(pref, 'preferred_method', None) or 'sms').lower()
+                    if method == 'web': 
+                        method = 'sms' # Force SMS for urgent offline alerts if web was default
+                    
                     to_number = (getattr(recipient, 'phone', None) or '').strip()
                     if not to_number:
                         continue
+                        
                     if method == 'sms':
                         notify_services.send_sms(
                             to_number,
@@ -1147,20 +1191,36 @@ def _apply_ai_triage(analysis: AIAnalysis) -> None:
             'triage_flagged': triage.get('flagged'),
             'triage_reason': triage.get('reason'),
         })
-        # Persist reference suggestions for mass-type abnormalities (for UI display/consumption).
+        
+        # Persist reference suggestions based on modality/body part and findings
         try:
-            labels = [(_normalize_abnormality_label(a) or '').lower() for a in (analysis.abnormalities_detected or [])]
-            labels = [l for l in labels if l]
-            if any(k in l for l in labels for k in ('mass', 'tumor', 'lesion', 'neoplasm')):
-                measurements['reference_suggestions'] = [
-                    "Brant & Helms – Fundamentals of Diagnostic Radiology",
-                    "Dähnert – Radiology Review Manual",
-                    "Grainger & Allison’s Diagnostic Radiology",
-                    "Osborn’s Brain / Head & Neck Imaging (if applicable)",
-                    "Diagnostic Imaging (Amirsys) series for pattern-based differentials",
-                ]
+            suggested_refs = []
+            suggested_refs.extend(MEDICAL_BOOK_REFERENCES.get('general', []))
+            
+            # Add modality specific references
+            modality = analysis.study.modality.code
+            if modality == 'CT' or modality == 'MR':
+                # Add body part specific references
+                body_part = str(analysis.study.body_part).lower()
+                if 'brain' in body_part or 'head' in body_part:
+                    suggested_refs.extend(MEDICAL_BOOK_REFERENCES.get('neuroradiology', []))
+                elif 'chest' in body_part or 'lung' in body_part:
+                    suggested_refs.extend(MEDICAL_BOOK_REFERENCES.get('chest', []))
+                elif 'abdomen' in body_part or 'pelvis' in body_part:
+                    suggested_refs.extend(MEDICAL_BOOK_REFERENCES.get('abdomen', []))
+                elif 'knee' in body_part or 'shoulder' in body_part or 'spine' in body_part:
+                    suggested_refs.extend(MEDICAL_BOOK_REFERENCES.get('msk', []))
+            
+            # Add emergency references if urgent
+            if triage.get('triage_level') == 'urgent':
+                suggested_refs.extend(MEDICAL_BOOK_REFERENCES.get('emergency', []))
+                
+            # Limit to unique entries
+            measurements['reference_suggestions'] = list(dict.fromkeys(suggested_refs))
+            
         except Exception:
             pass
+            
         analysis.measurements = measurements
         analysis.save(update_fields=['measurements'])
     except Exception:
@@ -1259,6 +1319,7 @@ def generate_report_content(study, analyses, template):
     all_findings = []
     all_abnormalities = []
     confidence_scores = []
+    reference_suggestions = []
     
     for analysis in analyses:
         if analysis.findings:
@@ -1267,6 +1328,8 @@ def generate_report_content(study, analyses, template):
             all_abnormalities.extend(analysis.abnormalities_detected)
         if analysis.confidence_score:
             confidence_scores.append(analysis.confidence_score)
+        if analysis.measurements and 'reference_suggestions' in analysis.measurements:
+            reference_suggestions.extend(analysis.measurements['reference_suggestions'])
     
     # Calculate overall confidence
     overall_confidence = np.mean(confidence_scores) if confidence_scores else 0.5
@@ -1288,10 +1351,13 @@ def generate_report_content(study, analyses, template):
     # Generate recommendations
     recommendations_text = template.recommendations_template or "Recommend correlation with clinical findings."
     
-    # Add a professional nudge to encourage clinician review and research
+    # Add references to report if available
     research_nudge = ("Note: This AI-generated summary is for preliminary support only. "
-                      "Please review images directly, correlate clinically, and consult authoritative references. "
-                      "Consider reviewing current guidelines and differential diagnoses relevant to the findings.")
+                      "Please review images directly, correlate clinically.")
+    
+    if reference_suggestions:
+        unique_refs = list(dict.fromkeys(reference_suggestions))
+        research_nudge += "\n\nSuggested Medical References:\n" + "\n".join([f"- {ref}" for ref in unique_refs[:5]])
     
     return {
         'findings': findings_text + "\n\n" + research_nudge,

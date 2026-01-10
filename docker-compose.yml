@@ -74,7 +74,7 @@ services:
     entrypoint: ["sh", "/ngrok-entrypoint.sh"]
     ports:
       # Local ngrok API (optional; helpful for debugging)
-      - "4040:4040"
+      - "${NGROK_WEB_PORT:-4040}:4040"
     restart: unless-stopped
 
 volumes:

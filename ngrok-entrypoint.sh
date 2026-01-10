@@ -23,7 +23,9 @@ if [ -n "$domain" ]; then
   # Accept either a bare hostname (reserved.ngrok.app) or a pasted URL (https://reserved.ngrok.app).
   domain="${domain#http://}"; domain="${domain#https://}"
   domain="${domain%%/*}"; domain="${domain%.}"
-  exec ngrok http web:8000 --domain="$domain"
+  # Ensure the local API listens on all interfaces so Docker port publishing works.
+  exec ngrok http web:8000 --web-addr=0.0.0.0:4040 --domain="$domain"
 fi
 
-exec ngrok http web:8000
+# Ensure the local API listens on all interfaces so Docker port publishing works.
+exec ngrok http web:8000 --web-addr=0.0.0.0:4040

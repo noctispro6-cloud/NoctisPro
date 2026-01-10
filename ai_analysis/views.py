@@ -374,6 +374,7 @@ def api_analysis_status(request, analysis_id):
             'findings': analysis.findings,
             'abnormalities_detected': analysis.abnormalities_detected,
             'measurements': analysis.measurements,
+            'overlays': analysis.measurements.get('overlays', []), # Add overlays support
             'processing_time': analysis.processing_time,
             'error_message': analysis.error_message,
         })
@@ -512,6 +513,7 @@ def api_analyze_series(request, series_id):
                 'findings': findings_list,
                 'annotations': [],
                 'measurements': analysis.measurements or {},
+                'overlays': (analysis.measurements or {}).get('overlays', []),
             }
         )
     except Exception as e:

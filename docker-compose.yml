@@ -79,7 +79,7 @@ services:
       [
         "bash",
         "-lc",
-        "exec celery -A noctis_pro worker -l info --concurrency ${CELERY_CONCURRENCY:-4}",
+        "WORKERS=\"${CELERY_CONCURRENCY:-}\"; if [ -z \"$WORKERS\" ]; then WORKERS=\"$(python3 -c 'import os; print(os.cpu_count() or 1)')\"; fi; exec celery -A noctis_pro worker -l info --concurrency \"$WORKERS\"",
       ]
     depends_on:
       db:

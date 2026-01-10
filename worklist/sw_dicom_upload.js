@@ -122,8 +122,11 @@ async function uploadSession(sessionId) {
     const totalBytes = Number(session.totalBytes || 0);
 
     // Conservative batching: avoid very large FormData requests.
-    const MAX_CHUNK_BYTES = 16 * 1024 * 1024; // 16MB
-    const MAX_CHUNK_FILES = 200;
+    // Tunnels (ngrok/trycloudflare/loca.lt) are prone to upstream idle timeouts on long requests.
+    const host = (self && self.location && self.location.hostname) ? String(self.location.hostname).toLowerCase() : '';
+    const isTunnelHost = host.includes('ngrok') || host.includes('trycloudflare.com') || host.includes('loca.lt');
+    const MAX_CHUNK_BYTES = isTunnelHost ? (4 * 1024 * 1024) : (16 * 1024 * 1024); // 4MB on tunnels, 16MB otherwise
+    const MAX_CHUNK_FILES = isTunnelHost ? 80 : 200;
 
     await broadcast({ type: 'UPLOAD_STATUS', sessionId, status: 'uploading', uploadedFiles: session.uploadedFiles, totalFiles });
 

@@ -81,9 +81,11 @@ services:
       if [ -n "$${NGROK_DOMAIN:-}" ]; then
         # Accept either a bare hostname (reserved.ngrok.app) or a pasted URL (https://reserved.ngrok.app).
         domain="$${NGROK_DOMAIN#http://}"; domain="$${domain#https://}"; domain="$${domain%%/*}"; domain="$${domain%.}";
-        exec ngrok http web:8000 --domain="$${domain}";
+        # Use an explicit URL so ngrok doesn't fall back to localhost:8000 inside the container.
+        exec ngrok http http://web:8000 --domain="$${domain}";
       else
-        exec ngrok http web:8000;
+        # Use an explicit URL so ngrok doesn't fall back to localhost:8000 inside the container.
+        exec ngrok http http://web:8000;
       fi
     ports:
       # Local ngrok API (optional; helpful for debugging)

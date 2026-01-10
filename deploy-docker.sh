@@ -51,6 +51,19 @@ read_env_kv() {
   done < "$file"
 }
 
+sanitize_env_value() {
+  # Trim whitespace and strip one layer of surrounding quotes.
+  # Useful because docker compose env files treat quotes as literal characters.
+  local v
+  v="$(printf '%s' "${1:-}" | xargs || true)"
+  if [[ "$v" == \"*\" && "$v" == *\" ]]; then
+    v="${v#\"}"; v="${v%\"}"
+  elif [[ "$v" == \'*\' && "$v" == *\' ]]; then
+    v="${v#\'}"; v="${v%\'}"
+  fi
+  printf '%s' "$v"
+}
+
 is_truthy() {
   # Returns 0 if value looks like "true/1/yes/on" (case-insensitive).
   local v
@@ -296,6 +309,23 @@ info "Ensuring host port ${dicom_port} is available..."
 ensure_port_free "${dicom_port}"
 
 if [[ "$want_ngrok" == "1" ]]; then
+  token_raw="$(read_env_kv NGROK_AUTHTOKEN .env.docker || true)"
+  token_val="$(sanitize_env_value "${token_raw:-}")"
+  if [[ -z "$token_val" || "$token_val" == "your_ngrok_authtoken" ]]; then
+    err "NGROK_AUTHTOKEN is required when using --ngrok."
+    err "Edit .env.docker and set: NGROK_AUTHTOKEN=your_actual_token (no quotes)."
+    err "Then re-run: ./deploy-docker.sh --ngrok"
+    exit 2
+  fi
+  domain_raw="$(read_env_kv NGROK_DOMAIN .env.docker || true)"
+  domain_val="$(sanitize_env_value "${domain_raw:-}")"
+  if [[ -n "$domain_val" && "$domain_val" == "reserved.ngrok.app" ]]; then
+    err "NGROK_DOMAIN is set to the example value 'reserved.ngrok.app'."
+    err "If you don't have a reserved domain, delete/comment NGROK_DOMAIN in .env.docker."
+    err "If you do, set it to your actual reserved hostname (no quotes)."
+    exit 2
+  fi
+
   info "Ensuring host port 4040 is available (ngrok local API)..."
   ensure_port_free "4040"
 fi

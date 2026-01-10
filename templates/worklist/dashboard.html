@@ -800,19 +800,24 @@
         let filteredData = [];
 
         // Enhanced studies loading with better support for uploaded studies
-        async function loadStudiesData() {
+        // `opts.silent`: don't show loading spinner / "Loaded X studies" toast (used for polling refresh).
+        async function loadStudiesData(opts = {}) {
             try {
-                // Show loading state
+                const silent = !!(opts && opts.silent);
+
+                // Show loading state (skip on silent refresh to avoid flicker)
                 const tbody = document.getElementById('studiesTableBody');
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-muted);">
-                            <i class="fas fa-spinner fa-spin" style="font-size: 48px; opacity: 0.3; margin-bottom: 16px; display: block;"></i>
-                            <div style="font-size: 14px; margin-bottom: 8px;">Loading studies...</div>
-                            <div style="font-size: 12px;">Please wait while we fetch the latest data</div>
-                        </td>
-                    </tr>
-                `;
+                if (!silent) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                                <i class="fas fa-spinner fa-spin" style="font-size: 48px; opacity: 0.3; margin-bottom: 16px; display: block;"></i>
+                                <div style="font-size: 14px; margin-bottom: 8px;">Loading studies...</div>
+                                <div style="font-size: 12px;">Please wait while we fetch the latest data</div>
+                            </td>
+                        </tr>
+                    `;
+                }
                 
                 // Fetch studies from the enhanced API
                 const response = await fetch('{% url "worklist:api_studies" %}', {
@@ -839,11 +844,11 @@
                     
                     if (studiesData.length === 0) {
                         showNoDataMessage();
-                        showToast('No studies found. Upload DICOM files to get started.', 'info', 5000);
+                        if (!silent) showToast('No studies found. Upload DICOM files to get started.', 'info', 5000);
                     } else {
                         applyFilters(); // render with any active filters
                         updateStatusCounts();
-                        showToast(`Loaded ${studiesData.length} studies`, 'success', 2000);
+                        if (!silent) showToast(`Loaded ${studiesData.length} studies`, 'success', 2000);
                     }
                     
                     // Show upload stats if available
@@ -1365,11 +1370,12 @@
             // Load initial data
             loadStudiesData();
             
-            // Set up enhanced auto-refresh with upload detection
+            // Set up auto-refresh so in-flight uploads show up and counts update
+            // (study appears after the first chunk is processed; image_count updates after subsequent chunks).
             let lastStudyCount = 0;
-            let lastUploadTime = null;
+            let lastRecentDigest = null;
             
-            // Increase inactivity timeout refresh to 20 minutes (1200000ms)
+            // Poll frequently (no flicker): only do a full refresh when something actually changed.
             setInterval(async () => {
                 try {
                     // Check for new studies
@@ -1378,24 +1384,24 @@
                     
                     if (data.success) {
                         const currentStudyCount = data.total_recent;
-                        const currentUploadTime = data.refresh_time;
+                        const currentDigest = data.recent_digest || null;
                         
                         // If new studies were uploaded, refresh and notify
                         if (currentStudyCount > lastStudyCount && lastStudyCount > 0) {
                             const newStudies = currentStudyCount - lastStudyCount;
                             showToast(`${newStudies} new study${newStudies > 1 ? 'ies' : ''} uploaded`, 'success');
-                            // Full refresh
-                            await loadStudiesData();
-                        } else if (lastUploadTime && currentUploadTime !== lastUploadTime) {
-                            // Check if there are any new uploads by comparing refresh times
-                            await loadStudiesData();
-                        } else {
-                            // Regular refresh
-                            loadStudiesData();
+                            // Full refresh (silent to avoid flicker; toast already shown)
+                            await loadStudiesData({ silent: true });
+                        } else if (lastRecentDigest && currentDigest && currentDigest !== lastRecentDigest) {
+                            // Something changed (often: more images arrived for an in-flight upload)
+                            await loadStudiesData({ silent: true });
+                        } else if (!lastRecentDigest && currentDigest) {
+                            // First poll initializes digest
+                            // (no refresh needed; just store it)
                         }
                         
                         lastStudyCount = currentStudyCount;
-                        lastUploadTime = currentUploadTime;
+                        lastRecentDigest = currentDigest;
                     }
                     
                     // Update last update time
@@ -1407,7 +1413,7 @@
                 } catch (error) {
                     console.error('Auto-refresh error:', error);
                 }
-            }, 1200000); // Refresh every 20 minutes
+            }, 15000); // Poll every 15 seconds
 
             // Notifications unread count badge
             fetch('/notifications/api/unread-count/')

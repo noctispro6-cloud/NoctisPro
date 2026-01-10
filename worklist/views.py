@@ -2139,12 +2139,32 @@ def api_refresh_worklist(request):
             'uploaded_by': study.uploaded_by.get_full_name() if study.uploaded_by else 'Unknown',
             'study_description': study.study_description,
         })
+
+    # A stable "digest" so the dashboard can detect when anything meaningful changed
+    # (new study, more images/series for an in-flight upload) without reloading constantly.
+    # IMPORTANT: This must NOT be based on "now", otherwise it changes every request.
+    try:
+        digest_parts = []
+        for s in studies_data:
+            digest_parts.append(f"{s.get('id')}:{s.get('series_count', 0)}:{s.get('image_count', 0)}:{s.get('status', '')}")
+        recent_digest = "|".join(digest_parts)
+    except Exception:
+        recent_digest = ""
+
+    # Most recent upload timestamp (stable, reflects new uploads finishing chunks)
+    latest_upload_date = None
+    try:
+        if studies_data:
+            latest_upload_date = studies_data[0].get('upload_date')
+    except Exception:
+        latest_upload_date = None
     
     return JsonResponse({
         'success': True, 
         'studies': studies_data,
         'total_recent': len(studies_data),
-        'refresh_time': timezone.now().isoformat()
+        'recent_digest': recent_digest,
+        'latest_upload_date': latest_upload_date,
     })
 
 @login_required

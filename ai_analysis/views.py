@@ -33,40 +33,114 @@ from .models import (
     AITrainingData, AIPerformanceMetric, AIFeedback
 )
 
-# Comprehensive medical book references for reporting
+# Comprehensive medical book references with topic mapping
 MEDICAL_BOOK_REFERENCES = {
-    'general': [
-        "Brant & Helms – Fundamentals of Diagnostic Radiology",
-        "Grainger & Allison’s Diagnostic Radiology",
-    ],
-    'neuroradiology': [
-        "Osborn’s Brain: Imaging, Pathology, and Anatomy",
-        "Neuroradiology: The Requisites (Nadgir & Yousem)",
-    ],
-    'chest': [
-        "Felson’s Principles of Chest Roentgenology",
-        "Thoracic Imaging: Pulmonary and Cardiovascular Radiology (Webb & Higgins)",
-    ],
-    'msk': [
-        "Resnick’s Diagnosis of Bone and Joint Disorders",
-        "Musculoskeletal MRI (Helms, Kaplan, et al.)",
-    ],
-    'abdomen': [
-        "CT and MRI of the Whole Body (Haaga)",
-        "Diagnostic Ultrasound (Rumack)",
-    ],
-    'pediatric': [
-        "Caffey’s Pediatric Diagnostic Imaging",
-    ],
-    'emergency': [
-        "Harris & Harris’ The Radiology of Emergency Medicine",
-        "Emergency Radiology: The Requisites",
-    ]
+    'general': {
+        'default': [
+            {'title': "Brant & Helms – Fundamentals of Diagnostic Radiology", 'topic': 'General Principles'},
+            {'title': "Grainger & Allison’s Diagnostic Radiology", 'topic': 'General Interpretation'},
+        ]
+    },
+    'neuroradiology': {
+        'stroke': [
+            {'title': "Osborn’s Brain: Imaging, Pathology, and Anatomy", 'topic': 'Chapter 4: Vascular Disorders'},
+            {'title': "Neuroradiology: The Requisites", 'topic': 'Stroke & Ischemia'},
+        ],
+        'hemorrhage': [
+            {'title': "Osborn’s Brain", 'topic': 'Chapter 2: Intracranial Hemorrhage'},
+            {'title': "Neuroradiology: The Requisites", 'topic': 'Trauma & Hemorrhage'},
+        ],
+        'tumor': [
+             {'title': "Osborn’s Brain", 'topic': 'Chapter 12: Primary Brain Tumors'},
+        ],
+        'mass': [
+             {'title': "Osborn’s Brain", 'topic': 'Chapter 1: Approach to Masses'},
+        ],
+        'default': [
+            {'title': "Osborn’s Brain", 'topic': 'General Brain Imaging'},
+        ]
+    },
+    'chest': {
+        'pneumonia': [
+             {'title': "Felson’s Principles of Chest Roentgenology", 'topic': 'Airspace Disease'},
+             {'title': "Thoracic Imaging (Webb)", 'topic': 'Infection'},
+        ],
+        'pneumothorax': [
+             {'title': "Felson’s Principles of Chest Roentgenology", 'topic': 'Pleural Disease'},
+        ],
+        'default': [
+            {'title': "Felson’s Principles of Chest Roentgenology", 'topic': 'Chest Basics'},
+        ]
+    },
+    'msk': {
+        'fracture': [
+            {'title': "Resnick’s Diagnosis of Bone and Joint Disorders", 'topic': 'Trauma & Fractures'},
+        ],
+        'default': [
+            {'title': "Musculoskeletal MRI (Helms)", 'topic': 'General MSK'},
+        ]
+    },
+    'emergency': {
+        'default': [
+            {'title': "Harris & Harris’ The Radiology of Emergency Medicine", 'topic': 'Trauma Overview'},
+        ]
+    }
 }
 
 def is_admin_or_radiologist(user):
     """Check if user is admin or radiologist"""
     return user.is_authenticated and (user.is_admin() or user.is_radiologist())
+
+def _get_online_references(keywords, max_results=3):
+    """
+    Search for high-quality online references for approved users.
+    Returns a list of dicts: {'title': str, 'url': str, 'source': str}
+    """
+    if not keywords:
+        return []
+    
+    # Clean keywords for search
+    search_query = " ".join(keywords[:3]) # Limit query length
+    
+    # Sources to prioritize
+    sources = [
+        'site:radiopaedia.org',
+        'site:ncbi.nlm.nih.gov', # PubMed / PMC
+        'site:merckmanuals.com/professional',
+    ]
+    
+    full_query = f"{search_query} ({' OR '.join(sources)})"
+    
+    try:
+        # Use DuckDuckGo HTML scrape (no API key needed, respectful of rate limits)
+        ddg_url = 'https://duckduckgo.com/html/'
+        params = {'q': full_query}
+        headers = {'User-Agent': 'Mozilla/5.0 (compatible; NoctisPro/1.0; +https://example.com)'}
+        
+        resp = requests.post(ddg_url, data=params, headers=headers, timeout=5)
+        
+        results = []
+        if resp.ok:
+            for m in re.finditer(r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', resp.text, re.I | re.S):
+                url = m.group(1)
+                title_raw = re.sub('<[^<]+?>', '', m.group(2))
+                title = re.sub(r'\s+', ' ', title_raw).strip()
+                
+                # Determine source label
+                source_label = 'Web'
+                if 'radiopaedia.org' in url: source_label = 'Radiopaedia'
+                elif 'ncbi.nlm.nih.gov' in url: source_label = 'PubMed/NCBI'
+                elif 'merckmanuals' in url: source_label = 'Merck Manual'
+                
+                if url and title:
+                    results.append({'title': title, 'url': url, 'source': source_label})
+                
+                if len(results) >= max_results:
+                    break
+        return results
+    except Exception:
+        # Fail gracefully
+        return []
 
 @login_required
 def ai_dashboard(request):
@@ -302,6 +376,36 @@ def api_analysis_status(request, analysis_id):
             'processing_time': analysis.processing_time,
             'error_message': analysis.error_message,
         })
+        
+        # Add real-time online references if measurements contain findings/keywords
+        # This is done on-demand to ensure "real-time" aspect for viewing
+        if analysis.status == 'completed' and analysis.measurements:
+            refs = analysis.measurements.get('reference_suggestions', [])
+            keywords = []
+            
+            # Extract keywords from findings labels
+            abnormalities = analysis.abnormalities_detected or []
+            for a in abnormalities:
+                label = _normalize_abnormality_label(a).lower()
+                if label: 
+                    # simple heuristic to clean label
+                    clean = re.sub(r'suspicion|possible|probable', '', label).strip()
+                    if clean: keywords.append(clean)
+            
+            # Fetch real-time references if we have keywords
+            if keywords:
+                # Cache key to prevent spamming searches on every poll
+                online_refs = analysis.measurements.get('online_references')
+                if not online_refs:
+                    # Fetch and save
+                    online_refs = _get_online_references(keywords)
+                    if online_refs:
+                        # Update DB with new online refs
+                        analysis.measurements['online_references'] = online_refs
+                        analysis.save(update_fields=['measurements'])
+                
+                data['online_references'] = online_refs
+                
     else:
         # Minimal, non-intrusive preliminary summary for non-clinician roles
         data.update({
@@ -1093,7 +1197,11 @@ def _notify_ai_triage(analysis: AIAnalysis, triage: dict) -> None:
         if analysis.measurements and 'reference_suggestions' in analysis.measurements:
             refs = analysis.measurements['reference_suggestions']
             if refs:
-                msg += " | References: " + "; ".join(refs[:3])
+                # Simplify to title + topic for SMS/Notification brevity
+                ref_texts = [f"{r.get('title')} ({r.get('topic')})" for r in refs if isinstance(r, dict)]
+                if not ref_texts: # Fallback if old format
+                    ref_texts = [r for r in refs if isinstance(r, str)]
+                msg += " | Refs: " + "; ".join(ref_texts[:2])
 
         action_url = f"/worklist/study/{study.id}/"
         # Dedupe key prevents duplicate alerts per recipient/triage level.
@@ -1195,28 +1303,60 @@ def _apply_ai_triage(analysis: AIAnalysis) -> None:
         # Persist reference suggestions based on modality/body part and findings
         try:
             suggested_refs = []
-            suggested_refs.extend(MEDICAL_BOOK_REFERENCES.get('general', []))
+            
+            # Helper to add refs
+            def add_refs_for_key(category, key):
+                if category in MEDICAL_BOOK_REFERENCES and key in MEDICAL_BOOK_REFERENCES[category]:
+                    suggested_refs.extend(MEDICAL_BOOK_REFERENCES[category][key])
             
             # Add modality specific references
             modality = analysis.study.modality.code
-            if modality == 'CT' or modality == 'MR':
-                # Add body part specific references
-                body_part = str(analysis.study.body_part).lower()
-                if 'brain' in body_part or 'head' in body_part:
-                    suggested_refs.extend(MEDICAL_BOOK_REFERENCES.get('neuroradiology', []))
-                elif 'chest' in body_part or 'lung' in body_part:
-                    suggested_refs.extend(MEDICAL_BOOK_REFERENCES.get('chest', []))
-                elif 'abdomen' in body_part or 'pelvis' in body_part:
-                    suggested_refs.extend(MEDICAL_BOOK_REFERENCES.get('abdomen', []))
-                elif 'knee' in body_part or 'shoulder' in body_part or 'spine' in body_part:
-                    suggested_refs.extend(MEDICAL_BOOK_REFERENCES.get('msk', []))
             
+            # Analyze findings/labels for keywords to match topics
+            labels = [(_normalize_abnormality_label(a) or '').lower() for a in (analysis.abnormalities_detected or [])]
+            finding_text = (analysis.findings or '').lower()
+            
+            # --- NEURORADIOLOGY ---
+            if modality in ['CT', 'MR'] and ('brain' in str(analysis.study.body_part).lower() or 'head' in str(analysis.study.body_part).lower()):
+                add_refs_for_key('neuroradiology', 'default')
+                if any('stroke' in l for l in labels) or 'stroke' in finding_text:
+                     add_refs_for_key('neuroradiology', 'stroke')
+                if any('hemorrhage' in l for l in labels) or 'bleed' in finding_text:
+                     add_refs_for_key('neuroradiology', 'hemorrhage')
+                if any('tumor' in l for l in labels) or 'mass' in finding_text:
+                     add_refs_for_key('neuroradiology', 'tumor')
+            
+            # --- CHEST ---
+            elif modality in ['CT', 'XR', 'CR'] and ('chest' in str(analysis.study.body_part).lower() or 'lung' in str(analysis.study.body_part).lower()):
+                 add_refs_for_key('chest', 'default')
+                 if any('pneumonia' in l for l in labels) or 'consolidation' in finding_text:
+                      add_refs_for_key('chest', 'pneumonia')
+                 if any('pneumothorax' in l for l in labels):
+                      add_refs_for_key('chest', 'pneumothorax')
+
+            # --- MSK ---
+            elif 'knee' in str(analysis.study.body_part).lower() or 'spine' in str(analysis.study.body_part).lower() or 'shoulder' in str(analysis.study.body_part).lower():
+                add_refs_for_key('msk', 'default')
+                if any('fracture' in l for l in labels):
+                    add_refs_for_key('msk', 'fracture')
+            
+            else:
+                 add_refs_for_key('general', 'default')
+
             # Add emergency references if urgent
             if triage.get('triage_level') == 'urgent':
-                suggested_refs.extend(MEDICAL_BOOK_REFERENCES.get('emergency', []))
+                add_refs_for_key('emergency', 'default')
                 
-            # Limit to unique entries
-            measurements['reference_suggestions'] = list(dict.fromkeys(suggested_refs))
+            # Limit to unique entries (dedupe by title+topic)
+            seen = set()
+            unique_suggested_refs = []
+            for r in suggested_refs:
+                key = f"{r['title']}:{r['topic']}"
+                if key not in seen:
+                    seen.add(key)
+                    unique_suggested_refs.append(r)
+
+            measurements['reference_suggestions'] = unique_suggested_refs
             
         except Exception:
             pass
@@ -1320,6 +1460,7 @@ def generate_report_content(study, analyses, template):
     all_abnormalities = []
     confidence_scores = []
     reference_suggestions = []
+    online_references = []
     
     for analysis in analyses:
         if analysis.findings:
@@ -1328,8 +1469,11 @@ def generate_report_content(study, analyses, template):
             all_abnormalities.extend(analysis.abnormalities_detected)
         if analysis.confidence_score:
             confidence_scores.append(analysis.confidence_score)
-        if analysis.measurements and 'reference_suggestions' in analysis.measurements:
-            reference_suggestions.extend(analysis.measurements['reference_suggestions'])
+        if analysis.measurements:
+             if 'reference_suggestions' in analysis.measurements:
+                reference_suggestions.extend(analysis.measurements['reference_suggestions'])
+             if 'online_references' in analysis.measurements:
+                online_references.extend(analysis.measurements['online_references'])
     
     # Calculate overall confidence
     overall_confidence = np.mean(confidence_scores) if confidence_scores else 0.5
@@ -1355,9 +1499,37 @@ def generate_report_content(study, analyses, template):
     research_nudge = ("Note: This AI-generated summary is for preliminary support only. "
                       "Please review images directly, correlate clinically.")
     
+    # Format Book References with Topics
     if reference_suggestions:
-        unique_refs = list(dict.fromkeys(reference_suggestions))
-        research_nudge += "\n\nSuggested Medical References:\n" + "\n".join([f"- {ref}" for ref in unique_refs[:5]])
+        # Dedupe dicts by title+topic
+        seen = set()
+        unique_refs = []
+        for r in reference_suggestions:
+            if isinstance(r, dict):
+                key = f"{r.get('title')}:{r.get('topic')}"
+                if key not in seen:
+                    seen.add(key)
+                    unique_refs.append(f"{r.get('title')} (Topic: {r.get('topic')})")
+            elif isinstance(r, str):
+                 if r not in seen:
+                    seen.add(r)
+                    unique_refs.append(r)
+        
+        if unique_refs:
+            research_nudge += "\n\nSuggested Medical Textbooks:\n" + "\n".join([f"- {ref}" for ref in unique_refs[:5]])
+
+    # Format Online References (Real-time)
+    if online_references:
+         # Dedupe
+         seen_urls = set()
+         unique_online = []
+         for r in online_references:
+             if r.get('url') not in seen_urls:
+                 seen_urls.add(r.get('url'))
+                 unique_online.append(f"{r.get('title')} [{r.get('source')}]")
+         
+         if unique_online:
+            research_nudge += "\n\nRelated Online Resources:\n" + "\n".join([f"- {ref}" for ref in unique_online[:5]])
     
     return {
         'findings': findings_text + "\n\n" + research_nudge,
@@ -1378,38 +1550,13 @@ def api_medical_references(request):
         query = request.GET.get('q', '').strip()
         if not query:
             return JsonResponse({'success': False, 'error': 'Missing query parameter q'}, status=400)
+        
+        # Check permissions for real-time fetch
+        if not is_admin_or_radiologist(request.user):
+             return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
 
-        # Basic source filters (avoid scraping TOS-sensitive sites; use public pages where permissible)
-        sources = [
-            'site:radiopaedia.org',
-            'site:nih.gov',
-            'site:ncbi.nlm.nih.gov',
-            'site:who.int',
-            'site:rsna.org'
-        ]
-        search_query = f"{query} ({' OR '.join(sources)})"
-
-        # Use a simple web search via DuckDuckGo HTML (no API key); degrade gracefully if blocked
-        ddg_url = 'https://duckduckgo.com/html/'
-        params = { 'q': search_query }
-        headers = { 'User-Agent': 'Mozilla/5.0 (compatible; NoctisPro/1.0)' }
-        results = []
-        try:
-            resp = requests.post(ddg_url, data=params, headers=headers, timeout=8)
-            if resp.ok:
-                html = resp.text
-                # Parse minimal anchors
-                for m in re.finditer(r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, re.I | re.S):
-                    url = m.group(1)
-                    title_raw = re.sub('<[^<]+?>', '', m.group(2))
-                    title = re.sub(r'\s+', ' ', title_raw).strip()
-                    if url and title:
-                        results.append({'title': title, 'url': url})
-                    if len(results) >= 8:
-                        break
-        except Exception:
-            # If search unavailable, return empty list
-            results = []
+        # Use shared helper
+        results = _get_online_references([query], max_results=10)
 
         return JsonResponse({
             'success': True,

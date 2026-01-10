@@ -1149,7 +1149,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch (_) {}
 
-        showNotification('Upload is running in the background. You can navigate away safely.', 'success');
+        showNotification(
+            'Upload has started in the background. You can leave this page, but studies/images will appear on the Worklist only as the background upload finishes processing.',
+            'info'
+        );
         return true;
     }
 

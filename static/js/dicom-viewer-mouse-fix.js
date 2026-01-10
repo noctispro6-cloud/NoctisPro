@@ -96,6 +96,15 @@
     }
     
     function handleKeyDown(e) {
+        // If another handler already consumed this event, don't duplicate actions.
+        if (e.defaultPrevented) return;
+
+        // Don't trigger navigation while user is typing.
+        const ae = document.activeElement;
+        const tag = (ae && ae.tagName) ? ae.tagName.toUpperCase() : '';
+        const isTyping = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (ae && ae.isContentEditable));
+        if (isTyping) return;
+
         // Keyboard slice navigation
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
             e.preventDefault();

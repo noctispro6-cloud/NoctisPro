@@ -345,6 +345,10 @@
 
         .crosshair-overlay {
             position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
             pointer-events: none;
             z-index: 10;
         }
@@ -1682,12 +1686,24 @@
             setupMouseEvents();
             setupKeyboardShortcuts();
             setupFileInput();
+            setupResizeHandling();
             
             // Initialize UI state
             updateOverlayInfo();
             updateZoomInfo();
             
             showToast('DICOM Viewer initialized and ready', 'success');
+        }
+
+        function setupResizeHandling() {
+            let resizeTimer = null;
+            window.addEventListener('resize', function() {
+                if (resizeTimer) clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(() => {
+                    try { updateMeasurementOverlay(); } catch (_) {}
+                    try { updateZoomInfo(); } catch (_) {}
+                }, 80);
+            });
         }
 
         function setupMouseEvents() {
@@ -1760,6 +1776,27 @@
 
         function setupKeyboardShortcuts() {
             document.addEventListener('keydown', function(e) {
+                const ae = document.activeElement;
+                const tag = (ae && ae.tagName) ? ae.tagName.toUpperCase() : '';
+                const isTyping = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (ae && ae.isContentEditable));
+                if (isTyping && e.key !== 'Escape') return;
+
+                const ctrlOrMeta = !!(e.ctrlKey || e.metaKey);
+                if (ctrlOrMeta && (e.key === 'o' || e.key === 'O')) {
+                    e.preventDefault();
+                    if (typeof loadFromLocalFiles === 'function') {
+                        loadFromLocalFiles();
+                    }
+                    return;
+                }
+                if (ctrlOrMeta && (e.key === 'p' || e.key === 'P')) {
+                    e.preventDefault();
+                    if (typeof showPrintDialog === 'function') {
+                        showPrintDialog();
+                    }
+                    return;
+                }
+
                 switch(e.key) {
                     case 'w':
                     case 'W':
@@ -1793,6 +1830,20 @@
                     case 'R':
                         resetView();
                         break;
+                    case '0':
+                        e.preventDefault();
+                        resetView();
+                        break;
+                    case '+':
+                    case '=':
+                        e.preventDefault();
+                        if (typeof setZoom === 'function') setZoom(zoomFactor * 1.1);
+                        break;
+                    case '-':
+                    case '_':
+                        e.preventDefault();
+                        if (typeof setZoom === 'function') setZoom(zoomFactor / 1.1);
+                        break;
                     case 'ArrowUp':
                         e.preventDefault();
                         changeSlice(-1);
@@ -1800,6 +1851,58 @@
                     case 'ArrowDown':
                         e.preventDefault();
                         changeSlice(1);
+                        break;
+                    case '?':
+                        e.preventDefault();
+                        try {
+                            const id = 'noctisShortcutHelp';
+                            let el = document.getElementById(id);
+                            if (!el) {
+                                el = document.createElement('div');
+                                el.id = id;
+                                el.style.cssText = `
+                                    position: fixed;
+                                    right: 16px;
+                                    bottom: 56px;
+                                    z-index: 20000;
+                                    background: rgba(0,0,0,0.88);
+                                    border: 1px solid var(--border-color, #404040);
+                                    border-left: 3px solid var(--accent-color, #00d4ff);
+                                    border-radius: 10px;
+                                    padding: 12px 14px;
+                                    width: min(320px, calc(100vw - 32px));
+                                    color: var(--text-primary, #fff);
+                                    font-size: 12px;
+                                    line-height: 1.5;
+                                    backdrop-filter: blur(6px);
+                                `;
+                                el.innerHTML = `
+                                    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
+                                        <strong>Keyboard shortcuts</strong>
+                                        <button type="button" aria-label="Close"
+                                            style="background:transparent;border:1px solid var(--border-color,#404040);color:var(--text-secondary,#b3b3b3);border-radius:8px;padding:2px 8px;cursor:pointer"
+                                            onclick="this.parentElement.parentElement.remove()">Esc</button>
+                                    </div>
+                                    <div><strong>W</strong> Window/Level &nbsp; <strong>Z</strong> Zoom &nbsp; <strong>P</strong> Pan</div>
+                                    <div><strong>M</strong> Measure &nbsp; <strong>A</strong> Annotate</div>
+                                    <div><strong>C</strong> Crosshair &nbsp; <strong>I</strong> Invert</div>
+                                    <div><strong>R</strong>/<strong>0</strong> Reset view</div>
+                                    <div><strong>+</strong>/<strong>-</strong> Zoom in/out</div>
+                                    <div><strong>↑</strong>/<strong>↓</strong> Previous/Next slice</div>
+                                    <div><strong>Ctrl+O</strong> Open local files &nbsp; <strong>Ctrl+P</strong> Print</div>
+                                    <div style="margin-top:6px;color:var(--text-muted,#888)">Press <strong>?</strong> again to hide.</div>
+                                `;
+                                document.body.appendChild(el);
+                            } else {
+                                el.remove();
+                            }
+                        } catch (_) {}
+                        break;
+                    case 'Escape':
+                        try {
+                            const el = document.getElementById('noctisShortcutHelp');
+                            if (el) { el.remove(); e.preventDefault(); }
+                        } catch (_) {}
                         break;
                 }
             });

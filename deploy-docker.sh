@@ -51,6 +51,23 @@ read_env_kv() {
   done < "$file"
 }
 
+is_truthy() {
+  # Returns 0 if value looks like "true/1/yes/on" (case-insensitive).
+  local v
+  v="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | xargs)"
+  [[ "$v" == "true" || "$v" == "1" || "$v" == "yes" || "$v" == "y" || "$v" == "on" ]]
+}
+
+require_nonempty_env() {
+  local key="${1:?}" file="${2:?}" value
+  value="$(read_env_kv "$key" "$file" | xargs || true)"
+  if [[ -z "${value}" ]]; then
+    err "Missing required ${key} in ${file}."
+    return 1
+  fi
+  return 0
+}
+
 stop_systemd_if_running() {
   local unit="${1:?}"
   command -v systemctl >/dev/null 2>&1 || return 0
@@ -211,6 +228,18 @@ if [[ ! -f ".env.docker" ]]; then
   fi
 fi
 
+debug_val="$(read_env_kv DEBUG .env.docker | xargs || true)"
+secret_key_val="$(read_env_kv SECRET_KEY .env.docker | xargs || true)"
+if ! is_truthy "${debug_val:-False}"; then
+  # In production mode (DEBUG=False), Django settings hard-fail if SECRET_KEY is empty/weak.
+  if [[ -z "${secret_key_val}" || "${secret_key_val,,}" == "change-me" || "${secret_key_val,,}" == "changeme" || "${secret_key_val}" == django-insecure* ]]; then
+    err "SECRET_KEY is required and must be a strong non-default value when DEBUG=False."
+    err "Edit .env.docker and set SECRET_KEY (example generator):"
+    err "  python -c \"import secrets; print(secrets.token_urlsafe(50))\""
+    exit 2
+  fi
+fi
+
 dicom_port="$(read_env_kv DICOM_PORT .env.docker)"
 dicom_port="${dicom_port:-11112}"
 
@@ -242,7 +271,31 @@ info "Starting containers..."
 docker compose "${args[@]}"
 
 info "Running a quick health check (web logs tail)..."
+docker compose ps || true
 docker compose logs --tail=30 web || true
+
+# Best-effort reachability check from host -> published port (helps catch exited web container).
+python3 - <<PY || {
+import sys, time, urllib.request
+url = f"http://127.0.0.1:{web_port}/"
+deadline = time.time() + 45
+last_err = None
+while time.time() < deadline:
+    try:
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            # Any HTTP status means the port is reachable.
+            sys.exit(0)
+    except Exception as e:
+        last_err = e
+        time.sleep(1)
+print(f"[ERROR] Web not reachable at {url} after 45s: {last_err}", file=sys.stderr)
+sys.exit(1)
+PY
+  err "Web did not become reachable on http://localhost:${web_port}"
+  err "Most common causes: container exited (check logs) or port not published."
+  err "Try: docker compose ps && docker compose logs --tail=200 web"
+  exit 3
+}
 
 info "Done."
 info "Web:   http://localhost:${web_port}"

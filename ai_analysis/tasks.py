@@ -2,7 +2,7 @@ from celery import shared_task
 from .models import AIAnalysis
 from .inference import ModelRegistry
 from .utils import simulate_ai_analysis, _apply_ai_triage
-from .dicom_sr import create_ai_findings_sr
+# from .dicom_sr import create_ai_findings_sr # DICOM SR generation disabled per policy
 import logging
 import pydicom
 import os
@@ -39,19 +39,6 @@ def run_ai_analysis(analysis_id):
         
         # Complete the analysis
         analysis.complete_analysis(results)
-
-        # Generate DICOM SR
-        if first_image and first_image.file_path and os.path.exists(first_image.file_path.path):
-            try:
-                ds = pydicom.dcmread(first_image.file_path.path)
-                sr_dataset = create_ai_findings_sr(analysis, analysis.ai_model, ds)
-                if sr_dataset:
-                    # In a real system, save this to DICOM storage and register in DB
-                    # sr_path = os.path.join(os.path.dirname(first_image.file_path.path), f"SR_{analysis.id}.dcm")
-                    # sr_dataset.save_as(sr_path)
-                    logger.info(f"DICOM SR generated for analysis {analysis.id}")
-            except Exception as sr_error:
-                logger.error(f"Failed to generate DICOM SR: {sr_error}")
 
         # Apply AI triage/flagging to the parent study (severity → study.priority)
         try:

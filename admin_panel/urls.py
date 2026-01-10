@@ -29,4 +29,7 @@ urlpatterns = [
     # Permissions and capabilities management
     path('permissions/', views_permissions.permissions_dashboard, name='permissions_dashboard'),
     path('permissions/user/<str:username>/', views_permissions.edit_user_permissions, name='edit_user_permissions'),
+
+    # QA / diagnostics
+    path('qa/responsive/', views.responsive_qa, name='responsive_qa'),
 ]

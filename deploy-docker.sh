@@ -295,10 +295,22 @@ if ! is_truthy "${debug_val:-False}"; then
 fi
 
 dicom_port="$(read_env_kv DICOM_PORT .env.docker)"
+dicom_port="$(sanitize_env_value "${dicom_port:-}")"
 dicom_port="${dicom_port:-11112}"
 
 web_port="$(read_env_kv WEB_PORT .env.docker)"
+web_port="$(sanitize_env_value "${web_port:-}")"
 web_port="${web_port:-8000}"
+
+# Validate ports early (avoid confusing failures later in ensure_port_free()).
+if [[ ! "${web_port}" =~ ^[0-9]+$ ]] || (( web_port < 1 || web_port > 65535 )); then
+  err "Invalid WEB_PORT in .env.docker: '${web_port}' (expected 1-65535, no quotes)."
+  exit 2
+fi
+if [[ ! "${dicom_port}" =~ ^[0-9]+$ ]] || (( dicom_port < 1 || dicom_port > 65535 )); then
+  err "Invalid DICOM_PORT in .env.docker: '${dicom_port}' (expected 1-65535, no quotes)."
+  exit 2
+fi
 
 info "Cleaning up old compose resources (safe; volumes persist)..."
 docker compose down --remove-orphans >/dev/null 2>&1 || true
@@ -330,6 +342,11 @@ if [[ "$want_ngrok" == "1" ]]; then
   fi
 
   info "Ensuring host port 4040 is available (ngrok local API)..."
+  # 4040 is fixed for ngrok's local API; validate for completeness.
+  if [[ ! "4040" =~ ^[0-9]+$ ]] || (( 4040 < 1 || 4040 > 65535 )); then
+    err "Internal error: invalid ngrok port"
+    exit 2
+  fi
   ensure_port_free "4040"
 fi
 

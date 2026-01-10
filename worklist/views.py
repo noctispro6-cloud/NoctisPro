@@ -302,7 +302,6 @@ def study_detail(request, study_id):
 
 @login_required
 @csrf_exempt
-@transaction.atomic
 def upload_study(request):
 	"""
 	Professional DICOM Upload Backend - Medical Imaging Excellence
@@ -320,11 +319,11 @@ def upload_study(request):
 			upload_start_time = time.time()
 
 			# Fail fast if the database schema is out of date.
-			# If migrations were not applied, *any* Facility ORM access can raise errors like:
+			# If migrations were not applied, Facility queries can raise:
 			#   "no such column: accounts_facility.has_ai_subscription"
-			# In that state uploads cannot be persisted reliably, so return an actionable error.
+			# IMPORTANT: `.only('id')` would *not* catch this, so we intentionally touch the field.
 			try:
-				Facility.objects.only('id').first()
+				Facility.objects.values_list('has_ai_subscription', flat=True).first()
 			except (OperationalError, ProgrammingError) as e:
 				logger.error(f"Upload blocked: database schema is out of date: {e}")
 				return JsonResponse(
@@ -742,16 +741,20 @@ def upload_study(request):
 					logger.warning(f"Invalid gender value: {gender}, defaulting to 'O'")
 					gender = 'O'
 				
-				# Professional patient creation with comprehensive logging
-				patient, patient_created = Patient.objects.get_or_create(
-					patient_id=patient_id,
-					defaults={
-						'first_name': first_name, 
-						'last_name': last_name, 
-						'date_of_birth': dob, 
-						'gender': gender
-					}
-				)
+				# Keep DB transactions short. DICOM header parsing is already done above.
+				# Only wrap the ORM write portion in atomic blocks so the system stays responsive
+				# during large uploads (fewer "network error" symptoms on other endpoints).
+				with transaction.atomic():
+					# Professional patient creation with comprehensive logging
+					patient, patient_created = Patient.objects.get_or_create(
+						patient_id=patient_id,
+						defaults={
+							'first_name': first_name,
+							'last_name': last_name,
+							'date_of_birth': dob,
+							'gender': gender,
+						},
+					)
 
 				# If the patient already existed but had placeholder names, refresh them from this upload.
 				# This prevents the worklist search from failing when a patient was first created from a
@@ -802,136 +805,136 @@ def upload_study(request):
 				else:
 					modality_code = 'OT'
 
-				modality, modality_created = Modality.objects.get_or_create(
-					code=modality_code, 
-					defaults={'name': modality_code, 'is_active': True}
-				)
-				
-				if modality_created:
-					logger.info(f"New modality created: {modality_code}")
-				
-				# Professional study metadata extraction with medical standards
-				study_description = getattr(rep_ds, 'StudyDescription', f'{modality_code} Study - Professional Upload')
-				referring_physician = str(getattr(rep_ds, 'ReferringPhysicianName', 'UNKNOWN')).replace('^', ' ')
-				
-				# Professional accession number generation with collision handling
-				accession_number = getattr(rep_ds, 'AccessionNumber', None)
-				if not accession_number or accession_number.strip() == '':
-					# Generate professional accession number
-					timestamp = int(timezone.now().timestamp())
-					accession_number = f"NOCTIS_{modality_code}_{timestamp}"
-				
-				# Medical-grade collision prevention
-				original_accession = accession_number
-				if Study.objects.filter(accession_number=accession_number).exists():
-					suffix = 1
-					base_acc = str(accession_number)
-					while Study.objects.filter(accession_number=f"{base_acc}_V{suffix}").exists():
-						suffix += 1
-					accession_number = f"{base_acc}_V{suffix}"
-					logger.info(f"Accession number collision resolved: {original_accession} → {accession_number}")
-				study_date = getattr(rep_ds, 'StudyDate', None)
-				study_time = getattr(rep_ds, 'StudyTime', '000000')
-				if study_date:
-					try:
-						sdt = datetime.strptime(f"{study_date}{study_time[:6]}", '%Y%m%d%H%M%S')
-						sdt = timezone.make_aware(sdt)
-					except Exception:
+				# Create/get modality + resolve facility + create/get study in a short DB transaction.
+				with transaction.atomic():
+					modality, modality_created = Modality.objects.get_or_create(
+						code=modality_code,
+						defaults={'name': modality_code, 'is_active': True},
+					)
+
+					# Professional study metadata extraction with medical standards
+					study_description = getattr(rep_ds, 'StudyDescription', f'{modality_code} Study - Professional Upload')
+					referring_physician = str(getattr(rep_ds, 'ReferringPhysicianName', 'UNKNOWN')).replace('^', ' ')
+
+					# Professional accession number generation with collision handling
+					accession_number = getattr(rep_ds, 'AccessionNumber', None)
+					if not accession_number or accession_number.strip() == '':
+						timestamp = int(timezone.now().timestamp())
+						accession_number = f"NOCTIS_{modality_code}_{timestamp}"
+
+					# Medical-grade collision prevention
+					original_accession = accession_number
+					if Study.objects.filter(accession_number=accession_number).exists():
+						suffix = 1
+						base_acc = str(accession_number)
+						while Study.objects.filter(accession_number=f"{base_acc}_V{suffix}").exists():
+							suffix += 1
+						accession_number = f"{base_acc}_V{suffix}"
+						logger.info(f"Accession number collision resolved: {original_accession} → {accession_number}")
+
+					study_date = getattr(rep_ds, 'StudyDate', None)
+					study_time = getattr(rep_ds, 'StudyTime', '000000')
+					if study_date:
+						try:
+							sdt = datetime.strptime(f"{study_date}{study_time[:6]}", '%Y%m%d%H%M%S')
+							sdt = timezone.make_aware(sdt)
+						except Exception:
+							sdt = timezone.now()
+					else:
 						sdt = timezone.now()
-				else:
-					sdt = timezone.now()
-				
-				# Facility attribution with admin/radiologist override
-				facility = None
 
-				def _infer_facility_from_dicom(ds) -> Facility | None:
-					"""
-					Best-effort facility inference from common DICOM fields.
+					# Facility attribution with admin/radiologist override
+					def _infer_facility_from_dicom(ds) -> Facility | None:
+						"""
+						Best-effort facility inference from common DICOM fields.
 
-					PACS exports often carry an AE Title and/or InstitutionName that can be mapped to
-					`accounts.Facility.ae_title` or `accounts.Facility.name`.
-					"""
-					try:
-						candidates = []
-						for attr in (
-							'ScheduledStationAETitle',
-							'StationAETitle',
-							'InstitutionName',
-							'InstitutionalDepartmentName',
-						):
-							val = str(getattr(ds, attr, '') or '').strip()
-							if val:
-								candidates.append(val)
-						# First: exact AE Title match
-						for c in candidates:
-							f = Facility.objects.filter(is_active=True).filter(ae_title__iexact=c).first()
-							if f:
-								return f
-						# Second: exact name match
-						for c in candidates:
-							f = Facility.objects.filter(is_active=True).filter(name__iexact=c).first()
-							if f:
-								return f
-						# Third: loose contains match on InstitutionName (helps when DICOM has "X Hospital - Dept Y")
-						for c in candidates:
-							if len(c) >= 4:
-								f = Facility.objects.filter(is_active=True).filter(name__icontains=c).first()
+						PACS exports often carry an AE Title and/or InstitutionName that can be mapped to
+						`accounts.Facility.ae_title` or `accounts.Facility.name`.
+						"""
+						try:
+							candidates = []
+							for attr in (
+								'ScheduledStationAETitle',
+								'StationAETitle',
+								'InstitutionName',
+								'InstitutionalDepartmentName',
+							):
+								val = str(getattr(ds, attr, '') or '').strip()
+								if val:
+									candidates.append(val)
+							# First: exact AE Title match
+							for c in candidates:
+								f = Facility.objects.filter(is_active=True).filter(ae_title__iexact=c).first()
 								if f:
 									return f
-						return None
-					except Exception:
-						return None
+							# Second: exact name match
+							for c in candidates:
+								f = Facility.objects.filter(is_active=True).filter(name__iexact=c).first()
+								if f:
+									return f
+							# Third: loose contains match on InstitutionName (helps when DICOM has "X Hospital - Dept Y")
+							for c in candidates:
+								if len(c) >= 4:
+									f = Facility.objects.filter(is_active=True).filter(name__icontains=c).first()
+									if f:
+										return f
+							return None
+						except Exception:
+							return None
 
-				if (hasattr(request.user, 'is_admin') and request.user.is_admin()) or (hasattr(request.user, 'is_radiologist') and request.user.is_radiologist()):
-					if override_facility_id:
-						facility = Facility.objects.filter(id=override_facility_id, is_active=True).first()
-				# If admin/radiologist didn't explicitly choose a target facility, try to infer from DICOM.
-				if not facility:
-					facility = _infer_facility_from_dicom(rep_ds)
-				if not facility and getattr(request.user, 'facility', None):
-					facility = request.user.facility
-				if not facility:
-					facility = Facility.objects.filter(is_active=True).first()
-				if not facility:
-					# Allow admin to upload without preconfigured facility by creating a default one
-					if hasattr(request.user, 'is_admin') and request.user.is_admin():
-						facility = Facility.objects.create(
-							name='Default Facility',
-							address='N/A',
-							phone='N/A',
-							email='default@example.com',
-							license_number=f'DEFAULT-{int(timezone.now().timestamp())}',
-							ae_title='',
-							is_active=True
-						)
-					else:
-						return JsonResponse({'success': False, 'error': 'No active facility configured'})
-				
-				# Optional: assign uploaded study to current radiologist's worklist
-				assigned_radiologist = None
-				if assign_to_me and hasattr(request.user, 'is_radiologist') and request.user.is_radiologist():
-					assigned_radiologist = request.user
-				
-				# Professional study creation with enhanced medical metadata
-				study, study_created = Study.objects.get_or_create(
-					study_instance_uid=study_uid,
-					defaults={
-						'accession_number': accession_number,
-						'patient': patient,
-						'facility': facility,
-						'modality': modality,
-						'study_description': study_description,
-						'study_date': sdt,
-						'referring_physician': referring_physician,
-						'status': 'scheduled',
-						'priority': priority,
-						'clinical_info': clinical_info,
-						'uploaded_by': request.user,
-						'radiologist': assigned_radiologist,
-						'body_part': getattr(rep_ds, 'BodyPartExamined', ''),
-						'study_comments': f'Professional upload by {request.user.get_full_name()} on {timezone.now().strftime("%Y-%m-%d %H:%M:%S")}',
-					}
-				)
+					facility = None
+					if (hasattr(request.user, 'is_admin') and request.user.is_admin()) or (hasattr(request.user, 'is_radiologist') and request.user.is_radiologist()):
+						if override_facility_id:
+							facility = Facility.objects.filter(id=override_facility_id, is_active=True).first()
+					# If admin/radiologist didn't explicitly choose a target facility, try to infer from DICOM.
+					if not facility:
+						facility = _infer_facility_from_dicom(rep_ds)
+					if not facility and getattr(request.user, 'facility', None):
+						facility = request.user.facility
+					if not facility:
+						facility = Facility.objects.filter(is_active=True).first()
+					if not facility:
+						# Allow admin to upload without preconfigured facility by creating a default one
+						if hasattr(request.user, 'is_admin') and request.user.is_admin():
+							facility = Facility.objects.create(
+								name='Default Facility',
+								address='N/A',
+								phone='N/A',
+								email='default@example.com',
+								license_number=f'DEFAULT-{int(timezone.now().timestamp())}',
+								ae_title='',
+								is_active=True,
+							)
+						else:
+							return JsonResponse({'success': False, 'error': 'No active facility configured'})
+
+					# Optional: assign uploaded study to current radiologist's worklist
+					assigned_radiologist = None
+					if assign_to_me and hasattr(request.user, 'is_radiologist') and request.user.is_radiologist():
+						assigned_radiologist = request.user
+
+					study, study_created = Study.objects.get_or_create(
+						study_instance_uid=study_uid,
+						defaults={
+							'accession_number': accession_number,
+							'patient': patient,
+							'facility': facility,
+							'modality': modality,
+							'study_description': study_description,
+							'study_date': sdt,
+							'referring_physician': referring_physician,
+							'status': 'scheduled',
+							'priority': priority,
+							'clinical_info': clinical_info,
+							'uploaded_by': request.user,
+							'radiologist': assigned_radiologist,
+							'body_part': getattr(rep_ds, 'BodyPartExamined', ''),
+							'study_comments': f'Professional upload by {request.user.get_full_name()} on {timezone.now().strftime("%Y-%m-%d %H:%M:%S")}',
+						},
+					)
+
+				if modality_created:
+					logger.info(f"New modality created: {modality_code}")
 
 				# Automatically start preliminary AI analysis for newly created studies
 				if study_created:
@@ -973,20 +976,21 @@ def upload_study(request):
 					# Enhanced medical imaging metadata for professional standards
 					body_part = getattr(ds0, 'BodyPartExamined', '').upper()
 					
-					# Professional series creation with comprehensive metadata
-					series, series_created = Series.objects.get_or_create(
-						series_instance_uid=series_uid,
-						defaults={
-							'study': study,
-							'series_number': int(series_number),
-							'series_description': series_desc,
-							'modality': series_modality_code,
-							'body_part': body_part,
-							'slice_thickness': slice_thickness if slice_thickness is not None else None,
-							'pixel_spacing': pixel_spacing,
-							'image_orientation': image_orientation,
-						}
-					)
+					# Create/get the Series in a short transaction; keep file I/O outside of it.
+					with transaction.atomic():
+						series, series_created = Series.objects.get_or_create(
+							series_instance_uid=series_uid,
+							defaults={
+								'study': study,
+								'series_number': int(series_number),
+								'series_description': series_desc,
+								'modality': series_modality_code,
+								'body_part': body_part,
+								'slice_thickness': slice_thickness if slice_thickness is not None else None,
+								'pixel_spacing': pixel_spacing,
+								'image_orientation': image_orientation,
+							},
+						)
 					try:
 						if series_uid:
 							series_uids_touched.add(str(series_uid))
@@ -1146,30 +1150,27 @@ def upload_study(request):
 							logger.error(f"Image processing failed for {sop_uid or 'unknown'}: {str(e)}")
 							continue
 
-					# Flush batched DB ops for this series
+					# Flush batched DB ops for this series in a short transaction.
 					try:
-						if to_create:
-							DicomImage.objects.bulk_create(to_create, ignore_conflicts=True, batch_size=500)
-							upload_stats['created_images'] += len(to_create)
+						with transaction.atomic():
+							if to_create:
+								DicomImage.objects.bulk_create(to_create, ignore_conflicts=True, batch_size=500)
+								upload_stats['created_images'] += len(to_create)
+							if to_update:
+								# Only re-link fields used by counting + ordering
+								DicomImage.objects.bulk_update(to_update, ['series', 'instance_number'], batch_size=500)
 					except Exception:
 						# fall back to safest behavior (best effort)
 						try:
-							for obj in to_create:
-								try:
-									obj.save()
-									upload_stats['created_images'] += 1
-								except Exception:
-									pass
+							if to_create:
+								for obj in to_create:
+									try:
+										obj.save()
+										upload_stats['created_images'] += 1
+									except Exception:
+										pass
 						except Exception:
 							pass
-
-					try:
-						if to_update:
-							# Only re-link fields used by counting + ordering
-							DicomImage.objects.bulk_update(to_update, ['series', 'instance_number'], batch_size=500)
-					except Exception:
-						# best effort: don't fail upload for bulk_update issues
-						pass
 					
 					series_processing_time = (time.time() - series_start_time) * 1000
 					logger.info(f"Professional series completed: {series_desc} - {images_processed} images in {series_processing_time:.1f}ms")

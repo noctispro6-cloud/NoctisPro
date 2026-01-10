@@ -1291,8 +1291,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function uploadFilesInChunks(opts = {}) {
         const forceDirect = !!(opts && opts.forceDirect);
+        const totalFiles = selectedFiles.length;
+        const totalBytes = selectedFiles.reduce((s, f) => s + (f.size || 0), 0);
+
+        // Prefer background mode only for smaller uploads.
+        // For very large batches, writing every file to IndexedDB can be slow and can keep uploading
+        // in the background (saturating the network and making the rest of the app feel "network error" / sluggish).
+        const bgEligible = totalFiles <= 800 && totalBytes <= (1024 * 1024 * 1024); // <=800 files and <=1GB
+
         // Prefer background mode if available (keeps working after navigation)
-        if (!forceDirect && BG_UPLOAD.supported && BG_UPLOAD.swReady && BG_UPLOAD.enabled) {
+        if (!forceDirect && bgEligible && BG_UPLOAD.supported && BG_UPLOAD.swReady && BG_UPLOAD.enabled) {
             try {
                 const started = await enqueueBackgroundUpload();
                 if (started) return;
@@ -1303,8 +1311,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const url = '{% url "worklist:upload_study" %}';
         const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
-        const totalFiles = selectedFiles.length;
-        const totalBytes = selectedFiles.reduce((s, f) => s + (f.size || 0), 0);
 
         // IMPORTANT:
         // On tunnel/proxy hosts (ngrok/trycloudflare/loca.lt), long-running HTTP requests are
@@ -1321,9 +1327,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const MAX_CHUNK_BYTES = isTunnelHost ? (8 * 1024 * 1024) : (48 * 1024 * 1024); // 8MB on tunnels, 48MB otherwise
         const MAX_CHUNK_FILES = isTunnelHost ? 200 : 600;
 
-        // Limited parallelism improves throughput without hammering the server.
-        // Keep tunnels at 1 (they're fragile); allow a bit more on normal hosts.
-        const MAX_PARALLEL = isTunnelHost ? 1 : 2;
+        // Parallel chunk uploads can overwhelm single-writer databases (SQLite) and produce lock contention,
+        // which surfaces in the browser as intermittent "network error"/failed requests.
+        // Default to 1 for stability; increase only if you're sure the server DB can handle concurrent writes.
+        const MAX_PARALLEL = 1;
 
         let chunks = [];
         let currentChunk = [];
@@ -1441,7 +1448,20 @@ document.addEventListener('DOMContentLoaded', function() {
                                     handleFailure((data && data.error) || 'Unknown error');
                                 }
                             } else {
-                                handleFailure(`HTTP ${xhr.status}: ${xhr.statusText || 'Request failed'}`);
+                                // Try to extract a helpful JSON error from the server even on non-2xx.
+                                let serverMsg = null;
+                                try {
+                                    const body = xhr.responseText || '';
+                                    const data = body ? JSON.parse(body) : null;
+                                    if (data && typeof data === 'object') {
+                                        const parts = [];
+                                        if (data.error) parts.push(String(data.error));
+                                        if (data.details) parts.push(String(data.details));
+                                        if (data.error_code) parts.push(`(${data.error_code})`);
+                                        if (parts.length) serverMsg = parts.join(' ');
+                                    }
+                                } catch (_) {}
+                                handleFailure(serverMsg || `HTTP ${xhr.status}: ${xhr.statusText || 'Request failed'}`);
                             }
                         } catch (e) {
                             handleFailure(`Response parsing error: ${e.message}`);

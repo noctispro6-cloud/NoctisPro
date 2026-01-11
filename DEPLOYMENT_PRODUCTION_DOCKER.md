@@ -26,6 +26,8 @@ Recommended:
 
 - `DEBUG=False`
 - `SERVE_MEDIA_FILES=False` (keep uploads private; the app serves images via authenticated endpoints)
+- If Celery logs show `FATAL: server login failed: wrong password type`, set `PGBOUNCER_AUTH_TYPE=plain`
+  in `.env.docker` (or ensure your PgBouncer auth configuration matches `md5`/`scram` expectations).
 
 ## 2) DNS + firewall
 

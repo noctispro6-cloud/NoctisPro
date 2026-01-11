@@ -20,6 +20,7 @@ channels-redis
 # Production serving
 gunicorn
 uvicorn
+websockets
 whitenoise
 reportlab
 

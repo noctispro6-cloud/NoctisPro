@@ -10,6 +10,8 @@ from django.conf import settings
 from django.core.files.storage import default_storage
 import mimetypes
 
+from django.db.utils import OperationalError, ProgrammingError, InterfaceError
+
 
 class ImageOptimizationMiddleware:
     """
@@ -167,6 +169,41 @@ class SlowConnectionOptimizationMiddleware:
             self.add_optimization_script(request, response)
         
         return response
+
+
+class DatabaseOperationalErrorMiddleware:
+    """
+    Convert common DB outage/overload errors into a clear 503 instead of a generic 500.
+
+    This helps when Postgres hits max_connections ("too many clients already") or
+    when the schema is temporarily out of date during deploys.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        try:
+            return self.get_response(request)
+        except (OperationalError, InterfaceError, ProgrammingError) as e:
+            # Prefer JSON when this looks like an API call.
+            accept = (request.headers.get("Accept") or "").lower()
+            is_json = "application/json" in accept or request.path.startswith("/worklist/api/") or request.path.startswith("/dicomweb/")
+
+            msg = "Database is temporarily unavailable or busy. Please retry in a moment."
+            # Keep details out of responses unless DEBUG is enabled.
+            details = str(e) if getattr(settings, "DEBUG", False) else None
+
+            if is_json:
+                from django.http import JsonResponse
+
+                payload = {"success": False, "error": msg, "error_code": "DB_UNAVAILABLE"}
+                if details:
+                    payload["details"] = details
+                return JsonResponse(payload, status=503)
+
+            body = msg if not details else f"{msg}\n\n{details}"
+            return HttpResponse(body, status=503, content_type="text/plain")
     
     def detect_connection_speed(self, request):
         """

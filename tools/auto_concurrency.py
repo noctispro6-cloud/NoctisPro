@@ -109,6 +109,12 @@ def recommend(role: str) -> int:
     web = max(1, (total + 1) // 2)  # ceil
     celery = max(1, total // 2)  # floor
 
+    # Hard safety caps: very large core counts can overwhelm Postgres (too many DB clients)
+    # and/or memory due to per-process overhead. Users can always override explicitly with
+    # WEB_CONCURRENCY / CELERY_CONCURRENCY.
+    web = min(web, 8)
+    celery = min(celery, 8)
+
     return web if role == "web" else celery
 
 

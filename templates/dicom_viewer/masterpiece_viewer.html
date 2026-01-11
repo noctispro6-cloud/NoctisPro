@@ -4861,9 +4861,22 @@
             const dx = Math.round(centerX - dw / 2);
             const dy = Math.round(centerY - dh / 2);
 
+            // 360° MPR rotation: rotate the image + pixel-space overlays around the crosshair intersection.
+            // This matches the expected "rotate MPR" behavior (not just rotating the overlay lines).
+            const rotDeg = (viewMode === 'mpr' && crosshair && mprCrosshairVoxel) ? _normalizeDeg(Number(crosshairRotation) || 0) : 0;
+            let pivotX = dx + dw / 2;
+            let pivotY = dy + dh / 2;
+            if (rotDeg && crosshair && mprCrosshairVoxel) {
+                const ch = _mprCrosshairCanvasPointForPlane(plane);
+                if (ch && isFinite(ch.x) && isFinite(ch.y)) {
+                    pivotX = ch.x;
+                    pivotY = ch.y;
+                }
+            }
+
             // Update live renderMeta so HU/ROI mapping uses the post-transform rectangle.
             if (mprState && mprState.renderMeta) {
-                mprState.renderMeta[plane] = { w, h, dx, dy, dw, dh };
+                mprState.renderMeta[plane] = { w, h, dx, dy, dw, dh, rotDeg, pivotX, pivotY };
             }
             ctx.clearRect(0, 0, c.width, c.height);
             // Render MPR with high-quality interpolation for better perceived clarity.
@@ -4872,6 +4885,12 @@
             const s = Math.min(dw / Math.max(1, w), dh / Math.max(1, h));
             ctx.imageSmoothingEnabled = Math.abs(s - 1) > 0.01;
             try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
+            ctx.save();
+            if (rotDeg) {
+                ctx.translate(pivotX, pivotY);
+                ctx.rotate((rotDeg * Math.PI) / 180);
+                ctx.translate(-pivotX, -pivotY);
+            }
             ctx.drawImage(img, dx, dy, dw, dh);
 
             // ROI draft overlay (if any)
@@ -4900,6 +4919,7 @@
 
             // Saved measurements/ROI for this plane+slice (disappear automatically when slice changes)
             try { drawMPRMeasurementsAndRois(plane, ctx); } catch (e) {}
+            ctx.restore();
 
             // Crosshair overlay (linked MPR)
             if (crosshair && mprCrosshairVoxel) {
@@ -5267,9 +5287,26 @@
             if (!meta) return null;
             const { w, h, dx, dy, dw, dh } = meta;
             if (!dw || !dh) return null;
-            if (canvasX < dx || canvasY < dy || canvasX > dx + dw || canvasY > dy + dh) return null;
-            const x = (canvasX - dx) * (w / dw);
-            const y = (canvasY - dy) * (h / dh);
+
+            // If MPR content is rotated, undo rotation before mapping to slice pixels.
+            let tx = canvasX;
+            let ty = canvasY;
+            const rotDeg = Number(meta.rotDeg || 0);
+            const pivotX = Number(meta.pivotX);
+            const pivotY = Number(meta.pivotY);
+            if (rotDeg && isFinite(pivotX) && isFinite(pivotY)) {
+                const a = (-rotDeg * Math.PI) / 180;
+                const ca = Math.cos(a);
+                const sa = Math.sin(a);
+                const px = tx - pivotX;
+                const py = ty - pivotY;
+                tx = pivotX + (px * ca - py * sa);
+                ty = pivotY + (px * sa + py * ca);
+            }
+
+            if (tx < dx || ty < dy || tx > dx + dw || ty > dy + dh) return null;
+            const x = (tx - dx) * (w / dw);
+            const y = (ty - dy) * (h / dh);
             return { x, y, ix: Math.floor(x), iy: Math.floor(y), w, h };
         }
 
@@ -5855,7 +5892,8 @@
             const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
             const slice = mprState.index[plane] || 0;
             try {
-                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&shape=ellipse&cx=${encodeURIComponent(Math.round(cx))}&cy=${encodeURIComponent(Math.round(cy))}&rx=${encodeURIComponent(Math.round(rx))}&ry=${encodeURIComponent(Math.round(ry))}&quality=${encodeURIComponent((mprQuality === 'high') ? 'high' : 'fast')}`;
+                // Include x/y for backwards-compatible servers; backend also supports ellipse ROI without them.
+                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&shape=ellipse&cx=${encodeURIComponent(Math.round(cx))}&cy=${encodeURIComponent(Math.round(cy))}&x=${encodeURIComponent(Math.round(cx))}&y=${encodeURIComponent(Math.round(cy))}&rx=${encodeURIComponent(Math.round(rx))}&ry=${encodeURIComponent(Math.round(ry))}&quality=${encodeURIComponent((mprQuality === 'high') ? 'high' : 'fast')}`;
                 const resp = await fetch(url, { credentials: 'same-origin' });
                 const data = await resp.json();
                 if (!resp.ok) throw new Error(data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${resp.status}`);
@@ -6023,7 +6061,8 @@
             bone3D.renderer.setSize(c.width || 1, c.height || 1, false);
             try { bone3D.renderer.outputEncoding = THREE.sRGBEncoding; } catch (e) {}
             try { bone3D.renderer.toneMapping = THREE.ACESFilmicToneMapping; } catch (e) {}
-            try { bone3D.renderer.toneMappingExposure = 1.1; } catch (e) {}
+            // Slightly higher exposure for a clearer "bone" look.
+            try { bone3D.renderer.toneMappingExposure = 1.28; } catch (e) {}
             try { bone3D.renderer.physicallyCorrectLights = true; } catch (e) {}
             bone3D.renderer.setClearColor(0x000000, 1);
             bone3D.renderer.shadowMap.enabled = true;
@@ -6036,9 +6075,10 @@
             bone3D.camera.position.set(0, 0, 200);
 
             // Lighting tuned for clinical “bone” look (clear depth/edges, no harsh burn-in)
-            const ambient = new THREE.AmbientLight(0xffffff, 0.25);
-            const hemi = new THREE.HemisphereLight(0xffffff, 0x222244, 0.35);
-            const key = new THREE.DirectionalLight(0xffffff, 1.0);
+            const ambient = new THREE.AmbientLight(0xffffff, 0.20);
+            const hemi = new THREE.HemisphereLight(0xffffff, 0x221a12, 0.28);
+            // Warm key light helps match the reference bone tone.
+            const key = new THREE.DirectionalLight(0xfff2dd, 1.25);
             key.position.set(1.2, 1.0, 1.8);
             key.castShadow = true;
             key.shadow.mapSize.width = 2048;
@@ -6047,10 +6087,10 @@
             key.shadow.camera.far = 2000;
             key.shadow.bias = -0.00005;
 
-            const fill = new THREE.DirectionalLight(0xffffff, 0.35);
+            const fill = new THREE.DirectionalLight(0xffe6c7, 0.55);
             fill.position.set(-1.5, 0.6, 0.8);
 
-            const rim = new THREE.DirectionalLight(0x88aaff, 0.25);
+            const rim = new THREE.DirectionalLight(0xffd2a3, 0.22);
             rim.position.set(0.0, -1.0, -1.2);
 
             bone3D.scene.add(ambient);
@@ -6195,12 +6235,17 @@
             geom.computeVertexNormals();
             geom.computeBoundingSphere();
 
-            const mat = new THREE.MeshStandardMaterial({
-                color: 0xf4f0e6, // warm bone
+            const mat = new THREE.MeshPhysicalMaterial({
+                // Warm, slightly amber bone tone (closer to the reference).
+                color: 0xf0d1a1,
+                emissive: 0x2a1400,
+                emissiveIntensity: 0.06,
                 transparent: true,
                 opacity: Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 0.8)),
-                roughness: 0.38, // slightly crisper highlights to read surfaces
+                roughness: 0.30, // crisper highlights to read surfaces
                 metalness: 0.02,
+                clearcoat: 0.22,
+                clearcoatRoughness: 0.35,
                 side: THREE.FrontSide,
             });
             const mesh = new THREE.Mesh(geom, mat);

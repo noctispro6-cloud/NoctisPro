@@ -28,6 +28,13 @@ services:
       DB_USER: ${DB_USER:-noctispro}
       DB_PASSWORD: ${DB_PASSWORD:-change-me}
       DB_NAME: ${DB_NAME:-noctispro}
+      # Authentication for *clients connecting to PgBouncer* (web/celery).
+      # Defaulting to "plain" avoids "wrong password type" errors when the
+      # generated auth file contains plaintext passwords.
+      #
+      # If you want stronger auth handling, set PGBOUNCER_AUTH_TYPE=md5 and
+      # ensure your PgBouncer auth file/users are configured accordingly.
+      AUTH_TYPE: ${PGBOUNCER_AUTH_TYPE:-plain}
       # Pooling behavior
       POOL_MODE: transaction
       MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-1000}

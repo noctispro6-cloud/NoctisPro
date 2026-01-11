@@ -235,6 +235,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # Must be early so DB overload/schema issues become a clean 503 (not a noisy 500).
+    'noctis_pro.middleware.DatabaseOperationalErrorMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # Re-enabled
     'django.middleware.security.SecurityMiddleware',
     # Serve static files efficiently when running without nginx (e.g. simple Docker deployments).
@@ -702,8 +704,21 @@ os.makedirs(os.path.join(BASE_DIR, 'logs'), exist_ok=True)
 
 # Performance settings for production
 if not DEBUG:
-    # Database connection pooling
-    DATABASES['default']['CONN_MAX_AGE'] = 60
+    # Database connections
+    #
+    # Persistent connections (CONN_MAX_AGE) can easily exhaust Postgres max_connections
+    # when running multiple Gunicorn workers + Celery workers.
+    #
+    # In Docker/VPS deployments, default to 0 (no persistence) unless explicitly overridden.
+    try:
+        in_docker = os.path.exists("/.dockerenv")
+    except Exception:
+        in_docker = False
+    default_conn_max_age = 0 if in_docker else 60
+    try:
+        DATABASES["default"]["CONN_MAX_AGE"] = int(os.environ.get("DB_CONN_MAX_AGE", str(default_conn_max_age)))
+    except Exception:
+        DATABASES["default"]["CONN_MAX_AGE"] = default_conn_max_age
     
     # Cache static file serving
     # WhiteNoise: compressed + hashed static assets

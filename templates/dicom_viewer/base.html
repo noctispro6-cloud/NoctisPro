@@ -4718,17 +4718,19 @@
                 showLoading('Running AI analysis...');
                 
                 // Call AI analysis API
-                const response = await fetch(`/ai/api/series/${currentSeries.id}/analyze/`, {
+                const formData = new FormData();
+                // Optional model selection (if the page provides it)
+                try {
+                    const sel = document.getElementById('aiModelSelect');
+                    if (sel && sel.value) formData.append('model_id', sel.value);
+                } catch (_) {}
+                const response = await fetch(`/ai_analysis/api/series/${currentSeries.id}/analyze/`, {
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': getCSRFToken(),
-                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
                     },
-                    body: JSON.stringify({
-                        analysis_type: 'comprehensive',
-                        include_measurements: true,
-                        include_annotations: true
-                    })
+                    body: formData
                 });
                 
                 if (!response.ok) {
@@ -5080,17 +5082,18 @@
                 resultsDiv.innerHTML = '<div style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i><br>Analyzing...</div>';
                 
                 // Call AI analysis API
-                const response = await fetch(`/ai/api/series/${currentSeries.id}/analyze/`, {
+                const formData = new FormData();
+                try {
+                    const sel = document.getElementById('aiModelSelect');
+                    if (sel && sel.value) formData.append('model_id', sel.value);
+                } catch (_) {}
+                const response = await fetch(`/ai_analysis/api/series/${currentSeries.id}/analyze/`, {
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': getCSRFToken(),
-                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
                     },
-                    body: JSON.stringify({
-                        analysis_type: 'comprehensive',
-                        include_measurements: document.querySelector('#aiPanel input[type="checkbox"]:nth-child(2)').checked,
-                        include_annotations: document.querySelector('#aiPanel input[type="checkbox"]:nth-child(3)').checked
-                    })
+                    body: formData
                 });
                 
                 const result = await response.json();

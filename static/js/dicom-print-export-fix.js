@@ -318,7 +318,7 @@
         w.document.close();
     };
     
-    // Override existing export function
-    window.exportImage = () => exportImageWithDetails('jpeg');
+    // Do NOT override existing viewer functions. Some templates implement their own export UI.
+    // If a page doesn't define export/print helpers, it can call these directly.
     
 })();

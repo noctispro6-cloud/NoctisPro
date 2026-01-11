@@ -757,6 +757,16 @@ def viewer(request):
 @login_required
 def masterpiece_viewer(request):
     """Masterpiece DICOM viewer - THE MAIN DICOM VIEWER with enhanced features."""
+    # Performance: prebuild MPR volumes in the background so MPR/3D feels instant when the user clicks it.
+    # This is best-effort and should never block page render.
+    try:
+        series_id = request.GET.get('series', '') or ''
+        sid = int(series_id) if str(series_id).strip().isdigit() else None
+        if sid:
+            _schedule_mpr_disk_cache_build(sid, quality='fast')
+            _schedule_mpr_disk_cache_build(sid, quality='high')
+    except Exception:
+        pass
     context = {
         'study_id': request.GET.get('study', ''),
         'series_id': request.GET.get('series', ''),

@@ -1457,7 +1457,12 @@
                 currentMeasurement = null;
             });
             
-            // Wheel event for slice navigation and zoom
+            // Wheel event for slice navigation and zoom.
+            // Performance: wheel events can fire extremely fast; throttle to once per animation frame and
+            // collapse large wheel deltas into multi-slice jumps to keep scrolling responsive.
+            let _wheelAccum = 0;
+            let _wheelRaf = 0;
+            const _WHEEL_PX_PER_SLICE = 60; // tune for trackpads/mice
             imageContainer.addEventListener('wheel', function(e) {
                 e.preventDefault();
                 
@@ -1465,11 +1470,20 @@
                     // Zoom with Ctrl+wheel
                     const zoomDirection = e.deltaY > 0 ? 0.9 : 1.1;
                     setZoom(zoomFactor * zoomDirection);
-                } else {
-                    // Slice navigation with wheel
-                    const direction = e.deltaY > 0 ? 1 : -1;
-                    changeSlice(direction);
+                    return;
                 }
+                
+                _wheelAccum += (Number(e.deltaY) || 0);
+                if (_wheelRaf) return;
+                _wheelRaf = requestAnimationFrame(() => {
+                    const d = _wheelAccum;
+                    _wheelAccum = 0;
+                    _wheelRaf = 0;
+                    if (!d) return;
+                    const steps = Math.max(1, Math.round(Math.abs(d) / _WHEEL_PX_PER_SLICE));
+                    const direction = d > 0 ? 1 : -1;
+                    changeSlice(direction * steps);
+                });
             });
         }
 
@@ -1757,6 +1771,7 @@
                 // Handle regular image navigation
                 currentImageIndex = parseInt(value);
                 document.getElementById('sliceValue').textContent = `${currentImageIndex + 1}/${images.length}`;
+                _singleViewLastNavAt = Date.now();
                 updateImageDisplay();
             }
         }
@@ -1776,6 +1791,7 @@
                     currentImageIndex = newIndex;
                     document.getElementById('sliceSlider').value = currentImageIndex;
                     document.getElementById('sliceValue').textContent = `${currentImageIndex + 1}/${images.length}`;
+                    _singleViewLastNavAt = Date.now();
                     updateImageDisplay();
                 }
             }
@@ -1784,6 +1800,47 @@
         // Image Display Management
         let _singleViewDisplayAbort = null;
         let _singleViewDisplayReqId = 0;
+        let _singleViewLastNavAt = 0; // timestamp of last slice navigation (wheel/slider/keys)
+        let _singleViewInfoBase = null; // cached metadata from first slice (dims, spacing, etc.)
+        let _singleViewHasUserWindowing = false;
+        try {
+            // Mark user-driven WW/WL changes so we don't override defaults on series load
+            const _markWindowing = () => { _singleViewHasUserWindowing = true; };
+            ['wwSlider', 'wlSlider'].forEach((id) => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('input', _markWindowing, { passive: true });
+            });
+        } catch (_) {}
+
+        function _renderPngUrlForImageId(imageId) {
+            const params = new URLSearchParams();
+            params.set('ww', String(windowWidth));
+            params.set('wl', String(windowLevel));
+            params.set('invert', inverted ? 'true' : 'false');
+            return `/dicom-viewer/api/image/${encodeURIComponent(imageId)}/render.png?${params.toString()}`;
+        }
+
+        async function _primeSingleViewDefaultsIfNeeded(imageId) {
+            // Fetch lightweight metadata + a stable render URL once per series load.
+            // This avoids a JSON round-trip per slice while still giving us image dimensions/pixel spacing defaults.
+            if (_singleViewInfoBase) return;
+            try {
+                const url = `/dicom-viewer/api/image/${encodeURIComponent(imageId)}/display/?ww=${encodeURIComponent(windowWidth)}&wl=${encodeURIComponent(windowLevel)}&invert=${encodeURIComponent(inverted)}&return=url`;
+                const response = await fetch(url, { credentials: 'same-origin' });
+                const data = await response.json().catch(() => null);
+                if (!response.ok || !data) return;
+                if (data.windowing && !_singleViewHasUserWindowing) {
+                    // Use backend-derived defaults only when the user hasn't touched windowing yet
+                    if (typeof data.windowing.window_width === 'number') windowWidth = data.windowing.window_width;
+                    if (typeof data.windowing.window_level === 'number') windowLevel = data.windowing.window_level;
+                    if (typeof data.windowing.inverted === 'boolean') inverted = data.windowing.inverted;
+                    try { _syncWindowLevelUI(); } catch (_) {}
+                }
+                _singleViewInfoBase = data.image_info || null;
+            } catch (_) {
+                // non-fatal
+            }
+        }
 
         async function updateImageDisplay() {
             if (!images.length || currentImageIndex < 0 || currentImageIndex >= images.length) {
@@ -1795,27 +1852,23 @@
             
             try {
                 const reqId = ++_singleViewDisplayReqId;
+                // We no longer need to abort a JSON fetch on every slice; image loads are handled by the browser.
                 try { _singleViewDisplayAbort?.abort(); } catch (_) {}
-                _singleViewDisplayAbort = new AbortController();
+                _singleViewDisplayAbort = null;
 
                 // Avoid flicker while scrubbing
                 let loadingTimer = setTimeout(() => {
                     if (reqId === _singleViewDisplayReqId) showLoading('Processing image...');
                 }, 150);
-                
-                // Get processed image with current window/level settings
-                // Prefer a streamed PNG URL to avoid huge base64 payloads and to support color DICOMs.
-                const url = `/dicom-viewer/api/image/${currentImage.id}/display/?ww=${windowWidth}&wl=${windowLevel}&invert=${inverted}&return=url`;
-                
-                const response = await fetch(url, { credentials: 'same-origin', signal: _singleViewDisplayAbort.signal });
-                const data = await response.json();
-                clearTimeout(loadingTimer);
-                if (reqId !== _singleViewDisplayReqId) return;
-                
+
                 const dicomImage = document.getElementById('dicomImage');
-                const srcUrl = (data && (data.image_url || data.image_data)) || null;
-                
-                if (srcUrl && dicomImage) {
+                if (dicomImage) {
+                    // Prime defaults/metadata once (does NOT decode pixels server-side due to return=url fast-path)
+                    await _primeSingleViewDefaultsIfNeeded(currentImage.id);
+                    clearTimeout(loadingTimer);
+                    if (reqId !== _singleViewDisplayReqId) return;
+
+                    const srcUrl = _renderPngUrlForImageId(currentImage.id);
                     
                     // Hide welcome screen and show image view
                     const welcomeScreen = document.getElementById('welcomeScreen');
@@ -1827,7 +1880,20 @@
                     dicomImage.onload = function() {
                         if (reqId !== _singleViewDisplayReqId) return;
                         hideLoading();
-                        updateImageInfo(data.image_info);
+                        // Update info using cached base + per-slice instance number.
+                        try {
+                            const base = _singleViewInfoBase || {};
+                            updateImageInfo({
+                                ...base,
+                                id: currentImage.id,
+                                instance_number: currentImage.instance_number ?? base.instance_number,
+                                slice_location: currentImage.slice_location ?? base.slice_location,
+                                pixel_spacing: (currentSeries && currentSeries.pixel_spacing) ? currentSeries.pixel_spacing : base.pixel_spacing,
+                                slice_thickness: (currentSeries && currentSeries.slice_thickness) ? currentSeries.slice_thickness : base.slice_thickness,
+                                modality: (currentSeries && currentSeries.modality) ? currentSeries.modality : base.modality,
+                                series_description: (currentSeries && currentSeries.series_description) ? currentSeries.series_description : base.series_description,
+                            });
+                        } catch (_) {}
                         updateMeasurementOverlay();
                         updateAnnotationOverlay();
                         
@@ -1842,33 +1908,38 @@
                         hideLoading();
                         showToast('Failed to load image', 'error');
                     };
+                    try {
+                        dicomImage.decoding = 'async';
+                        dicomImage.loading = 'eager';
+                        dicomImage.fetchPriority = 'high';
+                    } catch (_) {}
                     dicomImage.src = srcUrl;
 
                     // Prefetch neighbors (helps slow networks)
                     try {
+                        const isScrubbing = (Date.now() - _singleViewLastNavAt) < 120;
+                        if (isScrubbing) return; // don't overwhelm server while the user is actively scrubbing
                         const prefetch = (idx) => {
                             const imgObj = images[idx];
                             if (!imgObj) return;
-                            const u = `/dicom-viewer/api/image/${imgObj.id}/render.png?ww=${encodeURIComponent(windowWidth)}&wl=${encodeURIComponent(windowLevel)}&invert=${encodeURIComponent(inverted)}`;
+                            const u = _renderPngUrlForImageId(imgObj.id);
                             const im = new Image();
                             im.decoding = 'async';
+                            try { im.fetchPriority = 'low'; } catch (_) {}
                             im.src = u;
                         };
-                        if (currentImageIndex + 1 < images.length) prefetch(currentImageIndex + 1);
-                        if (currentImageIndex + 2 < images.length) prefetch(currentImageIndex + 2);
-                        if (currentImageIndex - 1 >= 0) prefetch(currentImageIndex - 1);
+                        // Small window prefetch (balanced: fast scroll without hammering the backend)
+                        for (let i = 1; i <= 4; i++) {
+                            if (currentImageIndex + i < images.length) prefetch(currentImageIndex + i);
+                            if (currentImageIndex - i >= 0) prefetch(currentImageIndex - i);
+                        }
                     } catch (_) {}
                 } else {
                     hideLoading();
-                    if (data.warnings?.pixel_decode_error) {
-                        showToast('Image format not supported: ' + data.warnings.pixel_decode_error, 'warning');
-                    } else {
-                        showToast('Failed to load image', 'error');
-                    }
+                    showToast('Failed to load image', 'error');
                 }
                 
             } catch (error) {
-                if (error && error.name === 'AbortError') return;
                 hideLoading();
                 console.error('Error updating image display:', error);
                 showToast('Error loading image', 'error');
@@ -4170,7 +4241,7 @@
 
                 const data = await response.json();
                 if (!response.ok || !data || data.success === false) {
-                    throw new Error((data && data.error) ? data.error : `HTTP ${response.status}`);
+                    throw new Error((data && data.error) ? String(data.error) : `HTTP ${response.status}`);
                 }
 
                 const conf = Number((data.measurements || {}).triage_score || data.confidence_score || 0) || 0;
@@ -4192,7 +4263,8 @@
             } catch (error) {
                 hideLoading();
                 console.error('AI analysis error:', error);
-                showToast('AI analysis failed', 'error');
+                const msg = (error && error.message) ? String(error.message) : 'AI analysis failed';
+                showToast(msg, 'error');
             }
         }
 

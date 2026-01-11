@@ -7,3 +7,8 @@
 # Docker env file (contains secrets)
 .env.docker
 
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+

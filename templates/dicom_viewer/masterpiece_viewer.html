@@ -5252,6 +5252,14 @@
                 const p = el.dataset && el.dataset.plane;
                 el.classList.toggle('maximized', !!plane && p === plane);
             });
+            // IMPORTANT: maximizing changes the pane size, but the canvas backing store won't update
+            // unless we resize it. Without this, the browser upscales a low-res canvas and the image
+            // looks blurry (most noticeable in sagittal/coronal).
+            try {
+                requestAnimationFrame(() => {
+                    try { resizeCanvas(); } catch (e) {}
+                });
+            } catch (e) {}
         }
 
         function _mprCanvasToSlicePx(plane, canvasX, canvasY) {

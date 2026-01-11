@@ -6729,16 +6729,21 @@
         }
 
         // Add keyboard shortcut for directory loader
+        // Use capture + stopImmediatePropagation so browser/system shortcuts (e.g. Ctrl+O)
+        // don't win over our in-app shortcut.
         document.addEventListener('keydown', function(e) {
-            if (e.ctrlKey && e.key === 'o') {
+            const ctrlOrMeta = !!(e.ctrlKey || e.metaKey);
+            if (ctrlOrMeta && (e.key === 'o' || e.key === 'O')) {
                 e.preventDefault();
+                try { e.stopPropagation(); } catch (_) {}
+                try { e.stopImmediatePropagation(); } catch (_) {}
                 showDirectoryLoader();
             }
             if (e.key === 'Escape') {
                 hideDirectoryLoader();
                 try { _closeModal('printExportModal'); } catch (e) {}
             }
-        });
+        }, true);
     </script>
 
     <!-- Directory Loader Modal -->

@@ -1583,9 +1583,18 @@
         let currentMeasurement = null;
 
         // --- MPR tool state (measurements + ROI are per-plane/per-slice) ---
+        // NOTE: "fast" and "high" quality can have different axial counts (high may upsample Z).
+        // If we upgrade to high-quality using fast slice indices, the user can end up scrolling only
+        // through a subset (e.g. "bottom part") of the reconstructed stack.
         const _mprState = {
+            // Active counts used for scrolling/clamping in the UI (fast initially, may upgrade to high).
             counts: { axial: 0, sagittal: 0, coronal: 0 },
-            sliceIndex: { axial: 0, sagittal: 0, coronal: 0 }
+            // Active slice indices in the current "counts" space.
+            sliceIndex: { axial: 0, sagittal: 0, coronal: 0 },
+            // Quality bookkeeping so we can remap indices when upgrading.
+            hqReady: false,
+            countsFast: { axial: 0, sagittal: 0, coronal: 0 },
+            countsHigh: { axial: 0, sagittal: 0, coronal: 0 }
         };
         let mprMeasurements = []; // { plane, sliceIndex, start:{x,y}, end:{x,y}, distance, timestamp }
         let mprAnnotations = [];  // { plane, sliceIndex, x,y,text,timestamp }
@@ -3022,20 +3031,23 @@
 
                 if (data && data.counts) {
                     _mprLastCounts = data.counts || _mprLastCounts;
-                    _mprState.counts = {
+                    const fastCounts = {
                         axial: Number(data.counts.axial || 0),
                         sagittal: Number(data.counts.sagittal || 0),
                         coronal: Number(data.counts.coronal || 0)
                     };
+                    _mprState.countsFast = { ...fastCounts };
+                    _mprState.counts = { ...fastCounts };
+                    _mprState.hqReady = false;
                     _mprState.sliceIndex = {
-                        axial: Math.floor((_mprState.counts.axial || 1) / 2),
-                        sagittal: Math.floor((_mprState.counts.sagittal || 1) / 2),
-                        coronal: Math.floor((_mprState.counts.coronal || 1) / 2)
+                        axial: Math.floor((fastCounts.axial || 1) / 2),
+                        sagittal: Math.floor((fastCounts.sagittal || 1) / 2),
+                        coronal: Math.floor((fastCounts.coronal || 1) / 2)
                     };
 
                     // Make MPR axial match the currently displayed axial slice position (as closely as possible).
                     try {
-                        const axialCount = Number(_mprState.counts.axial || 0);
+                        const axialCount = Number(fastCounts.axial || 0);
                         const srcCount = Number(images?.length || 0);
                         if (axialCount > 1 && srcCount > 1) {
                             const t = Math.max(0, Math.min(1, (Number(currentImageIndex) || 0) / (srcCount - 1)));
@@ -3058,14 +3070,66 @@
                     if (sagittalEl) { sagittalEl.decoding = 'async'; sagittalEl.src = _mprSliceUrl(currentSeries.id, 'sagittal', sa, 'fast'); }
                     if (coronalEl) { coronalEl.decoding = 'async'; coronalEl.src = _mprSliceUrl(currentSeries.id, 'coronal', co, 'fast'); }
 
-                    // Progressive upgrade to full quality (non-blocking).
-                    setTimeout(() => {
+                    // Progressive upgrade to full quality (non-blocking), BUT:
+                    // high-quality may have a different axial slice count (Z upsampling). We must fetch
+                    // high-quality counts and remap indices before requesting HQ slices, otherwise axial
+                    // scrolling can appear to cover only the "bottom part" of the reconstructed stack.
+                    (async () => {
                         try {
-                            if (axialEl) axialEl.src = _mprSliceUrl(currentSeries.id, 'axial', ax, 'high');
-                            if (sagittalEl) sagittalEl.src = _mprSliceUrl(currentSeries.id, 'sagittal', sa, 'high');
-                            if (coronalEl) coronalEl.src = _mprSliceUrl(currentSeries.id, 'coronal', co, 'high');
+                            const hqQs = new URLSearchParams();
+                            hqQs.set('window_width', String(windowWidth));
+                            hqQs.set('window_level', String(windowLevel));
+                            hqQs.set('inverted', String(!!inverted));
+                            hqQs.set('quality', 'high');
+                            hqQs.set('meta_only', '1');
+                            const hqResp = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?${hqQs.toString()}`, { credentials: 'same-origin' });
+                            if (!hqResp.ok) return;
+                            const hqData = await hqResp.json().catch(() => null);
+                            const hqCounts = hqData && hqData.counts ? {
+                                axial: Number(hqData.counts.axial || 0),
+                                sagittal: Number(hqData.counts.sagittal || 0),
+                                coronal: Number(hqData.counts.coronal || 0)
+                            } : null;
+                            if (!hqCounts) return;
+
+                            _mprState.countsHigh = { ...hqCounts };
+
+                            // Remap current indices from fast->high to preserve anatomical position.
+                            const remapIdx = (idx, nFrom, nTo) => {
+                                const from = Number(nFrom || 0);
+                                const to = Number(nTo || 0);
+                                const i = Number(idx || 0);
+                                if (to <= 1) return 0;
+                                if (from <= 1) return Math.max(0, Math.min(to - 1, i));
+                                const t = Math.max(0, Math.min(1, i / (from - 1)));
+                                return Math.max(0, Math.min(to - 1, Math.round(t * (to - 1))));
+                            };
+
+                            _mprState.sliceIndex = {
+                                axial: remapIdx(_mprState.sliceIndex.axial, _mprState.counts.axial, hqCounts.axial),
+                                sagittal: remapIdx(_mprState.sliceIndex.sagittal, _mprState.counts.sagittal, hqCounts.sagittal),
+                                coronal: remapIdx(_mprState.sliceIndex.coronal, _mprState.counts.coronal, hqCounts.coronal)
+                            };
+                            _mprState.counts = { ...hqCounts };
+                            _mprState.hqReady = true;
+
+                            const axH = _mprState.sliceIndex.axial;
+                            const saH = _mprState.sliceIndex.sagittal;
+                            const coH = _mprState.sliceIndex.coronal;
+                            try {
+                                if (axialEl) axialEl.src = _mprSliceUrl(currentSeries.id, 'axial', axH, 'high');
+                                if (sagittalEl) sagittalEl.src = _mprSliceUrl(currentSeries.id, 'sagittal', saH, 'high');
+                                if (coronalEl) coronalEl.src = _mprSliceUrl(currentSeries.id, 'coronal', coH, 'high');
+                            } catch (_) { /* ignore */ }
+
+                            try { _mprUpdateAllCrosshairsFromState(); } catch (_) { /* ignore */ }
+                            try {
+                                updateMprOverlays('axial');
+                                updateMprOverlays('sagittal');
+                                updateMprOverlays('coronal');
+                            } catch (_) { /* ignore */ }
                         } catch (_) { /* ignore */ }
-                    }, 350);
+                    })();
                     
                     // Enable crosshairs for MPR views
                     enableMPRCrosshairs();
@@ -3203,19 +3267,31 @@
                 if (!imgEl) return false;
                 imgEl.decoding = 'async';
                 // Use binary PNG endpoint to avoid large base64 JSON responses.
-                imgEl.src = _mprSliceUrl(currentSeries.id, plane, idx, 'fast');
+                //
+                // IMPORTANT:
+                // Once we have switched the UI into "high-quality count space" (hqReady=true),
+                // we must request HIGH quality slices. Otherwise we would be asking the server
+                // for fast slices with indices that may exceed the fast-volume bounds (fast and
+                // high can have different axial counts when Z is upsampled), which makes it look
+                // like you "can't reach the top slice".
+                const baseQuality = (_mprState.hqReady === true) ? 'high' : 'fast';
+                imgEl.src = _mprSliceUrl(currentSeries.id, plane, idx, baseQuality);
 
                 // Upgrade to high quality after scroll settles (best-effort).
-                try {
-                    window.__noctis_mpr_hq_timers = window.__noctis_mpr_hq_timers || { axial: null, sagittal: null, coronal: null };
-                    if (window.__noctis_mpr_hq_timers[plane]) clearTimeout(window.__noctis_mpr_hq_timers[plane]);
-                    window.__noctis_mpr_hq_timers[plane] = setTimeout(() => {
-                        try {
-                            const el = document.getElementById(_mprPlaneToImgId(plane));
-                            if (el) el.src = _mprSliceUrl(currentSeries.id, plane, idx, 'high');
-                        } catch (_) {}
-                    }, 220);
-                } catch (_) {}
+                // Only do this once we know high-quality counts/indices are active; otherwise the same
+                // numeric index can map to only a subset of the high-quality (Z-upsampled) volume.
+                if (_mprState.hqReady !== true) {
+                    try {
+                        window.__noctis_mpr_hq_timers = window.__noctis_mpr_hq_timers || { axial: null, sagittal: null, coronal: null };
+                        if (window.__noctis_mpr_hq_timers[plane]) clearTimeout(window.__noctis_mpr_hq_timers[plane]);
+                        window.__noctis_mpr_hq_timers[plane] = setTimeout(() => {
+                            try {
+                                const el = document.getElementById(_mprPlaneToImgId(plane));
+                                if (el) el.src = _mprSliceUrl(currentSeries.id, plane, idx, 'high');
+                            } catch (_) {}
+                        }, 220);
+                    } catch (_) {}
+                }
             } catch (e) {
                 return false;
             } finally {

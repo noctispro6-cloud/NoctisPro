@@ -690,11 +690,13 @@ def _get_mpr_volume_for_series(series):
                     pixel_array = px.astype(_np.float32)
                 except Exception:
                     continue
-            if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
-                try:
-                    pixel_array = pixel_array * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
-                except Exception:
-                    pass
+            # Apply rescale slope/intercept (CT HU etc.). Tags can exist but be None/MultiValue.
+            try:
+                slope = _safe_float(getattr(ds, 'RescaleSlope', None), 1.0)
+                intercept = _safe_float(getattr(ds, 'RescaleIntercept', None), 0.0)
+                pixel_array = pixel_array * slope + intercept
+            except Exception:
+                pass
             volume_data.append(pixel_array)
         except Exception:
             continue
@@ -1013,9 +1015,11 @@ def api_image_data(request, image_id):
             pixel_array = None
 
     # Apply rescale slope/intercept (HU for CT etc.)
-    if pixel_array is not None and ds is not None and hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
+    if pixel_array is not None and ds is not None:
         try:
-            pixel_array = pixel_array * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+            slope = _safe_float(getattr(ds, 'RescaleSlope', None), 1.0)
+            intercept = _safe_float(getattr(ds, 'RescaleIntercept', None), 0.0)
+            pixel_array = pixel_array * slope + intercept
         except Exception:
             pass
 
@@ -1367,8 +1371,12 @@ def api_mip_reconstruction(request, series_id):
                     dicom_path = os.path.join(settings.MEDIA_ROOT, str(img.file_path))
                     ds = pydicom.dcmread(dicom_path)
                     px = ds.pixel_array.astype(np.float32)
-                    if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
-                        px = px * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+                    try:
+                        slope = _safe_float(getattr(ds, 'RescaleSlope', None), 1.0)
+                        intercept = _safe_float(getattr(ds, 'RescaleIntercept', None), 0.0)
+                        px = px * slope + intercept
+                    except Exception:
+                        pass
                     if not volume_data:
                         ww = getattr(ds, 'WindowWidth', 400); wl = getattr(ds, 'WindowCenter', 40)
                         if hasattr(ww, '__iter__') and not isinstance(ww, str): ww = ww[0]
@@ -2155,9 +2163,11 @@ def api_dicom_image_display(request, image_id):
                     pixel_array = None
         
         # Apply rescale slope/intercept
-        if pixel_array is not None and ds is not None and hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
+        if pixel_array is not None and ds is not None:
             try:
-                pixel_array = pixel_array * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+                slope = _safe_float(getattr(ds, 'RescaleSlope', None), 1.0)
+                intercept = _safe_float(getattr(ds, 'RescaleIntercept', None), 0.0)
+                pixel_array = pixel_array * slope + intercept
             except Exception:
                 pass
 
@@ -2526,11 +2536,12 @@ def api_dicom_image_png(request, image_id):
             return HttpResponse(status=404)
 
         # Apply rescale slope/intercept
-        if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
-            try:
-                pixel_array = pixel_array * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
-            except Exception:
-                pass
+        try:
+            slope = _safe_float(getattr(ds, 'RescaleSlope', None), 1.0)
+            intercept = _safe_float(getattr(ds, 'RescaleIntercept', None), 0.0)
+            pixel_array = pixel_array * slope + intercept
+        except Exception:
+            pass
 
         # Derive default window if needed
         def _first_or_none(v):
@@ -2767,11 +2778,12 @@ def api_auto_window(request, image_id):
                     return JsonResponse({'success': False, 'error': 'Could not read pixel data'}, status=500)
             
             # Apply rescale slope/intercept
-            if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
-                try:
-                    pixel_array = pixel_array * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
-                except Exception:
-                    pass
+            try:
+                slope = _safe_float(getattr(ds, 'RescaleSlope', None), 1.0)
+                intercept = _safe_float(getattr(ds, 'RescaleIntercept', None), 0.0)
+                pixel_array = pixel_array * slope + intercept
+            except Exception:
+                pass
             
             # Use enhanced windowing algorithm
             processor = DicomProcessor()
@@ -2979,8 +2991,10 @@ def api_export_image(request, image_id):
 
         # Apply rescale (HU) if present
         try:
-            if ds is not None and hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
-                pixel_array = pixel_array * float(getattr(ds, 'RescaleSlope', 1.0)) + float(getattr(ds, 'RescaleIntercept', 0.0))
+            if ds is not None:
+                slope = _safe_float(getattr(ds, 'RescaleSlope', None), 1.0)
+                intercept = _safe_float(getattr(ds, 'RescaleIntercept', None), 0.0)
+                pixel_array = pixel_array * slope + intercept
         except Exception:
             pass
 
@@ -4748,8 +4762,13 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
                 pos = getattr(ds, 'ImagePositionPatient', None)
                 iop = getattr(ds, 'ImageOrientationPatient', None)
                 if iop is not None and len(iop) == 6:
-                    r = _np.array([float(iop[0]), float(iop[1]), float(iop[2])], dtype=_np.float64)
-                    c = _np.array([float(iop[3]), float(iop[4]), float(iop[5])], dtype=_np.float64)
+                    # Defensive: IOP can exist but contain None/empty entries in malformed studies.
+                    r = _np.array([
+                        _safe_float(iop[0], 1.0), _safe_float(iop[1], 0.0), _safe_float(iop[2], 0.0)
+                    ], dtype=_np.float64)
+                    c = _np.array([
+                        _safe_float(iop[3], 0.0), _safe_float(iop[4], 1.0), _safe_float(iop[5], 0.0)
+                    ], dtype=_np.float64)
                     n = _np.cross(r, c)
                     if normal is None:
                         normal = n / (_np.linalg.norm(n) + 1e-8)
@@ -4759,10 +4778,12 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
                         normal = n
 
                 if pos is not None and len(pos) == 3:
-                    p = _np.array([float(pos[0]), float(pos[1]), float(pos[2])], dtype=_np.float64)
+                    p = _np.array([
+                        _safe_float(pos[0], 0.0), _safe_float(pos[1], 0.0), _safe_float(pos[2], 0.0)
+                    ], dtype=_np.float64)
                     d = float(_np.dot(p, normal))
                 else:
-                    d = float(getattr(ds, 'SliceLocation', getattr(ds, 'InstanceNumber', 0)) or 0)
+                    d = _safe_float(getattr(ds, 'SliceLocation', getattr(ds, 'InstanceNumber', 0)), 0.0)
 
                 if rows is None:
                     try:
@@ -5482,8 +5503,9 @@ def _render_dicom_image_for_print(image_obj: DicomImage, *, window_width: float,
 
     # HU rescale if present
     try:
-        if hasattr(ds, 'RescaleSlope') and hasattr(ds, 'RescaleIntercept'):
-            px = px * float(getattr(ds, 'RescaleSlope', 1.0)) + float(getattr(ds, 'RescaleIntercept', 0.0))
+        slope = _safe_float(getattr(ds, 'RescaleSlope', None), 1.0)
+        intercept = _safe_float(getattr(ds, 'RescaleIntercept', None), 0.0)
+        px = px * slope + intercept
     except Exception:
         pass
 

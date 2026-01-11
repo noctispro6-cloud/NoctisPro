@@ -1951,6 +1951,10 @@
         let mprImages = { axial: null, sagittal: null, coronal: null };
         let mprIndices = { axial: 0, sagittal: 0, coronal: 0 };
         let mprCrosshair = { x: 0, y: 0, z: 0 };
+        // Crosshair rotation (visual) per plane, degrees.
+        // Note: true oblique MPR would require resampling the volume; for production safety we keep this
+        // as a UI/reference-line rotation only.
+        let mprCrosshairAngles = { axial: 0, sagittal: 0, coronal: 0 };
         let activePlane = 'axial';
         let volumeData = null;
         let volumeMetadata = null;
@@ -2775,6 +2779,9 @@
         }
 
         // Image Display Management
+        let _singleViewDisplayAbort = null;
+        let _singleViewDisplayReqId = 0;
+
         async function updateImageDisplay() {
             if (!images.length || currentImageIndex < 0 || currentImageIndex >= images.length) {
                 return;
@@ -2784,15 +2791,23 @@
             if (!currentImage) return;
             
             try {
-                // Show loading
-                showLoading('Processing image...');
+                const reqId = ++_singleViewDisplayReqId;
+                try { _singleViewDisplayAbort?.abort(); } catch (_) {}
+                _singleViewDisplayAbort = new AbortController();
+
+                // Show loading only if the fetch isn't instant (avoid flicker while scrolling).
+                let loadingTimer = setTimeout(() => {
+                    if (reqId === _singleViewDisplayReqId) showLoading('Processing image...');
+                }, 120);
                 
                 // Get processed image with current window/level settings
                 // Prefer a streamed PNG URL to avoid huge base64 payloads and to support color DICOMs.
                 const url = `/dicom-viewer/api/image/${currentImage.id}/display/?ww=${windowWidth}&wl=${windowLevel}&invert=${inverted}&return=url`;
                 
-                const response = await fetch(url, { credentials: 'same-origin' });
+                const response = await fetch(url, { credentials: 'same-origin', signal: _singleViewDisplayAbort.signal });
                 const data = await response.json();
+                clearTimeout(loadingTimer);
+                if (reqId !== _singleViewDisplayReqId) return; // stale
                 
                 const dicomImage = document.getElementById('dicomImage');
                 const dicomCanvas = document.getElementById('dicomCanvas');
@@ -2801,6 +2816,7 @@
                 if (srcUrl && dicomImage && dicomCanvas) {
                     // Attach handlers BEFORE setting src (cached loads can fire immediately).
                     dicomImage.onload = function() {
+                        if (reqId !== _singleViewDisplayReqId) return; // stale load
                         // Set modality attribute for CSS targeting
                         const modality = data.image_info?.modality || '';
                         if (modality) {
@@ -2820,16 +2836,33 @@
                         updateAnnotationOverlay();
                     };
                     dicomImage.onerror = function() {
+                        if (reqId !== _singleViewDisplayReqId) return;
                         hideLoading();
                         showToast('Failed to load rendered image', 'error');
                     };
                     dicomImage.src = srcUrl;
+
+                    // Prefetch adjacent slices (helps scrolling feel instant on slow networks).
+                    try {
+                        const prefetch = (idx) => {
+                            const imgObj = images[idx];
+                            if (!imgObj) return;
+                            const u = `/dicom-viewer/api/image/${imgObj.id}/render.png?ww=${encodeURIComponent(windowWidth)}&wl=${encodeURIComponent(windowLevel)}&invert=${encodeURIComponent(inverted)}`;
+                            const im = new Image();
+                            im.decoding = 'async';
+                            im.src = u;
+                        };
+                        if (currentImageIndex + 1 < images.length) prefetch(currentImageIndex + 1);
+                        if (currentImageIndex + 2 < images.length) prefetch(currentImageIndex + 2);
+                        if (currentImageIndex - 1 >= 0) prefetch(currentImageIndex - 1);
+                    } catch (_) {}
                 } else {
                     hideLoading();
                     showToast('Failed to load image', 'error');
                 }
                 
             } catch (error) {
+                if (error && error.name === 'AbortError') return;
                 hideLoading();
                 console.error('Error updating image display:', error);
                 showToast('Error loading image', 'error');
@@ -3626,7 +3659,12 @@
             try {
                 showLoading('Generating bone 3D reconstruction...');
                 
-                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/bone/?threshold=200&mesh=true&quality=normal`);
+                // Request a smoother, higher-detail mesh (fixes "lego" appearance) while still using
+                // backend caching for speed.
+                const response = await fetch(
+                    `/dicom-viewer/api/series/${currentSeries.id}/bone/?threshold=300&mesh=true&quality=high&smooth=true`,
+                    { credentials: 'same-origin' }
+                );
                 const data = await response.json();
                 
                 if (data.bone_views) {
@@ -3995,6 +4033,17 @@
                                 document.getElementById('zoomInfo').textContent = `Zoom: ${Math.round(newZoom * 100)}%`;
                             }
                         } else {
+                            // Shift+wheel: rotate crosshair reference lines (visual only)
+                            if (e.shiftKey) {
+                                const dir = e.deltaY > 0 ? 1 : -1;
+                                mprCrosshairAngles[plane] = (mprCrosshairAngles[plane] || 0) + (dir * 5);
+                                // Keep angles bounded
+                                if (mprCrosshairAngles[plane] > 180) mprCrosshairAngles[plane] -= 360;
+                                if (mprCrosshairAngles[plane] < -180) mprCrosshairAngles[plane] += 360;
+                                updateCrosshairDisplay();
+                                showToast(`${plane.toUpperCase()} crosshair: ${mprCrosshairAngles[plane]}°`, 'info', 800);
+                                return;
+                            }
                             // Slice navigation for this plane
                             // Keep sagittal/coronal behavior unchanged, but invert axial so it can scroll up to slice 0
                             // on systems where wheel/touchpad direction is reported opposite of expectation.
@@ -4070,17 +4119,24 @@
                 
                 const hLine = crosshair.querySelector('.crosshair-line-h-mpr');
                 const vLine = crosshair.querySelector('.crosshair-line-v-mpr');
+                const ang = Number(mprCrosshairAngles && mprCrosshairAngles[plane]) || 0;
                 
                 if (plane === 'axial') {
                     if (hLine) hLine.style.top = `${mprCrosshair.y}%`;
                     if (vLine) vLine.style.left = `${mprCrosshair.x}%`;
+                    crosshair.style.transformOrigin = `${mprCrosshair.x}% ${mprCrosshair.y}%`;
                 } else if (plane === 'sagittal') {
                     if (hLine) hLine.style.top = `${100 - mprCrosshair.z}%`;
                     if (vLine) vLine.style.left = `${mprCrosshair.y}%`;
+                    crosshair.style.transformOrigin = `${mprCrosshair.y}% ${100 - mprCrosshair.z}%`;
                 } else if (plane === 'coronal') {
                     if (hLine) hLine.style.top = `${100 - mprCrosshair.z}%`;
                     if (vLine) vLine.style.left = `${mprCrosshair.x}%`;
+                    crosshair.style.transformOrigin = `${mprCrosshair.x}% ${100 - mprCrosshair.z}%`;
                 }
+
+                // Apply rotation (UI-only)
+                crosshair.style.transform = ang ? `rotate(${ang}deg)` : 'none';
             });
         }
 
@@ -4144,49 +4200,27 @@
                     return;
                 }
             }
-            
-            // Add to queue if not priority
-            if (!priority && isLoadingMPRSlice) {
-                mprSliceQueue.push({ plane, sliceIndex, cacheKey });
-                return;
-            }
-            
+
+            // Prefer the binary PNG slice endpoint for speed and reliability (especially on poor networks).
+            // This avoids huge base64 JSON payloads and lets the browser HTTP cache do its job.
             try {
-                isLoadingMPRSlice = true;
-                
-                const response = await fetch(
-                    `/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=${plane}&slice=${sliceIndex}&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`
-                );
-                const data = await response.json();
-                
-                if (data.image) {
-                    // Cache the image for future use
-                    mprSliceCache.set(cacheKey, data.image);
-                    
-                    // Limit cache size to prevent memory issues
-                    if (mprSliceCache.size > 200) {
-                        const firstKey = mprSliceCache.keys().next().value;
-                        mprSliceCache.delete(firstKey);
-                    }
-                    
-                    const img = document.getElementById(`mpr${plane.charAt(0).toUpperCase() + plane.slice(1)}`);
-                    if (img) {
-                        img.src = data.image;
-                        img.onload = () => applyMPRViewportTransform(plane);
-                    }
+                const qs = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}&quality=high`;
+                const url = `/dicom-viewer/api/mpr-slice/${currentSeries.id}/${plane}/${sliceIndex}/?${qs}`;
+
+                // Cache URL string (browser will cache the actual bytes).
+                mprSliceCache.set(cacheKey, url);
+                if (mprSliceCache.size > 500) {
+                    const firstKey = mprSliceCache.keys().next().value;
+                    mprSliceCache.delete(firstKey);
                 }
-                
-                isLoadingMPRSlice = false;
-                
-                // Process queue
-                if (mprSliceQueue.length > 0) {
-                    const next = mprSliceQueue.shift();
-                    setTimeout(() => loadMPRSlice(next.plane, next.sliceIndex, false), 10);
+
+                const img = document.getElementById(`mpr${plane.charAt(0).toUpperCase() + plane.slice(1)}`);
+                if (img) {
+                    img.src = url;
+                    img.onload = () => applyMPRViewportTransform(plane);
                 }
-                
             } catch (error) {
                 console.error(`Error loading ${plane} slice ${sliceIndex}:`, error);
-                isLoadingMPRSlice = false;
             }
         }
 

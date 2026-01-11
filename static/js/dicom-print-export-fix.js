@@ -30,55 +30,118 @@
         {id: 'nine', name: '9 Images per Page', cols: 3, rows: 3}
     ];
     
+    // ---- Helpers ----
+    function _getPrimaryCanvas() {
+        return (
+            document.getElementById('dicomCanvas') ||
+            document.querySelector('#dicom-canvas') ||
+            document.querySelector('canvas.dicom-canvas') ||
+            document.querySelector('canvas')
+        );
+    }
+
+    function _parsePatientInfoText(text) {
+        const info = {};
+        const t = String(text || '').trim();
+        // Example from viewer: "Patient: X | Study Date: Y | Modality: Z"
+        const parts = t.split('|').map(s => s.trim());
+        for (const p of parts) {
+            if (p.toLowerCase().startsWith('patient:')) info.name = p.split(':').slice(1).join(':').trim();
+            if (p.toLowerCase().startsWith('study date:')) info.studyDate = p.split(':').slice(1).join(':').trim();
+            if (p.toLowerCase().startsWith('modality:')) info.modality = p.split(':').slice(1).join(':').trim();
+        }
+        return info;
+    }
+
+    function _safeText(v) {
+        const s = (v === null || v === undefined) ? '' : String(v);
+        return s.replace(/\s+/g, ' ').trim();
+    }
+
+    function _getExportScale(quality) {
+        const q = String(quality || 'high').toLowerCase();
+        if (q === 'low') return 1.0;
+        if (q === 'medium') return 1.5;
+        return 2.0; // high
+    }
+
     // Enhanced export with patient details
-    function exportImageWithDetails(format = 'jpeg') {
-        const canvas = document.querySelector('#dicom-canvas') || 
-                      document.querySelector('canvas') ||
-                      document.querySelector('#viewport canvas');
+    function exportImageWithDetails(format = 'jpeg', options = {}) {
+        const canvas = _getPrimaryCanvas();
         
         if (!canvas) {
             alert('No image to export');
             return;
         }
         
-        // Get patient details
+        const opts = {
+            includePatientInfo: options.includePatientInfo !== false,
+            includeMeasurements: options.includeMeasurements !== false,
+            includeAnnotations: options.includeAnnotations !== false,
+            quality: options.quality || 'high',
+        };
+
+        // Get patient details (best-effort; never block export)
         const patientInfo = getPatientInfo();
         
         // Create enhanced canvas with patient details
         const exportCanvas = document.createElement('canvas');
         const ctx = exportCanvas.getContext('2d');
         
-        // Set canvas size (add space for patient info)
-        const margin = 100;
-        exportCanvas.width = canvas.width + (margin * 2);
-        exportCanvas.height = canvas.height + (margin * 3);
+        const scale = _getExportScale(opts.quality);
+        const margin = Math.round(80 * scale);
+        const headerH = opts.includePatientInfo ? Math.round(140 * scale) : Math.round(40 * scale);
+        const footerH = Math.round(40 * scale);
+
+        exportCanvas.width = Math.round(canvas.width * scale) + (margin * 2);
+        exportCanvas.height = Math.round(canvas.height * scale) + headerH + footerH + margin;
         
         // White background
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
         
-        // Add patient information header
-        ctx.fillStyle = 'black';
-        ctx.font = 'bold 16px Arial';
-        let y = 30;
-        
-        ctx.fillText(`Patient: ${patientInfo.name || 'Unknown'}`, margin, y);
-        y += 25;
-        ctx.fillText(`ID: ${patientInfo.id || 'N/A'}`, margin, y);
-        y += 25;
-        ctx.fillText(`Study Date: ${patientInfo.studyDate || 'N/A'}`, margin, y);
-        y += 25;
-        ctx.fillText(`Modality: ${patientInfo.modality || 'N/A'}`, margin, y);
-        y += 25;
-        
-        // Add the DICOM image
-        ctx.drawImage(canvas, margin, y + 20);
+        let y = margin;
+
+        // Header (patient/study info)
+        if (opts.includePatientInfo) {
+            ctx.fillStyle = 'black';
+            ctx.font = `bold ${Math.round(18 * scale)}px Arial`;
+            ctx.fillText(`Patient: ${_safeText(patientInfo.name) || 'Unknown'}`, margin, y);
+            y += Math.round(26 * scale);
+
+            ctx.font = `bold ${Math.round(16 * scale)}px Arial`;
+            ctx.fillText(`Patient ID: ${_safeText(patientInfo.id) || 'N/A'}`, margin, y);
+            y += Math.round(24 * scale);
+
+            ctx.fillText(`Accession: ${_safeText(patientInfo.accession) || 'N/A'}`, margin, y);
+            y += Math.round(24 * scale);
+
+            ctx.fillText(`Study Date: ${_safeText(patientInfo.studyDate) || 'N/A'}   Modality: ${_safeText(patientInfo.modality) || 'N/A'}`, margin, y);
+            y += Math.round(18 * scale);
+        }
+
+        // Divider line
+        ctx.strokeStyle = '#000';
+        ctx.globalAlpha = 0.25;
+        ctx.beginPath();
+        ctx.moveTo(margin, y);
+        ctx.lineTo(exportCanvas.width - margin, y);
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+        y += Math.round(20 * scale);
+
+        // Image
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(canvas, margin, y, Math.round(canvas.width * scale), Math.round(canvas.height * scale));
         
         // Add footer with export info
-        const footerY = exportCanvas.height - 20;
-        ctx.font = '12px Arial';
+        const footerY = exportCanvas.height - Math.round(18 * scale);
+        ctx.fillStyle = 'black';
+        ctx.font = `${Math.round(12 * scale)}px Arial`;
         ctx.fillText(`Exported: ${new Date().toLocaleString()}`, margin, footerY);
-        ctx.fillText(`Facility: ${patientInfo.facility || 'Noctis Pro'}`, exportCanvas.width - 200, footerY);
+        const facilityText = `Facility: ${_safeText(patientInfo.facility) || 'Noctis Pro'}`;
+        ctx.fillText(facilityText, exportCanvas.width - margin - ctx.measureText(facilityText).width, footerY);
         
         // Export based on format
         if (format === 'pdf') {
@@ -89,12 +152,11 @@
     }
     
     function exportToPDF(canvas, patientInfo) {
-        // Convert canvas to image data
-        const imgData = canvas.toDataURL('image/jpeg', 0.95);
-        
-        // Create a link to download
+        // Minimal, dependency-free fallback: export as a high-quality PNG even if "PDF" was selected.
+        // (True PDF generation would require a library or server-side render.)
+        const imgData = canvas.toDataURL('image/png');
         const link = document.createElement('a');
-        link.download = `${patientInfo.name || 'patient'}_${patientInfo.id || 'unknown'}_${Date.now()}.jpg`;
+        link.download = `${patientInfo.name || 'patient'}_${patientInfo.id || 'unknown'}_${Date.now()}.png`;
         link.href = imgData;
         link.click();
     }
@@ -114,13 +176,33 @@
         const info = {};
         
         // Try to get from various sources
-        const patientNameEl = document.querySelector('.patient-name') || 
+        const patientNameEl = document.querySelector('.patient-name') ||
                              document.querySelector('[data-patient-name]') ||
+                             document.getElementById('patientInfo') ||
                              document.querySelector('.patient-info');
         
         if (patientNameEl) {
-            info.name = patientNameEl.textContent || patientNameEl.dataset.patientName;
+            const txt = patientNameEl.textContent || patientNameEl.dataset.patientName;
+            Object.assign(info, _parsePatientInfoText(txt));
+            // If it was only a name element, keep that too.
+            if (!info.name) info.name = txt;
         }
+
+        // Prefer structured globals if available
+        try {
+            if (window.currentStudy) {
+                // currentStudy shape varies; pick common keys.
+                info.name = info.name || window.currentStudy.patient_name || window.currentStudy.patientName;
+                info.id = info.id || window.currentStudy.patient_id || window.currentStudy.patientId;
+                info.accession = info.accession || window.currentStudy.accession_number || window.currentStudy.accessionNumber;
+                info.studyDate = info.studyDate || window.currentStudy.study_date || window.currentStudy.studyDate;
+                info.modality = info.modality || window.currentStudy.modality;
+                info.facility = info.facility || (window.currentStudy.facility && window.currentStudy.facility.name) || window.currentStudy.facility_name;
+            }
+            if (window.currentSeries) {
+                info.modality = info.modality || window.currentSeries.modality;
+            }
+        } catch (_) {}
         
         // Get from global variables if available
         if (window.currentPatient) {
@@ -184,6 +266,57 @@
     window.exportImageWithDetails = exportImageWithDetails;
     window.printWithLayout = printWithLayout;
     window.detectPrinters = detectPrinters;
+    window.printDicomImage = function() {
+        // Simple, reliable print path: render a high-quality page in a new window and call print().
+        const canvas = _getPrimaryCanvas();
+        if (!canvas) {
+            alert('No image to print');
+            return;
+        }
+        const patientInfo = getPatientInfo();
+        const imgUrl = canvas.toDataURL('image/png');
+
+        const w = window.open('', '_blank');
+        if (!w) {
+            alert('Popup blocked. Please allow popups to print.');
+            return;
+        }
+        const title = `DICOM Print - ${_safeText(patientInfo.name) || 'Patient'}`;
+        w.document.open();
+        w.document.write(`
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${title}</title>
+  <style>
+    @page { margin: 12mm; }
+    body { font-family: Arial, sans-serif; color: #000; }
+    .hdr { margin-bottom: 8mm; }
+    .hdr .row { display:flex; justify-content:space-between; gap: 16px; font-size: 12pt; }
+    .img { width: 100%; }
+    .img img { width: 100%; height: auto; display:block; }
+    .ft { margin-top: 6mm; font-size: 10pt; display:flex; justify-content:space-between; }
+  </style>
+</head>
+<body>
+  <div class="hdr">
+    <div class="row"><strong>Patient:</strong> ${_safeText(patientInfo.name) || 'Unknown'} <span><strong>Patient ID:</strong> ${_safeText(patientInfo.id) || 'N/A'}</span></div>
+    <div class="row"><span><strong>Accession:</strong> ${_safeText(patientInfo.accession) || 'N/A'}</span><span><strong>Study Date:</strong> ${_safeText(patientInfo.studyDate) || 'N/A'}</span></div>
+    <div class="row"><span><strong>Modality:</strong> ${_safeText(patientInfo.modality) || 'N/A'}</span><span><strong>Facility:</strong> ${_safeText(patientInfo.facility) || 'Noctis Pro'}</span></div>
+  </div>
+  <div class="img"><img src="${imgUrl}" alt="DICOM image"></div>
+  <div class="ft"><span>Printed: ${new Date().toLocaleString()}</span><span>Noctis Pro</span></div>
+  <script>
+    window.onload = function() {
+      setTimeout(function() { window.print(); }, 250);
+    };
+  </script>
+</body>
+</html>
+        `);
+        w.document.close();
+    };
     
     // Override existing export function
     window.exportImage = () => exportImageWithDetails('jpeg');

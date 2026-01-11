@@ -2366,7 +2366,12 @@
         let _imageLoadSeq = 0;
         let _scheduledLoadRaf = null;
         let _scheduledLoadIndex = null;
+        let _scheduledLoadOpts = null;
         let _prefetchTimer = null;
+        // Wheel scrubbing: during fast scroll, show lightweight server-rendered preview frames
+        // and only load raw pixel payload for the final resting slice.
+        let _lastWheelAt = 0;
+        let _scrubIdleTimer = null;
 
         function _cacheGetPayload(imageId) {
             const key = String(imageId);
@@ -2553,6 +2558,42 @@
             return `${String(imageId)}|ww:${Math.round(Number(windowWidth) || 0)}|wl:${Math.round(Number(windowLevel) || 0)}|inv:${inv}`;
         }
 
+        // Fast-path server render: avoid the JSON `display/` round-trip during wheel scrubbing.
+        // Uses `render.png` directly (user-invert only; MONOCHROME1 auto-invert is handled by full loads).
+        async function _loadServerRenderedFrameFast(imageId, { quiet = false } = {}) {
+            const id = String(imageId);
+            const params = new URLSearchParams();
+            const ww = Number(windowWidth);
+            const wl = Number(windowLevel);
+            if (Number.isFinite(ww) && Number.isFinite(wl) && ww > 0) {
+                params.set('ww', String(ww));
+                params.set('wl', String(wl));
+            }
+            params.set('invert', inverted ? 'true' : 'false');
+            try {
+                if (Number(currentFrameIndex || 0) > 0) params.set('frame', String(Number(currentFrameIndex || 0)));
+            } catch (e) {}
+
+            const srcUrl = `/dicom-viewer/api/image/${encodeURIComponent(id)}/render.png?${params.toString()}`;
+            const img = new Image();
+            try { img.decoding = 'async'; } catch (e) {}
+            img.src = srcUrl;
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+            });
+
+            _serverRendered.enabled = true;
+            _serverRendered.imageId = id;
+            _serverRendered.image = img;
+            _serverRendered.dataUrl = srcUrl;
+            _serverRendered.info = null;
+            _serverRendered.key = _serverRenderKey(id, null);
+
+            if (!quiet) showToast('Preview (server-rendered)', 'info', 900);
+            redrawCurrentImage();
+        }
+
         async function _loadServerRenderedFrame(imageId, { quiet = false } = {}) {
             const id = String(imageId);
             const params = new URLSearchParams();
@@ -2715,10 +2756,11 @@
             total.textContent = String(n);
         }
 
-        function scheduleLoadCurrentImage(index = currentImageIndex) {
+        function scheduleLoadCurrentImage(index = currentImageIndex, opts = null) {
             if (!imageData || !imageData.length) return;
             const clamped = Math.max(0, Math.min(imageData.length - 1, Number(index) || 0));
             _scheduledLoadIndex = clamped;
+            _scheduledLoadOpts = opts || null;
 
             // Update UI immediately (feels responsive) even if the load is coalesced.
             currentImageIndex = clamped;
@@ -2734,17 +2776,39 @@
                 _scheduledLoadRaf = null;
                 const idx = _scheduledLoadIndex;
                 _scheduledLoadIndex = null;
-                await loadCurrentImage(idx);
+                const o = _scheduledLoadOpts;
+                _scheduledLoadOpts = null;
+                await loadCurrentImage(idx, o || {});
             });
         }
 
-        async function loadCurrentImage(index = currentImageIndex) {
+        async function loadCurrentImage(index = currentImageIndex, opts = {}) {
             if (!imageData || !imageData.length) return;
             const idx = Math.max(0, Math.min(imageData.length - 1, Number(index) || 0));
             const entry = imageData[idx];
             if (!entry) return;
 
             const imageId = entry.id;
+            const fastPreview = !!(opts && opts.fastPreview);
+            const forceFull = !!(opts && opts.forceFull);
+
+            // During wheel scrubbing, show a quick PNG preview (no raw-pixel payload).
+            if (fastPreview && !forceFull) {
+                // Abort any in-flight raw pixel fetch (we're only previewing).
+                try { _imageLoadAbortController?.abort(); } catch (e) {}
+                _imageLoadAbortController = null;
+                // Keep UI responsive without spamming loaders.
+                try { showLoading(false); } catch (e) {}
+                try {
+                    await _loadServerRenderedFrameFast(imageId, { quiet: true });
+                    _scheduleMPRRefresh();
+                } catch (e) {
+                    // Fall back to the full (correctness-first) server render if direct render fails.
+                    _loadServerRenderedFrame(imageId, { quiet: true }).catch(() => {});
+                }
+                return;
+            }
+
             const cacheHit = _cacheGetPayload(imageId);
             if (cacheHit && cacheHit.pixel_data) {
                 _resetServerRendered();
@@ -3347,9 +3411,31 @@
                 updateZoomSlider();
                 redrawCurrentImage();
             } else {
-                // Slice navigation
-                const direction = event.deltaY > 0 ? 1 : -1;
-                changeSlice(currentImageIndex + direction);
+                // Slice navigation (throttled + multi-step).
+                const now = Date.now();
+                const scrubbing = (now - _lastWheelAt) < 120;
+                _lastWheelAt = now;
+
+                // Convert large wheel deltas into multi-slice steps (trackpads can be very "chatty").
+                const d = Number(event.deltaY) || 0;
+                const steps = Math.max(1, Math.round(Math.abs(d) / 60));
+                const direction = d > 0 ? 1 : -1;
+                const target = currentImageIndex + (direction * steps);
+
+                scheduleLoadCurrentImage(target, { fastPreview: scrubbing });
+
+                // When the user stops scrolling, load the raw pixel payload for the final resting slice
+                // (enables accurate measurements/HU without making scrolling feel heavy).
+                if (_scrubIdleTimer) {
+                    try { clearTimeout(_scrubIdleTimer); } catch (e) {}
+                }
+                _scrubIdleTimer = setTimeout(() => {
+                    _scrubIdleTimer = null;
+                    const id = imageData && imageData[currentImageIndex] ? imageData[currentImageIndex].id : null;
+                    if (!id) return;
+                    // Force full load for the current slice.
+                    loadCurrentImage(currentImageIndex, { forceFull: true }).catch(() => {});
+                }, 180);
             }
         }
 

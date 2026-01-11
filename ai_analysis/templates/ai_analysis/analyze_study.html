@@ -263,13 +263,16 @@
         if (!details || !data) return;
 
         if (data.status === 'completed') {
+            const reportText = data.report_text || (data.report && data.report.text) || '';
             const findings = data.findings || '';
             const conf = (data.confidence_score !== null && data.confidence_score !== undefined) ? data.confidence_score : '';
             details.innerHTML = '';
             if (conf !== '') {
                 details.innerHTML += `<div class="muted">Confidence: <strong>${conf}</strong></div>`;
             }
-            if (findings) {
+            if (reportText) {
+                details.innerHTML += `<pre>${reportText}</pre>`;
+            } else if (findings) {
                 details.innerHTML += `<pre>${findings}</pre>`;
             }
         } else if (data.status === 'failed') {

@@ -4861,22 +4861,11 @@
             const dx = Math.round(centerX - dw / 2);
             const dy = Math.round(centerY - dh / 2);
 
-            // 360° MPR rotation: rotate the image + pixel-space overlays around the crosshair intersection.
-            // This matches the expected "rotate MPR" behavior (not just rotating the overlay lines).
-            const rotDeg = (viewMode === 'mpr' && crosshair && mprCrosshairVoxel) ? _normalizeDeg(Number(crosshairRotation) || 0) : 0;
-            let pivotX = dx + dw / 2;
-            let pivotY = dy + dh / 2;
-            if (rotDeg && crosshair && mprCrosshairVoxel) {
-                const ch = _mprCrosshairCanvasPointForPlane(plane);
-                if (ch && isFinite(ch.x) && isFinite(ch.y)) {
-                    pivotX = ch.x;
-                    pivotY = ch.y;
-                }
-            }
-
-            // Update live renderMeta so HU/ROI mapping uses the post-transform rectangle.
+            // IMPORTANT:
+            // Crosshair "360° rotation" must rotate ONLY the crosshair overlay, not the MPR slice pixels.
+            // So we do not rotate the canvas/image here; drawMPRCrosshair() uses crosshairRotation.
             if (mprState && mprState.renderMeta) {
-                mprState.renderMeta[plane] = { w, h, dx, dy, dw, dh, rotDeg, pivotX, pivotY };
+                mprState.renderMeta[plane] = { w, h, dx, dy, dw, dh };
             }
             ctx.clearRect(0, 0, c.width, c.height);
             // Render MPR with high-quality interpolation for better perceived clarity.
@@ -4886,11 +4875,6 @@
             ctx.imageSmoothingEnabled = Math.abs(s - 1) > 0.01;
             try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
             ctx.save();
-            if (rotDeg) {
-                ctx.translate(pivotX, pivotY);
-                ctx.rotate((rotDeg * Math.PI) / 180);
-                ctx.translate(-pivotX, -pivotY);
-            }
             ctx.drawImage(img, dx, dy, dw, dh);
 
             // ROI draft overlay (if any)
@@ -5288,25 +5272,10 @@
             const { w, h, dx, dy, dw, dh } = meta;
             if (!dw || !dh) return null;
 
-            // If MPR content is rotated, undo rotation before mapping to slice pixels.
-            let tx = canvasX;
-            let ty = canvasY;
-            const rotDeg = Number(meta.rotDeg || 0);
-            const pivotX = Number(meta.pivotX);
-            const pivotY = Number(meta.pivotY);
-            if (rotDeg && isFinite(pivotX) && isFinite(pivotY)) {
-                const a = (-rotDeg * Math.PI) / 180;
-                const ca = Math.cos(a);
-                const sa = Math.sin(a);
-                const px = tx - pivotX;
-                const py = ty - pivotY;
-                tx = pivotX + (px * ca - py * sa);
-                ty = pivotY + (px * sa + py * ca);
-            }
-
-            if (tx < dx || ty < dy || tx > dx + dw || ty > dy + dh) return null;
-            const x = (tx - dx) * (w / dw);
-            const y = (ty - dy) * (h / dh);
+            // MPR pixels are not rotated; map canvas coords directly into slice pixel coords.
+            if (canvasX < dx || canvasY < dy || canvasX > dx + dw || canvasY > dy + dh) return null;
+            const x = (canvasX - dx) * (w / dw);
+            const y = (canvasY - dy) * (h / dh);
             return { x, y, ix: Math.floor(x), iy: Math.floor(y), w, h };
         }
 

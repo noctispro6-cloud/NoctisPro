@@ -740,6 +740,89 @@ document.addEventListener('DOMContentLoaded', function() {
     const facilitySelect = document.getElementById('facilitySelect');
     const assignToMe = document.getElementById('assignToMe');
 
+    // Keyboard shortcuts (upload page)
+    // Avoid system/browser-reserved shortcuts like Ctrl+O / Ctrl+P.
+    // - U: Choose files
+    // - F: Choose folder
+    // - ?: Toggle shortcut help
+    document.addEventListener('keydown', (e) => {
+        // Don't steal keystrokes while the user is typing.
+        const ae = document.activeElement;
+        const tag = (ae && ae.tagName) ? ae.tagName.toUpperCase() : '';
+        const isTyping = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (ae && ae.isContentEditable));
+        if (isTyping) return;
+
+        // Don't trigger while an upload is in progress.
+        if (isUploading) return;
+
+        // Toggle on-screen shortcut help (Shift+/ => '?')
+        if (e.key === '?') {
+            e.preventDefault();
+            try {
+                const id = 'noctisUploadShortcutHelp';
+                let el = document.getElementById(id);
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = id;
+                    el.style.cssText = `
+                        position: fixed;
+                        right: 16px;
+                        bottom: 56px;
+                        z-index: 20000;
+                        background: rgba(0,0,0,0.88);
+                        border: 1px solid var(--border-color, #404040);
+                        border-left: 3px solid var(--accent-color, #00d4ff);
+                        border-radius: 10px;
+                        padding: 12px 14px;
+                        width: min(360px, calc(100vw - 32px));
+                        color: var(--text-primary, #fff);
+                        font-size: 12px;
+                        line-height: 1.5;
+                        backdrop-filter: blur(6px);
+                    `;
+                    el.innerHTML = `
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
+                            <strong>Upload shortcuts</strong>
+                            <button type="button" aria-label="Close"
+                                style="background:transparent;border:1px solid var(--border-color,#404040);color:var(--text-secondary,#b3b3b3);border-radius:8px;padding:2px 8px;cursor:pointer"
+                                onclick="this.parentElement.parentElement.remove()">Esc</button>
+                        </div>
+                        <div><strong>U</strong> Choose files</div>
+                        <div><strong>F</strong> Choose folder</div>
+                        <div style="margin-top:6px;color:var(--text-muted,#888)">Press <strong>?</strong> again to hide.</div>
+                    `;
+                    document.body.appendChild(el);
+                } else {
+                    el.remove();
+                }
+            } catch (_) {}
+            return;
+        }
+
+        // Close shortcut help if open
+        if (e.key === 'Escape') {
+            try {
+                const el = document.getElementById('noctisUploadShortcutHelp');
+                if (el) { el.remove(); e.preventDefault(); }
+            } catch (_) {}
+            return;
+        }
+
+        // U => choose files
+        if (e.key === 'u' || e.key === 'U') {
+            e.preventDefault();
+            try { fileInputFiles.click(); } catch (_) {}
+            return;
+        }
+
+        // F => choose folder
+        if (e.key === 'f' || e.key === 'F') {
+            e.preventDefault();
+            try { fileInputFolder.click(); } catch (_) {}
+            return;
+        }
+    }, true);
+
     // Click to browse - prevent multiple triggers
     chooseFilesBtn.addEventListener('click', (e) => {
         e.preventDefault();

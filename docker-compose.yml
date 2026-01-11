@@ -79,7 +79,7 @@ services:
       [
         "bash",
         "-lc",
-        "WORKERS=\"${CELERY_CONCURRENCY:-}\"; if [ -z \"$WORKERS\" ]; then WORKERS=\"$(python3 /app/tools/auto_concurrency.py celery)\"; fi; exec celery -A noctis_pro worker -l info --concurrency \"$WORKERS\"",
+        "WORKERS=\"${CELERY_CONCURRENCY:-}\"; if [ -z \"$WORKERS\" ]; then WORKERS=\"$(python3 /app/tools/auto_concurrency.py celery 2>/dev/null || true)\"; fi; case \"$WORKERS\" in (''|*[!0-9]*) WORKERS=1 ;; esac; exec celery -A noctis_pro worker -l info --concurrency \"$WORKERS\"",
       ]
     depends_on:
       db:

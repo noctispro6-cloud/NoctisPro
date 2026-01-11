@@ -3267,12 +3267,20 @@
                 if (!imgEl) return false;
                 imgEl.decoding = 'async';
                 // Use binary PNG endpoint to avoid large base64 JSON responses.
-                imgEl.src = _mprSliceUrl(currentSeries.id, plane, idx, 'fast');
+                //
+                // IMPORTANT:
+                // Once we have switched the UI into "high-quality count space" (hqReady=true),
+                // we must request HIGH quality slices. Otherwise we would be asking the server
+                // for fast slices with indices that may exceed the fast-volume bounds (fast and
+                // high can have different axial counts when Z is upsampled), which makes it look
+                // like you "can't reach the top slice".
+                const baseQuality = (_mprState.hqReady === true) ? 'high' : 'fast';
+                imgEl.src = _mprSliceUrl(currentSeries.id, plane, idx, baseQuality);
 
                 // Upgrade to high quality after scroll settles (best-effort).
                 // Only do this once we know high-quality counts/indices are active; otherwise the same
                 // numeric index can map to only a subset of the high-quality (Z-upsampled) volume.
-                if (_mprState.hqReady === true) {
+                if (_mprState.hqReady !== true) {
                     try {
                         window.__noctis_mpr_hq_timers = window.__noctis_mpr_hq_timers || { axial: null, sagittal: null, coronal: null };
                         if (window.__noctis_mpr_hq_timers[plane]) clearTimeout(window.__noctis_mpr_hq_timers[plane]);

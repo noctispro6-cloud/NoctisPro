@@ -435,8 +435,10 @@ class DicomProcessor:
         """Convert pixel values to Hounsfield Units using DICOM rescale parameters"""
         try:
             # Get rescale parameters
-            slope = float(getattr(dicom_data, 'RescaleSlope', 1.0))
-            intercept = float(getattr(dicom_data, 'RescaleIntercept', 0.0))
+            slope_attr = getattr(dicom_data, 'RescaleSlope', None)
+            intercept_attr = getattr(dicom_data, 'RescaleIntercept', None)
+            slope = float(slope_attr) if slope_attr not in (None, "") else 1.0
+            intercept = float(intercept_attr) if intercept_attr not in (None, "") else 0.0
             
             # Convert to HU
             hu_array = pixel_array.astype(np.float32) * slope + intercept

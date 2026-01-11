@@ -4626,15 +4626,69 @@
                 if (mprQuality === 'high') return;
                 if (!currentSeries || !mprState) return;
 
+                const _remapIdx = (idx, fromCount, toCount) => {
+                    const a = Number(fromCount) || 0;
+                    const b = Number(toCount) || 0;
+                    const i = Number(idx) || 0;
+                    if (a <= 1 || b <= 1) return Math.max(0, Math.min(b - 1, Math.round(i)));
+                    const t = Math.max(0, Math.min(1, i / (a - 1)));
+                    return Math.max(0, Math.min(b - 1, Math.round(t * (b - 1))));
+                };
+
+                const prevCounts = {
+                    axial: Number((mprState.counts && mprState.counts.axial) || 0),
+                    sagittal: Number((mprState.counts && mprState.counts.sagittal) || 0),
+                    coronal: Number((mprState.counts && mprState.counts.coronal) || 0),
+                };
+
+                // IMPORTANT: "high" quality may upsample Z, which can change the axial slice count.
+                // If we don't refresh counts here, wheel/scroll clamps early (looks like axial "refuses" to scroll).
+                try {
+                    const metaUrl = `/dicom-viewer/api/series/${encodeURIComponent(currentSeries.id)}/mpr/?${qsBase}&quality=high&meta_only=1`;
+                    const metaResp = await fetch(metaUrl, { credentials: 'same-origin' });
+                    const meta = await metaResp.json();
+                    if (metaResp.ok) {
+                        const c = (meta && meta.counts) || {};
+                        const nextCounts = {
+                            axial: Number(c.axial || 0),
+                            sagittal: Number(c.sagittal || 0),
+                            coronal: Number(c.coronal || 0),
+                        };
+                        if (nextCounts.axial > 0 && nextCounts.sagittal > 0 && nextCounts.coronal > 0) {
+                            // Remap current indices proportionally so we stay at the same relative position.
+                            const curIdx = {
+                                axial: Number(mprState.index.axial || 0),
+                                sagittal: Number(mprState.index.sagittal || 0),
+                                coronal: Number(mprState.index.coronal || 0),
+                            };
+                            mprState.counts.axial = nextCounts.axial;
+                            mprState.counts.sagittal = nextCounts.sagittal;
+                            mprState.counts.coronal = nextCounts.coronal;
+                            mprState.index.axial = _remapIdx(curIdx.axial, prevCounts.axial, nextCounts.axial);
+                            mprState.index.sagittal = _remapIdx(curIdx.sagittal, prevCounts.sagittal, nextCounts.sagittal);
+                            mprState.index.coronal = _remapIdx(curIdx.coronal, prevCounts.coronal, nextCounts.coronal);
+
+                            if (mprCrosshairVoxel) {
+                                mprCrosshairVoxel = {
+                                    x: _remapIdx(Number(mprCrosshairVoxel.x || 0), prevCounts.sagittal, nextCounts.sagittal),
+                                    y: _remapIdx(Number(mprCrosshairVoxel.y || 0), prevCounts.coronal, nextCounts.coronal),
+                                    z: _remapIdx(Number(mprCrosshairVoxel.z || 0), prevCounts.axial, nextCounts.axial),
+                                };
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Best-effort; counts refresh failure should not block upgrade.
+                }
+
+                // Upgrade using the binary PNG endpoint (same pixels, less JSON/base64 overhead).
+                // Only swap if the user hasn't moved away from the target slice.
+                mprQuality = 'high';
                 const target = {
                     axial: mprState.index.axial || 0,
                     sagittal: mprState.index.sagittal || 0,
                     coronal: mprState.index.coronal || 0,
                 };
-
-                // Upgrade using the binary PNG endpoint (same pixels, less JSON/base64 overhead).
-                // Only swap if the user hasn't moved away from the target slice.
-                mprQuality = 'high';
                 const mkUrl = (plane, idx) => {
                     return `/dicom-viewer/api/mpr-slice/${encodeURIComponent(currentSeries.id)}/${encodeURIComponent(plane)}/${encodeURIComponent(idx)}/?${qsBase}&quality=high`;
                 };

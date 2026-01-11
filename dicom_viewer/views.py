@@ -42,6 +42,37 @@ from .models import WindowLevelPreset, HangingProtocol
 logger = logging.getLogger(__name__)
 
 
+def _safe_float(value, default: float) -> float:
+    """Best-effort float conversion for DICOM tags (handles None / MultiValue)."""
+    try:
+        if value is None or value == "":
+            return float(default)
+        # Some DICOM tags can be MultiValue-like; use the first element.
+        if hasattr(value, "__iter__") and not isinstance(value, (str, bytes)):
+            try:
+                value = value[0]
+            except Exception:
+                pass
+        if value is None or value == "":
+            return float(default)
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _safe_int_query(request, key: str, default=None):
+    """Parse int from query params, returning default on missing/invalid."""
+    try:
+        if request is None:
+            return default
+        raw = request.GET.get(key)
+        if raw is None or raw == "":
+            return default
+        return int(float(raw))
+    except Exception:
+        return default
+
+
 def _get_requested_frame_index(request, *, default_index: int = 0) -> int:
     """
     Parse a frame selector from query params.
@@ -2670,8 +2701,8 @@ def api_hounsfield_units(request):
                 raw_value = int(pixel_array[y, x])
                 
                 # Apply rescale slope and intercept to get Hounsfield units
-                slope = float(getattr(ds, 'RescaleSlope', 1.0))
-                intercept = float(getattr(ds, 'RescaleIntercept', 0.0))
+                slope = _safe_float(getattr(ds, 'RescaleSlope', None), 1.0)
+                intercept = _safe_float(getattr(ds, 'RescaleIntercept', None), 0.0)
                 hu_value = raw_value * slope + intercept
                 
                 result = {
@@ -4206,10 +4237,10 @@ def web_dicom_image(request, image_id):
                 pixel_array = _apply_voi_lut(pixel_array, ds)
         except Exception:
             pass
-        # apply slope/intercept
-        slope = getattr(ds, 'RescaleSlope', 1.0)
-        intercept = getattr(ds, 'RescaleIntercept', 0.0)
-        pixel_array = pixel_array.astype(np.float32) * float(slope) + float(intercept)
+        # apply slope/intercept (DICOM tags can exist but be None)
+        slope = _safe_float(getattr(ds, 'RescaleSlope', None), 1.0)
+        intercept = _safe_float(getattr(ds, 'RescaleIntercept', None), 0.0)
+        pixel_array = pixel_array.astype(np.float32) * slope + intercept
         # Derive defaults if not provided in query
         modality = str(getattr(ds, 'Modality', '')).upper()
         photo = str(getattr(ds, 'PhotometricInterpretation', '')).upper()
@@ -4559,8 +4590,8 @@ def api_hu_value(request):
             dicom_path = os.path.join(settings.MEDIA_ROOT, str(image.file_path))
             ds = pydicom.dcmread(dicom_path)
             arr = ds.pixel_array.astype(np.float32)
-            slope = float(getattr(ds, 'RescaleSlope', 1.0))
-            intercept = float(getattr(ds, 'RescaleIntercept', 0.0))
+            slope = _safe_float(getattr(ds, 'RescaleSlope', None), 1.0)
+            intercept = _safe_float(getattr(ds, 'RescaleIntercept', None), 0.0)
             arr = arr * slope + intercept
             h, w = arr.shape[:2]
             shape = (request.GET.get('shape') or '').lower()

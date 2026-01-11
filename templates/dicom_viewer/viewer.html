@@ -1522,6 +1522,29 @@
             return `/dicom-viewer/api/mpr-slice/${encodeURIComponent(seriesId)}/${encodeURIComponent(plane)}/${encodeURIComponent(sliceIndex)}/?${qs.toString()}`;
         }
 
+        function _mprPreferredQualityForPlane(plane) {
+            // IMPORTANT: backend "high" may upsample Z, which can change *axial* slice count.
+            // Sagittal/coronal counts do not change when only Z is resampled, so we can request
+            // high quality there immediately without risking index/count mismatches.
+            if (plane === 'axial') return (_mprState.hqReady === true) ? 'high' : 'fast';
+            if (plane === 'sagittal' || plane === 'coronal') return 'high';
+            return (_mprState.hqReady === true) ? 'high' : 'fast';
+        }
+
+        function _mprCancelActiveDraw(reason = 'cancel', plane = null) {
+            if (!_mprDraw.down) return;
+            if (plane && _mprDraw.plane && _mprDraw.plane !== plane) return;
+            const affectedPlane = _mprDraw.plane;
+            _mprDraw.down = false;
+            _mprDraw.plane = null;
+            _mprDraw.kind = null;
+            currentMprMeasurement = null;
+            currentMprRoi = null;
+            try {
+                if (affectedPlane) updateMprOverlays(affectedPlane);
+            } catch (_) { /* ignore */ }
+        }
+
         function _refreshMprSlicesForWindowingChange() {
             if (!_isMprVisible()) return;
             if (!currentSeries) return;
@@ -1536,7 +1559,9 @@
                 if (!imgEl || !count) return;
                 const clamped = Math.max(0, Math.min(count - 1, idx));
                 imgEl.decoding = 'async';
-                imgEl.src = _mprSliceUrl(currentSeries.id, plane, clamped, 'fast');
+                // Use a quality that matches the current slice-index "space" to avoid backend clamping
+                // that can make it look like you can't reach the top slice after HQ reconstruction.
+                imgEl.src = _mprSliceUrl(currentSeries.id, plane, clamped, _mprPreferredQualityForPlane(plane));
             });
 
             // Keep transforms applied for the active plane (zoom/pan).
@@ -1764,6 +1789,14 @@
             });
             
             // Wheel event for slice navigation and zoom
+            const _wheelStepFromDelta = (deltaY) => {
+                // Mouse wheels often send +/-100-ish; trackpads send tiny deltas.
+                // Convert big deltas into multi-slice steps for faster scrubbing.
+                const dy = Math.abs(Number(deltaY) || 0);
+                const base = Math.max(1, Math.round(dy / 80));
+                return Math.min(18, base);
+            };
+
             imageContainer.addEventListener('wheel', function(e) {
                 e.preventDefault();
                 
@@ -1774,9 +1807,10 @@
                 } else {
                     // Slice navigation with wheel
                     const direction = e.deltaY > 0 ? 1 : -1;
-                    changeSlice(direction);
+                    const step = (e.shiftKey ? 6 : 1) * _wheelStepFromDelta(e.deltaY);
+                    changeSlice(direction * step);
                 }
-            });
+            }, { passive: false });
         }
 
         function setupKeyboardShortcuts() {
@@ -2114,7 +2148,7 @@
                 }
             } else {
                 // Handle regular image navigation
-                const newIndex = currentImageIndex + direction;
+                const newIndex = currentImageIndex + (Number(direction) || 0);
                 if (newIndex >= 0 && newIndex < images.length) {
                     currentImageIndex = newIndex;
                     document.getElementById('sliceSlider').value = currentImageIndex;
@@ -2182,7 +2216,8 @@
             const seq = ++_displaySeq;
 
             // Avoid flickery loaders on fast wheel scrolling: only show if it takes noticeable time.
-            const loadingDelay = (reason === 'window') ? 220 : 140;
+            // Slightly longer delay for slice scrolling: avoids "flashy" loaders while scrubbing.
+            const loadingDelay = (reason === 'window') ? 220 : 260;
             let loaderTimer = setTimeout(() => showLoading('Processing image...'), loadingDelay);
             try {
                 const params = new URLSearchParams();
@@ -3066,9 +3101,11 @@
                     const axialEl = document.getElementById('mprAxial');
                     const sagittalEl = document.getElementById('mprSagittal');
                     const coronalEl = document.getElementById('mprCoronal');
+                    // Load axial fast first (HQ may upsample Z and change axial slice count),
+                    // but request sagittal/coronal in HQ immediately to avoid blurry reformats.
                     if (axialEl) { axialEl.decoding = 'async'; axialEl.src = _mprSliceUrl(currentSeries.id, 'axial', ax, 'fast'); }
-                    if (sagittalEl) { sagittalEl.decoding = 'async'; sagittalEl.src = _mprSliceUrl(currentSeries.id, 'sagittal', sa, 'fast'); }
-                    if (coronalEl) { coronalEl.decoding = 'async'; coronalEl.src = _mprSliceUrl(currentSeries.id, 'coronal', co, 'fast'); }
+                    if (sagittalEl) { sagittalEl.decoding = 'async'; sagittalEl.src = _mprSliceUrl(currentSeries.id, 'sagittal', sa, 'high'); }
+                    if (coronalEl) { coronalEl.decoding = 'async'; coronalEl.src = _mprSliceUrl(currentSeries.id, 'coronal', co, 'high'); }
 
                     // Progressive upgrade to full quality (non-blocking), BUT:
                     // high-quality may have a different axial slice count (Z upsampling). We must fetch
@@ -3256,10 +3293,10 @@
             const idx = Math.max(0, Math.min(counts - 1, Number(sliceIndex) || 0));
             _mprState.sliceIndex[plane] = idx;
 
-            // Requirement: ROI disappears in all windows when any MPR slice is scrolled
-            if (opts.clearRoiAll === true) {
-                mprRois = [];
-                currentMprRoi = null;
+            // If the user changes slice while drawing, cancel the in-progress draft so it doesn't
+            // "stick" or look like it persists across slices during scrolling.
+            if (opts.cancelDraw !== false) {
+                _mprCancelActiveDraw('slice-change', plane);
             }
 
             try {
@@ -3274,24 +3311,7 @@
                 // for fast slices with indices that may exceed the fast-volume bounds (fast and
                 // high can have different axial counts when Z is upsampled), which makes it look
                 // like you "can't reach the top slice".
-                const baseQuality = (_mprState.hqReady === true) ? 'high' : 'fast';
-                imgEl.src = _mprSliceUrl(currentSeries.id, plane, idx, baseQuality);
-
-                // Upgrade to high quality after scroll settles (best-effort).
-                // Only do this once we know high-quality counts/indices are active; otherwise the same
-                // numeric index can map to only a subset of the high-quality (Z-upsampled) volume.
-                if (_mprState.hqReady !== true) {
-                    try {
-                        window.__noctis_mpr_hq_timers = window.__noctis_mpr_hq_timers || { axial: null, sagittal: null, coronal: null };
-                        if (window.__noctis_mpr_hq_timers[plane]) clearTimeout(window.__noctis_mpr_hq_timers[plane]);
-                        window.__noctis_mpr_hq_timers[plane] = setTimeout(() => {
-                            try {
-                                const el = document.getElementById(_mprPlaneToImgId(plane));
-                                if (el) el.src = _mprSliceUrl(currentSeries.id, plane, idx, 'high');
-                            } catch (_) {}
-                        }, 220);
-                    } catch (_) {}
-                }
+                imgEl.src = _mprSliceUrl(currentSeries.id, plane, idx, _mprPreferredQualityForPlane(plane));
             } catch (e) {
                 return false;
             } finally {
@@ -4137,7 +4157,7 @@
         }
 
         // Missing functions that buttons are calling - URGENT FIX
-        function setActivePlane(plane) {
+        function setActivePlane(plane, opts = {}) {
             activeMprPlane = plane;
             // Update active plane visually
             document.querySelectorAll('.mpr-viewport').forEach(vp => {
@@ -4158,8 +4178,11 @@
             if (_isMprVisible()) {
                 applyTransform();
             }
-            
-            showToast(`Switched to ${plane} plane`, 'info');
+
+            // Avoid spamming toasts during wheel/drag interactions.
+            if (!(opts && opts.silent)) {
+                showToast(`Switched to ${plane} plane`, 'info');
+            }
         }
 
         function updateCrosshairOverlay(plane) {
@@ -4254,8 +4277,14 @@
             
             try {
                 showLoading('Generating bone 3D reconstruction...');
-                
-                const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/bone/?threshold=200&mesh=true&window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`);
+
+                // Use diagnostic bone windowing for bone recon previews (keeps it crisp + high contrast).
+                const boneWW = 2000;
+                const boneWL = 300;
+                const response = await fetch(
+                    `/dicom-viewer/api/series/${currentSeries.id}/bone/?threshold=200&mesh=true&quality=high&window_width=${encodeURIComponent(boneWW)}&window_level=${encodeURIComponent(boneWL)}&inverted=false`,
+                    { credentials: 'same-origin' }
+                );
                 const data = await response.json();
                 
                 if (data.bone_views) {
@@ -4332,6 +4361,12 @@
 
         function setupMPRViewportInteractions() {
             const viewports = document.querySelectorAll('.mpr-viewport');
+
+            const _mprWheelStepFromDelta = (deltaY) => {
+                const dy = Math.abs(Number(deltaY) || 0);
+                const base = Math.max(1, Math.round(dy / 80));
+                return Math.min(18, base);
+            };
             
             viewports.forEach(viewport => {
                 const plane = viewport.getAttribute('data-plane');
@@ -4362,14 +4397,14 @@
                 });
                 
                 viewport.addEventListener('click', function(e) {
-                    setActivePlane(plane);
+                    setActivePlane(plane, { silent: true });
                     _queueMPRCrosshairUpdate(viewport, plane, e.clientX, e.clientY, true);
                 });
 
                 // MPR zoom/pan interactions (server-rendered images, client-side transform)
                 viewport.addEventListener('wheel', function(e) {
                     e.preventDefault();
-                    setActivePlane(plane);
+                    if (activeMprPlane !== plane) setActivePlane(plane, { silent: true });
                     // Default: wheel scrolls slices. Ctrl+wheel (or Zoom tool) zooms.
                     // Axial: wheel-up should move "toward the top" (superior), which corresponds to increasing Z.
                     const direction = (plane === 'axial') ? (e.deltaY > 0 ? -1 : 1) : (e.deltaY > 0 ? 1 : -1);
@@ -4379,8 +4414,9 @@
                     } else {
                         const counts = Number(_mprState.counts?.[plane] || 0);
                         if (counts > 0) {
-                            const next = (Number(_mprState.sliceIndex?.[plane] || 0) + direction);
-                            _mprSetSlice(plane, next, { clearRoiAll: true });
+                            const step = (e.shiftKey ? 6 : 1) * _mprWheelStepFromDelta(e.deltaY);
+                            const next = (Number(_mprState.sliceIndex?.[plane] || 0) + (direction * step));
+                            _mprSetSlice(plane, next, { cancelDraw: true });
                         }
                     }
                 }, { passive: false });
@@ -4388,7 +4424,7 @@
                 viewport.addEventListener('mousedown', function(e) {
                     // Left button only
                     if (e.button !== 0) return;
-                    setActivePlane(plane);
+                    if (activeMprPlane !== plane) setActivePlane(plane, { silent: true });
                     // If drawing tools are active, don't start pan/zoom drag
                     if (activeTool === 'measure') {
                         const p = _mprViewportPointToImagePx(e, plane);
@@ -4580,24 +4616,34 @@
             if (activePlane === 'axial') {
                 const sagIdx = toIdx(x, sagN);
                 const corIdx = toIdx(y, corN);
-                // Crosshair click changes orthogonal planes (treat like scrolling: clear ROI everywhere).
-                _mprSetSlice('sagittal', sagIdx, { clearRoiAll: true });
-                _mprSetSlice('coronal', corIdx, { clearRoiAll: true });
+                // Crosshair click changes orthogonal planes; keep ROIs per-slice (do not globally clear).
+                _mprSetSlice('sagittal', sagIdx, { cancelDraw: true });
+                _mprSetSlice('coronal', corIdx, { cancelDraw: true });
             } else if (activePlane === 'sagittal') {
                 const axIdx = toIdx(y, axN);
                 const corIdx = toIdx(x, corN);
-                _mprSetSlice('axial', axIdx, { clearRoiAll: true });
-                _mprSetSlice('coronal', corIdx, { clearRoiAll: true });
+                _mprSetSlice('axial', axIdx, { cancelDraw: true });
+                _mprSetSlice('coronal', corIdx, { cancelDraw: true });
             } else if (activePlane === 'coronal') {
                 const axIdx = toIdx(y, axN);
                 const sagIdx = toIdx(x, sagN);
-                _mprSetSlice('axial', axIdx, { clearRoiAll: true });
-                _mprSetSlice('sagittal', sagIdx, { clearRoiAll: true });
+                _mprSetSlice('axial', axIdx, { cancelDraw: true });
+                _mprSetSlice('sagittal', sagIdx, { cancelDraw: true });
             }
 
             // Now drive all crosshair overlays from the slice indices (robust against letterboxing).
             _mprUpdateAllCrosshairsFromState();
         }
+
+        // Safety: if the browser loses focus mid-drag, ensure ROI/measurement drafts are cancelled.
+        window.addEventListener('blur', () => {
+            try { _mprCancelActiveDraw('blur'); } catch (_) { /* ignore */ }
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'visible') {
+                try { _mprCancelActiveDraw('hidden'); } catch (_) { /* ignore */ }
+            }
+        });
 
         function _mprSetCrosshairByImagePercent(plane, xPct, yPct) {
             const crosshairId = `crosshair${plane.charAt(0).toUpperCase() + plane.slice(1)}`;

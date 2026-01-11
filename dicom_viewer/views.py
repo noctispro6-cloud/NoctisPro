@@ -1550,10 +1550,11 @@ def api_bone_reconstruction(request, series_id):
         axial_idx = preview_volume.shape[0] // 2
         sag_idx = preview_volume.shape[2] // 2
         cor_idx = preview_volume.shape[1] // 2
-        bone_views['axial'] = _array_to_base64_image(preview_volume[axial_idx], window_width, window_level, inverted)
+        # Sharpen previews for diagnostic crispness (helps especially on large viewports).
+        bone_views['axial'] = _array_to_base64_image(preview_volume[axial_idx], window_width, window_level, inverted, sharpen=True)
         # Match MPR display convention: superior at top (flip Z vertically)
-        bone_views['sagittal'] = _array_to_base64_image(np.flipud(preview_volume[:, :, sag_idx]), window_width, window_level, inverted)
-        bone_views['coronal'] = _array_to_base64_image(np.flipud(preview_volume[:, cor_idx, :]), window_width, window_level, inverted)
+        bone_views['sagittal'] = _array_to_base64_image(np.flipud(preview_volume[:, :, sag_idx]), window_width, window_level, inverted, sharpen=True)
+        bone_views['coronal'] = _array_to_base64_image(np.flipud(preview_volume[:, cor_idx, :]), window_width, window_level, inverted, sharpen=True)
         
         mesh_payload = None
         if want_mesh:

@@ -25,6 +25,7 @@ from starlette.responses import FileResponse, RedirectResponse, Response
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
+from django.db import close_old_connections
 
 from worklist.models import DicomImage
 
@@ -120,6 +121,12 @@ def _cache_path(image_id: int, ww: float, wl: float, inverted: bool) -> str:
 
 def _get_django_user_from_session_cookie(request: Request):
     """Resolve Django user from db-backed session cookie."""
+    # This endpoint is executed outside Django's normal request lifecycle
+    # (FastAPI is mounted directly into the ASGI stack). Django normally
+    # closes DB connections at request start/finish; here we must do it
+    # ourselves or Postgres connections can leak and eventually hit
+    # "too many clients already".
+    close_old_connections()
     try:
         session_cookie_name = getattr(settings, "SESSION_COOKIE_NAME", "sessionid")
         session_key = request.cookies.get(session_cookie_name)
@@ -145,6 +152,8 @@ def _get_django_user_from_session_cookie(request: Request):
             return AnonymousUser()
     except Exception:
         return AnonymousUser()
+    finally:
+        close_old_connections()
 
 
 def _read_dicom_dataset(image: DicomImage):
@@ -267,43 +276,49 @@ def _render_png_bytes(pixel_array: np.ndarray, window_width: float, window_level
 
 
 def _compute_png_for_request(image_id: int, ww: Optional[float], wl: Optional[float], inverted: bool, user):
+    # Close stale DB connections; this function runs in a worker thread and
+    # uses Django ORM, but is not wrapped in Django's normal request lifecycle.
+    close_old_connections()
     try:
-        image = DicomImage.objects.select_related("series__study__facility").get(id=image_id)
-    except DicomImage.DoesNotExist:
-        return None, 404, None, None
-
-    # Permission parity with Django views
-    if getattr(user, "is_facility_user", None) and user.is_facility_user():
         try:
-            if getattr(user, "facility", None) and image.series.study.facility != user.facility:
+            image = DicomImage.objects.select_related("series__study__facility").get(id=image_id)
+        except DicomImage.DoesNotExist:
+            return None, 404, None, None
+
+        # Permission parity with Django views
+        if getattr(user, "is_facility_user", None) and user.is_facility_user():
+            try:
+                if getattr(user, "facility", None) and image.series.study.facility != user.facility:
+                    return None, 403, None, None
+            except Exception:
                 return None, 403, None, None
-        except Exception:
-            return None, 403, None, None
 
-    ds = _read_dicom_dataset(image)
-    if ds is None:
-        return None, 404, None, None
+        ds = _read_dicom_dataset(image)
+        if ds is None:
+            return None, 404, None, None
 
-    pixel = _decode_pixel_array(image, ds)
-    if pixel is None:
-        return None, 404, None, None
+        pixel = _decode_pixel_array(image, ds)
+        if pixel is None:
+            return None, 404, None, None
 
-    pixel = _normalize_to_2d_grayscale(pixel)
-    if pixel is None:
-        return None, 404, None, None
+        pixel = _normalize_to_2d_grayscale(pixel)
+        if pixel is None:
+            return None, 404, None, None
 
-    pixel = _apply_rescale_if_present(pixel, ds)
+        pixel = _apply_rescale_if_present(pixel, ds)
 
-    if ww is None or wl is None:
-        dww, dwl = _derive_default_window(pixel, ds)
-        ww = dww if ww is None else ww
-        wl = dwl if wl is None else wl
+        if ww is None or wl is None:
+            dww, dwl = _derive_default_window(pixel, ds)
+            ww = dww if ww is None else ww
+            wl = dwl if wl is None else wl
 
-    png_bytes = _render_png_bytes(pixel, float(ww), float(wl), bool(inverted))
-    if not png_bytes:
-        return None, 404, None, None
+        png_bytes = _render_png_bytes(pixel, float(ww), float(wl), bool(inverted))
+        if not png_bytes:
+            return None, 404, None, None
 
-    return png_bytes, 200, float(ww), float(wl)
+        return png_bytes, 200, float(ww), float(wl)
+    finally:
+        close_old_connections()
 
 
 @fastapi_app.get("/dicom-viewer/api/image/{image_id}/render.png")
@@ -312,7 +327,9 @@ async def dicom_image_render_png(request: Request, image_id: int):
     Fast path for streaming a windowed DICOM slice as PNG bytes.
     URL matches existing Django endpoint to avoid breaking clients.
     """
-    user = _get_django_user_from_session_cookie(request)
+    # Resolve user in a worker thread so we don't block the event loop, and so
+    # we can safely close DB connections around ORM/session access.
+    user = await asyncio.to_thread(_get_django_user_from_session_cookie, request)
     if not getattr(user, "is_authenticated", False):
         login_url = getattr(settings, "LOGIN_URL", "/login/")
         return RedirectResponse(url=f"{login_url}?next={request.url.path}", status_code=302)

@@ -5161,6 +5161,8 @@
         });
 
         // Keyboard shortcuts
+        // Use capture + stopImmediatePropagation so browser/system shortcuts (e.g. Ctrl+P)
+        // don't win over our in-app shortcuts.
         document.addEventListener('keydown', function(event) {
             // ESC key closes panels
             if (event.key === 'Escape') {
@@ -5175,11 +5177,13 @@
             }
             
             // Ctrl+P opens print dialog
-            if (event.ctrlKey && event.key === 'p') {
+            if ((event.ctrlKey || event.metaKey) && (event.key === 'p' || event.key === 'P')) {
                 event.preventDefault();
+                try { event.stopPropagation(); } catch (_) {}
+                try { event.stopImmediatePropagation(); } catch (_) {}
                 showPrintDialog();
             }
-        });
+        }, true);
     </script>
 </body>
 </html>

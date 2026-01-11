@@ -42,6 +42,37 @@ from .models import WindowLevelPreset, HangingProtocol
 logger = logging.getLogger(__name__)
 
 
+def _safe_float(value, default: float) -> float:
+    """Best-effort float conversion for DICOM tags (handles None / MultiValue)."""
+    try:
+        if value is None or value == "":
+            return float(default)
+        # Some DICOM tags can be MultiValue-like; use the first element.
+        if hasattr(value, "__iter__") and not isinstance(value, (str, bytes)):
+            try:
+                value = value[0]
+            except Exception:
+                pass
+        if value is None or value == "":
+            return float(default)
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _safe_int_query(request, key: str, default=None):
+    """Parse int from query params, returning default on missing/invalid."""
+    try:
+        if request is None:
+            return default
+        raw = request.GET.get(key)
+        if raw is None or raw == "":
+            return default
+        return int(float(raw))
+    except Exception:
+        return default
+
+
 def _get_requested_frame_index(request, *, default_index: int = 0) -> int:
     """
     Parse a frame selector from query params.

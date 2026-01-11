@@ -130,6 +130,27 @@ stop_systemd_if_running() {
   as_root systemctl stop "${unit}" || true
 }
 
+docker_remove_containers_publishing_port() {
+  # Stop/remove any Docker containers (any project) that publish the given host port.
+  # This is intentionally aggressive: a port conflict means something else is already using it.
+  local port="${1:?}"
+  local ids=""
+
+  # Best effort: prefer running containers first.
+  ids="$(docker ps -q --filter "publish=${port}" 2>/dev/null || true)"
+  if [[ -n "$ids" ]]; then
+    info "Stopping containers publishing port ${port}..."
+    docker stop ${ids} >/dev/null 2>&1 || true
+  fi
+
+  # Also remove any (possibly exited) containers still reserving port mappings/metadata.
+  ids="$(docker ps -aq --filter "publish=${port}" 2>/dev/null || true)"
+  if [[ -n "$ids" ]]; then
+    info "Removing containers that publish port ${port}..."
+    docker rm -f ${ids} >/dev/null 2>&1 || true
+  fi
+}
+
 port_in_use() {
   local port="${1:?}"
   if command -v ss >/dev/null 2>&1; then
@@ -206,13 +227,8 @@ ensure_port_free() {
   # Stop the known host-level DICOM receiver if it is running.
   stop_systemd_if_running "noctis-pro-dicom.service"
 
-  # Stop any docker containers (any stack) that already publish the port.
-  local ids
-  ids="$(docker ps -q --filter "publish=${port}" 2>/dev/null || true)"
-  if [[ -n "$ids" ]]; then
-    info "Stopping containers publishing port ${port}..."
-    docker stop ${ids} >/dev/null 2>&1 || true
-  fi
+  # Stop/remove any docker containers (any stack) that already publish the port.
+  docker_remove_containers_publishing_port "${port}"
 
   # If any other host process is holding the port, try to stop it.
   if port_in_use "${port}"; then
@@ -267,9 +283,11 @@ EOF
 }
 
 want_ngrok=0
+force_recreate=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ngrok) want_ngrok=1; shift ;;
+    --no-recreate) force_recreate=0; shift ;; # advanced: skip --force-recreate
     -h|--help) usage; exit 0 ;;
     *) err "Unknown arg: $1"; usage; exit 2 ;;
   esac
@@ -383,6 +401,10 @@ fi
 args=(--env-file .env.docker up -d --build)
 if [[ "$want_ngrok" == "1" ]]; then
   args=(--profile ngrok "${args[@]}")
+fi
+if [[ "$force_recreate" == "1" ]]; then
+  # Make sure a rebuild always restarts containers fresh with the latest code/image.
+  args+=("--force-recreate" "--remove-orphans")
 fi
 
 info "Starting containers..."

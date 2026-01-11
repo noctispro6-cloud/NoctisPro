@@ -2069,8 +2069,11 @@
                 // to overlay layers (avoid expensive redraws during pan/zoom).
                 const overlayId = _mprPlaneToOverlayId(activeMprPlane);
                 _setTransformIfNeeded(document.getElementById(overlayId), tfm);
+                // Crosshair is positioned using image-rect math (accounts for letterboxing), so do NOT
+                // transform it (otherwise we'd double-apply pan/zoom). Just recompute its placement.
                 const crosshairId = `crosshair${activeMprPlane.charAt(0).toUpperCase() + activeMprPlane.slice(1)}`;
-                _setTransformIfNeeded(document.getElementById(crosshairId), tfm);
+                _setTransformIfNeeded(document.getElementById(crosshairId), 'none');
+                try { _mprApplyCrosshairFromState(activeMprPlane); } catch (_) { /* ignore */ }
                 return;
             }
 
@@ -2557,6 +2560,12 @@
             if (crosshairOverlay) {
                 crosshairOverlay.style.display = showCrosshair ? 'block' : 'none';
             }
+
+            // When enabling, place crosshair on the actual image content (not letterboxed margins).
+            if (showCrosshair) {
+                try { _initSingleViewCrosshairPosition(); } catch (_) { /* ignore */ }
+                try { if (_isMprVisible()) _mprUpdateAllCrosshairsFromState(); } catch (_) { /* ignore */ }
+            }
             
             // Toggle MPR crosshairs if in MPR mode
             const mprView = document.getElementById('mprView');
@@ -2596,6 +2605,30 @@
                     toggleButton.style.color = 'var(--text-primary)';
                 }
             }
+        }
+
+        function _setSingleViewCrosshairAtContainerPercent(xPct, yPct) {
+            const overlay = document.getElementById('crosshairOverlay');
+            if (!overlay) return;
+            const h = overlay.querySelector('.crosshair-line-h');
+            const v = overlay.querySelector('.crosshair-line-v');
+            const xx = `${Math.max(0, Math.min(100, Number(xPct) || 0)).toFixed(2)}%`;
+            const yy = `${Math.max(0, Math.min(100, Number(yPct) || 0)).toFixed(2)}%`;
+            if (h) h.style.top = yy;
+            if (v) v.style.left = xx;
+        }
+
+        function _initSingleViewCrosshairPosition() {
+            const img = document.getElementById('dicomImage');
+            const container = document.getElementById('imageContainer');
+            if (!img || !container) return;
+            const imgRect = img.getBoundingClientRect();
+            const cRect = container.getBoundingClientRect();
+            if (!imgRect.width || !imgRect.height || !cRect.width || !cRect.height) return;
+            // Center of the displayed image rect, expressed as a percent of the container.
+            const cx = (imgRect.left - cRect.left) + imgRect.width / 2;
+            const cy = (imgRect.top - cRect.top) + imgRect.height / 2;
+            _setSingleViewCrosshairAtContainerPercent((cx / cRect.width) * 100, (cy / cRect.height) * 100);
         }
 
         // Plane selection functionality
@@ -4054,7 +4087,13 @@
         }
 
         function updateCrosshairOverlay(plane) {
-            // Crosshair overlay update
+            // Keep crosshair aligned to the displayed MPR image content on load/refresh.
+            try {
+                if (!showCrosshair) return;
+                if (!_isMprVisible()) return;
+                if (!(plane === 'axial' || plane === 'sagittal' || plane === 'coronal')) return;
+                _mprApplyCrosshairFromState(plane);
+            } catch (_) { /* ignore */ }
         }
 
         function generateBone3DType(type) {
@@ -4417,59 +4456,143 @@
         }
 
         function updateMPRCrosshairPosition(viewportEl, plane, clientX, clientY, lock = false) {
-            const rect = _mprViewportRectCache.get(viewportEl) || viewportEl.getBoundingClientRect();
-            _mprViewportRectCache.set(viewportEl, rect);
-            const x = ((clientX - rect.left) / rect.width) * 100;
-            const y = ((clientY - rect.top) / rect.height) * 100;
-            
-            // Update crosshair position
-            const crosshairId = `crosshair${plane.charAt(0).toUpperCase() + plane.slice(1)}`;
-            const crosshair = document.getElementById(crosshairId);
-            
-            if (crosshair) {
-                const hLine = crosshair.querySelector('.crosshair-line-h-mpr');
-                const vLine = crosshair.querySelector('.crosshair-line-v-mpr');
-                
-                // Round to reduce style churn during fast mouse moves.
-                const yy = `${Math.max(0, Math.min(100, y)).toFixed(2)}%`;
-                const xx = `${Math.max(0, Math.min(100, x)).toFixed(2)}%`;
-                if (hLine && hLine.style.top !== yy) hLine.style.top = yy;
-                if (vLine && vLine.style.left !== xx) vLine.style.left = xx;
+            // Prefer image-rect math so the crosshair tracks anatomy (not letterboxed margins).
+            const m = _mprGetMetrics(plane);
+            let xImgPct = null;
+            let yImgPct = null;
+            if (m && m.viewW > 0 && m.viewH > 0 && m.vpRect.width > 0 && m.vpRect.height > 0) {
+                const xView = (clientX - m.imgRect.left);
+                const yView = (clientY - m.imgRect.top);
+                xImgPct = Math.max(0, Math.min(1, xView / m.viewW));
+                yImgPct = Math.max(0, Math.min(1, yView / m.viewH));
             }
-            
+
+            // Fallback to viewport math if metrics aren't ready.
+            if (xImgPct === null || yImgPct === null) {
+                const rect = _mprViewportRectCache.get(viewportEl) || viewportEl.getBoundingClientRect();
+                _mprViewportRectCache.set(viewportEl, rect);
+                xImgPct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+                yImgPct = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+            }
+
+            _mprSetCrosshairByImagePercent(plane, xImgPct * 100, yImgPct * 100);
+
             if (lock) {
-                // Update all other crosshairs for orthogonal sync
-                syncOrthogonalCrosshairs(plane, x, y);
+                // Lock = user clicked: sync orthogonal slices (and therefore crosshairs) across planes.
+                syncOrthogonalCrosshairs(plane, xImgPct * 100, yImgPct * 100);
             }
         }
 
         function syncOrthogonalCrosshairs(activePlane, x, y) {
-            const planes = ['axial', 'sagittal', 'coronal'];
-            
-            planes.forEach(plane => {
-                if (plane === activePlane) return;
-                
-                const crosshairId = `crosshair${plane.charAt(0).toUpperCase() + plane.slice(1)}`;
-                const crosshair = document.getElementById(crosshairId);
-                
-                if (crosshair) {
-                    const hLine = crosshair.querySelector('.crosshair-line-h-mpr');
-                    const vLine = crosshair.querySelector('.crosshair-line-v-mpr');
-                    
-                    // Sync crosshair positions based on orthogonal relationships
-                    if (hLine && vLine) {
-                        if (plane === 'axial' && activePlane === 'sagittal') {
-                            hLine.style.top = `${y}%`;
-                        } else if (plane === 'axial' && activePlane === 'coronal') {
-                            vLine.style.left = `${x}%`;
-                        } else if (plane === 'sagittal' && activePlane === 'axial') {
-                            hLine.style.top = `${y}%`;
-                        } else if (plane === 'coronal' && activePlane === 'axial') {
-                            vLine.style.left = `${x}%`;
-                        }
-                    }
-                }
-            });
+            // x/y are image-relative percents (0..100) in the active plane.
+            // Convert to slice indices, then drive all crosshairs from those indices so the axial scroll
+            // covers the full reconstructed depth (using _mprState.counts, not viewport height).
+            const axN = Number(_mprState.counts?.axial || 0);
+            const sagN = Number(_mprState.counts?.sagittal || 0);
+            const corN = Number(_mprState.counts?.coronal || 0);
+
+            const toIdx = (pct, n) => {
+                const p = Math.max(0, Math.min(1, (Number(pct) || 0) / 100));
+                if (!n || n <= 1) return 0;
+                return Math.max(0, Math.min(n - 1, Math.round(p * (n - 1))));
+            };
+
+            // Update slice indices from the clicked position.
+            // Axial view: x->sagittal index (X), y->coronal index (Y)
+            // Sagittal view: x->coronal index (Y), y->axial index (Z)
+            // Coronal view: x->sagittal index (X), y->axial index (Z)
+            if (activePlane === 'axial') {
+                const sagIdx = toIdx(x, sagN);
+                const corIdx = toIdx(y, corN);
+                // Crosshair click changes orthogonal planes (treat like scrolling: clear ROI everywhere).
+                _mprSetSlice('sagittal', sagIdx, { clearRoiAll: true });
+                _mprSetSlice('coronal', corIdx, { clearRoiAll: true });
+            } else if (activePlane === 'sagittal') {
+                const axIdx = toIdx(y, axN);
+                const corIdx = toIdx(x, corN);
+                _mprSetSlice('axial', axIdx, { clearRoiAll: true });
+                _mprSetSlice('coronal', corIdx, { clearRoiAll: true });
+            } else if (activePlane === 'coronal') {
+                const axIdx = toIdx(y, axN);
+                const sagIdx = toIdx(x, sagN);
+                _mprSetSlice('axial', axIdx, { clearRoiAll: true });
+                _mprSetSlice('sagittal', sagIdx, { clearRoiAll: true });
+            }
+
+            // Now drive all crosshair overlays from the slice indices (robust against letterboxing).
+            _mprUpdateAllCrosshairsFromState();
+        }
+
+        function _mprSetCrosshairByImagePercent(plane, xPct, yPct) {
+            const crosshairId = `crosshair${plane.charAt(0).toUpperCase() + plane.slice(1)}`;
+            const crosshair = document.getElementById(crosshairId);
+            if (!crosshair) return;
+            const hLine = crosshair.querySelector('.crosshair-line-h-mpr');
+            const vLine = crosshair.querySelector('.crosshair-line-v-mpr');
+
+            const m = _mprGetMetrics(plane);
+            let xOverlayPct = Math.max(0, Math.min(100, Number(xPct) || 0));
+            let yOverlayPct = Math.max(0, Math.min(100, Number(yPct) || 0));
+
+            // If we know the image rect inside the viewport, position the crosshair at the matching
+            // pixel location inside the image (not the whole viewport).
+            if (m && m.vpRect.width > 0 && m.vpRect.height > 0 && m.viewW > 0 && m.viewH > 0) {
+                const xPx = m.offsetLeft + (xOverlayPct / 100) * m.viewW;
+                const yPx = m.offsetTop + (yOverlayPct / 100) * m.viewH;
+                xOverlayPct = (xPx / m.vpRect.width) * 100;
+                yOverlayPct = (yPx / m.vpRect.height) * 100;
+                xOverlayPct = Math.max(0, Math.min(100, xOverlayPct));
+                yOverlayPct = Math.max(0, Math.min(100, yOverlayPct));
+            }
+
+            const yy = `${yOverlayPct.toFixed(2)}%`;
+            const xx = `${xOverlayPct.toFixed(2)}%`;
+            if (hLine && hLine.style.top !== yy) hLine.style.top = yy;
+            if (vLine && vLine.style.left !== xx) vLine.style.left = xx;
+        }
+
+        function _mprApplyCrosshairFromState(plane) {
+            const axN = Number(_mprState.counts?.axial || 0);
+            const sagN = Number(_mprState.counts?.sagittal || 0);
+            const corN = Number(_mprState.counts?.coronal || 0);
+            const axIdx = Number(_mprState.sliceIndex?.axial || 0);
+            const sagIdx = Number(_mprState.sliceIndex?.sagittal || 0);
+            const corIdx = Number(_mprState.sliceIndex?.coronal || 0);
+
+            const pct = (idx, n) => {
+                if (!n || n <= 1) return 50;
+                return Math.max(0, Math.min(100, (idx / (n - 1)) * 100));
+            };
+
+            if (plane === 'axial') {
+                // Axial shows (X,Y)
+                _mprSetCrosshairByImagePercent('axial', pct(sagIdx, sagN), pct(corIdx, corN));
+            } else if (plane === 'sagittal') {
+                // Sagittal shows (Y,Z)
+                _mprSetCrosshairByImagePercent('sagittal', pct(corIdx, corN), pct(axIdx, axN));
+            } else if (plane === 'coronal') {
+                // Coronal shows (X,Z)
+                _mprSetCrosshairByImagePercent('coronal', pct(sagIdx, sagN), pct(axIdx, axN));
+            }
+        }
+
+        function _mprUpdateCrosshairPositionLabel() {
+            const el = document.getElementById('crosshairPosition');
+            if (!el) return;
+            const axIdx = Number(_mprState.sliceIndex?.axial || 0);
+            const sagIdx = Number(_mprState.sliceIndex?.sagittal || 0);
+            const corIdx = Number(_mprState.sliceIndex?.coronal || 0);
+            // X = sagittal index, Y = coronal index, Z = axial index (matches UI labels: Sagittal(X), Coronal(Y), Axial(Z))
+            el.textContent = `X:${sagIdx} Y:${corIdx} Z:${axIdx}`;
+        }
+
+        function _mprUpdateAllCrosshairsFromState() {
+            if (!showCrosshair) return;
+            if (!_isMprVisible()) return;
+            _mprApplyCrosshairFromState('axial');
+            _mprApplyCrosshairFromState('sagittal');
+            _mprApplyCrosshairFromState('coronal');
+            _mprUpdateCrosshairPositionLabel();
         }
 
         // Critical missing functions for button functionality

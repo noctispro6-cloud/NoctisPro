@@ -586,11 +586,22 @@
                     <i class="fas fa-file-medical" style="font-size: 2.5rem; margin-bottom: 0.5rem; color: var(--accent-color);"></i>
                 </div>
                 <h4 class="text-light mb-2" style="font-size: 1.1rem; font-weight: 600;">Drop DICOM files or folders here</h4>
-                <p class="text-secondary mb-2" style="font-size: 0.95rem; line-height: 1.4;">Files upload automatically once selected.</p>
-                <button type="button" class="btn-control primary np-upload-primary" id="chooseFilesBtn">
+                <p class="text-secondary mb-2" style="font-size: 0.95rem; line-height: 1.4;">
+                    Files upload automatically once selected.
+                    <span class="helper-text" style="display:block;margin-top:6px;">
+                        Tip: use <strong>Shift</strong> and <strong>Ctrl/Cmd</strong> in “Choose Files” to multi-select.
+                    </span>
+                </p>
+                <div class="upload-actions" style="margin-top: 0.75rem;">
+                    <button type="button" class="btn-control primary np-upload-primary" id="chooseFilesBtn">
                     <i class="fas fa-folder-open me-2"></i>
-                    Choose Files / Folder
-                </button>
+                    Choose Files
+                    </button>
+                    <button type="button" class="btn-control np-upload-primary" id="chooseFolderBtn" title="Select a folder (uploads the entire directory tree)">
+                        <i class="fas fa-folder-tree me-2"></i>
+                        Choose Folder
+                    </button>
+                </div>
             </div>
             
             <style>
@@ -606,7 +617,11 @@
             }
             </style>
             
-            <input type="file" id="fileInput" class="file-input" multiple webkitdirectory directory>
+            <!-- Two pickers:
+                 - Files picker: supports Shift/Ctrl/Cmd multi-select
+                 - Folder picker: uploads entire directory tree (webkitdirectory) -->
+            <input type="file" id="fileInputFiles" class="file-input" multiple>
+            <input type="file" id="fileInputFolder" class="file-input" webkitdirectory directory>
             
             <div class="upload-stats" id="uploadStats">
                 <h5 class="text-light mb-2">Upload Summary</h5>
@@ -699,10 +714,12 @@ let createdStudyIds = [];
 
 document.addEventListener('DOMContentLoaded', function() {
     const dropZone = document.getElementById('dropZone');
-    const fileInput = document.getElementById('fileInput');
+    const fileInputFiles = document.getElementById('fileInputFiles');
+    const fileInputFolder = document.getElementById('fileInputFolder');
     const uploadForm = document.getElementById('uploadForm');
     const uploadBtn = document.getElementById('uploadBtn');
     const chooseFilesBtn = document.getElementById('chooseFilesBtn');
+    const chooseFolderBtn = document.getElementById('chooseFolderBtn');
     const fileList = document.getElementById('fileList');
     const selectedFilesDiv = document.getElementById('selectedFiles');
     const progressSection = document.getElementById('progressSection');
@@ -728,7 +745,18 @@ document.addEventListener('DOMContentLoaded', function() {
         e.preventDefault();
         e.stopPropagation();
         if (!isUploading) {
-            fileInput.click();
+            fileInputFiles.click();
+        }
+    });
+
+    // Folder picker (some browsers don't allow multi-select + directory reliably)
+    if (chooseFolderBtn) {
+        chooseFolderBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!isUploading) {
+                fileInputFolder.click();
+            }
         }
     });
 
@@ -795,11 +823,15 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // File input change
-    fileInput.addEventListener('change', async (e) => {
-        if (!isUploading) {
-            const files = Array.from(e.target.files);
-            await handleFiles(files);
-        }
+    fileInputFiles.addEventListener('change', async (e) => {
+        if (isUploading) return;
+        const files = Array.from(e.target.files || []);
+        await handleFiles(files);
+    });
+    fileInputFolder.addEventListener('change', async (e) => {
+        if (isUploading) return;
+        const files = Array.from(e.target.files || []);
+        await handleFiles(files);
     });
 
     // Form submission

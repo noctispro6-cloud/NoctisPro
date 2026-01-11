@@ -90,7 +90,8 @@
         
         // Slice navigation with mouse wheel
         if (typeof navigateSlice === 'function') {
-            const direction = e.deltaY > 0 ? 1 : -1;
+            // Invert so wheel "up" moves toward slice 0 on systems where deltaY sign is flipped.
+            const direction = e.deltaY > 0 ? -1 : 1;
             navigateSlice(direction);
         }
     }

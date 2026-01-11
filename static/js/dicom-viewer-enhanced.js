@@ -466,8 +466,8 @@ class DicomViewerEnhanced {
             const clampIndex = (v) => Math.max(0, Math.min(localImages.length - 1, v));
             const changeSlice = (delta) => { index = clampIndex(index + delta); render(); };
 
-            // Mouse wheel for slice navigation
-            canvas.addEventListener('wheel', (e) => { e.preventDefault(); changeSlice(e.deltaY > 0 ? 1 : -1); }, { passive: false });
+            // Mouse wheel for slice navigation (invert so wheel "up" goes toward slice 0 reliably)
+            canvas.addEventListener('wheel', (e) => { e.preventDefault(); changeSlice(e.deltaY > 0 ? -1 : 1); }, { passive: false });
             // Arrow keys
             document.addEventListener('keydown', (e) => {
                 if (e.key === 'ArrowUp') { e.preventDefault(); changeSlice(-1); }

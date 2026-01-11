@@ -2312,7 +2312,9 @@
                     setZoom(zoomFactor * zoomDirection);
                 } else {
                     // Slice navigation with wheel
-                    const direction = e.deltaY > 0 ? 1 : -1;
+                    // NOTE: Some environments (touchpads / natural scrolling) report "scroll up" with a positive deltaY.
+                    // For the primary (axial) stack, we want "scroll up" to move toward slice 0.
+                    const direction = e.deltaY > 0 ? -1 : 1;
                     changeSlice(direction);
                 }
             });
@@ -3994,7 +3996,10 @@
                             }
                         } else {
                             // Slice navigation for this plane
-                            const direction = e.deltaY > 0 ? 1 : -1;
+                            // Keep sagittal/coronal behavior unchanged, but invert axial so it can scroll up to slice 0
+                            // on systems where wheel/touchpad direction is reported opposite of expectation.
+                            const baseDir = e.deltaY > 0 ? 1 : -1;
+                            const direction = (plane === 'axial') ? -baseDir : baseDir;
                             changeMPRSlice(plane, direction);
                         }
                     }

@@ -130,7 +130,16 @@
         100% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0); }
     }
 
-    .file-input { display: none; }
+    /* Keep file inputs "hidden but clickable" across browsers.
+       Some browsers block `.click()` on `display:none` inputs. */
+    .file-input {
+        position: absolute;
+        left: -9999px;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+    }
 
     .upload-actions { display: flex; gap: 1rem; margin-top: 2rem; justify-content: center; }
 
@@ -621,7 +630,8 @@
                  - Files picker: supports Shift/Ctrl/Cmd multi-select
                  - Folder picker: uploads entire directory tree (webkitdirectory) -->
             <input type="file" id="fileInputFiles" class="file-input" multiple>
-            <input type="file" id="fileInputFolder" class="file-input" webkitdirectory directory>
+            <!-- Folder selection: Chromium uses webkitdirectory; Firefox supports mozdirectory. -->
+            <input type="file" id="fileInputFolder" class="file-input" webkitdirectory directory mozdirectory multiple>
             
             <div class="upload-stats" id="uploadStats">
                 <h5 class="text-light mb-2">Upload Summary</h5>
@@ -832,16 +842,40 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Folder picker (some browsers don't allow multi-select + directory reliably)
+    function supportsFolderPicker() {
+        try {
+            const i = document.createElement('input');
+            i.type = 'file';
+            i.setAttribute('webkitdirectory', '');
+            i.setAttribute('directory', '');
+            i.setAttribute('mozdirectory', '');
+            // Chrome/Edge: i.webkitdirectory === true
+            // Firefox: i.mozdirectory === true
+            return (i.webkitdirectory === true) || (i.mozdirectory === true);
+        } catch (_) {
+            return false;
+        }
+    }
+
+    // Folder picker (browser support varies; provide a graceful fallback)
     if (chooseFolderBtn) {
         chooseFolderBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (!isUploading) {
-                fileInputFolder.click();
+            if (isUploading) return;
+
+            if (!supportsFolderPicker()) {
+                showNotification('Folder selection is not supported in this browser. Use Chrome/Edge for “Choose Folder”, or use “Choose Files” (multi-select) / drag & drop.', 'warning');
+                try { fileInputFiles.click(); } catch (_) {}
+                return;
             }
-        }
-    });
+
+            try { fileInputFolder.click(); } catch (_) {
+                // Fallback if the folder picker is blocked for any reason
+                try { fileInputFiles.click(); } catch (_2) {}
+            }
+        });
+    }
 
     // Enhanced drag and drop handlers with better folder support
     dropZone.addEventListener('dragover', (e) => {

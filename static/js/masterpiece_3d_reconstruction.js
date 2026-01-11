@@ -562,8 +562,11 @@ class MasterpieceBoneReconstruction3D {
             
             console.log(`🔄 Loading bone reconstruction for series ${seriesId} with threshold ${threshold}`);
             
-            // Fetch bone reconstruction data from Django backend
-            const response = await fetch(`/dicom-viewer/api/series/${seriesId}/bone/?threshold=${threshold}&smooth=${this.options.smoothShading}`, {
+            // Fetch bone reconstruction data from Django backend.
+            // IMPORTANT: request mesh=true so we get real surface geometry (not placeholder).
+            const quality = (this.options && this.options.highQuality) ? 'high' : 'fast';
+            const smooth = (this.options && this.options.smoothShading) ? 'true' : 'false';
+            const response = await fetch(`/dicom-viewer/api/series/${seriesId}/bone/?threshold=${threshold}&mesh=true&quality=${quality}&smooth=${smooth}`, {
                 method: 'GET',
                 headers: {
                     'Accept': 'application/json',
@@ -583,8 +586,12 @@ class MasterpieceBoneReconstruction3D {
             }
             
             this.volumeData = data;
-            await this.createBoneMesh(data.mesh_data);
-            this.updateStatisticsDisplay(data.statistics);
+            const mesh = data.mesh_data || data.mesh || data.meshData || null;
+            await this.createBoneMesh(mesh);
+            // Statistics payload is optional; don't fail if absent.
+            if (data.statistics) {
+                this.updateStatisticsDisplay(data.statistics);
+            }
             
             this.hideLoadingIndicator();
             

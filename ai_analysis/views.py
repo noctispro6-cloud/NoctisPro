@@ -38,6 +38,7 @@ from .utils import (
     _compute_ai_triage, _apply_ai_triage, simulate_ai_analysis, _upgrade_study_priority, _notify_ai_triage
 )
 from .tasks import run_ai_analysis
+from .reporting import persist_report_on_analysis, generate_report_content
 def is_admin_or_radiologist(user):
     """Check if user is admin or radiologist"""
     return user.is_authenticated and (user.is_admin() or user.is_radiologist())
@@ -286,35 +287,11 @@ def api_analysis_status(request, analysis_id):
             'processing_time': analysis.processing_time,
             'error_message': analysis.error_message,
         })
-        
-        # Add real-time online references if measurements contain findings/keywords
-        # This is done on-demand to ensure "real-time" aspect for viewing
-        if analysis.status == 'completed' and analysis.measurements:
-            refs = analysis.measurements.get('reference_suggestions', [])
-            keywords = []
-            
-            # Extract keywords from findings labels
-            abnormalities = analysis.abnormalities_detected or []
-            for a in abnormalities:
-                label = _normalize_abnormality_label(a).lower()
-                if label: 
-                    # simple heuristic to clean label
-                    clean = re.sub(r'suspicion|possible|probable', '', label).strip()
-                    if clean: keywords.append(clean)
-            
-            # Fetch real-time references if we have keywords
-            if keywords:
-                # Cache key to prevent spamming searches on every poll
-                online_refs = analysis.measurements.get('online_references')
-                if not online_refs:
-                    # Fetch and save
-                    online_refs = _get_online_references(keywords)
-                    if online_refs:
-                        # Update DB with new online refs
-                        analysis.measurements['online_references'] = online_refs
-                        analysis.save(update_fields=['measurements'])
-                
-                data['online_references'] = online_refs
+        # Final report payload (primary UI output when completed).
+        if analysis.status == 'completed':
+            report = (analysis.measurements or {}).get('report') or {}
+            data['report'] = report
+            data['report_text'] = report.get('text', '')
                 
     else:
         # Minimal, non-intrusive preliminary summary for non-clinician roles
@@ -416,6 +393,11 @@ def api_analyze_series(request, series_id):
             _apply_ai_triage(analysis)
         except Exception:
             pass
+        try:
+            analysis.refresh_from_db()
+            persist_report_on_analysis(analysis)
+        except Exception:
+            pass
 
         conf = float(analysis.confidence_score or 0.0)
 
@@ -466,6 +448,7 @@ def api_analyze_series(request, series_id):
                 'measurements': analysis.measurements or {},
                 'overlays': (analysis.measurements or {}).get('overlays', []),
                 'online_references': online_refs,
+                'report': (analysis.measurements or {}).get('report', {}),
             }
         )
     except Exception as e:

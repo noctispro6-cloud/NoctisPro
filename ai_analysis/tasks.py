@@ -2,6 +2,7 @@ from celery import shared_task
 from .models import AIAnalysis
 from .inference import ModelRegistry
 from .utils import simulate_ai_analysis, _apply_ai_triage
+from .reporting import persist_report_on_analysis
 # from .dicom_sr import create_ai_findings_sr # DICOM SR generation disabled per policy
 import logging
 import pydicom
@@ -45,6 +46,13 @@ def run_ai_analysis(analysis_id):
             _apply_ai_triage(analysis)
         except Exception:
             # Never fail the background worker due to triage/notification issues
+            pass
+
+        # Persist a final, structured preliminary report for UI display.
+        try:
+            analysis.refresh_from_db()
+            persist_report_on_analysis(analysis)
+        except Exception:
             pass
         
         # Update model statistics

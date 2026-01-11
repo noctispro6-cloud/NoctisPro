@@ -241,10 +241,14 @@ def _notify_ai_triage(analysis: AIAnalysis, triage: dict) -> None:
             },
         )
 
-        # Radiologists at the same facility, plus all admins (facility optional).
-        recipients = User.objects.filter(Q(role='radiologist') | Q(role='admin'))
-        if facility:
-            recipients = recipients.filter(Q(role='admin') | Q(facility=facility))
+        # Prefer notifying the assigned radiologist (if any). Otherwise notify facility radiologists + admins.
+        assigned = getattr(study, "radiologist", None)
+        if assigned:
+            recipients = User.objects.filter(id=assigned.id)
+        else:
+            recipients = User.objects.filter(Q(role='radiologist') | Q(role='admin'))
+            if facility:
+                recipients = recipients.filter(Q(role='admin') | Q(facility=facility))
 
         title = f"AI flagged study {study.accession_number} ({triage_level.upper()})"
         msg = (

@@ -1449,7 +1449,11 @@ def api_bone_reconstruction(request, series_id):
         # isosurface of all voxels >= threshold. Using a lower threshold can bring back soft tissue/skin.
         threshold = int(float(request.GET.get('threshold', 300)))
         want_mesh = (request.GET.get('mesh','false').lower() == 'true')
-        quality = (request.GET.get('quality','').lower())
+        quality = (request.GET.get('quality','').strip().lower())
+        if quality not in ('fast', 'high'):
+            # Backwards-compatible: treat unknown values (e.g. "normal") as fast.
+            quality = 'fast'
+        smooth = (request.GET.get('smooth', 'false').strip().lower() in ('1', 'true', 'yes', 'on'))
         
         # Fast path: reuse cached volume (isotropic for better quality)
         try:
@@ -1571,6 +1575,20 @@ def api_bone_reconstruction(request, series_id):
         # Threshold mask for isosurface extraction
         iso_mask = (volume >= float(threshold))
         
+        # Optional smoothing to avoid "lego" surfaces when downsampled.
+        # We smooth the binary mask (not the HU volume) so the surface extraction remains stable.
+        if smooth and want_mesh:
+            try:
+                from scipy import ndimage as _nd
+                # Light closing/opening to fill small holes and remove speckles
+                iso_mask = _nd.binary_closing(iso_mask, iterations=1)
+                iso_mask = _nd.binary_opening(iso_mask, iterations=1)
+                # Sub-voxel smoothing: gaussian blur then re-threshold
+                f = _nd.gaussian_filter(iso_mask.astype(np.float32), sigma=0.75)
+                iso_mask = (f >= 0.5)
+            except Exception:
+                pass
+
         # Windowing defaults for bone
         window_width = float(request.GET.get('window_width', 2000))
         window_level = float(request.GET.get('window_level', 300))
@@ -1602,10 +1620,10 @@ def api_bone_reconstruction(request, series_id):
                 vol_for_mesh = iso_mask.astype(np.float32)
 
                 # Adaptive downsampling: keep the mesh responsive to rotate/pan/zoom while staying detailed.
-                # - "high": target ~192 voxels on the longest axis, step_size=1
-                # - otherwise: target ~128 voxels on the longest axis, step_size=2
-                target = 192 if quality == 'high' else 128
-                step_size = 1 if quality == 'high' else 2
+                # - "high": target ~256 voxels on the longest axis, step_size=1
+                # - "fast": target ~160 voxels on the longest axis, step_size=1 (still smooth; faster via downsample)
+                target = 256 if quality == 'high' else 160
+                step_size = 1
 
                 z, y, x = vol_for_mesh.shape
                 max_dim = max(z, y, x, 1)
@@ -1629,6 +1647,10 @@ def api_bone_reconstruction(request, series_id):
                 mesh_payload = {
                     'vertices': verts.tolist(),
                     'faces': faces.tolist(),
+                    'vertex_count': int(verts.shape[0]) if hasattr(verts, 'shape') else int(len(verts)),
+                    'face_count': int(faces.shape[0]) if hasattr(faces, 'shape') else int(len(faces)),
+                    'quality': quality,
+                    'threshold': int(threshold),
                 }
             except Exception:
                 mesh_payload = None
@@ -1648,7 +1670,9 @@ def api_bone_reconstruction(request, series_id):
                 'description': series.series_description,
                 'modality': series.modality
             },
-            'mesh': mesh_payload
+            # Backwards/forwards compatible keys for multiple frontends
+            'mesh': mesh_payload,
+            'mesh_data': mesh_payload,
         })
         
     except Exception as e:

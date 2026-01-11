@@ -1315,6 +1315,7 @@
 
     <!-- Load essential JavaScript files -->
     <script src="{% static 'js/dicom-viewer-utils.js' %}" type="text/javascript"></script>
+    <script src="{% static 'js/dicom-print-export-fix.js' %}" type="text/javascript"></script>
     <script src="{% static 'js/delete-button-fix.js' %}" type="text/javascript"></script>
 
     <script>
@@ -1781,6 +1782,9 @@
         }
 
         // Image Display Management
+        let _singleViewDisplayAbort = null;
+        let _singleViewDisplayReqId = 0;
+
         async function updateImageDisplay() {
             if (!images.length || currentImageIndex < 0 || currentImageIndex >= images.length) {
                 return;
@@ -1790,15 +1794,23 @@
             if (!currentImage) return;
             
             try {
-                // Show loading
-                showLoading('Processing image...');
+                const reqId = ++_singleViewDisplayReqId;
+                try { _singleViewDisplayAbort?.abort(); } catch (_) {}
+                _singleViewDisplayAbort = new AbortController();
+
+                // Avoid flicker while scrubbing
+                let loadingTimer = setTimeout(() => {
+                    if (reqId === _singleViewDisplayReqId) showLoading('Processing image...');
+                }, 150);
                 
                 // Get processed image with current window/level settings
                 // Prefer a streamed PNG URL to avoid huge base64 payloads and to support color DICOMs.
                 const url = `/dicom-viewer/api/image/${currentImage.id}/display/?ww=${windowWidth}&wl=${windowLevel}&invert=${inverted}&return=url`;
                 
-                const response = await fetch(url, { credentials: 'same-origin' });
+                const response = await fetch(url, { credentials: 'same-origin', signal: _singleViewDisplayAbort.signal });
                 const data = await response.json();
+                clearTimeout(loadingTimer);
+                if (reqId !== _singleViewDisplayReqId) return;
                 
                 const dicomImage = document.getElementById('dicomImage');
                 const srcUrl = (data && (data.image_url || data.image_data)) || null;
@@ -1813,6 +1825,7 @@
                     
                     // Attach handlers BEFORE setting src (cached loads can fire immediately).
                     dicomImage.onload = function() {
+                        if (reqId !== _singleViewDisplayReqId) return;
                         hideLoading();
                         updateImageInfo(data.image_info);
                         updateMeasurementOverlay();
@@ -1825,10 +1838,26 @@
                         dicomImage.style.maxHeight = '100%';
                     };
                     dicomImage.onerror = function() {
+                        if (reqId !== _singleViewDisplayReqId) return;
                         hideLoading();
                         showToast('Failed to load image', 'error');
                     };
                     dicomImage.src = srcUrl;
+
+                    // Prefetch neighbors (helps slow networks)
+                    try {
+                        const prefetch = (idx) => {
+                            const imgObj = images[idx];
+                            if (!imgObj) return;
+                            const u = `/dicom-viewer/api/image/${imgObj.id}/render.png?ww=${encodeURIComponent(windowWidth)}&wl=${encodeURIComponent(windowLevel)}&invert=${encodeURIComponent(inverted)}`;
+                            const im = new Image();
+                            im.decoding = 'async';
+                            im.src = u;
+                        };
+                        if (currentImageIndex + 1 < images.length) prefetch(currentImageIndex + 1);
+                        if (currentImageIndex + 2 < images.length) prefetch(currentImageIndex + 2);
+                        if (currentImageIndex - 1 >= 0) prefetch(currentImageIndex - 1);
+                    } catch (_) {}
                 } else {
                     hideLoading();
                     if (data.warnings?.pixel_decode_error) {
@@ -1839,6 +1868,7 @@
                 }
                 
             } catch (error) {
+                if (error && error.name === 'AbortError') return;
                 hideLoading();
                 console.error('Error updating image display:', error);
                 showToast('Error loading image', 'error');
@@ -2713,6 +2743,19 @@
                 showToast('No image to export', 'warning');
                 return;
             }
+
+            // Prefer shared production export (adds patient/study header + high resolution).
+            try {
+                if (typeof exportImageWithDetails === 'function') {
+                    exportImageWithDetails('png', {
+                        includePatientInfo: true,
+                        includeMeasurements: true,
+                        includeAnnotations: true,
+                        quality: 'high',
+                    });
+                    return;
+                }
+            } catch (_) {}
             
             try {
                 const dicomImage = document.getElementById('dicomImage');
@@ -2760,6 +2803,14 @@
                 showToast('No image to print', 'warning');
                 return;
             }
+
+            // Prefer shared production print (patient header + reliable browser print flow).
+            try {
+                if (typeof printDicomImage === 'function') {
+                    printDicomImage();
+                    return;
+                }
+            } catch (_) {}
             
             try {
                 const dicomImage = document.getElementById('dicomImage');
@@ -4081,115 +4132,67 @@
             exportImage(); // Use existing export function
         }
 
-        // Comprehensive AI Analysis Function
+        // AI button fix: use the working ai_analysis series endpoint everywhere.
         async function runAIAnalysis(analysisType) {
             if (!analysisType) return;
-            if (!currentSeries) {
-                showToast('Please load a series first', 'warning');
-                return;
-            }
-            
-            const selectedModel = document.getElementById('aiModelSelect').value || 'general_v2';
-            
+            await runQuickAI();
             try {
-                showLoading(`Running AI ${analysisType.replace('_', ' ')}...`);
-                
-                const response = await fetch(`/ai-analysis/api/analyze/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCSRFToken()
-                    },
-                    body: JSON.stringify({
-                        series_id: currentSeries.id,
-                        analysis_type: analysisType,
-                        ai_model: selectedModel,
-                        modality: currentSeries.modality,
-                        current_image_index: currentImageIndex,
-                        window_width: windowWidth,
-                        window_level: windowLevel,
-                        include_visualization: true,
-                        confidence_threshold: 0.75
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    hideLoading();
-                    displayAIResults(data.results, analysisType);
-                    
-                    // Apply results to UI based on analysis type
-                    if (analysisType === 'auto_measurements' && data.measurements) {
-                        data.measurements.forEach(measurement => {
-                            measurements.push({
-                                ...measurement,
-                                isAI: true,
-                                confidence: measurement.confidence || 0.9
-                            });
-                        });
-                        updateMeasurementsList();
-                    }
-                    
-                    if (analysisType === 'image_enhancement' && data.enhanced_image_url) {
-                        const dicomImage = document.getElementById('dicomImage');
-                        dicomImage.src = data.enhanced_image_url;
-                    }
-                    
-                    showToast(`AI ${analysisType.replace('_', ' ')} completed successfully`, 'success');
-                } else {
-                    hideLoading();
-                    showToast(`AI ${analysisType.replace('_', ' ')} failed: ` + (data.error || 'Unknown error'), 'error');
-                }
-                
-            } catch (error) {
-                hideLoading();
-                console.error(`AI ${analysisType} error:`, error);
-                showToast(`AI ${analysisType.replace('_', ' ')} error`, 'error');
-            }
-            
-            // Reset dropdown
-            document.getElementById('aiAnalysisSelect').value = '';
+                const sel = document.getElementById('aiAnalysisSelect');
+                if (sel) sel.value = '';
+            } catch (_) {}
         }
 
-        // Quick AI function for rapid analysis
+        // Quick AI function (supported backend API)
         async function runQuickAI() {
             if (!currentSeries) {
                 showToast('Please load a series first', 'warning');
                 return;
             }
-            
+
             try {
-                showLoading('Running quick AI analysis...');
-                
-                const response = await fetch(`/ai-analysis/api/quick-scan/`, {
+                showLoading('Running AI analysis...');
+
+                const fd = new FormData();
+                try {
+                    const modelSel = document.getElementById('aiModelSelect');
+                    if (modelSel && modelSel.value) fd.append('model_id', modelSel.value);
+                } catch (_) {}
+
+                const response = await fetch(`/ai_analysis/api/series/${currentSeries.id}/analyze/`, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCSRFToken()
+                        'X-CSRFToken': getCSRFToken(),
+                        'X-Requested-With': 'XMLHttpRequest'
                     },
-                    body: JSON.stringify({
-                        series_id: currentSeries.id,
-                        modality: currentSeries.modality,
-                        current_image_index: currentImageIndex
-                    })
+                    body: fd,
+                    credentials: 'same-origin'
                 });
-                
+
                 const data = await response.json();
-                
-                if (data.success) {
-                    hideLoading();
-                    displayAIResults(data.results, 'quick_scan');
-                    showToast(`Quick AI scan completed - ${data.results.findings?.length || 0} findings`, 'success');
-                } else {
-                    hideLoading();
-                    showToast('Quick AI scan failed: ' + (data.error || 'Unknown error'), 'error');
+                if (!response.ok || !data || data.success === false) {
+                    throw new Error((data && data.error) ? data.error : `HTTP ${response.status}`);
                 }
-                
+
+                const conf = Number((data.measurements || {}).triage_score || data.confidence_score || 0) || 0;
+                const findings = Array.isArray(data.findings) ? data.findings : (data.findings || []);
+                const results = {
+                    model_used: (data.measurements && data.measurements.model_name) || 'Noctis AI',
+                    overall_confidence: Math.round((Number(conf) || 0) * 100),
+                    findings: Array.isArray(findings) ? findings.map((f) => ({
+                        type: f.type || 'Finding',
+                        confidence: Math.round((Number(f.confidence) || 0) * 100),
+                        severity: (Number(f.confidence) || 0) >= 0.8 ? 'high' : (Number(f.confidence) || 0) >= 0.6 ? 'medium' : 'low',
+                        location: f.location || 'N/A'
+                    })) : []
+                };
+
+                hideLoading();
+                displayAIResults(results, 'pathology');
+                showToast('AI analysis completed', 'success');
             } catch (error) {
                 hideLoading();
-                console.error('Quick AI scan error:', error);
-                showToast('Quick AI scan error', 'error');
+                console.error('AI analysis error:', error);
+                showToast('AI analysis failed', 'error');
             }
         }
 

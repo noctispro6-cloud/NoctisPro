@@ -1293,9 +1293,9 @@
         let _mprSuppressNextClick = false;
 
         // Progressive MPR quality:
-        // - Start in 'fast' so the first 3 images appear quickly.
-        // - Upgrade to 'high' asynchronously (no quality compromise in final image).
-        let mprQuality = 'fast';
+        // MPR quality:
+        // Keep this on 'high' to avoid the "minimal reconstruction" / downsampled flash while scrolling.
+        let mprQuality = 'high';
 
         let _mprSyncTimer = null;
         
@@ -4511,8 +4511,8 @@
                 try { resizeCanvas(); } catch (e) {}
 
                 const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
-                // Always start with fast for initial responsiveness; we'll upgrade after first paint.
-                mprQuality = 'fast';
+                // Always use high quality for crisp MPR rendering.
+                mprQuality = 'high';
 
                 // Preserve the per-plane slice index whenever possible (wheel scrolling per plane).
                 const canPreserve =
@@ -4609,8 +4609,8 @@
                 }
                 if (!quiet) showToast('MPR ready', 'success');
 
-                // Progressive upgrade to high quality (non-blocking).
-                // The server is already prewarming in the background; this will swap images as soon as ready.
+                // Historical: progressive upgrade from fast->high.
+                // We now start in high by default, so this is typically a no-op.
                 _upgradeMPRQualityToHigh(qsBase);
             } catch (error) {
                 console.error('Error generating MPR:', error);
@@ -4703,7 +4703,7 @@
                 ]);
             } catch (e) {
                 // If upgrade fails, keep fast mode; user still has a working MPR.
-                try { mprQuality = 'fast'; } catch (_) {}
+                try { mprQuality = 'high'; } catch (_) {}
             }
         }
 
@@ -5213,7 +5213,7 @@
             // Prefer the binary PNG slice endpoint (much smaller than JSON+base64).
             // If counts are known, we can avoid a metadata fetch entirely.
             const knownCount = Number(mprState?.counts?.[plane] || 0);
-            const q = (mprQuality === 'high') ? 'high' : 'fast';
+            const q = 'high';
             if (knownCount > 0) {
                 const clamped = Math.max(0, Math.min(knownCount - 1, Math.round(idx)));
                 return {

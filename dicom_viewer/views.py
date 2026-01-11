@@ -271,6 +271,29 @@ def _schedule_mpr_disk_cache_build(series_id: int, quality: str = 'high') -> Non
     except Exception:
         return
 
+    # Avoid spawning many duplicate builders (e.g. multiple viewer page loads).
+    # This is best-effort; the per-series build lock inside `_get_mpr_volume_and_spacing`
+    # is still the ultimate guard.
+    try:
+        global _MPR_DISK_BUILD_LOCK, _MPR_DISK_BUILD_INFLIGHT
+    except Exception:
+        pass
+    try:
+        _MPR_DISK_BUILD_LOCK
+    except Exception:
+        _MPR_DISK_BUILD_LOCK = Lock()
+        _MPR_DISK_BUILD_INFLIGHT = set()  # {(series_id, quality)}
+
+    key = (sid, q)
+    try:
+        with _MPR_DISK_BUILD_LOCK:
+            if key in _MPR_DISK_BUILD_INFLIGHT:
+                return
+            _MPR_DISK_BUILD_INFLIGHT.add(key)
+    except Exception:
+        # If bookkeeping fails, continue without it.
+        pass
+
     def _run():
         try:
             close_old_connections()
@@ -286,11 +309,21 @@ def _schedule_mpr_disk_cache_build(series_id: int, quality: str = 'high') -> Non
                 close_old_connections()
             except Exception:
                 pass
+            try:
+                with _MPR_DISK_BUILD_LOCK:
+                    _MPR_DISK_BUILD_INFLIGHT.discard(key)
+            except Exception:
+                pass
 
     try:
         t = Thread(target=_run, daemon=True)
         t.start()
     except Exception:
+        try:
+            with _MPR_DISK_BUILD_LOCK:
+                _MPR_DISK_BUILD_INFLIGHT.discard(key)
+        except Exception:
+            pass
         return
 
 def _jsonify_dicom_value(v):
@@ -669,6 +702,18 @@ def _get_mpr_volume_for_series(series):
 @login_required
 def viewer(request):
     """Complete professional DICOM viewer with MPR, 3D reconstruction, and all medical imaging tools."""
+    # Performance: prebuild MPR volumes in the background so reconstruction is fast when the user
+    # clicks MPR/3D, and reopening the same series reuses disk cache instead of re-decoding pixels.
+    try:
+        series_id = request.GET.get('series', '') or ''
+        sid = int(series_id) if str(series_id).strip().isdigit() else None
+        if sid:
+            # Build a fast volume for immediate interaction + a high-quality volume for later upgrades.
+            _schedule_mpr_disk_cache_build(sid, quality='fast')
+            _schedule_mpr_disk_cache_build(sid, quality='high')
+    except Exception:
+        pass
+
     context = {
         'study_id': request.GET.get('study', ''),
         'series_id': request.GET.get('series', ''),
@@ -6760,7 +6805,9 @@ def mpr_slice_api(request, series_id, plane, slice_index):
         cached_png = _mpr_png_cache_get(series_id, plane, slice_index, window_width, window_level, inverted, quality=quality)
         if cached_png:
             resp = HttpResponse(cached_png, content_type='image/png')
-            resp['Cache-Control'] = 'private, max-age=30'
+            # Window/level/invert are part of the URL query, and quality is part of the cache key,
+            # so it is safe to let the browser reuse slices for a while (helps reopen/refresh).
+            resp['Cache-Control'] = 'private, max-age=3600'
             return resp
 
         # Build/reuse volume (single-build guarded by per-series lock in _get_mpr_volume_and_spacing)
@@ -6783,7 +6830,7 @@ def mpr_slice_api(request, series_id, plane, slice_index):
             raise Http404("MPR slice not available")
 
         resp = HttpResponse(png_bytes, content_type='image/png')
-        resp['Cache-Control'] = 'private, max-age=30'
+        resp['Cache-Control'] = 'private, max-age=3600'
         return resp
 
     except Exception as e:

@@ -4595,9 +4595,9 @@ def api_hu_value(request):
 
     try:
         if mode == 'series':
-            image_id = int(request.GET.get('image_id'))
-            x = int(float(request.GET.get('x')))
-            y = int(float(request.GET.get('y')))
+            image_id = _safe_int_query(request, 'image_id', default=None)
+            if image_id is None:
+                return JsonResponse({'error': 'image_id required'}, status=400)
             image = get_object_or_404(DicomImage, id=image_id)
             if user.is_facility_user() and getattr(user, 'facility', None) and image.series.study.facility != user.facility:
                 return JsonResponse({'error': 'Permission denied'}, status=403)
@@ -4610,10 +4610,22 @@ def api_hu_value(request):
             h, w = arr.shape[:2]
             shape = (request.GET.get('shape') or '').lower()
             if shape == 'ellipse':
-                cx = int(float(request.GET.get('cx', x)))
-                cy = int(float(request.GET.get('cy', y)))
-                rx = max(1, int(float(request.GET.get('rx', 1))))
-                ry = max(1, int(float(request.GET.get('ry', 1))))
+                # Ellipse ROI does not require x/y; default them to center if missing.
+                cx = _safe_int_query(request, 'cx', default=None)
+                cy = _safe_int_query(request, 'cy', default=None)
+                x = _safe_int_query(request, 'x', default=cx)
+                y = _safe_int_query(request, 'y', default=cy)
+                if cx is None:
+                    cx = x
+                if cy is None:
+                    cy = y
+                if cx is None or cy is None:
+                    return JsonResponse({'error': 'ROI requires cx/cy (or x/y)'}, status=400)
+                rx = max(1, int(_safe_float(request.GET.get('rx', 1), 1.0)))
+                ry = max(1, int(_safe_float(request.GET.get('ry', 1), 1.0)))
+                # Clamp to image bounds (defensive against odd UI coords)
+                cx = max(0, min(w - 1, int(cx)))
+                cy = max(0, min(h - 1, int(cy)))
                 yy, xx = np.ogrid[:h, :w]
                 mask = ((xx - cx) ** 2) / (rx ** 2) + ((yy - cy) ** 2) / (ry ** 2) <= 1.0
                 roi = arr[mask]
@@ -4627,17 +4639,21 @@ def api_hu_value(request):
                     'n': int(roi.size),
                 }
                 return JsonResponse({'mode': 'series', 'image_id': image_id, 'stats': stats})
+            x = _safe_int_query(request, 'x', default=None)
+            y = _safe_int_query(request, 'y', default=None)
+            if x is None or y is None:
+                return JsonResponse({'error': 'x and y required'}, status=400)
             if x < 0 or y < 0 or x >= w or y >= h:
                 return JsonResponse({'error': 'Out of bounds'}, status=400)
             hu = float(arr[y, x])
             return JsonResponse({'mode': 'series', 'image_id': image_id, 'x': x, 'y': y, 'hu': round(hu, 2)})
 
         elif mode == 'mpr':
-            series_id = int(request.GET.get('series_id'))
+            series_id = _safe_int_query(request, 'series_id', default=None)
+            if series_id is None:
+                return JsonResponse({'error': 'series_id required'}, status=400)
             plane = (request.GET.get('plane') or '').lower()
-            slice_index = int(float(request.GET.get('slice', '0')))
-            x = int(float(request.GET.get('x')))
-            y = int(float(request.GET.get('y')))
+            slice_index = _safe_int_query(request, 'slice', default=0) or 0
             quality = (request.GET.get('quality') or 'high').strip().lower()
             if quality not in ('fast', 'high'):
                 quality = 'high'
@@ -4667,10 +4683,22 @@ def api_hu_value(request):
             h, w = slice2d.shape[:2]
             shape = (request.GET.get('shape') or '').lower()
             if shape == 'ellipse':
-                cx = int(float(request.GET.get('cx', x)))
-                cy = int(float(request.GET.get('cy', y)))
-                rx = max(1, int(float(request.GET.get('rx', 1))))
-                ry = max(1, int(float(request.GET.get('ry', 1))))
+                # Ellipse ROI does not require x/y; default them to center if missing.
+                cx = _safe_int_query(request, 'cx', default=None)
+                cy = _safe_int_query(request, 'cy', default=None)
+                x = _safe_int_query(request, 'x', default=cx)
+                y = _safe_int_query(request, 'y', default=cy)
+                if cx is None:
+                    cx = x
+                if cy is None:
+                    cy = y
+                if cx is None or cy is None:
+                    return JsonResponse({'error': 'ROI requires cx/cy (or x/y)'}, status=400)
+                rx = max(1, int(_safe_float(request.GET.get('rx', 1), 1.0)))
+                ry = max(1, int(_safe_float(request.GET.get('ry', 1), 1.0)))
+                # Clamp to slice bounds (defensive against odd UI coords)
+                cx = max(0, min(w - 1, int(cx)))
+                cy = max(0, min(h - 1, int(cy)))
                 yy, xx = np.ogrid[:h, :w]
                 mask = ((xx - cx) ** 2) / (rx ** 2) + ((yy - cy) ** 2) / (ry ** 2) <= 1.0
                 roi = slice2d[mask]
@@ -4685,6 +4713,10 @@ def api_hu_value(request):
                 }
                 return JsonResponse({'mode': 'mpr', 'series_id': series_id, 'plane': plane, 'slice': slice_index, 'stats': stats})
 
+            x = _safe_int_query(request, 'x', default=None)
+            y = _safe_int_query(request, 'y', default=None)
+            if x is None or y is None:
+                return JsonResponse({'error': 'x and y required'}, status=400)
             if x < 0 or y < 0 or x >= w or y >= h:
                 return JsonResponse({'error': 'Out of bounds'}, status=400)
             hu = float(slice2d[int(y), int(x)])

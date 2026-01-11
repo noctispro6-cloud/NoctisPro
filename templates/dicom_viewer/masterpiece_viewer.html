@@ -1401,7 +1401,8 @@
         // - Stored in image pixel coordinates (center point)
         // - Has an independent rotation (degrees) to help align misaligned images without rotating the pixels
         let crosshairRotation = 0; // degrees, additional rotation relative to displayed image axes
-        let _crosshairRotateDrag = { active: false, startAngle: 0, baseDeg: 0 };
+        // Track drag rotation continuously across the -π/π wrap so users can rotate 360°+ smoothly.
+        let _crosshairRotateDrag = { active: false, lastAngle: 0, accumDeg: 0, baseDeg: 0 };
         let _crosshairRotateHover = false;
         let cineMode = false;
         let cineInterval = null;
@@ -3033,7 +3034,8 @@
                 if (crosshair && viewMode === 'single' && _hitTestCrosshairRotateHandle(lastMouseX, lastMouseY)) {
                     const c = _crosshairCenterCanvasPoint();
                     _crosshairRotateDrag.active = true;
-                    _crosshairRotateDrag.startAngle = Math.atan2(lastMouseY - c.y, lastMouseX - c.x);
+                    _crosshairRotateDrag.lastAngle = Math.atan2(lastMouseY - c.y, lastMouseX - c.x);
+                    _crosshairRotateDrag.accumDeg = 0;
                     _crosshairRotateDrag.baseDeg = Number(crosshairRotation) || 0;
                     _crosshairRotateHover = true;
                     isDragging = true;
@@ -3115,8 +3117,13 @@
             if (_crosshairRotateDrag && _crosshairRotateDrag.active) {
                 const c = _crosshairCenterCanvasPoint();
                 const a = Math.atan2(mouseY - c.y, mouseX - c.x);
-                const deltaDeg = (a - _crosshairRotateDrag.startAngle) * (180 / Math.PI);
-                crosshairRotation = _normalizeDeg((_crosshairRotateDrag.baseDeg || 0) + deltaDeg);
+                // Unwrap angle differences to avoid jumps at the ±π boundary.
+                let delta = a - (_crosshairRotateDrag.lastAngle || 0);
+                if (delta > Math.PI) delta -= 2 * Math.PI;
+                if (delta < -Math.PI) delta += 2 * Math.PI;
+                _crosshairRotateDrag.accumDeg = Number(_crosshairRotateDrag.accumDeg || 0) + (delta * (180 / Math.PI));
+                _crosshairRotateDrag.lastAngle = a;
+                crosshairRotation = _normalizeDeg((Number(_crosshairRotateDrag.baseDeg) || 0) + Number(_crosshairRotateDrag.accumDeg || 0));
                 redrawCurrentImage();
                 lastMouseX = mouseX;
                 lastMouseY = mouseY;
@@ -3495,7 +3502,7 @@
             flipH = false;
             flipV = false;
             crosshairRotation = 0;
-            _crosshairRotateDrag = { active: false, startAngle: 0, baseDeg: 0 };
+            _crosshairRotateDrag = { active: false, lastAngle: 0, accumDeg: 0, baseDeg: 0 };
             _crosshairRotateHover = false;
             updateZoomSlider();
             redrawCurrentImage();
@@ -3532,7 +3539,7 @@
             crosshair = false;
             crosshairImagePx = null;
             crosshairRotation = 0;
-            _crosshairRotateDrag = { active: false, startAngle: 0, baseDeg: 0 };
+            _crosshairRotateDrag = { active: false, lastAngle: 0, accumDeg: 0, baseDeg: 0 };
             _crosshairRotateHover = false;
 
             // Reset basic view transform

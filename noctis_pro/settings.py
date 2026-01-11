@@ -633,6 +633,17 @@ DATABASES = {
     }
 }
 
+# PgBouncer compatibility:
+# When using transaction pooling, Django must not use server-side cursors.
+try:
+    _db_engine = (DATABASES.get("default", {}).get("ENGINE") or "")
+    _db_host = (DATABASES.get("default", {}).get("HOST") or "").strip().lower()
+    _use_pgbouncer = (os.environ.get("USE_PGBOUNCER", "") or "").strip().lower() in ("1", "true", "yes", "on")
+    if "postgresql" in _db_engine and (_use_pgbouncer or _db_host == "pgbouncer"):
+        DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
+except Exception:
+    pass
+
 # Logging configuration
 LOGGING = {
     'version': 1,

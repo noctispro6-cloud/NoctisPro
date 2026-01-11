@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:16
+    command: ["postgres", "-c", "max_connections=${POSTGRES_MAX_CONNECTIONS:-200}"]
     environment:
       POSTGRES_DB: ${DB_NAME:-noctispro}
       POSTGRES_USER: ${DB_USER:-noctispro}
@@ -12,6 +13,26 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    restart: unless-stopped
+
+  pgbouncer:
+    image: edoburu/pgbouncer:1.22.1
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-noctispro}
+      DB_PASSWORD: ${DB_PASSWORD:-change-me}
+      DB_NAME: ${DB_NAME:-noctispro}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-1000}
+      DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-20}
+      RESERVE_POOL_SIZE: ${PGBOUNCER_RESERVE_POOL_SIZE:-5}
+      SERVER_RESET_QUERY: DISCARD ALL
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits
+      LISTEN_PORT: "6432"
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
   redis:
@@ -28,11 +49,12 @@ services:
       - .env.docker
     environment:
       DB_ENGINE: django.db.backends.postgresql
-      DB_HOST: db
-      DB_PORT: "5432"
+      DB_HOST: pgbouncer
+      DB_PORT: "6432"
       DB_NAME: ${DB_NAME:-noctispro}
       DB_USER: ${DB_USER:-noctispro}
       DB_PASSWORD: ${DB_PASSWORD:-change-me}
+      USE_PGBOUNCER: "true"
 
       # Redis for Channels (websockets / realtime)
       REDIS_URL: redis://redis:6379/0
@@ -51,6 +73,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      pgbouncer:
+        condition: service_started
       redis:
         condition: service_started
     expose:
@@ -67,11 +91,12 @@ services:
       - .env.docker
     environment:
       DB_ENGINE: django.db.backends.postgresql
-      DB_HOST: db
-      DB_PORT: "5432"
+      DB_HOST: pgbouncer
+      DB_PORT: "6432"
       DB_NAME: ${DB_NAME:-noctispro}
       DB_USER: ${DB_USER:-noctispro}
       DB_PASSWORD: ${DB_PASSWORD:-change-me}
+      USE_PGBOUNCER: "true"
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
@@ -87,6 +112,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      pgbouncer:
+        condition: service_started
       redis:
         condition: service_started
     volumes:

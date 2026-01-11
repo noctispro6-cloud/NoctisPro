@@ -3064,7 +3064,17 @@ def api_export_image(request, image_id):
         if burn_in:
             from PIL import ImageDraw, ImageFont
 
-            draw = ImageDraw.Draw(pil)
+            # Pillow requires mode-appropriate colors:
+            # - "L" expects an int (or 1-tuple)
+            # - "RGB" expects a 3-tuple
+            # - "RGBA" expects a 4-tuple
+            #
+            # Our burn-in uses a translucent backing box, so ensure RGBA first.
+            if pil.mode != "RGBA":
+                pil = pil.convert("RGBA")
+
+            # Use RGBA drawing so the alpha backing box is applied correctly.
+            draw = ImageDraw.Draw(pil, "RGBA")
             # Font: best-effort; Pillow default is fine if truetype not present.
             try:
                 font = ImageFont.truetype("DejaVuSans.ttf", 14)

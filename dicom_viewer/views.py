@@ -4830,6 +4830,10 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
             anisotropy = 1.0
 
         preserve_z_first = bool(anisotropy >= 1.8)
+        # Never downsample Z so aggressively that we end up with a single axial slice.
+        # If axial depth collapses to 1, the UI appears "stuck" because there is nothing to scroll.
+        # When memory pressure exists, prefer downsampling X/Y further instead.
+        max_z_step = max(1, int(z) - 1)
         while _bytes_for_steps(z_step, y_step, x_step) > target_bytes_budget and (z_step < z or y_step < y or x_step < x):
             if preserve_z_first:
                 # Keep Z detail; spend budget on XY instead.
@@ -4839,12 +4843,12 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
                 if x_step < x:
                     x_step += 1
                     continue
-                if z_step < z:
+                if z_step < max_z_step:
                     z_step += 1
                     continue
             else:
                 # Default: reduce Z first (most CT stacks have plenty of slices).
-                if z_step < z:
+                if z_step < max_z_step:
                     z_step += 1
                     continue
                 if y_step < y:

@@ -1404,6 +1404,9 @@
         // Track drag rotation continuously across the -π/π wrap so users can rotate 360°+ smoothly.
         let _crosshairRotateDrag = { active: false, lastAngle: 0, accumDeg: 0, baseDeg: 0 };
         let _crosshairRotateHover = false;
+        // MPR crosshair rotation drag (overlay-only; does not create oblique reformats).
+        let _mprCrosshairRotateDrag = { active: false, plane: null, lastAngle: 0, accumDeg: 0, baseDeg: 0 };
+        let _mprCrosshairRotateHover = false;
         let cineMode = false;
         let cineInterval = null;
         // Multi-frame cine (Enhanced MR/US, etc.)
@@ -1914,6 +1917,9 @@
                             };
                         }
                         redrawAllMPRPlanes();
+                        if (crosshair) {
+                            showToast('MPR crosshair: drag center to move intersection; drag the small handle to rotate', 'info', 3500);
+                        }
                     } else {
                         // Single view: keep crosshair anchored in image space so it stays correct through pan/zoom/rotate/flip.
                         if (crosshair && (!crosshairImagePx || crosshairImagePx.x == null || crosshairImagePx.y == null)) {
@@ -5001,9 +5007,9 @@
             }
         }
 
-        function drawMPRCrosshair(plane, ctx) {
+        function _mprCrosshairCenterCanvasPoint(plane) {
             const meta = mprState.renderMeta[plane];
-            if (!meta || !mprCrosshairVoxel) return;
+            if (!meta || !mprCrosshairVoxel) return null;
             const { w, h, dx, dy, dw, dh } = meta;
             const sx = dw / w;
             const sy = dh / h;
@@ -5017,9 +5023,11 @@
             } else if (plane === 'sagittal') {
                 px = mprCrosshairVoxel.y;           // columns = y
                 py = (h - 1) - mprCrosshairVoxel.z; // rows = z (flipped)
-            } else { // coronal
+            } else if (plane === 'coronal') {
                 px = mprCrosshairVoxel.x;           // columns = x
                 py = (h - 1) - mprCrosshairVoxel.z; // rows = z (flipped)
+            } else {
+                return null;
             }
 
             // Clamp to image bounds.
@@ -5028,6 +5036,40 @@
 
             const cx = dx + px * sx;
             const cy = dy + py * sy;
+            return { cx, cy, dx, dy, dw, dh };
+        }
+
+        function _mprCrosshairRotateHandleCanvasPoint(plane) {
+            const c = _mprCrosshairCenterCanvasPoint(plane);
+            if (!c) return null;
+            const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+            const off = 28 * dpr;
+            const r = 9 * dpr;
+            const a = (_normalizeDeg(Number(crosshairRotation) || 0) * Math.PI) / 180;
+            return { x: c.cx + Math.cos(a) * off, y: c.cy + Math.sin(a) * off, r };
+        }
+
+        function _hitTestMPRCrosshairRotateHandle(plane, canvasX, canvasY) {
+            if (!crosshair) return false;
+            if (!(plane === 'axial' || plane === 'sagittal' || plane === 'coronal')) return false;
+            if (!(mprState && mprState.activePlane === plane)) return false;
+            const h = _mprCrosshairRotateHandleCanvasPoint(plane);
+            if (!h) return false;
+            const dx = canvasX - h.x;
+            const dy = canvasY - h.y;
+            const rr = (h.r || 10);
+            return (dx * dx + dy * dy) <= (rr * rr);
+        }
+
+        function drawMPRCrosshair(plane, ctx) {
+            const meta = mprState.renderMeta[plane];
+            if (!meta || !mprCrosshairVoxel) return;
+            const { dx, dy, dw, dh } = meta;
+
+            const center = _mprCrosshairCenterCanvasPoint(plane);
+            if (!center) return;
+            const cx = center.cx;
+            const cy = center.cy;
 
             // Color coding (hospital-grade convention-ish):
             // axial line = cyan, sagittal = red, coronal = green.
@@ -5039,10 +5081,10 @@
             let vertCol = COL_SAG;
             let horizCol = COL_COR;
             if (plane === 'sagittal') {
-                vertCol = COL_COR;   // x-axis is y (coronal index)
+                vertCol = COL_COR;    // x-axis is y (coronal index)
                 horizCol = COL_AXIAL; // y-axis is z (axial index)
             } else if (plane === 'coronal') {
-                vertCol = COL_SAG;   // x-axis is x (sagittal index)
+                vertCol = COL_SAG;    // x-axis is x (sagittal index)
                 horizCol = COL_AXIAL; // y-axis is z (axial index)
             }
 
@@ -5050,18 +5092,28 @@
             ctx.lineWidth = 1.5;
             ctx.setLineDash([]);
 
-            // Horizontal line
+            // Clip to the rendered image rect so lines don't spill into UI chrome.
+            ctx.beginPath();
+            ctx.rect(dx, dy, dw, dh);
+            ctx.clip();
+
+            const a = (_normalizeDeg(Number(crosshairRotation) || 0) * Math.PI) / 180;
+            const ca = Math.cos(a);
+            const sa = Math.sin(a);
+            const len = Math.max(dw, dh) * 1.4;
+
+            // "Horizontal" axis rotated by crosshairRotation
             ctx.strokeStyle = horizCol;
             ctx.beginPath();
-            ctx.moveTo(dx, cy);
-            ctx.lineTo(dx + dw, cy);
+            ctx.moveTo(cx - ca * len, cy - sa * len);
+            ctx.lineTo(cx + ca * len, cy + sa * len);
             ctx.stroke();
 
-            // Vertical line
+            // "Vertical" axis rotated by crosshairRotation (perpendicular)
             ctx.strokeStyle = vertCol;
             ctx.beginPath();
-            ctx.moveTo(cx, dy);
-            ctx.lineTo(cx, dy + dh);
+            ctx.moveTo(cx + sa * len, cy - ca * len);
+            ctx.lineTo(cx - sa * len, cy + ca * len);
             ctx.stroke();
 
             // Center marker
@@ -5073,6 +5125,22 @@
             ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
+
+            // Rotation handle (active pane only): drag to rotate 360°+
+            if (mprState && mprState.activePlane === plane) {
+                const hpt = _mprCrosshairRotateHandleCanvasPoint(plane);
+                if (hpt) {
+                    const highlight = !!(_mprCrosshairRotateDrag && _mprCrosshairRotateDrag.active) || !!_mprCrosshairRotateHover;
+                    ctx.lineWidth = 1.5;
+                    ctx.fillStyle = highlight ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.65)';
+                    ctx.strokeStyle = highlight ? 'rgba(0,212,255,0.95)' : 'rgba(255,255,255,0.8)';
+                    ctx.beginPath();
+                    ctx.arc(hpt.x, hpt.y, hpt.r || 10, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+
             ctx.restore();
         }
 
@@ -5361,7 +5429,10 @@
                 return;
             }
             const delta = Math.sign(event.deltaY || 0);
-            const step = delta === 0 ? 0 : (delta > 0 ? 1 : -1);
+            let step = delta === 0 ? 0 : (delta > 0 ? 1 : -1);
+            // Axial: users expect wheel-up to move "toward the top" (superior). In our display convention
+            // (Z increases upward in sagittal/coronal due to flip), that corresponds to increasing Z.
+            if (plane === 'axial') step = -step;
             const count = mprState.counts[plane] || 0;
             if (!count) return;
             const next = Math.max(0, Math.min(count - 1, (mprState.index[plane] || 0) + step));
@@ -5404,6 +5475,33 @@
             const x = pxy.x;
             const y = pxy.y;
             setActiveMPRPlane(plane);
+
+            // Crosshair rotate (MPR): drag the handle to rotate 360°+ (overlay only).
+            if (crosshair && (plane === 'axial' || plane === 'sagittal' || plane === 'coronal') && event.button === 0) {
+                const isDrawingTool = (activeTool === 'roi' || activeTool === 'measure' || activeTool === 'angle' || activeTool === 'area' || activeTool === 'annotate');
+                if (!isDrawingTool && c && _hitTestMPRCrosshairRotateHandle(plane, x, y)) {
+                    event.preventDefault();
+                    const center = _mprCrosshairCenterCanvasPoint(plane);
+                    if (center) {
+                        _mprCrosshairRotateDrag.active = true;
+                        _mprCrosshairRotateDrag.plane = plane;
+                        _mprCrosshairRotateDrag.lastAngle = Math.atan2(y - center.cy, x - center.cx);
+                        _mprCrosshairRotateDrag.accumDeg = 0;
+                        _mprCrosshairRotateDrag.baseDeg = Number(crosshairRotation) || 0;
+                        _mprCrosshairRotateHover = true;
+
+                        _mprDragState.down = true;
+                        _mprDragState.plane = plane;
+                        _mprDragState.tool = 'crosshair-rotate';
+                        _mprDragState.lastX = x;
+                        _mprDragState.lastY = y;
+                        _mprDragState.wasDragged = false;
+                        _mprSuppressNextClick = true; // suppress click-after-drag
+                        redrawAllMPRPlanes();
+                        return;
+                    }
+                }
+            }
 
             // Drag the crosshair intersection in real-time (grab near the center marker).
             if (crosshair && (plane === 'axial' || plane === 'sagittal' || plane === 'coronal') && event.button === 0) {
@@ -5538,6 +5636,14 @@
             const x = pxy.x;
             const y = pxy.y;
             _scheduleMPRHU(plane, x, y);
+            // Crosshair rotate hover feedback (active MPR pane only).
+            if (crosshair && c && (plane === 'axial' || plane === 'sagittal' || plane === 'coronal') && mprState && mprState.activePlane === plane && !_mprDragState.down) {
+                const hover = _hitTestMPRCrosshairRotateHandle(plane, x, y);
+                if (hover !== _mprCrosshairRotateHover) {
+                    _mprCrosshairRotateHover = hover;
+                    try { c.style.cursor = hover ? 'grab' : 'crosshair'; } catch (_) {}
+                }
+            }
             if (activeTool === 'roi' && roiDraft && roiDraft.mode === 'mpr' && roiDraft.plane === plane) {
                 const p = _mprCanvasToSlicePx(plane, x, y);
                 if (!p) return;
@@ -5551,6 +5657,20 @@
             _mprDragState.lastX = x;
             _mprDragState.lastY = y;
             if (Math.abs(dx) + Math.abs(dy) > 1.5) _mprDragState.wasDragged = true;
+
+            if (_mprDragState.tool === 'crosshair-rotate' && _mprCrosshairRotateDrag && _mprCrosshairRotateDrag.active) {
+                const center = _mprCrosshairCenterCanvasPoint(plane);
+                if (!center) return;
+                const a = Math.atan2(y - center.cy, x - center.cx);
+                let delta = a - (_mprCrosshairRotateDrag.lastAngle || 0);
+                if (delta > Math.PI) delta -= 2 * Math.PI;
+                if (delta < -Math.PI) delta += 2 * Math.PI;
+                _mprCrosshairRotateDrag.accumDeg = Number(_mprCrosshairRotateDrag.accumDeg || 0) + (delta * (180 / Math.PI));
+                _mprCrosshairRotateDrag.lastAngle = a;
+                crosshairRotation = _normalizeDeg((Number(_mprCrosshairRotateDrag.baseDeg) || 0) + Number(_mprCrosshairRotateDrag.accumDeg || 0));
+                redrawAllMPRPlanes();
+                return;
+            }
 
             if (_mprDragState.tool === 'crosshair') {
                 _scheduleMPRCrosshairDragUpdate(plane, x, y);
@@ -5601,6 +5721,19 @@
 
         async function handleMPRMouseUp(event, plane) {
             if (viewMode !== 'mpr') return;
+            // End crosshair rotation drag (MPR)
+            if (_mprDragState.down && _mprDragState.plane === plane && _mprDragState.tool === 'crosshair-rotate') {
+                _mprCrosshairRotateDrag.active = false;
+                _mprCrosshairRotateDrag.plane = null;
+                _mprDragState.down = false;
+                _mprDragState.plane = null;
+                _mprDragState.tool = null;
+                _mprDragState.wasDragged = false;
+                // Suppress the immediately following click event triggered by mouseup.
+                _mprSuppressNextClick = true;
+                setTimeout(() => { _mprSuppressNextClick = false; }, 0);
+                return;
+            }
             // Finalize crosshair drag (force a last sync at the last mouse position)
             if (_mprDragState.down && _mprDragState.plane === plane && _mprDragState.tool === 'crosshair') {
                 try {

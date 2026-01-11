@@ -4256,7 +4256,8 @@
                     e.preventDefault();
                     setActivePlane(plane);
                     // Default: wheel scrolls slices. Ctrl+wheel (or Zoom tool) zooms.
-                    const direction = e.deltaY > 0 ? 1 : -1;
+                    // Axial: wheel-up should move "toward the top" (superior), which corresponds to increasing Z.
+                    const direction = (plane === 'axial') ? (e.deltaY > 0 ? -1 : 1) : (e.deltaY > 0 ? 1 : -1);
                     if (e.ctrlKey || activeTool === 'zoom') {
                         const zoomDirection = e.deltaY > 0 ? 0.9 : 1.1;
                         setZoom(zoomFactor * zoomDirection);

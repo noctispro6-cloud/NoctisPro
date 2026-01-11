@@ -352,7 +352,12 @@ _MPR_BUILD_LOCKS = {}  # series_id -> Lock()
 
 # Cap Z upsampling to keep MPR responsive on thick-slice stacks (e.g. CT 5mm / 0.7mm px spacing).
 # Full isotropic upsampling can explode depth and stall the request.
-_MAX_Z_RESAMPLE_FACTOR = 2.0
+#
+# NOTE:
+# Coronal/sagittal clarity depends heavily on Z-resolution. A too-low cap makes reformats look
+# soft or "blocky" in the superior-inferior direction. We still guard memory via the volume
+# budget logic in `_get_mpr_volume_and_spacing`.
+_MAX_Z_RESAMPLE_FACTOR = 4.0
 
 
 def _get_mpr_build_lock(series_id: int) -> Lock:
@@ -4729,8 +4734,28 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
             return (a + b - 1) // b
 
         # In fast mode, use a smaller memory budget so initial MPR is responsive even for huge stacks.
-        # High-quality still uses the full budget because it may resample Z and benefits from more detail.
+        # In high-quality mode, we may resample Z for clearer reformats; to make that possible we
+        # intentionally keep some headroom (especially for thick-slice stacks) instead of filling
+        # the entire budget before the Z-resample step.
         max_bytes_budget = _MAX_MPR_VOLUME_BYTES if q != 'fast' else min(_MAX_MPR_VOLUME_BYTES, 96 * 1024 * 1024)
+        target_bytes_budget = max_bytes_budget
+
+        # Plan headroom for Z upsampling when slice spacing is much larger than in-plane spacing.
+        # This directly improves coronal/sagittal perceived clarity.
+        try:
+            if q != 'fast':
+                py0, px0 = float(first_ps[0] or 1.0), float(first_ps[1] or 1.0)
+                target_xy0 = (py0 + px0) / 2.0
+                st0 = float(st or 1.0)
+                if st0 > 0 and target_xy0 > 0:
+                    desired_z_factor = float(st0) / float(target_xy0)
+                    # Only reserve headroom if we actually intend to upsample.
+                    if desired_z_factor > 1.05:
+                        planned = min(float(desired_z_factor), float(_MAX_Z_RESAMPLE_FACTOR))
+                        # Avoid pathological "tiny budget" by keeping a reasonable floor.
+                        target_bytes_budget = max(int(max_bytes_budget / planned), 48 * 1024 * 1024)
+        except Exception:
+            target_bytes_budget = max_bytes_budget
 
         def _bytes_for_steps(_zs, _ys, _xs):
             dz = _ceil_div(z, _zs)
@@ -4745,16 +4770,43 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
         # (slice direction) which is often lower resolution and later can be interpolated for reformats.
         #
         # This loop is bounded by dimensions and typically runs only a few iterations.
-        while _bytes_for_steps(z_step, y_step, x_step) > max_bytes_budget and (z_step < z or y_step < y or x_step < x):
-            if z_step < z:
-                z_step += 1
-                continue
-            if y_step < y:
-                y_step += 1
-                continue
-            if x_step < x:
-                x_step += 1
-                continue
+        # Reduce memory footprint while preserving perceived MPR resolution.
+        #
+        # For thick-slice stacks (st >> in-plane spacing), Z is already the limiting direction for
+        # coronal/sagittal. In that case, prefer downsampling X/Y first (slightly) to keep Z
+        # resampling effective. Otherwise, prefer reducing Z first (typical thin-slice CT).
+        try:
+            py0, px0 = float(first_ps[0] or 1.0), float(first_ps[1] or 1.0)
+            target_xy0 = (py0 + px0) / 2.0
+            st0 = float(st or 1.0)
+            anisotropy = (st0 / target_xy0) if (st0 > 0 and target_xy0 > 0) else 1.0
+        except Exception:
+            anisotropy = 1.0
+
+        preserve_z_first = bool(anisotropy >= 1.8)
+        while _bytes_for_steps(z_step, y_step, x_step) > target_bytes_budget and (z_step < z or y_step < y or x_step < x):
+            if preserve_z_first:
+                # Keep Z detail; spend budget on XY instead.
+                if y_step < y and y_step <= x_step:
+                    y_step += 1
+                    continue
+                if x_step < x:
+                    x_step += 1
+                    continue
+                if z_step < z:
+                    z_step += 1
+                    continue
+            else:
+                # Default: reduce Z first (most CT stacks have plenty of slices).
+                if z_step < z:
+                    z_step += 1
+                    continue
+                if y_step < y:
+                    y_step += 1
+                    continue
+                if x_step < x:
+                    x_step += 1
+                    continue
             break
 
         if z_step > 1 or y_step > 1 or x_step > 1:
@@ -4762,7 +4814,8 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
                 f"MPR downsample for series {series.id}: "
                 f"orig=({z},{y},{x}) float32 -> "
                 f"step=({z_step},{y_step},{x_step}) "
-                f"est_bytes={_bytes_for_steps(z_step,y_step,x_step)/1024/1024:.1f}MB"
+                f"est_bytes={_bytes_for_steps(z_step,y_step,x_step)/1024/1024:.1f}MB "
+                f"(budget={target_bytes_budget/1024/1024:.1f}MB, mode={q})"
             )
 
         dz = _ceil_div(z, z_step)

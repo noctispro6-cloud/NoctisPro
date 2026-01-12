@@ -429,6 +429,154 @@ def _apply_ai_triage(analysis: AIAnalysis) -> None:
     if upgraded and triage.get('flagged'):
         _notify_ai_triage(analysis, triage)
 
+    # Persist triage status on the Study record (for fast worklist rendering and durability).
+    try:
+        s = analysis.study
+        s.ai_triage_level = (triage.get('triage_level') or '')[:10]
+        s.ai_triage_score = triage.get('triage_score')
+        s.ai_triage_flagged = bool(triage.get('flagged'))
+        s.ai_last_analyzed_at = timezone.now()
+        s.save(update_fields=['ai_triage_level', 'ai_triage_score', 'ai_triage_flagged', 'ai_last_analyzed_at', 'last_updated'])
+    except Exception:
+        # Best-effort only (do not break analysis completion)
+        pass
+
+
+def select_series_images_for_analysis(images_qs, max_slices: int = 24):
+    """
+    Pick a representative set of images from a Series for "full series" AI analysis.
+    - If <= max_slices: return all
+    - Else: sample evenly by instance_number order
+    """
+    try:
+        max_slices = int(max_slices or 24)
+    except Exception:
+        max_slices = 24
+    max_slices = max(1, min(64, max_slices))
+
+    try:
+        qs = images_qs.order_by('instance_number').only('id', 'instance_number', 'file_path')
+        total = qs.count()
+        if total <= 0:
+            return []
+        if total <= max_slices:
+            return list(qs)
+        step = max(1, total // max_slices)
+        picked = []
+        i = 0
+        for img in qs.iterator(chunk_size=256):
+            if (i % step) == 0:
+                picked.append(img)
+                if len(picked) >= max_slices:
+                    break
+            i += 1
+        # Ensure last slice is included for coverage
+        try:
+            last = qs.order_by('-instance_number').first()
+            if last and (not picked or picked[-1].id != last.id):
+                picked.append(last)
+        except Exception:
+            pass
+        return picked[:max_slices]
+    except Exception:
+        try:
+            return list(images_qs.all()[:max_slices])
+        except Exception:
+            return []
+
+
+def run_full_series_inference(model_adapter, images, *, max_slices: int = 24) -> dict:
+    """
+    Run inference across a representative subset of slices and aggregate outputs into a single result dict
+    compatible with AIAnalysis.complete_analysis().
+    """
+    picked = select_series_images_for_analysis(images, max_slices=max_slices)
+    confidences = []
+    all_abnormalities = []
+    findings_parts = []
+    overlays = []
+    per_slice = []
+
+    for img in picked:
+        try:
+            path = getattr(getattr(img, 'file_path', None), 'path', None)
+            if not path:
+                continue
+            r = model_adapter.predict(path) or {}
+        except Exception as e:
+            # Keep going; we still want best-effort overall output
+            continue
+
+        try:
+            conf = float(r.get('confidence', 0) or 0)
+        except Exception:
+            conf = 0.0
+        confidences.append(conf)
+
+        findings = (r.get('findings') or '').strip()
+        if findings:
+            # Keep only a few unique summary lines
+            if findings not in findings_parts:
+                findings_parts.append(findings)
+
+        abn = r.get('abnormalities') or []
+        if isinstance(abn, (str, dict)):
+            abn = [abn]
+        if isinstance(abn, list):
+            all_abnormalities.extend(abn)
+
+        o = r.get('overlays') or []
+        if isinstance(o, dict):
+            o = [o]
+        if isinstance(o, list):
+            for item in o:
+                if not isinstance(item, dict):
+                    continue
+                # Normalize overlay so the frontend can map it to the correct slice
+                overlay = dict(item)
+                overlay.setdefault('type', overlay.get('shape') or 'rectangle')
+                overlay['image_id'] = getattr(img, 'id', None)
+                overlay['instance_number'] = getattr(img, 'instance_number', None)
+                overlays.append(overlay)
+
+        # Per-slice summary (useful for audit + later UI)
+        per_slice.append({
+            'image_id': getattr(img, 'id', None),
+            'instance_number': getattr(img, 'instance_number', None),
+            'confidence': conf,
+            'abnormalities': abn if isinstance(abn, list) else [],
+            'findings': findings[:220] if isinstance(findings, str) else '',
+            'overlays_count': len(o) if isinstance(o, list) else 0,
+        })
+
+    # Aggregate confidence: prioritize the most confident slice when any abnormalities are present
+    conf_out = 0.0
+    try:
+        has_abn = any(_normalize_abnormality_label(a) for a in (all_abnormalities or []))
+        if confidences:
+            conf_out = max(confidences) if has_abn else (sum(confidences) / max(1, len(confidences)))
+    except Exception:
+        conf_out = max(confidences) if confidences else 0.0
+
+    findings_text = ''
+    if findings_parts:
+        # Keep it readable: top few unique findings summaries
+        findings_text = " | ".join(findings_parts[:6])
+
+    measurements = {
+        'mode': 'full_series',
+        'slices_analyzed': len(per_slice),
+        'per_slice': per_slice,
+        'overlays': overlays,
+    }
+
+    return {
+        'findings': findings_text,
+        'abnormalities': all_abnormalities,
+        'confidence': conf_out,
+        'measurements': measurements,
+    }
+
 def simulate_ai_analysis(analysis):
     """Heavier inference if available; otherwise safe simulation."""
     modality = analysis.study.modality.code

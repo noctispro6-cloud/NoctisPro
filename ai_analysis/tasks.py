@@ -1,7 +1,7 @@
 from celery import shared_task
 from .models import AIAnalysis
 from .inference import ModelRegistry
-from .utils import simulate_ai_analysis, _apply_ai_triage
+from .utils import simulate_ai_analysis, _apply_ai_triage, run_full_series_inference
 from .reporting import persist_report_on_analysis
 # from .dicom_sr import create_ai_findings_sr # DICOM SR generation disabled per policy
 import logging
@@ -27,15 +27,25 @@ def run_ai_analysis(analysis_id):
         # Use real inference engine (via registry) with fallback to simulation
         model_adapter = ModelRegistry.get_model(analysis.ai_model)
         
-        # Use first image from the study
-        # In a real scenario, this might iterate over all series/images or select a specific one
-        first_series = analysis.study.series_set.first()
-        first_image = first_series.images.first() if first_series else None
-        
-        if first_image and first_image.file_path:
-            results = model_adapter.predict(first_image.file_path.path)
+        # Full-series analysis (representative sampling) on the largest series in the study.
+        series_qs = analysis.study.series_set.all()
+        target_series = None
+        try:
+            # Prefer the series with the most images (typical CT stack)
+            target_series = max(series_qs, key=lambda s: s.images.count()) if series_qs else None
+        except Exception:
+            target_series = series_qs.first() if series_qs else None
+
+        if target_series and target_series.images.exists():
+            try:
+                results = run_full_series_inference(model_adapter, target_series.images.all(), max_slices=24)
+                # Store which series we analyzed
+                results.setdefault('measurements', {})
+                if isinstance(results['measurements'], dict):
+                    results['measurements']['series_id'] = int(target_series.id)
+            except Exception:
+                results = simulate_ai_analysis(analysis)
         else:
-            # Fallback to pure simulation if no file
             results = simulate_ai_analysis(analysis)
         
         # Complete the analysis

@@ -4,20 +4,7 @@
 
 {% block extra_css %}
 <style>
-        :root {
-            --primary-bg: #0a0a0a;
-            --secondary-bg: #1a1a1a;
-            --card-surface: #252525;
-            --header-bg: #333333;
-            --border-color: #404040;
-            --accent-color: #00d4ff;
-            --text-primary: #ffffff;
-            --text-secondary: #b3b3b3;
-            --text-muted: #666666;
-            --success-color: #00ff88;
-            --warning-color: #ffaa00;
-            --danger-color: #ff4444;
-        }
+        /* NOTE: no local :root overrides; inherit theme from base.html (dark/light) */
 
     .report-editor-container {
         background: var(--dark-bg);
@@ -331,6 +318,11 @@
                     <button type="button" class="btn btn-medical" onclick="generateAIFindings()"  >
                         <i class="fas fa-magic me-2"></i>Generate AI Findings
                     </button>
+                    <div id="aiAssistStatus" class="text-muted small mt-2"></div>
+                    <div id="aiAssistRefs" class="mt-2" style="display:none;">
+                        <div class="text-muted small" style="margin-bottom:6px;">References</div>
+                        <div id="aiAssistRefsList" class="text-secondary small" style="white-space:pre-wrap;"></div>
+                    </div>
                 </div>
 
                 <!-- Report Form -->
@@ -458,8 +450,117 @@ function insertMacro(fieldId, text) {
     textarea.focus();
 }
 
-function generateAIFindings() {
-	console.info('AI analysis feature is a stub.');
+function _setAiAssistStatus(msg) {
+    const el = document.getElementById('aiAssistStatus');
+    if (el) el.textContent = msg || '';
+}
+
+function _renderAiRefs(payload) {
+    const wrap = document.getElementById('aiAssistRefs');
+    const el = document.getElementById('aiAssistRefsList');
+    if (!wrap || !el) return;
+
+    const refSuggestions = (payload && payload.reference_suggestions) || [];
+    const onlineRefs = (payload && payload.online_references) || [];
+
+    const lines = [];
+    if (Array.isArray(refSuggestions) && refSuggestions.length) {
+        lines.push('Selected references:');
+        for (const r of refSuggestions.slice(0, 8)) {
+            if (r && typeof r === 'object') {
+                const t = (r.title || '').toString().trim();
+                const topic = (r.topic || '').toString().trim();
+                if (t && topic) lines.push(`- ${t} — ${topic}`);
+                else if (t) lines.push(`- ${t}`);
+            } else if (typeof r === 'string' && r.trim()) {
+                lines.push(`- ${r.trim()}`);
+            }
+        }
+        lines.push('');
+    }
+    if (Array.isArray(onlineRefs) && onlineRefs.length) {
+        lines.push('Online references:');
+        for (const r of onlineRefs.slice(0, 6)) {
+            if (r && typeof r === 'object') {
+                const t = (r.title || '').toString().trim();
+                const url = (r.url || '').toString().trim();
+                const src = (r.source || '').toString().trim();
+                if (t && url) lines.push(`- ${t}${src ? ` (${src})` : ''}: ${url}`);
+            }
+        }
+    }
+
+    if (!lines.length) {
+        wrap.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+    wrap.style.display = 'block';
+    el.textContent = lines.join('\n');
+}
+
+function _getCookie(name) {
+    try {
+        const v = `; ${document.cookie}`;
+        const parts = v.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+    } catch (_) {}
+    return '';
+}
+
+async function generateAIFindings() {
+    const studyId = {{ study.id }};
+    try {
+        _setAiAssistStatus('Running AI full-series analysis…');
+        const fd = new FormData();
+        fd.append('max_slices', '24');
+        const r1 = await fetch(`/ai_analysis/api/study/${studyId}/analyze/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': _getCookie('csrftoken'),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: fd,
+            credentials: 'same-origin',
+        });
+        const j1 = await r1.json();
+        if (!r1.ok || !j1 || j1.success === false) {
+            throw new Error((j1 && j1.error) ? j1.error : `HTTP ${r1.status}`);
+        }
+
+        _setAiAssistStatus('Generating report draft…');
+        const r2 = await fetch(`/ai_analysis/api/study/${studyId}/generate-report/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': _getCookie('csrftoken'),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+        });
+        const j2 = await r2.json();
+        if (!r2.ok || !j2 || j2.success === false) {
+            throw new Error((j2 && j2.error) ? j2.error : `HTTP ${r2.status}`);
+        }
+
+        const f = document.getElementById('findings');
+        const i = document.getElementById('impression');
+        const rec = document.getElementById('recommendations');
+        if (f && j2.findings) f.value = j2.findings;
+        if (i && j2.impression) i.value = j2.impression;
+        if (rec && j2.recommendations) rec.value = j2.recommendations;
+
+        _renderAiRefs(j2);
+        const tri = (j2 && j2.triage) || (j1 && j1.triage) || null;
+        if (tri && tri.triage_level) {
+            _setAiAssistStatus(`AI ready. Triage: ${String(tri.triage_level).toUpperCase()} (score ${tri.triage_score ?? 'N/A'})`);
+        } else {
+            _setAiAssistStatus('AI ready.');
+        }
+    } catch (e) {
+        console.error(e);
+        _setAiAssistStatus(`AI failed: ${(e && e.message) ? e.message : 'unknown error'}`);
+        alert('AI generation failed. ' + ((e && e.message) ? e.message : ''));
+    }
 }
 
 function previewReport() {
@@ -517,11 +618,6 @@ window.addEventListener('beforeunload', function(e) {
 
 {% block extra_js %}
 <script>
-function generateAIFindings() {
-	console.info('AI analysis feature is a stub.');
-}
-function previewReport() {
-	console.info('Report preview is a stub.');
-}
+// Intentionally empty: avoid duplicating functions defined above.
 </script>
 {% endblock %}

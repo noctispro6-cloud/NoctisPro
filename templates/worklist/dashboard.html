@@ -435,6 +435,34 @@
             color: var(--text-muted);
         }
 
+        .ai-flag-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-left: 6px;
+            padding: 1px 6px;
+            border-radius: 999px;
+            font-size: 9px;
+            line-height: 1.4;
+            border: 1px solid rgba(0, 212, 255, 0.55);
+            color: var(--accent-color);
+            background: rgba(0, 212, 255, 0.10);
+            white-space: nowrap;
+            vertical-align: middle;
+        }
+
+        .ai-flag-badge.ai-urgent {
+            border-color: rgba(255, 68, 68, 0.75);
+            color: var(--danger-color);
+            background: rgba(255, 68, 68, 0.12);
+        }
+
+        .ai-flag-badge.ai-high {
+            border-color: rgba(255, 170, 0, 0.75);
+            color: var(--warning-color);
+            background: rgba(255, 170, 0, 0.12);
+        }
+
         /* Modality Badges */
         .modality-badge {
             background: var(--card-bg);
@@ -958,7 +986,19 @@
                         <td><span class="status-badge status-${study.status}">
                             ${getStatusIcon(study.status)}${study.status.toUpperCase().replace('_', ' ')}
                         </span></td>
-                        <td class="priority-${study.priority}" title="${(study.clinical_info||'').toString().replace(/"/g,'&quot;')}">${(study.priority||'normal').toString().toUpperCase()}</td>
+                        <td class="priority-${study.priority}" title="${(study.clinical_info||'').toString().replace(/"/g,'&quot;')}">
+                            ${(study.priority||'normal').toString().toUpperCase()}
+                            ${(() => {
+                                const lvl = (study.ai_triage_level || '').toString().toLowerCase();
+                                const flagged = !!study.ai_triage_flagged || (lvl === 'high' || lvl === 'urgent');
+                                if (!flagged) return '';
+                                const score = (study.ai_triage_score !== null && study.ai_triage_score !== undefined) ? study.ai_triage_score : '';
+                                const cls = (lvl === 'urgent') ? 'ai-urgent' : (lvl === 'high' ? 'ai-high' : '');
+                                const label = lvl ? lvl.toUpperCase() : 'AI';
+                                const title = `AI flagged study (${label}${score !== '' ? ` score ${score}` : ''})`;
+                                return `<span class="ai-flag-badge ${cls}" title="${title.replace(/"/g,'&quot;')}"><i class="fas fa-robot"></i> ${label}</span>`;
+                            })()}
+                        </td>
                         <td class="timestamp">${scheduledTime}</td>
                         <td title="${seriesCount} series, ${imageCount} images">
                             ${imageCount} <small style="color: var(--text-secondary);">(${seriesCount}s)</small>

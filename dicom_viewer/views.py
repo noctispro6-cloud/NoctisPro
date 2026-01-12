@@ -5683,6 +5683,7 @@ def print_dicom_image(request):
         printer_name = request.POST.get('printer_name', '')
         layout_type = request.POST.get('layout_type', 'single')
         print_medium = request.POST.get('print_medium', 'paper')  # paper or film
+        print_color_mode = request.POST.get('print_color_mode', 'auto')  # auto|monochrome|color
         # Grid controls (used by 'grid' / modality-specific grids)
         grid_rows = request.POST.get('grid_rows')
         grid_cols = request.POST.get('grid_cols')
@@ -5864,6 +5865,7 @@ def print_dicom_image(request):
                 paper_type,
                 print_quality,
                 copies,
+                print_color_mode,
             )
             
             if print_result['success']:
@@ -6391,7 +6393,7 @@ def get_print_layouts(request):
         'modality': modality
     })
 
-def send_to_printer(pdf_path, printer_name, paper_size, paper_type, print_quality, copies):
+def send_to_printer(pdf_path, printer_name, paper_size, paper_type, print_quality, copies, print_color_mode: str = "auto"):
     """
     Send PDF to printer with optimized settings for glossy paper.
     """
@@ -6415,13 +6417,22 @@ def send_to_printer(pdf_path, printer_name, paper_size, paper_type, print_qualit
         else:
             target_printer = list(printers.keys())[0]  # Use first available printer
         
-        # Set print options optimized for medical images and glossy paper
+        # Set print options optimized for medical images.
+        #
+        # NOTE:
+        # Many clinical sites print CT/MR as monochrome; some printers/PPDs error when forced to "color".
+        # Default to monochrome unless explicitly requested as color.
+        pcm = (print_color_mode or "auto").strip().lower()
+        if pcm not in ("auto", "color", "monochrome"):
+            pcm = "auto"
+        cups_color_mode = "color" if pcm == "color" else "monochrome"
+
         print_options = {
             'copies': str(copies),
             # IMPORTANT: `paper_type` is glossy/matte/etc; `paper_size` is A4/Letter/film sizes.
             'media': str(paper_size).upper(),
             'print-quality': '5' if print_quality == 'high' else '4',  # Highest quality
-            'print-color-mode': 'color',
+            'print-color-mode': cups_color_mode,
             'orientation-requested': '3',  # Portrait
         }
         
@@ -6430,7 +6441,8 @@ def send_to_printer(pdf_path, printer_name, paper_size, paper_type, print_qualit
             print_options.update({
                 'media-type': 'photographic-glossy',
                 'print-quality': '5',  # Maximum quality for glossy
-                'ColorModel': 'RGB',
+                # Avoid printers failing on "color" when they only support grayscale.
+                'ColorModel': 'RGB' if cups_color_mode == 'color' else 'Gray',
                 'Resolution': '1200dpi',
                 'MediaType': 'Glossy',
             })
@@ -6467,6 +6479,11 @@ def send_to_printer_fallback(pdf_path, printer_name, paper_size, paper_type, pri
         # Add quality options
         if print_quality == 'high':
             cmd.extend(['-o', 'print-quality=5'])
+
+        # Default to monochrome to avoid printer "color" capability errors.
+        # (If a site needs color printing they should use the CUPS path or pass printer-specific options.)
+        cmd.extend(['-o', 'print-color-mode=monochrome'])
+        cmd.extend(['-o', 'ColorModel=Gray'])
         
         if paper_type == 'glossy':
             cmd.extend(['-o', 'media-type=photographic-glossy'])

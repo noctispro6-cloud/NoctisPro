@@ -281,14 +281,12 @@
         .dicom-canvas {
             max-width: 100%;
             max-height: 100%;
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: -moz-crisp-edges;
-            image-rendering: crisp-edges;
-            image-rendering: high-quality;
+            /* Cleaner diagnostic scaling (avoid pixelated/noisy appearance) */
+            image-rendering: auto;
             cursor: crosshair;
             transition: transform 0.1s ease;
-            filter: contrast(1.15) brightness(1.08) sharpen(0.3);
-            -webkit-filter: contrast(1.15) brightness(1.08);
+            filter: none;
+            -webkit-filter: none;
         }
 
         .image-container {
@@ -304,15 +302,13 @@
         .dicom-image {
             max-width: 100%;
             max-height: 100%;
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: -moz-crisp-edges;
-            image-rendering: crisp-edges;
-            image-rendering: high-quality;
+            /* Cleaner diagnostic scaling (avoid pixelated/noisy appearance) */
+            image-rendering: auto;
             cursor: crosshair;
             user-select: none;
             transition: none;
-            filter: contrast(1.15) brightness(1.08) sharpen(0.3);
-            -webkit-filter: contrast(1.15) brightness(1.08);
+            filter: none;
+            -webkit-filter: none;
         }
 
         /* Overlay Information */
@@ -410,11 +406,8 @@
         .mpr-viewport img {
             max-width: 100%;
             max-height: 100%;
-            /* High-quality scaling for diagnostic viewing */
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: -moz-crisp-edges;
-            image-rendering: crisp-edges;
-            image-rendering: high-quality;
+            /* Cleaner diagnostic scaling (avoid pixelated/noisy appearance) */
+            image-rendering: auto;
             cursor: crosshair;
             user-select: none;
             -webkit-user-drag: none;
@@ -682,6 +675,28 @@
             bottom: 0;
             pointer-events: none;
             z-index: 20;
+        }
+
+        /* Single-view ROI overlay (Ellipse ROI, per-slice like MPR) */
+        .roi-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 19; /* below measurement labels, above image */
+        }
+
+        /* AI overlay (per-slice). Draws boxes/polygons on the current slice. */
+        .ai-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 18; /* below ROI, above image */
         }
 
         .measurement-line {
@@ -1064,6 +1079,8 @@
                         <div class="crosshair-line-h"></div>
                         <div class="crosshair-line-v"></div>
                     </div>
+                    <div class="roi-overlay" id="roiOverlay"></div>
+                    <div class="ai-overlay" id="aiOverlay"></div>
                     <div class="measurement-overlay" id="measurementOverlay"></div>
                 </div>
 
@@ -1607,6 +1624,10 @@
         let measurements = [];
         let annotations = [];
         let currentMeasurement = null;
+        let rois = []; // { imageId, cx, cy, rx, ry, stats?, timestamp }
+        let currentRoi = null; // { imageId, cx, cy, rx, ry }
+        // AI overlays keyed by DicomImage.id for slice-accurate rendering
+        let aiOverlaysByImageId = {}; // { [imageId]: overlay[] }
 
         // --- MPR tool state (measurements + ROI are per-plane/per-slice) ---
         // NOTE: "fast" and "high" quality can have different axial counts (high may upsample Z).
@@ -1732,6 +1753,7 @@
                 if (resizeTimer) clearTimeout(resizeTimer);
                 resizeTimer = setTimeout(() => {
                     try { updateMeasurementOverlay(); } catch (_) {}
+                    try { updateRoiOverlay(); } catch (_) {}
                     try { updateZoomInfo(); } catch (_) {}
                 }, 80);
             });
@@ -1752,6 +1774,8 @@
                 
                 if (activeTool === 'measure') {
                     startMeasurement(e);
+                } else if (activeTool === 'roi') {
+                    startRoi(e);
                 } else if (activeTool === 'annotate') {
                     addAnnotation(e);
                 }
@@ -1771,6 +1795,8 @@
                         handlePanning(deltaX, deltaY);
                     } else if (activeTool === 'measure' && currentMeasurement) {
                         updateMeasurement(e);
+                    } else if (activeTool === 'roi' && currentRoi) {
+                        updateRoi(e);
                     }
                     
                     lastMousePos = { x: e.clientX, y: e.clientY };
@@ -1784,33 +1810,60 @@
                 if (mouseDown && activeTool === 'measure' && currentMeasurement) {
                     finishMeasurement(e);
                 }
+                if (mouseDown && activeTool === 'roi' && currentRoi) {
+                    finishRoi(e);
+                }
                 mouseDown = false;
                 isDragging = false;
                 currentMeasurement = null;
+                currentRoi = null;
             });
             
             // Wheel event for slice navigation and zoom
-            const _wheelStepFromDelta = (deltaY) => {
-                // Mouse wheels often send +/-100-ish; trackpads send tiny deltas.
-                // Convert big deltas into multi-slice steps for faster scrubbing.
-                const dy = Math.abs(Number(deltaY) || 0);
-                const base = Math.max(1, Math.round(dy / 80));
-                return Math.min(18, base);
+            // Goals:
+            // - very fast scrolling when the user wheels quickly (mouse) or swipes (trackpad)
+            // - accurate, smooth response for tiny trackpad deltas
+            // - avoid overloading the backend while scrubbing (existing display pipeline is latest-wins)
+            let _wheelAccumPx = 0;
+            let _wheelRaf = 0;
+            const _normalizeWheelDeltaY = (e) => {
+                // deltaMode: 0=pixels, 1=lines, 2=pages
+                const dy = Number(e.deltaY) || 0;
+                if (e.deltaMode === 1) return dy * 18;      // ~18px per line
+                if (e.deltaMode === 2) return dy * 320;     // ~one "page"
+                return dy;                                  // pixels
             };
+            const _WHEEL_PX_PER_SLICE = 24; // smaller => faster (trackpad-friendly)
 
             imageContainer.addEventListener('wheel', function(e) {
                 e.preventDefault();
-                
+
                 if (e.ctrlKey) {
                     // Zoom with Ctrl+wheel
                     const zoomDirection = e.deltaY > 0 ? 0.9 : 1.1;
                     setZoom(zoomFactor * zoomDirection);
-                } else {
-                    // Slice navigation with wheel
-                    const direction = e.deltaY > 0 ? 1 : -1;
-                    const step = (e.shiftKey ? 6 : 1) * _wheelStepFromDelta(e.deltaY);
-                    changeSlice(direction * step);
+                    return;
                 }
+
+                // Slice navigation: accumulate in "pixel-like" units then apply at most once per frame.
+                _wheelAccumPx += _normalizeWheelDeltaY(e);
+                if (_wheelRaf) return;
+                _wheelRaf = requestAnimationFrame(() => {
+                    _wheelRaf = 0;
+                    const d = _wheelAccumPx;
+                    _wheelAccumPx = 0;
+                    if (!d) return;
+
+                    const direction = d > 0 ? 1 : -1;
+                    const stepsBase = Math.max(1, Math.round(Math.abs(d) / _WHEEL_PX_PER_SLICE));
+                    // Shift accelerates strongly for power users
+                    const accel = e.shiftKey ? 8 : 1;
+                    const steps = Math.min(120, stepsBase * accel);
+
+                    // Cancel any in-progress ROI draw so it doesn't look like it "sticks" while scrolling.
+                    cancelRoiDraw();
+                    changeSlice(direction * steps);
+                });
             }, { passive: false });
         }
 
@@ -1892,6 +1945,18 @@
                         e.preventDefault();
                         changeSlice(1);
                         break;
+                    case '[':
+                    case '{':
+                        // Crosshair rotation (MPR + single view): rotate counter-clockwise
+                        e.preventDefault();
+                        rotateCrosshairBy(-(e.shiftKey ? 5 : 1));
+                        break;
+                    case ']':
+                    case '}':
+                        // Crosshair rotation (MPR + single view): rotate clockwise
+                        e.preventDefault();
+                        rotateCrosshairBy((e.shiftKey ? 5 : 1));
+                        break;
                     case '?':
                         e.preventDefault();
                         try {
@@ -1929,6 +1994,7 @@
                                     <div><strong>R</strong>/<strong>0</strong> Reset view</div>
                                     <div><strong>+</strong>/<strong>-</strong> Zoom in/out</div>
                                     <div><strong>↑</strong>/<strong>↓</strong> Previous/Next slice</div>
+                                    <div><strong>[</strong>/<strong>]</strong> Rotate crosshair (Shift = 5°)</div>
                                     <div><strong>Ctrl+O</strong> Open local files &nbsp; <strong>Ctrl+P</strong> Print</div>
                                     <div style="margin-top:6px;color:var(--text-muted,#888)">Press <strong>?</strong> again to hide.</div>
                                 `;
@@ -2135,6 +2201,7 @@
                 // Handle regular image navigation
                 currentImageIndex = parseInt(value);
                 document.getElementById('sliceValue').textContent = `${currentImageIndex + 1}/${images.length}`;
+                cancelRoiDraw();
                 scheduleImageDisplayUpdate(currentImageIndex, 'slice');
             }
         }
@@ -2154,6 +2221,7 @@
                     currentImageIndex = newIndex;
                     document.getElementById('sliceSlider').value = currentImageIndex;
                     document.getElementById('sliceValue').textContent = `${currentImageIndex + 1}/${images.length}`;
+                    cancelRoiDraw();
                     scheduleImageDisplayUpdate(currentImageIndex, 'slice');
                 }
             }
@@ -2191,10 +2259,9 @@
                     dicomImage.src = payload.image_data;
                 }
 
-                // Apply high-quality rendering hints
+                // Rendering hints: keep clean/smooth by default (avoid pixelated look).
                 if (dicomImage) {
-                    dicomImage.style.imageRendering = 'pixelated';
-                    dicomImage.style.imageRendering = 'crisp-edges';
+                    dicomImage.style.imageRendering = 'auto';
                     dicomImage.style.maxWidth = '100%';
                     dicomImage.style.maxHeight = '100%';
                 }
@@ -2202,6 +2269,8 @@
                 // Overlays depend on the current transform/viewport size.
                 updateMeasurementOverlay();
                 updateAnnotationOverlay();
+                updateRoiOverlay();
+                updateAIOverlay();
                 return true;
             };
 
@@ -2900,6 +2969,226 @@
             }
         }
 
+        // ROI System (Ellipse) - single view, per-image (one-slice), like MPR
+        function cancelRoiDraw() {
+            currentRoi = null;
+            try { updateRoiOverlay(); } catch (_) {}
+        }
+
+        function startRoi(event) {
+            const p = viewportPointToImagePx(event);
+            if (!p) return;
+            const imageId = images[currentImageIndex]?.id;
+            if (!imageId) return;
+
+            currentRoi = {
+                imageId,
+                cx: p.x,
+                cy: p.y,
+                rx: 1,
+                ry: 1
+            };
+            updateRoiOverlay();
+        }
+
+        function updateRoi(event) {
+            if (!currentRoi) return;
+            const p = viewportPointToImagePx(event);
+            if (!p) return;
+            currentRoi.rx = Math.max(1, Math.abs(p.x - currentRoi.cx));
+            currentRoi.ry = Math.max(1, Math.abs(p.y - currentRoi.cy));
+            updateRoiOverlay();
+        }
+
+        function finishRoi(_event) {
+            if (!currentRoi) return;
+
+            const roi = {
+                ...currentRoi,
+                timestamp: new Date().toISOString()
+            };
+            currentRoi = null;
+            rois.push(roi);
+            updateRoiOverlay();
+
+            // Fetch HU ROI stats (non-blocking)
+            (async () => {
+                try {
+                    const imageId = roi.imageId;
+                    const cx = Math.round(roi.cx), cy = Math.round(roi.cy);
+                    const rx = Math.max(1, Math.round(roi.rx)), ry = Math.max(1, Math.round(roi.ry));
+                    const url = `/dicom-viewer/api/hu/?mode=series&image_id=${encodeURIComponent(imageId)}&shape=ellipse&cx=${encodeURIComponent(cx)}&cy=${encodeURIComponent(cy)}&rx=${encodeURIComponent(rx)}&ry=${encodeURIComponent(ry)}&x=${encodeURIComponent(cx)}&y=${encodeURIComponent(cy)}`;
+                    const resp = await fetch(url, { credentials: 'same-origin' });
+                    const data = await resp.json().catch(() => null);
+                    if (data && data.stats) {
+                        roi.stats = data.stats;
+                        updateRoiOverlay();
+                    }
+                } catch (_) {}
+            })();
+        }
+
+        function updateRoiOverlay() {
+            const overlay = document.getElementById('roiOverlay');
+            if (!overlay) return;
+            overlay.innerHTML = '';
+
+            const imageId = images[currentImageIndex]?.id;
+            if (!imageId) return;
+
+            rois.forEach((r) => {
+                if (r.imageId !== imageId) return;
+                drawRoiEllipse(overlay, r, false);
+            });
+            if (currentRoi && currentRoi.imageId === imageId) {
+                drawRoiEllipse(overlay, currentRoi, true);
+            }
+        }
+
+        function updateAIOverlay() {
+            const overlayEl = document.getElementById('aiOverlay');
+            if (!overlayEl) return;
+            overlayEl.innerHTML = '';
+
+            const imageId = images[currentImageIndex]?.id;
+            if (!imageId) return;
+
+            const items = (aiOverlaysByImageId && aiOverlaysByImageId[imageId]) ? aiOverlaysByImageId[imageId] : [];
+            if (!Array.isArray(items) || items.length === 0) return;
+
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('width', '100%');
+            svg.setAttribute('height', '100%');
+            svg.style.position = 'absolute';
+            svg.style.left = '0';
+            svg.style.top = '0';
+            overlayEl.appendChild(svg);
+
+            items.forEach((item) => {
+                if (!item || typeof item !== 'object') return;
+                const type = String(item.type || item.shape || 'rectangle').toLowerCase();
+                const color = String(item.color || '#00d4ff');
+                const strokeWidth = String(item.stroke_width || 2);
+                const label = (item.label || item.name || '').toString().trim();
+
+                if (type === 'polygon') {
+                    const pts = item.points;
+                    if (!Array.isArray(pts) || pts.length < 3) return;
+                    const vp = [];
+                    for (const p of pts) {
+                        let x = null, y = null;
+                        if (Array.isArray(p) && p.length >= 2) {
+                            x = p[0]; y = p[1];
+                        } else if (p && typeof p === 'object') {
+                            x = p.x; y = p.y;
+                        }
+                        if (!isFinite(Number(x)) || !isFinite(Number(y))) continue;
+                        const pt = imagePxToViewportPoint({ x: Number(x), y: Number(y) });
+                        if (pt) vp.push(pt);
+                    }
+                    if (vp.length < 3) return;
+                    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                    poly.setAttribute('points', vp.map(p => `${p.x},${p.y}`).join(' '));
+                    poly.setAttribute('fill', 'none');
+                    poly.setAttribute('stroke', color);
+                    poly.setAttribute('stroke-width', strokeWidth);
+                    svg.appendChild(poly);
+                    if (label) {
+                        const t = document.createElement('div');
+                        t.className = 'measurement-label';
+                        t.style.color = color;
+                        t.style.left = `${vp[0].x}px`;
+                        t.style.top = `${vp[0].y}px`;
+                        t.textContent = label;
+                        overlayEl.appendChild(t);
+                    }
+                    return;
+                }
+
+                // Default: rectangle in image pixel coordinates
+                let x1 = null, y1 = null, x2 = null, y2 = null;
+                if (Array.isArray(item.points) && item.points.length >= 4 && item.points.every(n => isFinite(Number(n)))) {
+                    x1 = Number(item.points[0]); y1 = Number(item.points[1]); x2 = Number(item.points[2]); y2 = Number(item.points[3]);
+                } else if (item.bbox && typeof item.bbox === 'object') {
+                    x1 = Number(item.bbox.x1 ?? item.bbox.x ?? item.bbox.left);
+                    y1 = Number(item.bbox.y1 ?? item.bbox.y ?? item.bbox.top);
+                    x2 = Number(item.bbox.x2 ?? ((isFinite(Number(item.bbox.width)) && isFinite(x1)) ? (x1 + Number(item.bbox.width)) : null));
+                    y2 = Number(item.bbox.y2 ?? ((isFinite(Number(item.bbox.height)) && isFinite(y1)) ? (y1 + Number(item.bbox.height)) : null));
+                }
+                if (!isFinite(x1) || !isFinite(y1) || !isFinite(x2) || !isFinite(y2)) return;
+                const a = imagePxToViewportPoint({ x: x1, y: y1 });
+                const b = imagePxToViewportPoint({ x: x2, y: y2 });
+                if (!a || !b) return;
+                const left = Math.min(a.x, b.x);
+                const top = Math.min(a.y, b.y);
+                const w = Math.abs(b.x - a.x);
+                const h = Math.abs(b.y - a.y);
+
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', String(left));
+                rect.setAttribute('y', String(top));
+                rect.setAttribute('width', String(w));
+                rect.setAttribute('height', String(h));
+                rect.setAttribute('fill', 'none');
+                rect.setAttribute('stroke', color);
+                rect.setAttribute('stroke-width', strokeWidth);
+                svg.appendChild(rect);
+
+                if (label) {
+                    const t = document.createElement('div');
+                    t.className = 'measurement-label';
+                    t.style.color = color;
+                    t.style.left = `${left}px`;
+                    t.style.top = `${Math.max(0, top - 14)}px`;
+                    t.textContent = label;
+                    overlayEl.appendChild(t);
+                }
+            });
+        }
+
+        function drawRoiEllipse(overlay, roi, isTemp) {
+            const c = imagePxToViewportPoint({ x: roi.cx, y: roi.cy });
+            const ex = imagePxToViewportPoint({ x: roi.cx + roi.rx, y: roi.cy });
+            const ey = imagePxToViewportPoint({ x: roi.cx, y: roi.cy + roi.ry });
+            if (!c || !ex || !ey) return;
+            const rx = Math.max(2, Math.abs(ex.x - c.x));
+            const ry = Math.max(2, Math.abs(ey.y - c.y));
+
+            const ellipse = document.createElement('div');
+            ellipse.className = 'roi-ellipse';
+            ellipse.style.left = `${c.x - rx}px`;
+            ellipse.style.top = `${c.y - ry}px`;
+            ellipse.style.width = `${rx * 2}px`;
+            ellipse.style.height = `${ry * 2}px`;
+            ellipse.style.opacity = isTemp ? '0.75' : '1';
+            overlay.appendChild(ellipse);
+
+            const label = document.createElement('div');
+            label.className = 'roi-label';
+            const mean = roi.stats?.mean;
+            const std = roi.stats?.std;
+            // Also show area (mm²/cm²) when pixel spacing is known.
+            let areaText = '';
+            try {
+                const spacing = currentPixelSpacing || (currentSeries && currentSeries.pixel_spacing ? currentSeries.pixel_spacing : null);
+                const ps = Array.isArray(spacing) ? spacing : (typeof spacing === 'string' && spacing.includes('\\') ? spacing.split('\\') : null);
+                const rowMm = ps && isFinite(parseFloat(ps[0])) ? Math.abs(parseFloat(ps[0])) : null;
+                const colMm = ps && isFinite(parseFloat(ps[1])) ? Math.abs(parseFloat(ps[1])) : null;
+                if (rowMm && colMm) {
+                    const areaMm2 = Math.PI * (roi.rx * colMm) * (roi.ry * rowMm);
+                    const areaCm2 = areaMm2 / 100.0;
+                    areaText = ` • A=${areaMm2.toFixed(1)} mm² (${areaCm2.toFixed(2)} cm²)`;
+                }
+            } catch (_) {}
+
+            label.textContent = (typeof mean === 'number')
+                ? `ROI μ=${mean.toFixed(1)} HU σ=${(typeof std === 'number' ? std.toFixed(1) : '—')}${areaText}`
+                : (areaText ? `ROI${areaText}` : 'ROI (drag)');
+            label.style.left = `${c.x}px`;
+            label.style.top = `${c.y - ry}px`;
+            overlay.appendChild(label);
+        }
+
         function drawMeasurementLine(overlay, measurement, isTemp = false, index = -1) {
             // stored in image pixels; convert to viewport coords for drawing
             const start = imagePxToViewportPoint(measurement.start);
@@ -2985,9 +3274,11 @@
         function clearMeasurements() {
             measurements = [];
             annotations = [];
+            rois = [];
             updateMeasurementsList();
             updateMeasurementOverlay();
             updateAnnotationOverlay();
+            updateRoiOverlay();
             showToast('Measurements cleared', 'success');
         }
 
@@ -3423,9 +3714,42 @@
             label.className = 'roi-label';
             const mean = roi.stats?.mean;
             const std = roi.stats?.std;
+            // Also show area (mm²/cm²) when we can approximate spacing.
+            // For MPR:
+            // - axial plane uses pixel_spacing (row=y, col=x)
+            // - sagittal plane approx uses (row=z, col=y) => (slice_thickness, row_mm)
+            // - coronal plane approx uses (row=z, col=x) => (slice_thickness, col_mm)
+            let areaText = '';
+            try {
+                const spacing = currentPixelSpacing || (currentSeries && currentSeries.pixel_spacing ? currentSeries.pixel_spacing : null);
+                const ps = Array.isArray(spacing) ? spacing : (typeof spacing === 'string' && spacing.includes('\\') ? spacing.split('\\') : null);
+                const rowMm = ps && isFinite(parseFloat(ps[0])) ? Math.abs(parseFloat(ps[0])) : null;
+                const colMm = ps && isFinite(parseFloat(ps[1])) ? Math.abs(parseFloat(ps[1])) : null;
+                const zMm = (currentSeries && currentSeries.slice_thickness && isFinite(parseFloat(currentSeries.slice_thickness)))
+                    ? Math.abs(parseFloat(currentSeries.slice_thickness))
+                    : null;
+                let mmPerX = null;
+                let mmPerY = null;
+                if (plane === 'axial') {
+                    mmPerX = colMm;
+                    mmPerY = rowMm;
+                } else if (plane === 'sagittal') {
+                    mmPerX = rowMm; // y axis
+                    mmPerY = zMm;   // z axis
+                } else if (plane === 'coronal') {
+                    mmPerX = colMm; // x axis
+                    mmPerY = zMm;   // z axis
+                }
+                if (mmPerX && mmPerY) {
+                    const areaMm2 = Math.PI * (roi.rx * mmPerX) * (roi.ry * mmPerY);
+                    const areaCm2 = areaMm2 / 100.0;
+                    areaText = ` • A=${areaMm2.toFixed(1)} mm² (${areaCm2.toFixed(2)} cm²)`;
+                }
+            } catch (_) {}
+
             label.textContent = (typeof mean === 'number')
-                ? `ROI μ=${mean.toFixed(1)} HU σ=${(typeof std === 'number' ? std.toFixed(1) : '—')}`
-                : 'ROI (drag)';
+                ? `ROI μ=${mean.toFixed(1)} HU σ=${(typeof std === 'number' ? std.toFixed(1) : '—')}${areaText}`
+                : (areaText ? `ROI${areaText}` : 'ROI (drag)');
             label.style.left = `${c.x}px`;
             label.style.top = `${c.y - ry}px`;
             overlay.appendChild(label);
@@ -4304,7 +4628,7 @@
                 const boneWW = 2000;
                 const boneWL = 300;
                 const response = await fetch(
-                    `/dicom-viewer/api/series/${currentSeries.id}/bone/?threshold=200&mesh=true&quality=high&window_width=${encodeURIComponent(boneWW)}&window_level=${encodeURIComponent(boneWL)}&inverted=false`,
+                    `/dicom-viewer/api/series/${currentSeries.id}/bone/?threshold=200&mesh=true&quality=high&smooth=true&window_width=${encodeURIComponent(boneWW)}&window_level=${encodeURIComponent(boneWL)}&inverted=false`,
                     { credentials: 'same-origin' }
                 );
                 const data = await response.json();
@@ -4381,20 +4705,57 @@
             setupMPRViewportInteractions();
         }
 
+        // ---- Crosshair rotation (visual) ----
+        // NOTE: This is a visual rotation of the crosshair overlays (not a true oblique reslice).
+        // It keeps the viewer stable and avoids breaking ROI/measurement coordinate math.
+        let _crosshairRotationDeg = 0;
+        function rotateCrosshairBy(deltaDeg) {
+            const d = Number(deltaDeg) || 0;
+            if (!d) return;
+            _crosshairRotationDeg = (_crosshairRotationDeg + d) % 360;
+            _applyCrosshairRotation();
+        }
+        function _applyCrosshairRotation() {
+            const rot = `rotate(${_crosshairRotationDeg}deg)`;
+            // Single view crosshair
+            try {
+                const el = document.getElementById('crosshairOverlay');
+                if (el) {
+                    el.style.transformOrigin = '50% 50%';
+                    el.style.transform = rot;
+                }
+            } catch (_) {}
+            // MPR crosshairs
+            try {
+                ['crosshairAxial', 'crosshairSagittal', 'crosshairCoronal'].forEach((id) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    el.style.transformOrigin = '50% 50%';
+                    el.style.transform = rot;
+                });
+            } catch (_) {}
+        }
+
         function setupMPRViewportInteractions() {
             const viewports = document.querySelectorAll('.mpr-viewport');
-
-            const _mprWheelStepFromDelta = (deltaY) => {
-                const dy = Math.abs(Number(deltaY) || 0);
-                const base = Math.max(1, Math.round(dy / 80));
-                return Math.min(18, base);
+            // MPR wheel scrolling: fast + accurate for trackpad and mouse.
+            const _normalizeWheelDeltaY = (e) => {
+                const dy = Number(e.deltaY) || 0;
+                if (e.deltaMode === 1) return dy * 18;
+                if (e.deltaMode === 2) return dy * 320;
+                return dy;
             };
+            const _WHEEL_PX_PER_SLICE = 24;
             
             viewports.forEach(viewport => {
                 const plane = viewport.getAttribute('data-plane');
                 if (plane === '3d') return;
                 if (viewport.hasAttribute('data-mpr-interactions')) return;
                 viewport.setAttribute('data-mpr-interactions', 'true');
+
+                // per-viewport wheel accumulator so trackpad swipes are smooth
+                let _wheelAccumPx = 0;
+                let _wheelRaf = 0;
                 
                 viewport.addEventListener('mousemove', function(e) {
                     _queueMPRCrosshairUpdate(viewport, plane, e.clientX, e.clientY, false);
@@ -4436,9 +4797,19 @@
                     } else {
                         const counts = Number(_mprState.counts?.[plane] || 0);
                         if (counts > 0) {
-                            const step = (e.shiftKey ? 6 : 1) * _mprWheelStepFromDelta(e.deltaY);
-                            const next = (Number(_mprState.sliceIndex?.[plane] || 0) + (direction * step));
-                            _mprSetSlice(plane, next, { cancelDraw: true });
+                            _wheelAccumPx += _normalizeWheelDeltaY(e);
+                            if (_wheelRaf) return;
+                            _wheelRaf = requestAnimationFrame(() => {
+                                _wheelRaf = 0;
+                                const d = _wheelAccumPx;
+                                _wheelAccumPx = 0;
+                                if (!d) return;
+                                const stepsBase = Math.max(1, Math.round(Math.abs(d) / _WHEEL_PX_PER_SLICE));
+                                const accel = e.shiftKey ? 8 : 1;
+                                const step = Math.min(120, stepsBase * accel);
+                                const next = (Number(_mprState.sliceIndex?.[plane] || 0) + (direction * step));
+                                _mprSetSlice(plane, next, { cancelDraw: true });
+                            });
                         }
                     }
                 }, { passive: false });
@@ -4961,40 +5332,8 @@
                 showToast('Please load a series first', 'warning');
                 return;
             }
-            
-            try {
-                showLoading('Running AI pathology detection...');
-                
-                const response = await fetch(`/ai-analysis/api/pathology/${currentSeries.id}/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCSRFToken()
-                    },
-                    body: JSON.stringify({
-                        analysis_type: 'pathology_detection',
-                        modality: currentSeries.modality,
-                        include_heatmap: true,
-                        confidence_threshold: 0.7
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    hideLoading();
-                    displayAIResults(data.results, 'pathology');
-                    showToast(`AI detected ${data.results.findings?.length || 0} potential findings`, 'success');
-                } else {
-                    hideLoading();
-                    showToast('AI pathology detection failed: ' + (data.error || 'Unknown error'), 'error');
-                }
-                
-            } catch (error) {
-                hideLoading();
-                console.error('AI pathology detection error:', error);
-                showToast('AI pathology detection error', 'error');
-            }
+            // Keep production reliable: route to the supported series analyze endpoint.
+            await runQuickAI();
         }
         
         async function runAutoMeasurements() {
@@ -5002,49 +5341,8 @@
                 showToast('Please load a series first', 'warning');
                 return;
             }
-            
-            try {
-                showLoading('Running AI auto measurements...');
-                
-                const response = await fetch(`/ai-analysis/api/measurements/${currentSeries.id}/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCSRFToken()
-                    },
-                    body: JSON.stringify({
-                        analysis_type: 'auto_measurements',
-                        modality: currentSeries.modality,
-                        measurement_types: ['length', 'area', 'volume', 'density']
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    hideLoading();
-                    // Add AI measurements to the measurements list
-                    if (data.measurements) {
-                        data.measurements.forEach(measurement => {
-                            measurements.push({
-                                ...measurement,
-                                isAI: true,
-                                confidence: measurement.confidence || 0.9
-                            });
-                        });
-                        updateMeasurementsList();
-                    }
-                    showToast(`AI generated ${data.measurements?.length || 0} automatic measurements`, 'success');
-                } else {
-                    hideLoading();
-                    showToast('AI auto measurements failed: ' + (data.error || 'Unknown error'), 'error');
-                }
-                
-            } catch (error) {
-                hideLoading();
-                console.error('AI auto measurements error:', error);
-                showToast('AI auto measurements error', 'error');
-            }
+            // Keep production reliable: route to the supported series analyze endpoint.
+            await runQuickAI();
         }
         
         async function runImageEnhancement() {
@@ -5052,43 +5350,8 @@
                 showToast('Please load a series first', 'warning');
                 return;
             }
-            
-            try {
-                showLoading('Running AI image enhancement...');
-                
-                const response = await fetch(`/ai-analysis/api/enhance/${currentSeries.id}/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCSRFToken()
-                    },
-                    body: JSON.stringify({
-                        analysis_type: 'image_enhancement',
-                        enhancement_types: ['noise_reduction', 'contrast_enhancement', 'sharpening'],
-                        preserve_original: true
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    hideLoading();
-                    // Update the current image with enhanced version
-                    if (data.enhanced_image_url) {
-                        const dicomImage = document.getElementById('dicomImage');
-                        dicomImage.src = data.enhanced_image_url;
-                        showToast('AI image enhancement applied', 'success');
-                    }
-                } else {
-                    hideLoading();
-                    showToast('AI image enhancement failed: ' + (data.error || 'Unknown error'), 'error');
-                }
-                
-            } catch (error) {
-                hideLoading();
-                console.error('AI image enhancement error:', error);
-                showToast('AI image enhancement error', 'error');
-            }
+            // Keep production reliable: route to the supported series analyze endpoint.
+            await runQuickAI();
         }
 
         // Enhanced AI Results Display
@@ -5269,6 +5532,8 @@
                     const modelSel = document.getElementById('aiModelSelect');
                     if (modelSel && modelSel.value) fd.append('model_id', modelSel.value);
                 } catch (_) {}
+                // Full-series analysis (representative sampling)
+                fd.append('max_slices', '24');
 
                 const response = await fetch(`/ai_analysis/api/series/${currentSeries.id}/analyze/`, {
                     method: 'POST',
@@ -5301,6 +5566,19 @@
 
                 hideLoading();
                 displayAIResults(results, 'pathology');
+
+                // Slice-accurate overlays: store by image_id and render on the current slice
+                try {
+                    aiOverlaysByImageId = {};
+                    const ovs = Array.isArray(data.overlays) ? data.overlays : [];
+                    for (const o of ovs) {
+                        const imageId = o && o.image_id;
+                        if (!imageId) continue;
+                        if (!aiOverlaysByImageId[imageId]) aiOverlaysByImageId[imageId] = [];
+                        aiOverlaysByImageId[imageId].push(o);
+                    }
+                    updateAIOverlay();
+                } catch (_) {}
                 showToast('AI analysis completed', 'success');
             } catch (error) {
                 hideLoading();

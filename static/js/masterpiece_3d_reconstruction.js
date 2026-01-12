@@ -630,7 +630,7 @@ class MasterpieceBoneReconstruction3D {
             // similar to how reformats are displayed with superior at the top.
             // So we map:
             // - x_voxel -> X
-            // - z_voxel -> Y (up), with a flip so superior appears "up" by default
+            // - z_voxel -> Y (up)
             // - y_voxel -> Z
             const srcVerts = Array.isArray(meshData.vertices) ? meshData.vertices : [];
             const vertices = new Float32Array(srcVerts.length * 3);
@@ -640,7 +640,9 @@ class MasterpieceBoneReconstruction3D {
                 const y = Number(v[1]) || 0;
                 const x = Number(v[2]) || 0;
                 vertices[i * 3] = x;
-                vertices[i * 3 + 1] = -z; // flip to make initial orientation upright (superior towards +Y)
+                // NOTE: Some series were reported as upside-down in production. Prefer the natural Z-up
+                // orientation (viewer controls allow rotation as needed).
+                vertices[i * 3 + 1] = z;
                 vertices[i * 3 + 2] = y;
             }
             const indices = new Uint32Array(meshData.faces.flat());

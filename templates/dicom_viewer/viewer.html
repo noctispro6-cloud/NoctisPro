@@ -684,6 +684,17 @@
             z-index: 20;
         }
 
+        /* Single-view ROI overlay (Ellipse ROI, per-slice like MPR) */
+        .roi-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 19; /* below measurement labels, above image */
+        }
+
         .measurement-line {
             position: absolute;
             background: #ff0000;
@@ -1064,6 +1075,7 @@
                         <div class="crosshair-line-h"></div>
                         <div class="crosshair-line-v"></div>
                     </div>
+                    <div class="roi-overlay" id="roiOverlay"></div>
                     <div class="measurement-overlay" id="measurementOverlay"></div>
                 </div>
 
@@ -1607,6 +1619,8 @@
         let measurements = [];
         let annotations = [];
         let currentMeasurement = null;
+        let rois = []; // { imageId, cx, cy, rx, ry, stats?, timestamp }
+        let currentRoi = null; // { imageId, cx, cy, rx, ry }
 
         // --- MPR tool state (measurements + ROI are per-plane/per-slice) ---
         // NOTE: "fast" and "high" quality can have different axial counts (high may upsample Z).
@@ -1732,6 +1746,7 @@
                 if (resizeTimer) clearTimeout(resizeTimer);
                 resizeTimer = setTimeout(() => {
                     try { updateMeasurementOverlay(); } catch (_) {}
+                    try { updateRoiOverlay(); } catch (_) {}
                     try { updateZoomInfo(); } catch (_) {}
                 }, 80);
             });
@@ -1752,6 +1767,8 @@
                 
                 if (activeTool === 'measure') {
                     startMeasurement(e);
+                } else if (activeTool === 'roi') {
+                    startRoi(e);
                 } else if (activeTool === 'annotate') {
                     addAnnotation(e);
                 }
@@ -1771,6 +1788,8 @@
                         handlePanning(deltaX, deltaY);
                     } else if (activeTool === 'measure' && currentMeasurement) {
                         updateMeasurement(e);
+                    } else if (activeTool === 'roi' && currentRoi) {
+                        updateRoi(e);
                     }
                     
                     lastMousePos = { x: e.clientX, y: e.clientY };
@@ -1784,9 +1803,13 @@
                 if (mouseDown && activeTool === 'measure' && currentMeasurement) {
                     finishMeasurement(e);
                 }
+                if (mouseDown && activeTool === 'roi' && currentRoi) {
+                    finishRoi(e);
+                }
                 mouseDown = false;
                 isDragging = false;
                 currentMeasurement = null;
+                currentRoi = null;
             });
             
             // Wheel event for slice navigation and zoom
@@ -1809,6 +1832,8 @@
                     // Slice navigation with wheel
                     const direction = e.deltaY > 0 ? 1 : -1;
                     const step = (e.shiftKey ? 6 : 1) * _wheelStepFromDelta(e.deltaY);
+                    // Cancel any in-progress ROI draw so it doesn't look like it "sticks" while scrolling.
+                    cancelRoiDraw();
                     changeSlice(direction * step);
                 }
             }, { passive: false });
@@ -2135,6 +2160,7 @@
                 // Handle regular image navigation
                 currentImageIndex = parseInt(value);
                 document.getElementById('sliceValue').textContent = `${currentImageIndex + 1}/${images.length}`;
+                cancelRoiDraw();
                 scheduleImageDisplayUpdate(currentImageIndex, 'slice');
             }
         }
@@ -2154,6 +2180,7 @@
                     currentImageIndex = newIndex;
                     document.getElementById('sliceSlider').value = currentImageIndex;
                     document.getElementById('sliceValue').textContent = `${currentImageIndex + 1}/${images.length}`;
+                    cancelRoiDraw();
                     scheduleImageDisplayUpdate(currentImageIndex, 'slice');
                 }
             }
@@ -2202,6 +2229,7 @@
                 // Overlays depend on the current transform/viewport size.
                 updateMeasurementOverlay();
                 updateAnnotationOverlay();
+                updateRoiOverlay();
                 return true;
             };
 
@@ -2900,6 +2928,111 @@
             }
         }
 
+        // ROI System (Ellipse) - single view, per-image (one-slice), like MPR
+        function cancelRoiDraw() {
+            currentRoi = null;
+            try { updateRoiOverlay(); } catch (_) {}
+        }
+
+        function startRoi(event) {
+            const p = viewportPointToImagePx(event);
+            if (!p) return;
+            const imageId = images[currentImageIndex]?.id;
+            if (!imageId) return;
+
+            currentRoi = {
+                imageId,
+                cx: p.x,
+                cy: p.y,
+                rx: 1,
+                ry: 1
+            };
+            updateRoiOverlay();
+        }
+
+        function updateRoi(event) {
+            if (!currentRoi) return;
+            const p = viewportPointToImagePx(event);
+            if (!p) return;
+            currentRoi.rx = Math.max(1, Math.abs(p.x - currentRoi.cx));
+            currentRoi.ry = Math.max(1, Math.abs(p.y - currentRoi.cy));
+            updateRoiOverlay();
+        }
+
+        function finishRoi(_event) {
+            if (!currentRoi) return;
+
+            const roi = {
+                ...currentRoi,
+                timestamp: new Date().toISOString()
+            };
+            currentRoi = null;
+            rois.push(roi);
+            updateRoiOverlay();
+
+            // Fetch HU ROI stats (non-blocking)
+            (async () => {
+                try {
+                    const imageId = roi.imageId;
+                    const cx = Math.round(roi.cx), cy = Math.round(roi.cy);
+                    const rx = Math.max(1, Math.round(roi.rx)), ry = Math.max(1, Math.round(roi.ry));
+                    const url = `/dicom-viewer/api/hu/?mode=series&image_id=${encodeURIComponent(imageId)}&shape=ellipse&cx=${encodeURIComponent(cx)}&cy=${encodeURIComponent(cy)}&rx=${encodeURIComponent(rx)}&ry=${encodeURIComponent(ry)}&x=${encodeURIComponent(cx)}&y=${encodeURIComponent(cy)}`;
+                    const resp = await fetch(url, { credentials: 'same-origin' });
+                    const data = await resp.json().catch(() => null);
+                    if (data && data.stats) {
+                        roi.stats = data.stats;
+                        updateRoiOverlay();
+                    }
+                } catch (_) {}
+            })();
+        }
+
+        function updateRoiOverlay() {
+            const overlay = document.getElementById('roiOverlay');
+            if (!overlay) return;
+            overlay.innerHTML = '';
+
+            const imageId = images[currentImageIndex]?.id;
+            if (!imageId) return;
+
+            rois.forEach((r) => {
+                if (r.imageId !== imageId) return;
+                drawRoiEllipse(overlay, r, false);
+            });
+            if (currentRoi && currentRoi.imageId === imageId) {
+                drawRoiEllipse(overlay, currentRoi, true);
+            }
+        }
+
+        function drawRoiEllipse(overlay, roi, isTemp) {
+            const c = imagePxToViewportPoint({ x: roi.cx, y: roi.cy });
+            const ex = imagePxToViewportPoint({ x: roi.cx + roi.rx, y: roi.cy });
+            const ey = imagePxToViewportPoint({ x: roi.cx, y: roi.cy + roi.ry });
+            if (!c || !ex || !ey) return;
+            const rx = Math.max(2, Math.abs(ex.x - c.x));
+            const ry = Math.max(2, Math.abs(ey.y - c.y));
+
+            const ellipse = document.createElement('div');
+            ellipse.className = 'roi-ellipse';
+            ellipse.style.left = `${c.x - rx}px`;
+            ellipse.style.top = `${c.y - ry}px`;
+            ellipse.style.width = `${rx * 2}px`;
+            ellipse.style.height = `${ry * 2}px`;
+            ellipse.style.opacity = isTemp ? '0.75' : '1';
+            overlay.appendChild(ellipse);
+
+            const label = document.createElement('div');
+            label.className = 'roi-label';
+            const mean = roi.stats?.mean;
+            const std = roi.stats?.std;
+            label.textContent = (typeof mean === 'number')
+                ? `ROI μ=${mean.toFixed(1)} HU σ=${(typeof std === 'number' ? std.toFixed(1) : '—')}`
+                : 'ROI (drag)';
+            label.style.left = `${c.x}px`;
+            label.style.top = `${c.y - ry}px`;
+            overlay.appendChild(label);
+        }
+
         function drawMeasurementLine(overlay, measurement, isTemp = false, index = -1) {
             // stored in image pixels; convert to viewport coords for drawing
             const start = imagePxToViewportPoint(measurement.start);
@@ -2985,9 +3118,11 @@
         function clearMeasurements() {
             measurements = [];
             annotations = [];
+            rois = [];
             updateMeasurementsList();
             updateMeasurementOverlay();
             updateAnnotationOverlay();
+            updateRoiOverlay();
             showToast('Measurements cleared', 'success');
         }
 

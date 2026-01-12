@@ -321,10 +321,20 @@ def api_analyze_series(request, series_id):
     if user.is_facility_user() and study.facility != user.facility:
         return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
 
-    # Only clinicians/admins can initiate AI runs
-    if not is_admin_or_radiologist(user):
+    # Permission to initiate AI runs:
+    # - admins/radiologists always
+    # - facility users only when their facility has an active AI subscription
+    can_start_ai = False
+    if is_admin_or_radiologist(user):
+        can_start_ai = True
+    elif user.is_facility_user() and getattr(user, 'facility', None):
+        has_sub = bool(user.facility.has_ai_subscription)
+        is_expired = bool(user.facility.subscription_expires_at and user.facility.subscription_expires_at < timezone.now())
+        can_start_ai = has_sub and not is_expired
+
+    if not can_start_ai:
         return JsonResponse(
-            {'success': False, 'error': 'Only administrators or radiologists can start AI analyses'},
+            {'success': False, 'error': 'AI access requires a radiologist/admin account or an active facility AI subscription'},
             status=403,
         )
 

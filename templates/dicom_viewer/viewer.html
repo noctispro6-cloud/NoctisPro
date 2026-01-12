@@ -5096,40 +5096,8 @@
                 showToast('Please load a series first', 'warning');
                 return;
             }
-            
-            try {
-                showLoading('Running AI pathology detection...');
-                
-                const response = await fetch(`/ai-analysis/api/pathology/${currentSeries.id}/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCSRFToken()
-                    },
-                    body: JSON.stringify({
-                        analysis_type: 'pathology_detection',
-                        modality: currentSeries.modality,
-                        include_heatmap: true,
-                        confidence_threshold: 0.7
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    hideLoading();
-                    displayAIResults(data.results, 'pathology');
-                    showToast(`AI detected ${data.results.findings?.length || 0} potential findings`, 'success');
-                } else {
-                    hideLoading();
-                    showToast('AI pathology detection failed: ' + (data.error || 'Unknown error'), 'error');
-                }
-                
-            } catch (error) {
-                hideLoading();
-                console.error('AI pathology detection error:', error);
-                showToast('AI pathology detection error', 'error');
-            }
+            // Keep production reliable: route to the supported series analyze endpoint.
+            await runQuickAI();
         }
         
         async function runAutoMeasurements() {
@@ -5137,49 +5105,8 @@
                 showToast('Please load a series first', 'warning');
                 return;
             }
-            
-            try {
-                showLoading('Running AI auto measurements...');
-                
-                const response = await fetch(`/ai-analysis/api/measurements/${currentSeries.id}/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCSRFToken()
-                    },
-                    body: JSON.stringify({
-                        analysis_type: 'auto_measurements',
-                        modality: currentSeries.modality,
-                        measurement_types: ['length', 'area', 'volume', 'density']
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    hideLoading();
-                    // Add AI measurements to the measurements list
-                    if (data.measurements) {
-                        data.measurements.forEach(measurement => {
-                            measurements.push({
-                                ...measurement,
-                                isAI: true,
-                                confidence: measurement.confidence || 0.9
-                            });
-                        });
-                        updateMeasurementsList();
-                    }
-                    showToast(`AI generated ${data.measurements?.length || 0} automatic measurements`, 'success');
-                } else {
-                    hideLoading();
-                    showToast('AI auto measurements failed: ' + (data.error || 'Unknown error'), 'error');
-                }
-                
-            } catch (error) {
-                hideLoading();
-                console.error('AI auto measurements error:', error);
-                showToast('AI auto measurements error', 'error');
-            }
+            // Keep production reliable: route to the supported series analyze endpoint.
+            await runQuickAI();
         }
         
         async function runImageEnhancement() {
@@ -5187,43 +5114,8 @@
                 showToast('Please load a series first', 'warning');
                 return;
             }
-            
-            try {
-                showLoading('Running AI image enhancement...');
-                
-                const response = await fetch(`/ai-analysis/api/enhance/${currentSeries.id}/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCSRFToken()
-                    },
-                    body: JSON.stringify({
-                        analysis_type: 'image_enhancement',
-                        enhancement_types: ['noise_reduction', 'contrast_enhancement', 'sharpening'],
-                        preserve_original: true
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    hideLoading();
-                    // Update the current image with enhanced version
-                    if (data.enhanced_image_url) {
-                        const dicomImage = document.getElementById('dicomImage');
-                        dicomImage.src = data.enhanced_image_url;
-                        showToast('AI image enhancement applied', 'success');
-                    }
-                } else {
-                    hideLoading();
-                    showToast('AI image enhancement failed: ' + (data.error || 'Unknown error'), 'error');
-                }
-                
-            } catch (error) {
-                hideLoading();
-                console.error('AI image enhancement error:', error);
-                showToast('AI image enhancement error', 'error');
-            }
+            // Keep production reliable: route to the supported series analyze endpoint.
+            await runQuickAI();
         }
 
         // Enhanced AI Results Display

@@ -281,14 +281,12 @@
         .dicom-canvas {
             max-width: 100%;
             max-height: 100%;
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: -moz-crisp-edges;
-            image-rendering: crisp-edges;
-            image-rendering: high-quality;
+            /* Cleaner diagnostic scaling (avoid pixelated/noisy appearance) */
+            image-rendering: auto;
             cursor: crosshair;
             transition: transform 0.1s ease;
-            filter: contrast(1.15) brightness(1.08) sharpen(0.3);
-            -webkit-filter: contrast(1.15) brightness(1.08);
+            filter: none;
+            -webkit-filter: none;
         }
 
         .image-container {
@@ -304,15 +302,13 @@
         .dicom-image {
             max-width: 100%;
             max-height: 100%;
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: -moz-crisp-edges;
-            image-rendering: crisp-edges;
-            image-rendering: high-quality;
+            /* Cleaner diagnostic scaling (avoid pixelated/noisy appearance) */
+            image-rendering: auto;
             cursor: crosshair;
             user-select: none;
             transition: none;
-            filter: contrast(1.15) brightness(1.08) sharpen(0.3);
-            -webkit-filter: contrast(1.15) brightness(1.08);
+            filter: none;
+            -webkit-filter: none;
         }
 
         /* Overlay Information */
@@ -410,11 +406,8 @@
         .mpr-viewport img {
             max-width: 100%;
             max-height: 100%;
-            /* High-quality scaling for diagnostic viewing */
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: -moz-crisp-edges;
-            image-rendering: crisp-edges;
-            image-rendering: high-quality;
+            /* Cleaner diagnostic scaling (avoid pixelated/noisy appearance) */
+            image-rendering: auto;
             cursor: crosshair;
             user-select: none;
             -webkit-user-drag: none;
@@ -1813,29 +1806,50 @@
             });
             
             // Wheel event for slice navigation and zoom
-            const _wheelStepFromDelta = (deltaY) => {
-                // Mouse wheels often send +/-100-ish; trackpads send tiny deltas.
-                // Convert big deltas into multi-slice steps for faster scrubbing.
-                const dy = Math.abs(Number(deltaY) || 0);
-                const base = Math.max(1, Math.round(dy / 80));
-                return Math.min(18, base);
+            // Goals:
+            // - very fast scrolling when the user wheels quickly (mouse) or swipes (trackpad)
+            // - accurate, smooth response for tiny trackpad deltas
+            // - avoid overloading the backend while scrubbing (existing display pipeline is latest-wins)
+            let _wheelAccumPx = 0;
+            let _wheelRaf = 0;
+            const _normalizeWheelDeltaY = (e) => {
+                // deltaMode: 0=pixels, 1=lines, 2=pages
+                const dy = Number(e.deltaY) || 0;
+                if (e.deltaMode === 1) return dy * 18;      // ~18px per line
+                if (e.deltaMode === 2) return dy * 320;     // ~one "page"
+                return dy;                                  // pixels
             };
+            const _WHEEL_PX_PER_SLICE = 24; // smaller => faster (trackpad-friendly)
 
             imageContainer.addEventListener('wheel', function(e) {
                 e.preventDefault();
-                
+
                 if (e.ctrlKey) {
                     // Zoom with Ctrl+wheel
                     const zoomDirection = e.deltaY > 0 ? 0.9 : 1.1;
                     setZoom(zoomFactor * zoomDirection);
-                } else {
-                    // Slice navigation with wheel
-                    const direction = e.deltaY > 0 ? 1 : -1;
-                    const step = (e.shiftKey ? 6 : 1) * _wheelStepFromDelta(e.deltaY);
+                    return;
+                }
+
+                // Slice navigation: accumulate in "pixel-like" units then apply at most once per frame.
+                _wheelAccumPx += _normalizeWheelDeltaY(e);
+                if (_wheelRaf) return;
+                _wheelRaf = requestAnimationFrame(() => {
+                    _wheelRaf = 0;
+                    const d = _wheelAccumPx;
+                    _wheelAccumPx = 0;
+                    if (!d) return;
+
+                    const direction = d > 0 ? 1 : -1;
+                    const stepsBase = Math.max(1, Math.round(Math.abs(d) / _WHEEL_PX_PER_SLICE));
+                    // Shift accelerates strongly for power users
+                    const accel = e.shiftKey ? 8 : 1;
+                    const steps = Math.min(120, stepsBase * accel);
+
                     // Cancel any in-progress ROI draw so it doesn't look like it "sticks" while scrolling.
                     cancelRoiDraw();
-                    changeSlice(direction * step);
-                }
+                    changeSlice(direction * steps);
+                });
             }, { passive: false });
         }
 
@@ -1917,6 +1931,18 @@
                         e.preventDefault();
                         changeSlice(1);
                         break;
+                    case '[':
+                    case '{':
+                        // Crosshair rotation (MPR + single view): rotate counter-clockwise
+                        e.preventDefault();
+                        rotateCrosshairBy(-(e.shiftKey ? 5 : 1));
+                        break;
+                    case ']':
+                    case '}':
+                        // Crosshair rotation (MPR + single view): rotate clockwise
+                        e.preventDefault();
+                        rotateCrosshairBy((e.shiftKey ? 5 : 1));
+                        break;
                     case '?':
                         e.preventDefault();
                         try {
@@ -1954,6 +1980,7 @@
                                     <div><strong>R</strong>/<strong>0</strong> Reset view</div>
                                     <div><strong>+</strong>/<strong>-</strong> Zoom in/out</div>
                                     <div><strong>↑</strong>/<strong>↓</strong> Previous/Next slice</div>
+                                    <div><strong>[</strong>/<strong>]</strong> Rotate crosshair (Shift = 5°)</div>
                                     <div><strong>Ctrl+O</strong> Open local files &nbsp; <strong>Ctrl+P</strong> Print</div>
                                     <div style="margin-top:6px;color:var(--text-muted,#888)">Press <strong>?</strong> again to hide.</div>
                                 `;
@@ -2218,10 +2245,9 @@
                     dicomImage.src = payload.image_data;
                 }
 
-                // Apply high-quality rendering hints
+                // Rendering hints: keep clean/smooth by default (avoid pixelated look).
                 if (dicomImage) {
-                    dicomImage.style.imageRendering = 'pixelated';
-                    dicomImage.style.imageRendering = 'crisp-edges';
+                    dicomImage.style.imageRendering = 'auto';
                     dicomImage.style.maxWidth = '100%';
                     dicomImage.style.maxHeight = '100%';
                 }
@@ -3025,9 +3051,23 @@
             label.className = 'roi-label';
             const mean = roi.stats?.mean;
             const std = roi.stats?.std;
+            // Also show area (mm²/cm²) when pixel spacing is known.
+            let areaText = '';
+            try {
+                const spacing = currentPixelSpacing || (currentSeries && currentSeries.pixel_spacing ? currentSeries.pixel_spacing : null);
+                const ps = Array.isArray(spacing) ? spacing : (typeof spacing === 'string' && spacing.includes('\\') ? spacing.split('\\') : null);
+                const rowMm = ps && isFinite(parseFloat(ps[0])) ? Math.abs(parseFloat(ps[0])) : null;
+                const colMm = ps && isFinite(parseFloat(ps[1])) ? Math.abs(parseFloat(ps[1])) : null;
+                if (rowMm && colMm) {
+                    const areaMm2 = Math.PI * (roi.rx * colMm) * (roi.ry * rowMm);
+                    const areaCm2 = areaMm2 / 100.0;
+                    areaText = ` • A=${areaMm2.toFixed(1)} mm² (${areaCm2.toFixed(2)} cm²)`;
+                }
+            } catch (_) {}
+
             label.textContent = (typeof mean === 'number')
-                ? `ROI μ=${mean.toFixed(1)} HU σ=${(typeof std === 'number' ? std.toFixed(1) : '—')}`
-                : 'ROI (drag)';
+                ? `ROI μ=${mean.toFixed(1)} HU σ=${(typeof std === 'number' ? std.toFixed(1) : '—')}${areaText}`
+                : (areaText ? `ROI${areaText}` : 'ROI (drag)');
             label.style.left = `${c.x}px`;
             label.style.top = `${c.y - ry}px`;
             overlay.appendChild(label);
@@ -3558,9 +3598,42 @@
             label.className = 'roi-label';
             const mean = roi.stats?.mean;
             const std = roi.stats?.std;
+            // Also show area (mm²/cm²) when we can approximate spacing.
+            // For MPR:
+            // - axial plane uses pixel_spacing (row=y, col=x)
+            // - sagittal plane approx uses (row=z, col=y) => (slice_thickness, row_mm)
+            // - coronal plane approx uses (row=z, col=x) => (slice_thickness, col_mm)
+            let areaText = '';
+            try {
+                const spacing = currentPixelSpacing || (currentSeries && currentSeries.pixel_spacing ? currentSeries.pixel_spacing : null);
+                const ps = Array.isArray(spacing) ? spacing : (typeof spacing === 'string' && spacing.includes('\\') ? spacing.split('\\') : null);
+                const rowMm = ps && isFinite(parseFloat(ps[0])) ? Math.abs(parseFloat(ps[0])) : null;
+                const colMm = ps && isFinite(parseFloat(ps[1])) ? Math.abs(parseFloat(ps[1])) : null;
+                const zMm = (currentSeries && currentSeries.slice_thickness && isFinite(parseFloat(currentSeries.slice_thickness)))
+                    ? Math.abs(parseFloat(currentSeries.slice_thickness))
+                    : null;
+                let mmPerX = null;
+                let mmPerY = null;
+                if (plane === 'axial') {
+                    mmPerX = colMm;
+                    mmPerY = rowMm;
+                } else if (plane === 'sagittal') {
+                    mmPerX = rowMm; // y axis
+                    mmPerY = zMm;   // z axis
+                } else if (plane === 'coronal') {
+                    mmPerX = colMm; // x axis
+                    mmPerY = zMm;   // z axis
+                }
+                if (mmPerX && mmPerY) {
+                    const areaMm2 = Math.PI * (roi.rx * mmPerX) * (roi.ry * mmPerY);
+                    const areaCm2 = areaMm2 / 100.0;
+                    areaText = ` • A=${areaMm2.toFixed(1)} mm² (${areaCm2.toFixed(2)} cm²)`;
+                }
+            } catch (_) {}
+
             label.textContent = (typeof mean === 'number')
-                ? `ROI μ=${mean.toFixed(1)} HU σ=${(typeof std === 'number' ? std.toFixed(1) : '—')}`
-                : 'ROI (drag)';
+                ? `ROI μ=${mean.toFixed(1)} HU σ=${(typeof std === 'number' ? std.toFixed(1) : '—')}${areaText}`
+                : (areaText ? `ROI${areaText}` : 'ROI (drag)');
             label.style.left = `${c.x}px`;
             label.style.top = `${c.y - ry}px`;
             overlay.appendChild(label);
@@ -4439,7 +4512,7 @@
                 const boneWW = 2000;
                 const boneWL = 300;
                 const response = await fetch(
-                    `/dicom-viewer/api/series/${currentSeries.id}/bone/?threshold=200&mesh=true&quality=high&window_width=${encodeURIComponent(boneWW)}&window_level=${encodeURIComponent(boneWL)}&inverted=false`,
+                    `/dicom-viewer/api/series/${currentSeries.id}/bone/?threshold=200&mesh=true&quality=high&smooth=true&window_width=${encodeURIComponent(boneWW)}&window_level=${encodeURIComponent(boneWL)}&inverted=false`,
                     { credentials: 'same-origin' }
                 );
                 const data = await response.json();
@@ -4516,20 +4589,57 @@
             setupMPRViewportInteractions();
         }
 
+        // ---- Crosshair rotation (visual) ----
+        // NOTE: This is a visual rotation of the crosshair overlays (not a true oblique reslice).
+        // It keeps the viewer stable and avoids breaking ROI/measurement coordinate math.
+        let _crosshairRotationDeg = 0;
+        function rotateCrosshairBy(deltaDeg) {
+            const d = Number(deltaDeg) || 0;
+            if (!d) return;
+            _crosshairRotationDeg = (_crosshairRotationDeg + d) % 360;
+            _applyCrosshairRotation();
+        }
+        function _applyCrosshairRotation() {
+            const rot = `rotate(${_crosshairRotationDeg}deg)`;
+            // Single view crosshair
+            try {
+                const el = document.getElementById('crosshairOverlay');
+                if (el) {
+                    el.style.transformOrigin = '50% 50%';
+                    el.style.transform = rot;
+                }
+            } catch (_) {}
+            // MPR crosshairs
+            try {
+                ['crosshairAxial', 'crosshairSagittal', 'crosshairCoronal'].forEach((id) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    el.style.transformOrigin = '50% 50%';
+                    el.style.transform = rot;
+                });
+            } catch (_) {}
+        }
+
         function setupMPRViewportInteractions() {
             const viewports = document.querySelectorAll('.mpr-viewport');
-
-            const _mprWheelStepFromDelta = (deltaY) => {
-                const dy = Math.abs(Number(deltaY) || 0);
-                const base = Math.max(1, Math.round(dy / 80));
-                return Math.min(18, base);
+            // MPR wheel scrolling: fast + accurate for trackpad and mouse.
+            const _normalizeWheelDeltaY = (e) => {
+                const dy = Number(e.deltaY) || 0;
+                if (e.deltaMode === 1) return dy * 18;
+                if (e.deltaMode === 2) return dy * 320;
+                return dy;
             };
+            const _WHEEL_PX_PER_SLICE = 24;
             
             viewports.forEach(viewport => {
                 const plane = viewport.getAttribute('data-plane');
                 if (plane === '3d') return;
                 if (viewport.hasAttribute('data-mpr-interactions')) return;
                 viewport.setAttribute('data-mpr-interactions', 'true');
+
+                // per-viewport wheel accumulator so trackpad swipes are smooth
+                let _wheelAccumPx = 0;
+                let _wheelRaf = 0;
                 
                 viewport.addEventListener('mousemove', function(e) {
                     _queueMPRCrosshairUpdate(viewport, plane, e.clientX, e.clientY, false);
@@ -4571,9 +4681,19 @@
                     } else {
                         const counts = Number(_mprState.counts?.[plane] || 0);
                         if (counts > 0) {
-                            const step = (e.shiftKey ? 6 : 1) * _mprWheelStepFromDelta(e.deltaY);
-                            const next = (Number(_mprState.sliceIndex?.[plane] || 0) + (direction * step));
-                            _mprSetSlice(plane, next, { cancelDraw: true });
+                            _wheelAccumPx += _normalizeWheelDeltaY(e);
+                            if (_wheelRaf) return;
+                            _wheelRaf = requestAnimationFrame(() => {
+                                _wheelRaf = 0;
+                                const d = _wheelAccumPx;
+                                _wheelAccumPx = 0;
+                                if (!d) return;
+                                const stepsBase = Math.max(1, Math.round(Math.abs(d) / _WHEEL_PX_PER_SLICE));
+                                const accel = e.shiftKey ? 8 : 1;
+                                const step = Math.min(120, stepsBase * accel);
+                                const next = (Number(_mprState.sliceIndex?.[plane] || 0) + (direction * step));
+                                _mprSetSlice(plane, next, { cancelDraw: true });
+                            });
                         }
                     }
                 }, { passive: false });

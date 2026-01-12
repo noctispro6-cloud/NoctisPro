@@ -51,6 +51,33 @@
             --info-color: #00bcd4;
         }
 
+        /* Light-mode adaptation (auto, OS-controlled)
+         * Keeps the same component system but swaps tokens for a clean clinical light UI.
+         */
+        @media (prefers-color-scheme: light) {
+            :root {
+                --primary-bg: #f6f7fb;
+                --secondary-bg: #ffffff;
+                --card-surface: #ffffff;
+                --header-bg: #ffffff;
+                --border-color: #e5e7eb;
+                --accent-color: #0284c7;
+                --text-primary: #0f172a;
+                --text-secondary: #334155;
+                --text-muted: #64748b;
+                --success-color: #16a34a;
+                --warning-color: #d97706;
+                --danger-color: #dc2626;
+
+                --dark-bg: var(--primary-bg);
+                --card-bg: var(--card-surface);
+                --gradient-primary: linear-gradient(135deg, #ffffff 0%, #f3f4f6 100%);
+                --gradient-accent: linear-gradient(135deg, var(--accent-color) 0%, #0ea5e9 100%);
+                --secondary-color: var(--card-surface);
+                --info-color: #0284c7;
+            }
+        }
+
         * {
             margin: 0;
             padding: 0;

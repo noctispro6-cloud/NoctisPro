@@ -35,7 +35,8 @@ from .models import (
 from .inference import ModelRegistry
 from .utils import (
     MEDICAL_BOOK_REFERENCES, _get_online_references, _normalize_abnormality_label,
-    _compute_ai_triage, _apply_ai_triage, simulate_ai_analysis, _upgrade_study_priority, _notify_ai_triage
+    _compute_ai_triage, _apply_ai_triage, simulate_ai_analysis, _upgrade_study_priority, _notify_ai_triage,
+    run_full_series_inference
 )
 from .tasks import run_ai_analysis
 from .reporting import persist_report_on_analysis, generate_report_content
@@ -389,13 +390,25 @@ def api_analyze_series(request, series_id):
         
         # Use real inference engine (via registry) with fallback to simulation
         model_adapter = ModelRegistry.get_model(ai_model)
-        
-        # Get first image of series for inference (basic single-slice inference)
-        first_image = series.images.first()
-        if first_image and first_image.file_path:
-            results = model_adapter.predict(first_image.file_path.path)
+
+        # Full-series analysis (representative sampling across the series)
+        try:
+            max_slices = int(request.POST.get('max_slices') or 24)
+        except Exception:
+            max_slices = 24
+        max_slices = max(1, min(64, max_slices))
+
+        if series.images.exists():
+            try:
+                results = run_full_series_inference(model_adapter, series.images.all(), max_slices=max_slices)
+                results.setdefault('measurements', {})
+                if isinstance(results['measurements'], dict):
+                    results['measurements']['series_id'] = int(series.id)
+                    results['measurements']['study_id'] = int(study.id)
+                    results['measurements']['max_slices'] = int(max_slices)
+            except Exception:
+                results = simulate_ai_analysis(analysis)
         else:
-            # Fallback to pure simulation if no file
             results = simulate_ai_analysis(analysis)
             
         analysis.complete_analysis(results)
@@ -449,18 +462,178 @@ def api_analyze_series(request, series_id):
                     analysis.measurements['online_references'] = online_refs
                     analysis.save(update_fields=['measurements'])
 
+        m_out = analysis.measurements or {}
+        if not isinstance(m_out, dict):
+            m_out = {}
         return JsonResponse(
             {
                 'success': True,
                 'analysis_id': analysis.id,
+                'study_id': study.id,
+                'series_id': series.id,
                 'findings': findings_list,
                 'annotations': [],
-                'measurements': analysis.measurements or {},
-                'overlays': (analysis.measurements or {}).get('overlays', []),
+                'measurements': m_out,
+                # overlays are per-slice; each item should include image_id/instance_number when available
+                'overlays': m_out.get('overlays', []),
                 'online_references': online_refs,
-                'report': (analysis.measurements or {}).get('report', {}),
+                'report': m_out.get('report', {}),
+                'report_text': (m_out.get('report') or {}).get('text', ''),
+                'triage': {
+                    'triage_level': m_out.get('triage_level'),
+                    'triage_score': m_out.get('triage_score'),
+                    'flagged': bool(m_out.get('triage_flagged')),
+                },
             }
         )
+    except Exception as e:
+        analysis.status = 'failed'
+        analysis.error_message = str(e)
+        analysis.save(update_fields=['status', 'error_message'])
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@login_required
+@csrf_exempt
+def api_analyze_study(request, study_id):
+    """
+    Study-level AI analysis endpoint.
+    Picks the largest series in the study and runs full-series inference, then applies triage + report.
+    Designed for Worklist + Reporting UI integration.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
+
+    user = request.user
+    study = get_object_or_404(Study, id=study_id)
+
+    # Facility permissions
+    if user.is_facility_user() and getattr(user, 'facility', None) and study.facility != user.facility:
+        return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+
+    # Permission to initiate AI runs:
+    can_start_ai = False
+    if is_admin_or_radiologist(user):
+        can_start_ai = True
+    elif user.is_facility_user() and getattr(user, 'facility', None):
+        has_sub = bool(user.facility.has_ai_subscription)
+        is_expired = bool(user.facility.subscription_expires_at and user.facility.subscription_expires_at < timezone.now())
+        can_start_ai = has_sub and not is_expired
+
+    if not can_start_ai:
+        return JsonResponse(
+            {'success': False, 'error': 'AI access requires a radiologist/admin account or an active facility AI subscription'},
+            status=403,
+        )
+
+    # Pick an active model for this modality (same selection rules as series endpoint)
+    modality_code = getattr(study.modality, 'code', None)
+    models_query = AIModel.objects.filter(is_active=True, modality__in=[modality_code, 'ALL'])
+    if user.facility and (not user.facility.has_ai_subscription or (user.facility.subscription_expires_at and user.facility.subscription_expires_at < timezone.now())):
+        models_query = models_query.filter(requires_subscription=False)
+
+    requested_model_id = request.POST.get('model_id')
+    ai_model = None
+    if requested_model_id:
+        try:
+            ai_model = models_query.get(id=requested_model_id)
+        except AIModel.DoesNotExist:
+            ai_model = None
+    if not ai_model:
+        ai_model = models_query.order_by('model_type', '-created_at').first()
+    if not ai_model:
+        return JsonResponse({'success': False, 'error': f'No active AI models available for modality {modality_code}'}, status=400)
+
+    # Find the target series (largest stack)
+    series_qs = study.series_set.all()
+    target_series = None
+    try:
+        target_series = max(series_qs, key=lambda s: s.images.count()) if series_qs else None
+    except Exception:
+        target_series = series_qs.first() if series_qs else None
+    if not target_series:
+        return JsonResponse({'success': False, 'error': 'No series available for study'}, status=400)
+
+    try:
+        max_slices = int(request.POST.get('max_slices') or 24)
+    except Exception:
+        max_slices = 24
+    max_slices = max(1, min(64, max_slices))
+
+    analysis = AIAnalysis.objects.create(
+        study=study,
+        ai_model=ai_model,
+        priority='normal',
+        status='pending',
+    )
+
+    try:
+        analysis.start_processing()
+        model_adapter = ModelRegistry.get_model(ai_model)
+        if target_series.images.exists():
+            results = run_full_series_inference(model_adapter, target_series.images.all(), max_slices=max_slices)
+            results.setdefault('measurements', {})
+            if isinstance(results['measurements'], dict):
+                results['measurements']['series_id'] = int(target_series.id)
+                results['measurements']['study_id'] = int(study.id)
+                results['measurements']['max_slices'] = int(max_slices)
+        else:
+            results = simulate_ai_analysis(analysis)
+
+        analysis.complete_analysis(results)
+        try:
+            _apply_ai_triage(analysis)
+        except Exception:
+            pass
+        try:
+            analysis.refresh_from_db()
+            persist_report_on_analysis(analysis)
+        except Exception:
+            pass
+
+        # Handle online references for Study-level Quick AI too
+        online_refs = (analysis.measurements or {}).get('online_references') or []
+        if not online_refs:
+            keywords = []
+            abnormalities = analysis.abnormalities_detected or []
+            for a in abnormalities:
+                label = _normalize_abnormality_label(a).lower()
+                if label:
+                    clean = re.sub(r'suspicion|possible|probable', '', label).strip()
+                    if clean:
+                        keywords.append(clean)
+            if keywords:
+                online_refs = _get_online_references(keywords)
+                if online_refs:
+                    try:
+                        mtmp = analysis.measurements or {}
+                        if not isinstance(mtmp, dict):
+                            mtmp = {}
+                        mtmp['online_references'] = online_refs
+                        analysis.measurements = mtmp
+                        analysis.save(update_fields=['measurements'])
+                    except Exception:
+                        pass
+
+        m_out = analysis.measurements or {}
+        if not isinstance(m_out, dict):
+            m_out = {}
+        return JsonResponse({
+            'success': True,
+            'analysis_id': analysis.id,
+            'study_id': study.id,
+            'series_id': int(target_series.id),
+            'measurements': m_out,
+            'overlays': m_out.get('overlays', []),
+            'online_references': online_refs,
+            'report': m_out.get('report', {}),
+            'report_text': (m_out.get('report') or {}).get('text', ''),
+            'triage': {
+                'triage_level': m_out.get('triage_level'),
+                'triage_score': m_out.get('triage_score'),
+                'flagged': bool(m_out.get('triage_flagged')),
+            },
+        })
     except Exception as e:
         analysis.status = 'failed'
         analysis.error_message = str(e)
@@ -555,6 +728,12 @@ def generate_auto_report(request, study_id):
             overall_confidence=report_data['confidence'],
             requires_review=report_data['confidence'] < template.confidence_threshold
         )
+
+        # Return references + triage metadata from the primary analysis (if present)
+        primary = analyses.first()
+        m = (getattr(primary, 'measurements', {}) or {})
+        if not isinstance(m, dict):
+            m = {}
         
         return JsonResponse({
             'success': True,
@@ -563,7 +742,14 @@ def generate_auto_report(request, study_id):
             'impression': auto_report.generated_impression,
             'recommendations': auto_report.generated_recommendations,
             'confidence': auto_report.overall_confidence,
-            'requires_review': auto_report.requires_review
+            'requires_review': auto_report.requires_review,
+            'triage': {
+                'triage_level': m.get('triage_level'),
+                'triage_score': m.get('triage_score'),
+                'flagged': bool(m.get('triage_flagged')),
+            },
+            'reference_suggestions': m.get('reference_suggestions') or [],
+            'online_references': m.get('online_references') or [],
         })
         
     except Exception as e:

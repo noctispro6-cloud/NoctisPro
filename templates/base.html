@@ -718,9 +718,7 @@
                 <div class="nav-tab{% if ns == 'dicom_viewer' %} active{% endif %}" onclick="window.location.href='{% url 'dicom_viewer:viewer' %}'"><i class="fas fa-eye"></i> DICOM VIEWER</div>
                 {% user_caps as caps %}
                 {% if caps.ai_visible %}
-                {% if user.role == 'admin' or user.role == 'radiologist' %}
                 <div class="nav-tab{% if ns == 'ai_analysis' %} active{% endif %}" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI</div>
-                {% endif %}
                 {% endif %}
                 {% if user.is_authenticated %}
                 {% user_caps as caps %}

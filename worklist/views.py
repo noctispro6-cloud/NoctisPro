@@ -307,6 +307,20 @@ def study_list(request):
 	except Exception:
 		ai_triage_map = {}
 	
+	# Fallback to persisted study-level fields (works even if no AIAnalysis rows are loaded here)
+	try:
+		for s in page_studies:
+			if s.id in ai_triage_map:
+				continue
+			if getattr(s, 'ai_triage_flagged', False) or getattr(s, 'ai_triage_level', ''):
+				ai_triage_map[s.id] = {
+					'triage_level': getattr(s, 'ai_triage_level', '') or None,
+					'triage_score': getattr(s, 'ai_triage_score', None),
+					'flagged': bool(getattr(s, 'ai_triage_flagged', False)),
+				}
+	except Exception:
+		pass
+	
 	context = {
 		'studies': studies_page,
 		'modalities': modalities,

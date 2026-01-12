@@ -11,6 +11,7 @@ urlpatterns = [
     path('models/', views.model_management, name='model_management'),
     
     # AI Analysis API endpoints
+    path('api/study/<int:study_id>/analyze/', views.api_analyze_study, name='api_analyze_study'),
     path('api/series/<int:series_id>/analyze/', views.api_analyze_series, name='api_analyze_series'),
     path('api/analysis/<int:analysis_id>/status/', views.api_analysis_status, name='api_analysis_status'),
     path('api/analysis/<int:analysis_id>/feedback/', views.api_ai_feedback, name='api_ai_feedback'),

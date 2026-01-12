@@ -66,6 +66,36 @@ def build_report_sections_from_analysis(analysis) -> Dict[str, str]:
     triage_score = m.get("triage_score")
     flagged = bool(m.get("triage_flagged"))
 
+    # References (local + optional online)
+    references_lines: list[str] = []
+    try:
+        refs = (m.get("reference_suggestions") or [])
+        if isinstance(refs, list) and refs:
+            references_lines.append("Selected references:")
+            for r in refs[:6]:
+                if isinstance(r, dict):
+                    title = (r.get("title") or "").strip()
+                    topic = (r.get("topic") or "").strip()
+                    if title and topic:
+                        references_lines.append(f"- {title} — {topic}")
+                    elif title:
+                        references_lines.append(f"- {title}")
+                elif isinstance(r, str) and r.strip():
+                    references_lines.append(f"- {r.strip()}")
+        online = (m.get("online_references") or [])
+        if isinstance(online, list) and online:
+            references_lines.append("Online references (best-effort):")
+            for r in online[:4]:
+                if isinstance(r, dict):
+                    title = (r.get("title") or "").strip()
+                    url = (r.get("url") or "").strip()
+                    source = (r.get("source") or "").strip()
+                    if title and url:
+                        label = f"{title} ({source})" if source else title
+                        references_lines.append(f"- {label}: {url}")
+    except Exception:
+        references_lines = []
+
     # Findings
     lines: list[str] = []
     header = f"{modality}"
@@ -98,6 +128,8 @@ def build_report_sections_from_analysis(analysis) -> Dict[str, str]:
         lines.append(tri)
 
     findings_text = "\n".join(lines).strip()
+    if references_lines:
+        findings_text = (findings_text + "\n\n" + "\n".join(references_lines)).strip()
 
     # Impression (keep it conservative)
     if triage_level in ("urgent", "high") or flagged:

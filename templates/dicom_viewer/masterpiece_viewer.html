@@ -3107,7 +3107,8 @@
                     _crosshairRotateDrag.active = true;
                     _crosshairRotateDrag.lastAngle = Math.atan2(lastMouseY - c.y, lastMouseX - c.x);
                     _crosshairRotateDrag.accumDeg = 0;
-                    _crosshairRotateDrag.baseDeg = Number(crosshairRotation) || 0;
+                    // Rotate the image smoothly (360°), driven by the crosshair rotate handle.
+                    _crosshairRotateDrag.baseDeg = Number(rotation) || 0;
                     _crosshairRotateHover = true;
                     isDragging = true;
                     try { canvas.style.cursor = 'grabbing'; } catch (_) {}
@@ -3194,7 +3195,7 @@
                 if (delta < -Math.PI) delta += 2 * Math.PI;
                 _crosshairRotateDrag.accumDeg = Number(_crosshairRotateDrag.accumDeg || 0) + (delta * (180 / Math.PI));
                 _crosshairRotateDrag.lastAngle = a;
-                crosshairRotation = _normalizeDeg((Number(_crosshairRotateDrag.baseDeg) || 0) + Number(_crosshairRotateDrag.accumDeg || 0));
+                rotation = _normalizeDeg((Number(_crosshairRotateDrag.baseDeg) || 0) + Number(_crosshairRotateDrag.accumDeg || 0));
                 redrawCurrentImage();
                 lastMouseX = mouseX;
                 lastMouseY = mouseY;
@@ -3418,7 +3419,9 @@
 
                 // Convert large wheel deltas into multi-slice steps (trackpads can be very "chatty").
                 const d = Number(event.deltaY) || 0;
-                const steps = Math.max(1, Math.round(Math.abs(d) / 60));
+                // Faster default axial scrolling: fewer wheel "pixels" per slice => more slices per gesture.
+                // Trackpads can send small deltas, so keep a minimum of 1 slice per wheel event.
+                const steps = Math.max(1, Math.round(Math.abs(d) / 30));
                 const direction = d > 0 ? 1 : -1;
                 const target = currentImageIndex + (direction * steps);
 
@@ -3455,11 +3458,40 @@
                     break;
                 case 'ArrowUp':
                 case 'ArrowLeft':
-                    changeSlice(currentImageIndex - 1);
+                    // Keyboard slice navigation
+                    // - Arrow: 1 slice
+                    // - Shift+Arrow: 10 slices (fast axial browsing)
+                    // - Ctrl/Cmd+Arrow: 50 slices (very fast)
+                    {
+                        const jump = (event.ctrlKey || event.metaKey) ? 50 : (event.shiftKey ? 10 : 1);
+                        changeSlice(currentImageIndex - jump);
+                    }
                     break;
                 case 'ArrowDown':
                 case 'ArrowRight':
-                    changeSlice(currentImageIndex + 1);
+                    {
+                        const jump = (event.ctrlKey || event.metaKey) ? 50 : (event.shiftKey ? 10 : 1);
+                        changeSlice(currentImageIndex + jump);
+                    }
+                    break;
+                case 'PageUp':
+                    // Rapid scroll without modifiers (common PACS behavior)
+                    changeSlice(currentImageIndex - 10);
+                    break;
+                case 'PageDown':
+                    changeSlice(currentImageIndex + 10);
+                    break;
+                case 'Home':
+                    // Jump to first slice
+                    changeSlice(0);
+                    break;
+                case 'End':
+                    // Jump to last slice
+                    try {
+                        changeSlice(Math.max(0, (imageData ? imageData.length : 1) - 1));
+                    } catch (_) {
+                        changeSlice(currentImageIndex);
+                    }
                     break;
                 case 'r':
                     resetAllDefaults();
@@ -3792,6 +3824,12 @@
                 finalized.unit = a.mm2 != null ? 'mm2' : 'px2';
             }
 
+            // Tie single-view measurements to the current slice so they don't persist across slices.
+            try {
+                finalized.mode = 'single';
+                finalized.image_id = (imageData && imageData[currentImageIndex]) ? imageData[currentImageIndex].id : null;
+            } catch (_) {}
+
             measurements.push(finalized);
             saveMeasurement(finalized);
             updateMeasurementsList();
@@ -3808,8 +3846,16 @@
             ctx.fillStyle = '#ff0000';
             ctx.font = '14px Arial';
             ctx.textAlign = 'center';
+            const curImageId = (imageData && imageData[currentImageIndex]) ? imageData[currentImageIndex].id : null;
             
             measurements.forEach((measurement, index) => {
+                // Single-view overlays should be per-slice (per DicomImage) and should never render MPR measurements.
+                const mode = (measurement && measurement.mode) ? measurement.mode : 'single';
+                if (mode === 'mpr') return;
+                if (curImageId != null) {
+                    const mid = (measurement && (measurement.image_id ?? measurement.imageId)) ?? null;
+                    if (mid != null && String(mid) !== String(curImageId)) return;
+                }
                 if (measurement.type === 'distance') {
                     const a = imagePxToCanvasPoint({ x: measurement.startX, y: measurement.startY });
                     const b = imagePxToCanvasPoint({ x: measurement.endX, y: measurement.endY });
@@ -3994,7 +4040,13 @@
 
         function drawAnnotations() {
             // Implementation for drawing annotations
+            const curImageId = (imageData && imageData[currentImageIndex]) ? imageData[currentImageIndex].id : null;
             annotations.forEach(annotation => {
+                // Per-slice annotations: only show on the slice they were created on.
+                if (curImageId != null) {
+                    const aid = (annotation && (annotation.image_id ?? annotation.imageId)) ?? null;
+                    if (aid != null && String(aid) !== String(curImageId)) return;
+                }
                 const pt = imagePxToCanvasPoint({ x: annotation.x, y: annotation.y });
                 if (!pt) return;
                 ctx.fillStyle = annotation.color || '#ffff00';
@@ -4278,6 +4330,7 @@
                 const p = canvasPointToImagePx(x, y);
                 if (!p) return;
                 const annotation = {
+                    image_id: (imageData && imageData[currentImageIndex]) ? imageData[currentImageIndex].id : null,
                     x: p.x,
                     y: p.y,
                     text: text,

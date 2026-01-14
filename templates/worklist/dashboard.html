@@ -36,6 +36,29 @@
             --cancelled-color: #d0021b;
         }
 
+        /* Auto light-mode (OS-controlled) */
+        @media (prefers-color-scheme: light) {
+            :root {
+                --primary-bg: #f6f7fb;
+                --secondary-bg: #ffffff;
+                --card-bg: #ffffff;
+                --header-bg: #ffffff;
+                --border-color: #e5e7eb;
+                --accent-color: #0284c7;
+                --text-primary: #0f172a;
+                --text-secondary: #334155;
+                --text-muted: #64748b;
+                --success-color: #16a34a;
+                --warning-color: #d97706;
+                --danger-color: #dc2626;
+                --urgent-color: #dc2626;
+                --scheduled-color: #2563eb;
+                --in-progress-color: #d97706;
+                --completed-color: #16a34a;
+                --cancelled-color: #b91c1c;
+            }
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -43,7 +66,7 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: var(--primary-bg);
             color: var(--text-primary);
             font-size: 12px;

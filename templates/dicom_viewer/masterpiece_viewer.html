@@ -3458,11 +3458,40 @@
                     break;
                 case 'ArrowUp':
                 case 'ArrowLeft':
-                    changeSlice(currentImageIndex - 1);
+                    // Keyboard slice navigation
+                    // - Arrow: 1 slice
+                    // - Shift+Arrow: 10 slices (fast axial browsing)
+                    // - Ctrl/Cmd+Arrow: 50 slices (very fast)
+                    {
+                        const jump = (event.ctrlKey || event.metaKey) ? 50 : (event.shiftKey ? 10 : 1);
+                        changeSlice(currentImageIndex - jump);
+                    }
                     break;
                 case 'ArrowDown':
                 case 'ArrowRight':
-                    changeSlice(currentImageIndex + 1);
+                    {
+                        const jump = (event.ctrlKey || event.metaKey) ? 50 : (event.shiftKey ? 10 : 1);
+                        changeSlice(currentImageIndex + jump);
+                    }
+                    break;
+                case 'PageUp':
+                    // Rapid scroll without modifiers (common PACS behavior)
+                    changeSlice(currentImageIndex - 10);
+                    break;
+                case 'PageDown':
+                    changeSlice(currentImageIndex + 10);
+                    break;
+                case 'Home':
+                    // Jump to first slice
+                    changeSlice(0);
+                    break;
+                case 'End':
+                    // Jump to last slice
+                    try {
+                        changeSlice(Math.max(0, (imageData ? imageData.length : 1) - 1));
+                    } catch (_) {
+                        changeSlice(currentImageIndex);
+                    }
                     break;
                 case 'r':
                     resetAllDefaults();

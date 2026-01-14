@@ -676,17 +676,33 @@ class DicomViewerEnhanced {
                 formData.append('model_id', modelSelect.value);
             }
 
+            const csrf =
+                (document.querySelector('meta[name="csrf-token"]') && document.querySelector('meta[name="csrf-token"]').getAttribute('content')) ||
+                (document.querySelector('[name=csrfmiddlewaretoken]') && document.querySelector('[name=csrfmiddlewaretoken]').value) ||
+                '';
+
             const response = await fetch(`/ai_analysis/api/series/${seriesId}/analyze/`, {
                 method: 'POST',
                 headers: {
-                    'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') || {}).content,
+                    'X-CSRFToken': csrf,
                     'X-Requested-With': 'XMLHttpRequest'
                 },
                 body: formData
             });
 
-            const data = await response.json();
+            let data = {};
+            try {
+                data = await response.json();
+            } catch (_) {
+                data = {};
+            }
             
+            if (!response.ok) {
+                const msg = (data && (data.error || data.message)) ? (data.error || data.message) : `HTTP ${response.status}`;
+                this.showToast(`AI Error: ${msg}`, 'error', 6000);
+                return;
+            }
+
             if (data.success) {
                 this.showToast('AI Analysis Complete', 'success');
                 this.showFindingsPanel(data);
@@ -695,7 +711,7 @@ class DicomViewerEnhanced {
                     this.renderAIOverlays(data.overlays);
                 }
             } else {
-                this.showToast(`AI Error: ${data.error}`, 'error');
+                this.showToast(`AI Error: ${(data && (data.error || data.message)) ? (data.error || data.message) : 'Unknown error'}`, 'error', 6000);
             }
         } catch (error) {
             console.error(error);

@@ -169,13 +169,53 @@ def _auto_start_ai_for_study(study: Study) -> None:
 		# Run in background via Celery (same mechanism as manual "Start Analysis").
 		try:
 			from ai_analysis.tasks import run_ai_analysis
-			for a in analyses:
+
+			# If the Celery worker/broker isn't reachable, fall back to an in-process background thread.
+			# This keeps "AI not analysing" from happening in single-container / dev deployments.
+			use_celery = False
+			try:
+				use_celery = bool(_celery_ping_ok(timeout_seconds=1.0, ttl_seconds=15))
+			except Exception:
+				use_celery = False
+
+			if use_celery:
+				for a in analyses:
+					try:
+						run_ai_analysis.delay(int(a.id))
+					except Exception:
+						continue
+			else:
+				ids = [int(a.id) for a in analyses if getattr(a, "id", None)]
+
+				def _run_in_process(_ids):
+					# Reuse the same concurrency guard used for other upload post-processing.
+					acquired = False
+					try:
+						acquired = _UPLOAD_POSTPROCESS_SEM.acquire(blocking=False)
+					except Exception:
+						acquired = True
+					if not acquired:
+						return
+					try:
+						for _id in _ids:
+							try:
+								# Calling the task directly runs it synchronously in this process/thread.
+								run_ai_analysis(int(_id))
+							except Exception:
+								continue
+					finally:
+						try:
+							_UPLOAD_POSTPROCESS_SEM.release()
+						except Exception:
+							pass
+
 				try:
-					run_ai_analysis.delay(int(a.id))
+					threading.Thread(target=_run_in_process, args=(ids,), daemon=True).start()
 				except Exception:
-					continue
+					# If thread spawn fails, leave analyses pending.
+					pass
 		except Exception:
-			# Celery not configured/running; best-effort fallback is to leave the analyses pending.
+			# Best-effort: leave analyses pending.
 			pass
 	except Exception:
 		return

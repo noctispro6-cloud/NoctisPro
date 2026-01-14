@@ -3419,7 +3419,9 @@
 
                 // Convert large wheel deltas into multi-slice steps (trackpads can be very "chatty").
                 const d = Number(event.deltaY) || 0;
-                const steps = Math.max(1, Math.round(Math.abs(d) / 60));
+                // Faster default axial scrolling: fewer wheel "pixels" per slice => more slices per gesture.
+                // Trackpads can send small deltas, so keep a minimum of 1 slice per wheel event.
+                const steps = Math.max(1, Math.round(Math.abs(d) / 30));
                 const direction = d > 0 ? 1 : -1;
                 const target = currentImageIndex + (direction * steps);
 

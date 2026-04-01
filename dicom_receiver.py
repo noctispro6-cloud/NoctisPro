@@ -48,8 +48,8 @@ from pydicom.errors import InvalidDicomError
 import numpy as np
 from PIL import Image
 
-from worklist.models import Patient, Study, Series, DicomImage, Modality, Facility
-from accounts.models import User
+from worklist.models import Patient, Study, Series, DicomImage, Modality
+from accounts.models import User, Facility
 from django.utils import timezone
 from django.db import transaction, connection
 from notifications.models import Notification, NotificationType

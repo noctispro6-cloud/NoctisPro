@@ -1,5 +1,6 @@
 from django.db import models
 from django.utils import timezone
+from django.conf import settings
 from accounts.models import User, Facility
 from worklist.models import Study
 import os
@@ -75,26 +76,16 @@ class Report(models.Model):
             self.signature_timestamp = timezone.now()
         self.save()
 
-    def create_amendment(self, new_findings=None, new_impression=None):
-        """Create an amended version of the report"""
-        if self.status != 'final':
-            raise ValueError("Only final reports can be amended")
-        
-        amended_report = Report.objects.create(
-            study=self.study,
-            template=self.template,
-            radiologist=self.radiologist,
-            findings=new_findings or self.findings,
-            impression=new_impression or self.impression,
-            recommendations=self.recommendations,
-            clinical_history=self.clinical_history,
-            technique=self.technique,
-            comparison=self.comparison,
-            status='amended',
-            version=self.version + 1,
-            previous_version=self
+    def create_amendment(self, radiologist, findings='', impression='', recommendations='', reason=''):
+        """Create an amendment record linked to this report."""
+        return ReportAmendment.objects.create(
+            original_report=self,
+            radiologist=radiologist,
+            findings=findings or self.findings,
+            impression=impression or self.impression,
+            recommendations=recommendations or self.recommendations,
+            amendment_reason=reason,
         )
-        return amended_report
 
 class ReportSection(models.Model):
     """Individual sections of a report for structured reporting"""
@@ -171,6 +162,7 @@ class MacroText(models.Model):
     name = models.CharField(max_length=100)
     text = models.TextField()
     category = models.CharField(max_length=50)
+    section = models.CharField(max_length=50, blank=True)
     modality = models.CharField(max_length=10, blank=True)
     is_global = models.BooleanField(default=False)  # Available to all users
     created_by = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -178,3 +170,24 @@ class MacroText(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class ReportAmendment(models.Model):
+    """Amendment to a final report. Linked to the original rather than the Study."""
+    original_report = models.ForeignKey(
+        'Report', on_delete=models.CASCADE, related_name='amendments'
+    )
+    radiologist = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True
+    )
+    findings = models.TextField(blank=True)
+    impression = models.TextField(blank=True)
+    recommendations = models.TextField(blank=True)
+    amendment_reason = models.TextField(blank=True)
+    amended_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-amended_at']
+
+    def __str__(self):
+        return f"Amendment to report {self.original_report_id} at {self.amended_at}"

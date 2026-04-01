@@ -5694,6 +5694,14 @@ def print_dicom_image(request):
         modality = request.POST.get('modality', '')
         series_description = request.POST.get('series_description', '')
         institution_name = request.POST.get('institution_name', request.user.facility.name if hasattr(request.user, 'facility') and request.user.facility else 'Medical Facility')
+        accession_number = request.POST.get('accession_number', '')
+        if not accession_number and series_id:
+            try:
+                from worklist.models import Series as _SeriesAcc
+                _sa = _SeriesAcc.objects.select_related('study').get(id=int(series_id))
+                accession_number = getattr(_sa.study, 'accession_number', '') or ''
+            except Exception:
+                pass
         
         # Optional windowing overrides for server-rendered slices
         try:
@@ -5803,6 +5811,7 @@ def print_dicom_image(request):
                 institution_name,
                 grid_rows=(int(grid_rows) if (grid_rows and str(grid_rows).strip()) else None),
                 grid_cols=(int(grid_cols) if (grid_cols and str(grid_cols).strip()) else None),
+                accession_number=accession_number,
             )
 
             # Optionally return the generated PDF to the browser instead of sending to CUPS.
@@ -5935,7 +5944,7 @@ def print_dicom_image(request):
         logger.error(f"Error in print_dicom_image: {str(e)}")
         return JsonResponse({'success': False, 'error': str(e)})
 
-def create_medical_print_pdf_enhanced(image_paths, output_path, paper_size, layout_type, print_medium, modality, patient_name, study_date, series_description, institution_name, grid_rows: int | None = None, grid_cols: int | None = None):
+def create_medical_print_pdf_enhanced(image_paths, output_path, paper_size, layout_type, print_medium, modality, patient_name, study_date, series_description, institution_name, grid_rows: int | None = None, grid_cols: int | None = None, accession_number: str = ''):
     """
     Create a PDF optimized for medical image printing with multiple layout options for different modalities.
     Supports both paper and film printing with modality-specific layouts.
@@ -5967,7 +5976,7 @@ def create_medical_print_pdf_enhanced(image_paths, output_path, paper_size, layo
     header_lines = [
         f"{institution_name}".strip(),
         f"Patient: {patient_name}".strip(),
-        f"Study: {study_date} | Modality: {modality} | Series: {series_description}".strip(),
+        f"Accession: {accession_number} | Study: {study_date} | Modality: {modality} | Series: {series_description}".strip(),
     ]
     footer_text = f"Printed: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')} | NoctisPro Medical Imaging"
     

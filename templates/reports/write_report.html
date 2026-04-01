@@ -345,6 +345,8 @@
                                     <option value="draft" {% if report.status == 'draft' %}selected{% endif %}>Draft</option>
                                     <option value="preliminary" {% if report.status == 'preliminary' %}selected{% endif %}>Preliminary</option>
                                     <option value="final" {% if report.status == 'final' %}selected{% endif %}>Final</option>
+                                    <option value="amended" {% if report and report.status == 'amended' %}selected{% endif %}>Amended</option>
+                                    <option value="cancelled" {% if report and report.status == 'cancelled' %}selected{% endif %}>Cancelled</option>
                                 </select>
                             </div>
 
@@ -430,6 +432,7 @@
                                 <button type="submit" name="action" value="save" class="btn btn-save">
                                     <i class="fas fa-save me-2"></i>Save Draft
                                 </button>
+                                <span id="autoSaveStatus" style="font-size:11px;color:#666;margin-left:8px;"></span>
                                 <button type="submit" name="action" value="submit" onclick="document.getElementById('reportStatus').value='final'" class="btn btn-medical">
                                     <i class="fas fa-paper-plane me-2"></i>Submit Final
                                 </button>
@@ -583,13 +586,49 @@ async function exportDicomSR(){
 function exportPDF(){ window.open(`/reports/export/pdf/{{ study.id }}/`, '_blank'); }
 function exportDOCX(){ window.open(`/reports/export/docx/{{ study.id }}/`, '_blank'); }
 
+// Track original content to detect real changes
+const _originalContent = {};
+document.querySelectorAll('textarea[name]').forEach(function(ta) {
+    _originalContent[ta.name] = ta.value;
+});
+
+// Live word count for report sections
+document.querySelectorAll('textarea[name]').forEach(function(ta) {
+    const counter = document.createElement('small');
+    counter.style.cssText = 'color:#666;font-size:10px;';
+    counter.textContent = '0 words';
+    ta.parentNode.insertBefore(counter, ta.nextSibling);
+    ta.addEventListener('input', function() {
+        const words = ta.value.trim() ? ta.value.trim().split(/\s+/).length : 0;
+        counter.textContent = words + ' word' + (words !== 1 ? 's' : '');
+    });
+    if (ta.value.trim()) {
+        const words = ta.value.trim().split(/\s+/).length;
+        counter.textContent = words + ' word' + (words !== 1 ? 's' : '');
+    }
+});
+
 // Auto-save functionality
-let autoSaveInterval;
 function startAutoSave() {
-    autoSaveInterval = setInterval(function() {
-        // Auto-save logic here
-        console.log('Auto-saving report...');
-    }, 30000); // Auto-save every 30 seconds
+    let _autoSaveTimer = setInterval(async function() {
+        const form = document.getElementById('reportForm') || document.querySelector('form[action]');
+        if (!form) return;
+        try {
+            const formData = new FormData(form);
+            formData.set('action', 'save');
+            const hasChanges = Array.from(document.querySelectorAll('textarea[name]')).some(
+                ta => _originalContent && ta.value !== _originalContent[ta.name]
+            );
+            if (!hasChanges) return;
+            const resp = await fetch(form.action, {
+                method: 'POST', body: formData, credentials: 'same-origin'
+            });
+            if (resp.ok) {
+                const savedEl = document.getElementById('autoSaveStatus');
+                if (savedEl) { savedEl.textContent = 'Draft saved ' + new Date().toLocaleTimeString(); }
+            }
+        } catch(e) { /* silent */ }
+    }, 30000);
 }
 
 // Start auto-save when page loads
@@ -597,17 +636,11 @@ document.addEventListener('DOMContentLoaded', function() {
     startAutoSave();
 });
 
-// Save before leaving page
+// Only warn on beforeunload when content has actually changed since page load
 window.addEventListener('beforeunload', function(e) {
-    // Check if there are unsaved changes
-    const forms = document.querySelectorAll('textarea');
-    let hasChanges = false;
-    forms.forEach(function(textarea) {
-        if (textarea.value.trim() !== '') {
-            hasChanges = true;
-        }
-    });
-    
+    const hasChanges = Array.from(document.querySelectorAll('textarea[name]')).some(
+        ta => ta.value !== _originalContent[ta.name]
+    );
     if (hasChanges) {
         e.preventDefault();
         e.returnValue = '';

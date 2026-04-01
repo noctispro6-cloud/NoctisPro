@@ -90,6 +90,8 @@
     .status-draft { background: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1px solid #9ca3af; }
     .status-preliminary { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; }
     .status-final { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; }
+    .status-amended { background: rgba(255, 165, 0, 0.15); color: #ffa500; border: 1px solid #ffa500; }
+    .status-cancelled { background: rgba(128, 128, 128, 0.15); color: #808080; border: 1px solid #808080; }
 
     .action-buttons {
         display: flex;
@@ -128,6 +130,16 @@
         background: var(--text-secondary);
         color: var(--primary-bg);
     }
+
+    .sort-link {
+        color: inherit;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+
+    .sort-link:hover {
+        color: var(--accent-color);
+    }
 </style>
 {% endblock %}
 
@@ -160,6 +172,7 @@
                 <option value="preliminary" {% if status_filter == 'preliminary' %}selected{% endif %}>Preliminary</option>
                 <option value="final" {% if status_filter == 'final' %}selected{% endif %}>Final</option>
                 <option value="amended" {% if status_filter == 'amended' %}selected{% endif %}>Amended</option>
+                <option value="cancelled" {% if status_filter == 'cancelled' %}selected{% endif %}>Cancelled</option>
             </select>
         </div>
         <div class="control-group">
@@ -171,6 +184,14 @@
                 <option value="XR" {% if modality_filter == 'XR' %}selected{% endif %}>X-Ray</option>
                 <option value="US" {% if modality_filter == 'US' %}selected{% endif %}>Ultrasound</option>
             </select>
+        </div>
+        <div class="control-group">
+            <label class="control-label">From:</label>
+            <input type="date" class="control-input" name="date_from" value="{{ date_from|default:'' }}">
+        </div>
+        <div class="control-group">
+            <label class="control-label">To:</label>
+            <input type="date" class="control-input" name="date_to" value="{{ date_to|default:'' }}">
         </div>
         <button type="submit" class="btn-control reset">REFRESH</button>
         <button type="button" class="btn-control" onclick="resetFilters()">RESET FILTERS</button>
@@ -205,19 +226,33 @@
                 <p>Final Reports</p>
             </div>
         </div>
+        <div class="stat-card">
+            <div class="stat-icon"><i class="fas fa-edit"></i></div>
+            <div class="stat-content">
+                <h3>{{ amended_reports|default:0 }}</h3>
+                <p>Amended Reports</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon"><i class="fas fa-ban"></i></div>
+            <div class="stat-content">
+                <h3>{{ cancelled_reports|default:0 }}</h3>
+                <p>Cancelled Reports</p>
+            </div>
+        </div>
     </div>
 
     <div class="data-table-container">
         <table class="data-table">
             <thead>
                 <tr>
-                    <th class="sortable">PATIENT</th>
-                    <th class="sortable">STUDY DATE</th>
-                    <th class="sortable">MODALITY</th>
-                    <th class="sortable">BODY PART</th>
-                    <th class="sortable">RADIOLOGIST</th>
-                    <th class="sortable">STATUS</th>
-                    <th class="sortable">REPORT DATE</th>
+                    <th><a href="?{{ request.GET.urlencode }}&sort=patient&order={% if sort == 'patient' and order == 'asc' %}desc{% else %}asc{% endif %}" class="sort-link">PATIENT {% if sort == 'patient' %}<i class="fas fa-sort-{% if order == 'asc' %}up{% else %}down{% endif %}"></i>{% endif %}</a></th>
+                    <th><a href="?{{ request.GET.urlencode }}&sort=study_date&order={% if sort == 'study_date' and order == 'asc' %}desc{% else %}asc{% endif %}" class="sort-link">STUDY DATE {% if sort == 'study_date' %}<i class="fas fa-sort-{% if order == 'asc' %}up{% else %}down{% endif %}"></i>{% endif %}</a></th>
+                    <th>MODALITY</th>
+                    <th>BODY PART</th>
+                    <th><a href="?{{ request.GET.urlencode }}&sort=radiologist&order={% if sort == 'radiologist' and order == 'asc' %}desc{% else %}asc{% endif %}" class="sort-link">RADIOLOGIST {% if sort == 'radiologist' %}<i class="fas fa-sort-{% if order == 'asc' %}up{% else %}down{% endif %}"></i>{% endif %}</a></th>
+                    <th>STATUS</th>
+                    <th><a href="?{{ request.GET.urlencode }}&sort=report_date&order={% if sort == 'report_date' and order == 'asc' %}desc{% else %}asc{% endif %}" class="sort-link">REPORT DATE {% if sort == 'report_date' %}<i class="fas fa-sort-{% if order == 'asc' %}up{% else %}down{% endif %}"></i>{% endif %}</a></th>
                     <th>ACTIONS</th>
                 </tr>
             </thead>
@@ -249,6 +284,9 @@
                             </a>
                             <a href="{% url 'reports:export_report_pdf' report.study.id %}" class="btn-viewer viewer-only" title="Download PDF">
                                 <i class="fas fa-download"></i> PDF
+                            </a>
+                            <a href="{% url 'reports:export_report_docx' report.study.id %}" class="btn-viewer viewer-only" title="Export Word">
+                                <i class="fas fa-file-word"></i> DOCX
                             </a>
                         </div>
                     </td>

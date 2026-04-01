@@ -67,10 +67,14 @@ def report_list(request):
     search_query = request.GET.get('search', '')
     status_filter = request.GET.get('status', '')
     modality_filter = request.GET.get('modality', '')
-    
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    sort = request.GET.get('sort', '')
+    order = request.GET.get('order', 'desc')
+
     # Base queryset
     reports = Report.objects.select_related('study', 'study__patient', 'study__modality', 'radiologist').all()
-    
+
     # Apply filters
     if search_query:
         reports = reports.filter(
@@ -80,33 +84,63 @@ def report_list(request):
             Q(radiologist__first_name__icontains=search_query) |
             Q(radiologist__last_name__icontains=search_query)
         )
-    
+
     if status_filter:
         reports = reports.filter(status=status_filter)
-    
+
     if modality_filter:
         reports = reports.filter(study__modality__code=modality_filter)
-    
-    # Order by most recent
-    reports = reports.order_by('-report_date')
-    
+
+    if date_from:
+        try:
+            reports = reports.filter(report_date__date__gte=date_from)
+        except Exception:
+            pass
+
+    if date_to:
+        try:
+            reports = reports.filter(report_date__date__lte=date_to)
+        except Exception:
+            pass
+
+    # Sorting
+    sort_fields = {
+        'patient': 'study__patient__last_name',
+        'study_date': 'study__study_date',
+        'radiologist': 'radiologist__last_name',
+        'report_date': 'report_date',
+    }
+    sort_field = sort_fields.get(sort, 'report_date')
+    if order == 'asc':
+        reports = reports.order_by(sort_field)
+    else:
+        reports = reports.order_by(f'-{sort_field}')
+
     # Calculate statistics
     total_reports = Report.objects.count()
     draft_reports = Report.objects.filter(status='draft').count()
     pending_reports = Report.objects.filter(status='preliminary').count()
     final_reports = Report.objects.filter(status='final').count()
-    
+    amended_reports = Report.objects.filter(status='amended').count()
+    cancelled_reports = Report.objects.filter(status='cancelled').count()
+
     context = {
         'reports': reports,
         'total_reports': total_reports,
         'draft_reports': draft_reports,
         'pending_reports': pending_reports,
         'final_reports': final_reports,
+        'amended_reports': amended_reports,
+        'cancelled_reports': cancelled_reports,
         'search_query': search_query,
         'status_filter': status_filter,
         'modality_filter': modality_filter,
+        'date_from': date_from,
+        'date_to': date_to,
+        'sort': sort,
+        'order': order,
     }
-    
+
     return render(request, 'reports/report_list.html', context)
 
 
@@ -367,11 +401,16 @@ def export_report_pdf(request, study_id):
         # Insert facility letterhead image if available
         try:
             if getattr(study.facility, 'letterhead', None) and study.facility.letterhead.name:
-                with open(study.facility.letterhead.path, 'rb') as f:
-                    img_bytes = f.read()
-                rect = fitz.Rect(margin, y, page.rect.width - margin, y + 90)
-                page.insert_image(rect, stream=img_bytes, keep_proportion=True)
-                y = rect.y1 + 12
+                try:
+                    letterhead_data = study.facility.letterhead.open('rb').read()
+                except Exception:
+                    letterhead_data = None
+                if letterhead_data:
+                    rect = fitz.Rect(margin, y, page.rect.width - margin, y + 90)
+                    page.insert_image(rect, stream=letterhead_data, keep_proportion=True)
+                    y = rect.y1 + 12
+                else:
+                    raise Exception("letterhead unreadable")
             else:
                 page.insert_text((margin, y), study.facility.name, fontsize=14, fontname="helv", fill=(0, 0, 0))
                 y += 22
@@ -508,7 +547,10 @@ def export_report_docx(request, study_id):
     # Letterhead as image if available
     try:
         if getattr(study.facility, 'letterhead', None) and study.facility.letterhead.name:
-            doc.add_picture(study.facility.letterhead.path, width=None)
+            lh_data = study.facility.letterhead.open('rb').read()
+            doc.add_picture(io.BytesIO(lh_data), width=None)
+        else:
+            raise Exception("no letterhead")
     except Exception:
         doc.add_heading(study.facility.name, 0)
     doc.add_paragraph(f"Patient: {study.patient.full_name} ({study.patient.patient_id})")

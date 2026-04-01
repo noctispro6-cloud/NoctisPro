@@ -117,7 +117,15 @@ def write_report(request, study_id):
         return HttpResponse(status=403)
     """Write report for study"""
     study = get_object_or_404(Study, id=study_id)
-    
+    user = request.user
+
+    # Radiologists/admins scoped to their assigned facility
+    if not user.is_admin() and hasattr(user, 'facility') and user.facility:
+        if study.facility and study.facility != user.facility:
+            from django.contrib import messages as _msgs
+            _msgs.error(request, 'You can only write reports for studies at your assigned facility.')
+            return redirect('worklist:dashboard')
+
     # When opening editor, mark study as in progress for editors
     if study.status in ['scheduled', 'suspended']:
         study.status = 'in_progress'
@@ -200,6 +208,14 @@ def write_report(request, study_id):
 def print_report_stub(request, study_id):
     """Printable HTML that mirrors facility letterhead, includes author signature and QR/link footer."""
     study = get_object_or_404(Study, id=study_id)
+
+    # Facility users can only print their own facility's reports
+    user = request.user
+    if not user.can_edit_reports():
+        if not hasattr(user, 'facility') or not user.facility or study.facility != user.facility:
+            from django.http import HttpResponseForbidden
+            return HttpResponseForbidden('Access denied')
+
     report = Report.objects.filter(study=study).first()
 
     # Build absolute URLs

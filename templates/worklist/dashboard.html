@@ -836,9 +836,9 @@
                 <select class="control-select" id="statusFilter">
                     <option value="">All Status</option>
                     <option value="scheduled">Scheduled</option>
-                    <option value="urgent">Urgent</option>
                     <option value="in-progress">In Progress</option>
                     <option value="completed">Completed</option>
+                    <option value="suspended">Suspended</option>
                     <option value="pending">Pending</option>
                     <option value="cancelled">Cancelled</option>
                 </select>
@@ -1657,9 +1657,10 @@
                 .then(r => r.json())
                 .then(d => {
                     const badge = document.getElementById('notifBadge');
-                    if (badge && d && typeof d.unread_count === 'number') {
-                        if (d.unread_count > 0) {
-                            badge.textContent = d.unread_count;
+                    const cnt = d && (d.count !== undefined ? d.count : (d.unread_count !== undefined ? d.unread_count : d.unread));
+                    if (badge && typeof cnt === 'number') {
+                        if (cnt > 0) {
+                            badge.textContent = cnt;
                             badge.style.display = 'inline-block';
                         } else {
                             badge.style.display = 'none';

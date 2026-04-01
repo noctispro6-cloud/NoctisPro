@@ -87,7 +87,7 @@ if os.environ.get("ENABLE_CPP_COMPAT_API", "False").lower() in ("1", "true", "ye
 
 urlpatterns += [
     # Web viewer pages
-    path('web/', views.web_index, name='index'),
+    path('web/', lambda request: __import__('django.shortcuts', fromlist=['redirect']).redirect('dicom_viewer:viewer'), name='index'),
     path('web/viewer/', views.web_viewer, name='web_viewer'),
 
 

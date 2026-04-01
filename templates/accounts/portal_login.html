@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Noctis Pro PACS</title>
+    <title>Staff Portal Login - Noctis Pro PACS</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     {% load static %}
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -154,10 +154,6 @@
             background: var(--primary-bg);
         }
 
-        .form-control:focus + i {
-            color: var(--accent-color);
-        }
-
         .form-control::placeholder {
             color: var(--text-muted);
         }
@@ -184,21 +180,6 @@
             overflow: hidden;
         }
 
-        .btn-login::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-            transition: left 0.5s;
-        }
-
-        .btn-login:hover::before {
-            left: 100%;
-        }
-
         .btn-login:hover {
             transform: translateY(-2px);
             box-shadow: 0 10px 25px rgba(0, 212, 255, 0.3);
@@ -215,10 +196,6 @@
             box-shadow: none;
         }
 
-        .btn-login:disabled::before {
-            display: none;
-        }
-
         .alert {
             padding: 12px 16px;
             border-radius: 8px;
@@ -232,30 +209,11 @@
         }
 
         @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
-        .alert-danger {
-            background: rgba(255, 68, 68, 0.1);
-            border-color: var(--danger-color);
-            color: var(--danger-color);
-        }
-
-        .alert-success {
-            background: rgba(0, 255, 136, 0.1);
-            border-color: var(--success-color);
-            color: var(--success-color);
-        }
-
-        /* Django messages use `error`/`warning` tags; map them to visible styles */
-        .alert-error {
+        .alert-danger, .alert-error {
             background: rgba(255, 68, 68, 0.1);
             border-color: var(--danger-color);
             color: var(--danger-color);
@@ -288,39 +246,9 @@
             margin-top: 2rem;
         }
 
-        /* Responsive design */
-        @media (max-width: 480px) {
-            .login-container {
-                padding: 15px;
-            }
-            
-            .login-card {
-                padding: 2rem 1.5rem;
-            }
-            
-            .logo {
-                font-size: 20px;
-            }
-        }
-
-        /* Input validation states */
-        .form-control.is-invalid {
-            border-color: var(--danger-color);
-            box-shadow: 0 0 0 2px rgba(255, 68, 68, 0.2);
-        }
-
-        .form-control.is-valid {
-            border-color: var(--success-color);
-            box-shadow: 0 0 0 2px rgba(0, 255, 136, 0.2);
-        }
-
-        /* Loading overlay */
         .loading-overlay {
             position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
+            top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0, 0, 0, 0.7);
             display: none;
             align-items: center;
@@ -347,6 +275,12 @@
             animation: spin 1s linear infinite;
             margin: 0 auto 10px;
         }
+
+        @media (max-width: 480px) {
+            .login-container { padding: 15px; }
+            .login-card { padding: 2rem 1.5rem; }
+            .logo { font-size: 20px; }
+        }
     </style>
 </head>
 <body>
@@ -363,9 +297,8 @@
                 <i class="fas fa-hospital-symbol"></i>
                 Noctis Pro PACS
             </div>
-            <div class="subtitle">Professional Medical Imaging Platform</div>
+            <div class="subtitle">Staff Portal Login</div>
 
-            {# Only show login-relevant messages here (avoid leaking setup/admin actions). #}
             {% if messages %}
                 {% for message in messages %}
                     {% if 'error' in message.tags or 'warning' in message.tags %}
@@ -384,19 +317,19 @@
                 {% endfor %}
             {% endif %}
 
-            <form method="post" id="loginForm" action="{% url 'accounts:login' %}" novalidate>
+            <form method="post" id="loginForm" action="{% url 'accounts:portal_login' %}" novalidate>
                 {% csrf_token %}
                 <div class="form-group">
                     <label class="form-label" for="username">Username or Email</label>
                     <div class="input-group">
-                        <input type="text" 
-                               class="form-control" 
-                               id="username" 
-                               name="username" 
-                               placeholder="Enter your username or email" 
-                               required 
-                               autocomplete="username" 
-                               autocapitalize="none" 
+                        <input type="text"
+                               class="form-control"
+                               id="username"
+                               name="username"
+                               placeholder="Enter your username or email"
+                               required
+                               autocomplete="username"
+                               autocapitalize="none"
                                autocorrect="off"
                                spellcheck="false">
                         <i class="fas fa-user"></i>
@@ -406,12 +339,12 @@
                 <div class="form-group">
                     <label class="form-label" for="password">Password</label>
                     <div class="input-group">
-                        <input type="password" 
-                               class="form-control" 
-                               id="password" 
-                               name="password" 
-                               placeholder="Enter your password" 
-                               required 
+                        <input type="password"
+                               class="form-control"
+                               id="password"
+                               name="password"
+                               placeholder="Enter your password"
+                               required
                                autocomplete="current-password">
                         <i class="fas fa-lock"></i>
                     </div>
@@ -437,12 +370,9 @@
         const loadingOverlay = document.getElementById('loadingOverlay');
         const usernameInput = document.getElementById('username');
         const passwordInput = document.getElementById('password');
-        // Focus username on load (do NOT wipe browser/password-manager autofill)
-        setTimeout(() => {
-            usernameInput.focus();
-        }, 50);
 
-        // Auto-clear alerts after 5 seconds
+        setTimeout(() => { usernameInput.focus(); }, 50);
+
         const alerts = document.querySelectorAll('.alert');
         alerts.forEach(function(alert, index) {
             setTimeout(function() {
@@ -450,106 +380,57 @@
                 alert.style.opacity = '0';
                 alert.style.transform = 'translateY(-10px)';
                 setTimeout(function() {
-                    if (alert.parentNode) {
-                        alert.parentNode.removeChild(alert);
-                    }
+                    if (alert.parentNode) alert.parentNode.removeChild(alert);
                 }, 300);
             }, 5000 + (index * 200));
         });
 
-        // Real-time input validation
-        function validateInput(input) {
-            const value = input.value.trim();
-            if (value.length === 0) {
-                input.classList.remove('is-valid', 'is-invalid');
-            } else {
-                input.classList.remove('is-invalid');
-                input.classList.add('is-valid');
-            }
-        }
-
-        usernameInput.addEventListener('input', function() {
-            validateInput(this);
-        });
-
-        passwordInput.addEventListener('input', function() {
-            validateInput(this);
-        });
-
-        // Enhanced form submission (use normal POST to ensure session cookie + redirects work reliably)
         loginForm.addEventListener('submit', function(e) {
             e.preventDefault();
-            
             const username = usernameInput.value.trim();
             const password = passwordInput.value;
-            
-            // Clear existing alerts
-            const existingAlerts = document.querySelectorAll('.alert');
-            existingAlerts.forEach(alert => alert.remove());
-            
-            // Validate inputs
-            if (!username || username.length < 1) {
+
+            document.querySelectorAll('.alert').forEach(a => a.remove());
+
+            if (!username) {
                 showAlert('Please enter your username or email', 'danger');
                 usernameInput.focus();
                 return;
             }
-            
-            if (!password || password.length < 1) {
+
+            if (!password) {
                 showAlert('Please enter your password', 'danger');
                 passwordInput.focus();
                 return;
             }
-            
-            // Show loading state
+
             loginButton.disabled = true;
             loginButtonText.innerHTML = '<div class="spinner"></div> Authenticating...';
             loadingOverlay.classList.add('active');
-            
-            // Submit form after short delay for UX (native submit avoids fetch/cookie issues)
-            setTimeout(() => {
-                // Native submit does not re-trigger this submit handler (prevents loops)
-                loginForm.submit();
-            }, 250);
+
+            setTimeout(() => { loginForm.submit(); }, 250);
         });
 
         function showAlert(message, type) {
             const alertDiv = document.createElement('div');
             alertDiv.className = `alert alert-${type}`;
-            alertDiv.innerHTML = `
-                <i class="fas fa-${type === 'danger' ? 'exclamation-triangle' : 'info-circle'}"></i>
-                ${message}
-            `;
-            
+            alertDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i>${message}`;
             const form = document.getElementById('loginForm');
             form.parentNode.insertBefore(alertDiv, form);
-            
-            // Auto-remove after 5 seconds
             setTimeout(() => {
                 alertDiv.style.transition = 'all 0.3s ease-out';
                 alertDiv.style.opacity = '0';
                 alertDiv.style.transform = 'translateY(-10px)';
-                setTimeout(() => {
-                    if (alertDiv.parentNode) {
-                        alertDiv.parentNode.removeChild(alertDiv);
-                    }
-                }, 300);
+                setTimeout(() => { if (alertDiv.parentNode) alertDiv.parentNode.removeChild(alertDiv); }, 300);
             }, 5000);
         }
 
-        function resetLoginForm() {
-            loginButton.disabled = false;
-            loginButtonText.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign In';
-            loadingOverlay.classList.remove('active');
-        }
-
-        // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !loginButton.disabled) {
                 loginForm.dispatchEvent(new Event('submit'));
             }
         });
 
-        // Prevent form resubmission on page refresh
         if (window.history.replaceState) {
             window.history.replaceState(null, null, window.location.href);
         }

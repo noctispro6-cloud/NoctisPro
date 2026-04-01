@@ -1896,9 +1896,11 @@ def upload_attachment(request, study_id):
     """Upload attachment to study"""
     study = get_object_or_404(Study, id=study_id)
     user = request.user
-    
-    # All authenticated users can upload attachments regardless of facility
-    
+
+    # Facility users can only attach to their own facility's studies
+    if user.is_facility_user() and study.facility != user.facility:
+        return JsonResponse({'error': 'Access denied'}, status=403)
+
     if request.method == 'POST':
         try:
             files = request.FILES.getlist('files')
@@ -2278,9 +2280,19 @@ def api_update_study_status(request, study_id):
     try:
         data = json.loads(request.body)
         new_status = data.get('status', '').strip()
-        
+
+        ALLOWED_STATUS_BY_ROLE = {
+            'facility': {'scheduled', 'in_progress'},
+            'radiologist': {'scheduled', 'in_progress', 'completed', 'suspended', 'cancelled'},
+            'admin': {'scheduled', 'in_progress', 'completed', 'suspended', 'cancelled'},
+        }
+        user_role = getattr(user, 'role', 'facility')
+        allowed = ALLOWED_STATUS_BY_ROLE.get(user_role, set())
+        if new_status and new_status not in allowed:
+            return JsonResponse({'error': f'Your role cannot set status to {new_status}'}, status=403)
+
         # Validate status
-        valid_statuses = ['scheduled', 'in_progress', 'completed', 'cancelled']
+        valid_statuses = ['scheduled', 'in_progress', 'completed', 'suspended', 'cancelled']
         if new_status not in valid_statuses:
             return JsonResponse({'error': 'Invalid status'}, status=400)
         
@@ -2397,7 +2409,12 @@ def api_delete_study(request, study_id):
     
     try:
         study = get_object_or_404(Study, id=study_id)
-        
+
+        # Non-superusers (including radiologists) scoped to their facility
+        if not request.user.is_superuser and hasattr(request.user, 'facility') and request.user.facility:
+            if study.facility and study.facility != request.user.facility:
+                return JsonResponse({'error': 'Permission denied: study belongs to a different facility'}, status=403)
+
         # Store study info for logging before deletion
         study_info = {
             'id': study.id,

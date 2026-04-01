@@ -152,6 +152,13 @@ def login_view(request):
                 messages.error(request, 'Invalid username/email or password')
             return render(request, 'accounts/login.html', {'hide_navbar': True})
 
+        # Only admins can use the main /login/ endpoint.
+        # Radiologists and facility users must use /portal/login/
+        if not user.is_admin():
+            list(messages.get_messages(request))
+            messages.error(request, 'This login page is for administrators only. Please use the staff portal at /portal/login/')
+            return render(request, 'accounts/login.html', {'hide_navbar': True})
+
         # Allow superusers/staff to bypass verification to prevent lockout on fresh setups
         if user and user.is_active and (getattr(user, 'is_verified', True) or getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)):
             # Track login session
@@ -341,3 +348,92 @@ def user_api_info(request):
             'is_facility_user': user.is_facility_user(),
         }
     })
+
+
+def portal_login(request):
+    """Staff portal login for radiologists and facility users (no admin-only restriction)."""
+    _bootstrap_admin_user_if_enabled()
+    if request.user.is_authenticated:
+        return redirect('worklist:dashboard')
+
+    if request.method == 'GET':
+        list(messages.get_messages(request))
+
+    if request.method == 'POST':
+        identifier = (request.POST.get('username') or '').strip()
+        password = request.POST.get('password') or ''
+
+        if not identifier or not password:
+            list(messages.get_messages(request))
+            messages.error(request, 'Please enter your username/email and password')
+            return render(request, 'accounts/portal_login.html', {'hide_navbar': True})
+
+        user = authenticate(request, username=identifier, password=password)
+        if not user and '@' in identifier:
+            try:
+                candidate = User.objects.only('username').get(email__iexact=identifier)
+                user = authenticate(request, username=candidate.username, password=password)
+            except User.DoesNotExist:
+                user = None
+            except Exception:
+                user = None
+
+        if not user:
+            try:
+                candidate = User.objects.only('is_active', 'is_verified').get(username__iexact=identifier)
+            except User.DoesNotExist:
+                candidate = None
+            except Exception:
+                candidate = None
+
+            if not candidate and '@' in identifier:
+                try:
+                    candidate = User.objects.only('is_active', 'is_verified').get(email__iexact=identifier)
+                except User.DoesNotExist:
+                    candidate = None
+                except Exception:
+                    candidate = None
+
+            list(messages.get_messages(request))
+            if candidate and not getattr(candidate, 'is_active', True):
+                messages.error(request, 'Your account is disabled. Please contact an administrator.')
+            elif candidate and hasattr(candidate, 'is_verified') and not getattr(candidate, 'is_verified', True):
+                messages.error(request, 'Your account is not verified yet. Please contact an administrator.')
+            else:
+                messages.error(request, 'Invalid username/email or password')
+            return render(request, 'accounts/portal_login.html', {'hide_navbar': True})
+
+        if user and user.is_active and (getattr(user, 'is_verified', True) or getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)):
+            login(request, user)
+
+            ip_address = get_client_ip(request)
+            user_agent = request.META.get('HTTP_USER_AGENT', '')
+
+            try:
+                user.last_login_ip = ip_address
+                user.save(update_fields=['last_login_ip', 'updated_at'] if hasattr(user, 'updated_at') else ['last_login_ip'])
+            except Exception:
+                pass
+
+            try:
+                session_key = _get_or_create_session_key(request)
+                UserSession.objects.create(
+                    user=user,
+                    session_key=session_key,
+                    ip_address=ip_address,
+                    user_agent=user_agent
+                )
+            except Exception:
+                pass
+
+            return redirect('worklist:dashboard')
+        else:
+            list(messages.get_messages(request))
+            if not getattr(user, 'is_active', True):
+                messages.error(request, 'Your account is disabled. Please contact an administrator.')
+            elif hasattr(user, 'is_verified') and not getattr(user, 'is_verified', True):
+                messages.error(request, 'Your account is not verified yet. Please contact an administrator.')
+            else:
+                messages.error(request, 'Invalid username/email or password')
+
+    return render(request, 'accounts/portal_login.html', {'hide_navbar': True})

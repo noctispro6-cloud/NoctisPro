@@ -131,6 +131,67 @@
 		border-color: var(--accent-color);
 		color: var(--primary-bg);
 	}
+
+	/* Context menu */
+	.sl-ctx-menu {
+		position: fixed;
+		background: var(--card-bg, #252525);
+		border: 1px solid var(--border-color, #404040);
+		border-radius: 6px;
+		box-shadow: 0 8px 24px rgba(0,0,0,.35);
+		z-index: 9999;
+		min-width: 190px;
+		padding: 4px 0;
+		display: none;
+	}
+	.sl-ctx-menu.visible { display: block; }
+	.sl-ctx-item {
+		display: flex; align-items: center; gap: 8px;
+		padding: 8px 14px; font-size: 12px;
+		color: var(--text-primary, #fff); cursor: pointer;
+		transition: background .15s; white-space: nowrap;
+	}
+	.sl-ctx-item:hover { background: rgba(0,212,255,.12); color: var(--accent-color, #00d4ff); }
+	.sl-ctx-item.danger:hover { background: rgba(255,68,68,.12); color: var(--danger-color, #ff4444); }
+	.sl-ctx-item i { width: 14px; text-align: center; opacity: .8; }
+	.sl-ctx-sep { height: 1px; background: var(--border-color, #404040); margin: 4px 0; }
+
+	/* Delete confirm modal */
+	.sl-del-overlay {
+		display: none; position: fixed; inset: 0;
+		background: rgba(0,0,0,.6); z-index: 10000;
+		align-items: center; justify-content: center;
+	}
+	.sl-del-overlay.visible { display: flex; }
+	.sl-del-modal {
+		background: var(--card-bg, #252525);
+		border: 1px solid var(--border-color, #404040);
+		border-radius: 10px; padding: 28px 32px;
+		max-width: 420px; width: 90%;
+		box-shadow: 0 16px 48px rgba(0,0,0,.5);
+	}
+	.sl-del-modal .icon { font-size: 36px; color: var(--danger-color, #ff4444); margin-bottom: 14px; }
+	.sl-del-modal h3 { font-size: 15px; margin: 0 0 8px; }
+	.sl-del-modal p { font-size: 12px; color: var(--text-secondary, #b3b3b3); margin: 0 0 14px; line-height: 1.6; }
+	.sl-del-acc {
+		display: inline-block; font-family: monospace; font-size: 12px;
+		color: var(--danger-color, #ff4444);
+		background: rgba(255,68,68,.08); border: 1px solid rgba(255,68,68,.3);
+		border-radius: 4px; padding: 4px 10px; margin-bottom: 20px;
+	}
+	.sl-del-actions { display: flex; gap: 10px; justify-content: flex-end; }
+	.sl-btn-cancel {
+		background: var(--secondary-bg, #1a1a1a); border: 1px solid var(--border-color, #404040);
+		color: var(--text-secondary, #b3b3b3); padding: 8px 18px;
+		border-radius: 5px; font-size: 11px; cursor: pointer;
+	}
+	.sl-btn-cancel:hover { color: var(--text-primary, #fff); }
+	.sl-btn-confirm {
+		background: var(--danger-color, #ff4444); border: none;
+		color: #fff; padding: 8px 18px; border-radius: 5px;
+		font-size: 11px; font-weight: bold; cursor: pointer;
+	}
+	.sl-btn-confirm:disabled { opacity: .6; cursor: not-allowed; }
 </style>
 {% endblock %}
 
@@ -181,13 +242,17 @@
 			</thead>
 			<tbody>
 			{% for s in studies %}
-			<tr>
+			<tr class="study-row"
+				data-study-id="{{ s.id }}"
+				data-url-view="{% url 'dicom_viewer:viewer' %}?study={{ s.id }}"
+				data-url-details="{% url 'worklist:study_detail' s.id %}"
+				data-url-attach="{% url 'worklist:upload_attachment' s.id %}"
+				data-url-report="{% if user.role == 'admin' or user.role == 'radiologist' %}{% url 'reports:write_report' s.id %}{% endif %}"
+				data-can-delete="{% if user.role == 'admin' or user.role == 'radiologist' %}1{% endif %}"
+				data-accession="{{ s.accession_number|escapejs }}">
 				<td>
 					<div class="d-flex align-items-center justify-content-between">
 						<div class="fw-bold">{{ s.patient.full_name }}</div>
-						<a class="btn-control" href="{% url 'worklist:upload_attachment' s.id %}" title="Attach files for {{ s.patient.full_name }}">
-							<i class="fas fa-paperclip"></i>
-						</a>
 					</div>
 					<div class="text-secondary small">{{ s.patient.patient_id }}</div>
 				</td>
@@ -231,27 +296,9 @@
 					</div>
 				</td>
 				<td>
-					<div class="d-flex gap-2">
-						<!-- View Study Detail - All authenticated users -->
-						<a class="btn-control" href="{% url 'worklist:study_detail' s.id %}" title="Open"><i class="fas fa-folder-open"></i></a>
-						
-						<!-- DICOM Viewer - All authenticated users -->
-						<a class="btn-dicom-viewer btn-sm" href="{% url 'dicom_viewer:viewer' %}?study={{ s.id }}" onclick="openStudyInViewer('{{ s.id }}', event); return false;" title="View in DICOM Viewer"><i class="fas fa-eye"></i></a>
-						
-						<!-- Report Writing - Only admin and radiologist -->
-						{% if user.role == 'admin' or user.role == 'radiologist' %}
-						<a class="btn-control" href="{% url 'reports:write_report' s.id %}" title="Report"><i class="fas fa-file-medical"></i></a>
-						{% endif %}
-						
-						<!-- Delete Study - Only admin and radiologist -->
-						{% if user.role == 'admin' or user.role == 'radiologist' %}
-						<button type="button" class="btn-control" style="background: var(--danger-color);" 
-								onclick="deleteStudy({{ s.id }}, '{{ s.accession_number|escapejs }}')" 
-								title="Delete Study (Admin/Radiologist Only)">
-							<i class="fas fa-trash"></i>
-						</button>
-						{% endif %}
-					</div>
+					<span style="font-size:10px;color:var(--text-muted);user-select:none;">
+						<i class="fas fa-mouse-pointer"></i> Right-click
+					</span>
 				</td>
 			</tr>
 			{% empty %}
@@ -286,6 +333,31 @@
 {% endblock %}
 
 {% block extra_js %}
+<!-- Context menu -->
+<div id="slCtxMenu" class="sl-ctx-menu">
+	<div class="sl-ctx-item" id="slCtxView"><i class="fas fa-eye"></i> View in DICOM Viewer</div>
+	<div class="sl-ctx-item" id="slCtxDetails"><i class="fas fa-folder-open"></i> Study Details</div>
+	<div class="sl-ctx-item" id="slCtxAttach"><i class="fas fa-paperclip"></i> Attach Files</div>
+	{% if user.role == 'admin' or user.role == 'radiologist' %}
+	<div class="sl-ctx-item" id="slCtxReport"><i class="fas fa-file-medical"></i> Write / Edit Report</div>
+	<div class="sl-ctx-sep"></div>
+	<div class="sl-ctx-item danger" id="slCtxDelete"><i class="fas fa-trash"></i> Delete Study</div>
+	{% endif %}
+</div>
+<!-- Delete modal -->
+<div id="slDelOverlay" class="sl-del-overlay">
+	<div class="sl-del-modal">
+		<div class="icon"><i class="fas fa-exclamation-triangle"></i></div>
+		<h3>Delete Study?</h3>
+		<p>This will permanently remove all associated DICOM images, series, reports, measurements, and annotations.</p>
+		<div class="sl-del-acc" id="slDelAcc"></div>
+		<p style="color:var(--danger-color,#ff4444);font-size:11px;margin-bottom:20px;">This action cannot be undone.</p>
+		<div class="sl-del-actions">
+			<button class="sl-btn-cancel" id="slDelCancel">Cancel</button>
+			<button class="sl-btn-confirm" id="slDelConfirm"><i class="fas fa-trash"></i> Yes, Delete</button>
+		</div>
+	</div>
+</div>
 <script src="{% static 'js/worklist-button-handlers.js' %}" defer></script>
 <script>
 	// Notification count update (page-level fallback; base.html also updates notif badges)
@@ -341,39 +413,74 @@
 		});
 	})();
 
-	// Delete study functionality (admin/radiologist only)
-	async function deleteStudy(studyId, accessionNumber) {
-		if (!confirm(`Are you sure you want to delete study ${accessionNumber}?\n\nThis action cannot be undone and will permanently remove all associated data including:\n• DICOM images\n• Series data\n• Reports\n• Measurements\n• Annotations`)) {
-			return;
-		}
+	// ── Context menu ──────────────────────────────────────
+	(function(){
+		const menu = document.getElementById('slCtxMenu');
+		let activeRow = null;
 
-		try {
-			const csrfToken =
-				document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
-				document.querySelector('meta[name=csrf-token]')?.getAttribute('content');
+		function closeMenu(){ menu.classList.remove('visible'); activeRow = null; }
+		document.addEventListener('click', closeMenu);
+		document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeMenu(); });
 
-			const response = await fetch(`/worklist/api/study/${studyId}/delete/`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					'X-CSRFToken': csrfToken || '',
-					'X-Requested-With': 'XMLHttpRequest'
-				},
-				credentials: 'same-origin'
+		document.querySelectorAll('tr.study-row').forEach(function(row){
+			row.addEventListener('contextmenu', function(e){
+				e.preventDefault(); e.stopPropagation();
+				activeRow = row;
+				const x = Math.min(e.clientX, window.innerWidth - 210);
+				const y = Math.min(e.clientY, window.innerHeight - 220);
+				menu.style.left = x + 'px';
+				menu.style.top  = y + 'px';
+				menu.classList.add('visible');
 			});
+		});
 
-			const data = await response.json();
+		function go(attr){ if(activeRow){ window.location.href = activeRow.dataset[attr]; } closeMenu(); }
 
-			if (response.ok && data.success) {
-				alert(`Study ${accessionNumber} deleted successfully`);
-				location.reload();
-			} else {
-				alert(`Failed to delete study: ${data.error || 'Unknown error'}`);
-			}
-		} catch (error) {
-			console.error('Error deleting study:', error);
-			alert(`Failed to delete study: ${error.message}`);
+		document.getElementById('slCtxView')    && document.getElementById('slCtxView').addEventListener('click',    function(){ go('urlView'); });
+		document.getElementById('slCtxDetails') && document.getElementById('slCtxDetails').addEventListener('click', function(){ go('urlDetails'); });
+		document.getElementById('slCtxAttach')  && document.getElementById('slCtxAttach').addEventListener('click',  function(){ go('urlAttach'); });
+		{% if user.role == 'admin' or user.role == 'radiologist' %}
+		document.getElementById('slCtxReport')  && document.getElementById('slCtxReport').addEventListener('click',  function(){
+			if(activeRow && activeRow.dataset.urlReport) go('urlReport');
+			closeMenu();
+		});
+		document.getElementById('slCtxDelete')  && document.getElementById('slCtxDelete').addEventListener('click',  function(){
+			const row = activeRow; closeMenu();
+			if(row) showSlDeleteModal(row.dataset.studyId, row.dataset.accession);
+		});
+		{% endif %}
+	})();
+
+	// ── Delete confirm modal ────────────────────────────
+	function showSlDeleteModal(studyId, accession){
+		const overlay    = document.getElementById('slDelOverlay');
+		const accEl      = document.getElementById('slDelAcc');
+		const confirmBtn = document.getElementById('slDelConfirm');
+		const cancelBtn  = document.getElementById('slDelCancel');
+		accEl.textContent = 'Accession: ' + (accession || studyId);
+		overlay.classList.add('visible');
+
+		function cleanup(){ overlay.classList.remove('visible'); confirmBtn.removeEventListener('click', onConfirm); cancelBtn.removeEventListener('click', cleanup); }
+		async function onConfirm(){
+			confirmBtn.disabled = true;
+			confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting…';
+			try {
+				const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+				const resp = await fetch('/worklist/api/study/' + studyId + '/delete/', {
+					method: 'DELETE',
+					headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/json' },
+					credentials: 'same-origin'
+				});
+				const data = await resp.json();
+				if(resp.ok && data.success){ cleanup(); location.reload(); }
+				else { alert('Failed to delete: ' + (data.error || 'Unknown error')); cleanup(); }
+			} catch(err){ alert('Error: ' + err.message); cleanup(); }
+			confirmBtn.disabled = false;
+			confirmBtn.innerHTML = '<i class="fas fa-trash"></i> Yes, Delete';
 		}
+		confirmBtn.addEventListener('click', onConfirm);
+		cancelBtn.addEventListener('click', cleanup);
+		overlay.addEventListener('click', function(e){ if(e.target===overlay) cleanup(); }, {once:true});
 	}
 </script>
 {% endblock %}

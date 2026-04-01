@@ -732,8 +732,16 @@ if not DEBUG:
         DATABASES["default"]["CONN_MAX_AGE"] = default_conn_max_age
     
     # Cache static file serving
-    # WhiteNoise: compressed + hashed static assets
-    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+    # Django 4.2+ replaced STATICFILES_STORAGE with the STORAGES dict.
+    # Django 6 silently ignores STATICFILES_STORAGE, so we must use STORAGES.
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
     WHITENOISE_MAX_AGE = int(os.environ.get("WHITENOISE_MAX_AGE", "31536000"))
 
 # Ngrok-specific settings for better performance

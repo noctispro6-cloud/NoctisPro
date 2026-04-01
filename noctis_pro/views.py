@@ -63,6 +63,13 @@ class StaticFileView(View):
         return response
 
 
+def subscription_expired(request):
+    """Render the subscription-expired page for facility users."""
+    from django.shortcuts import render
+    facility = getattr(request.user, 'facility', None) if request.user.is_authenticated else None
+    return render(request, 'subscription_expired.html', {'facility': facility})
+
+
 @require_http_methods(["GET"])
 def connection_info(request):
     """

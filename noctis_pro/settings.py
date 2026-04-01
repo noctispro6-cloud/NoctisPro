@@ -246,6 +246,10 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # SubscriptionRequiredMiddleware is defined in noctis_pro/middleware.py but NOT activated here.
+    # To enable subscription enforcement for facility users, add the line below after
+    # AuthenticationMiddleware and verify /subscription-expired/ URL + template are in place:
+    # 'noctis_pro.middleware.SubscriptionRequiredMiddleware',
 ]
 
 ROOT_URLCONF = 'noctis_pro.urls'
@@ -383,6 +387,14 @@ try:
 except Exception:
     # Don't crash settings import; storage errors will surface during request handling/logging.
     pass
+
+# Backup configuration
+# BACKUP_ROOT: local directory where backup files are written.
+# BACKUP_RETENTION_DAYS: how many days to keep old backup files before auto-deletion.
+# BACKUP_REMOTE_URL: optional remote storage URL (e.g. s3://bucket/path) for future use.
+BACKUP_ROOT = os.environ.get('BACKUP_ROOT', os.path.join(BASE_DIR, 'backups'))
+BACKUP_RETENTION_DAYS = int(os.environ.get('BACKUP_RETENTION_DAYS', '30'))
+BACKUP_REMOTE_URL = os.environ.get('BACKUP_REMOTE_URL', '')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

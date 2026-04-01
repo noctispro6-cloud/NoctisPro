@@ -6719,114 +6719,11 @@ endsolid AI_Enhanced_Model_{series_id}
 @login_required
 @require_http_methods(["POST"])
 def advanced_reconstruction_api(request, series_id):
-    """
-    Perform advanced AI-enhanced reconstruction on DICOM series.
-    """
-    try:
-        series = get_object_or_404(Series, id=series_id)
-        
-        # Check user permissions
-        if not request.user.has_perm('dicom_viewer.can_use_advanced_reconstruction'):
-            return JsonResponse({
-                'success': False,
-                'error': 'Permission denied for advanced reconstruction'
-            })
-        
-        # Parse request data
-        data = json.loads(request.body) if request.body else {}
-        reconstruction_type = data.get('reconstruction_type', 'ai_enhanced')
-        include_mpr = data.get('include_mpr', True)
-        include_mip = data.get('include_mip', True)
-        include_volume_rendering = data.get('include_volume_rendering', True)
-        
-        # Get DICOM images for the series
-        images = DicomImage.objects.filter(series=series).order_by('instance_number')
-        if not images.exists():
-            return JsonResponse({
-                'success': False,
-                'error': 'No DICOM images found for this series'
-            })
-        
-        # Create reconstruction job
-        job = ReconstructionJob.objects.create(
-            series=series,
-            user=request.user,
-            reconstruction_type='advanced_ai',
-            parameters={
-                'reconstruction_type': reconstruction_type,
-                'include_mpr': include_mpr,
-                'include_mip': include_mip,
-                'include_volume_rendering': include_volume_rendering
-            },
-            status='processing'
-        )
-        
-        # For demo purposes, simulate advanced reconstruction
-        # In a real implementation, this would call advanced AI reconstruction services
-        try:
-            # Simulate processing time
-            import time
-            time.sleep(3)
-            
-            # Generate mock reconstruction results
-            reconstructions = []
-            
-            if include_mpr:
-                # Generate mock MPR views
-                for view in ['axial', 'sagittal', 'coronal']:
-                    mock_url = f"/dicom-viewer/api/mock-reconstruction/{series_id}/{view}/"
-                    reconstructions.append({
-                        'type': 'mpr',
-                        'view': view,
-                        'url': mock_url,
-                        'description': f'AI-Enhanced {view.title()} MPR'
-                    })
-            
-            if include_mip:
-                # Generate mock MIP views
-                mock_url = f"/dicom-viewer/api/mock-reconstruction/{series_id}/mip/"
-                reconstructions.append({
-                    'type': 'mip',
-                    'view': 'composite',
-                    'url': mock_url,
-                    'description': 'AI-Enhanced Maximum Intensity Projection'
-                })
-            
-            if include_volume_rendering:
-                # Generate mock volume rendering
-                mock_url = f"/dicom-viewer/api/mock-reconstruction/{series_id}/volume/"
-                reconstructions.append({
-                    'type': 'volume',
-                    'view': '3d',
-                    'url': mock_url,
-                    'description': 'AI-Enhanced Volume Rendering'
-                })
-            
-            # Update job status
-            job.status = 'completed'
-            job.result_data = {'reconstructions': reconstructions}
-            job.save()
-            
-            return JsonResponse({
-                'success': True,
-                'message': 'Advanced reconstruction completed successfully',
-                'reconstructions': [r['url'] for r in reconstructions],
-                'details': reconstructions,
-                'job_id': job.id
-            })
-            
-        except Exception as e:
-            job.status = 'failed'
-            job.error_message = str(e)
-            job.save()
-            raise e
-            
-    except Exception as e:
-        logger.error(f"Advanced reconstruction error for series {series_id}: {str(e)}")
-        return JsonResponse({
-            'success': False,
-            'error': f'Failed to perform advanced reconstruction: {str(e)}'
-        })
+    """Advanced reconstruction - not yet implemented."""
+    return JsonResponse(
+        {'error': 'Advanced reconstruction is not yet available. Use standard 3D reconstruction.'},
+        status=501
+    )
 
 
 @login_required

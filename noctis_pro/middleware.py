@@ -412,6 +412,43 @@ class SessionTimeoutMiddleware(MiddlewareMixin):
         return None
 
 
+class SubscriptionRequiredMiddleware:
+    """
+    Redirect facility users with expired/missing subscriptions to a subscription-expired page.
+    Admins and radiologists always bypass this check.
+
+    NOTE: This middleware is defined but NOT registered in settings.MIDDLEWARE.
+    To activate it, add 'noctis_pro.middleware.SubscriptionRequiredMiddleware' to MIDDLEWARE
+    (after AuthenticationMiddleware) and ensure the /subscription-expired/ URL is configured.
+    """
+    EXEMPT_PATHS = {'/login/', '/portal/login/', '/logout/', '/static/', '/media/', '/health/', '/favicon.ico'}
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if request.user.is_authenticated:
+            user = request.user
+            path = request.path
+
+            # Admins and radiologists always have access
+            if not (user.is_admin() or user.is_radiologist()):
+                # Check if path is exempt
+                is_exempt = any(path.startswith(p) for p in self.EXEMPT_PATHS)
+                if not is_exempt and path != '/subscription-expired/':
+                    facility = getattr(user, 'facility', None)
+                    if facility:
+                        from django.utils import timezone as _tz
+                        subscription_ok = facility.has_ai_subscription
+                        if subscription_ok and facility.subscription_expires_at:
+                            subscription_ok = facility.subscription_expires_at > _tz.now()
+                        if not subscription_ok:
+                            from django.shortcuts import redirect
+                            return redirect('/subscription-expired/')
+
+        return self.get_response(request)
+
+
 class SessionTimeoutWarningMiddleware(MiddlewareMixin):
     # NOTE: This middleware is defined but NOT registered in settings.MIDDLEWARE.
     # To activate it, add 'noctis_pro.middleware.SessionTimeoutWarningMiddleware' to MIDDLEWARE

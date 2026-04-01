@@ -14,6 +14,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/responsive-ui-scaling.css' %}">
+    <!-- masterpiece_3d_reconstruction.js: defines MasterpieceBoneReconstruction3D class
+         which is currently unused - the viewer uses inline Three.js instead.
+         TODO: remove or wire up in a future refactor -->
     <script src="{% static 'js/masterpiece_3d_reconstruction.js' %}"></script>
     <script src="{% static 'js/vendor/dicomParser.min.js' %}"></script>
     <script src="{% static 'js/dicom-viewer-enhanced.js' %}"></script>
@@ -856,13 +859,21 @@
                 <i class="fas fa-adjust"></i>
                 <span>Invert</span>
             </button>
-            <button class="tool-btn" data-tool="rotate" title="Rotate">
+            <button class="tool-btn" data-tool="rotate" title="Rotate Clockwise (+90°)">
                 <i class="fas fa-redo"></i>
                 <span>Rotate</span>
             </button>
-            <button class="tool-btn" data-tool="flip" title="Flip">
+            <button class="tool-btn" data-tool="rotate-ccw" title="Rotate Counter-Clockwise (-90°)" onclick="handleRotateCCW(); event.stopPropagation();">
+                <i class="fas fa-undo"></i>
+                <span>Rot CCW</span>
+            </button>
+            <button class="tool-btn" data-tool="flip" title="Flip Horizontal">
                 <i class="fas fa-exchange-alt"></i>
-                <span>Flip</span>
+                <span>Flip H</span>
+            </button>
+            <button class="tool-btn" data-tool="flipv" title="Flip Vertical" onclick="handleFlipV(); event.stopPropagation();">
+                <i class="fas fa-arrows-alt-v"></i>
+                <span>Flip V</span>
             </button>
             <button class="tool-btn" data-tool="reset" title="Reset View">
                 <i class="fas fa-undo"></i>
@@ -916,6 +927,25 @@
                     Patient: - | Study Date: - | Modality: -
                 </div>
 
+                {% if user.is_admin or user.is_radiologist %}
+                <a id="writeReportBtn" class="btn" href="#" onclick="if(window.currentStudyId){ window.location.href='/reports/write/'+window.currentStudyId+'/'; } else { alert('Please load a study first'); } return false;" title="Write Report for current study" style="display:none">
+                    <i class="fas fa-file-signature"></i> Report
+                </a>
+                <script>
+                // Show write report button when a study is loaded
+                document.addEventListener('studyLoaded', function(e) {
+                    const btn = document.getElementById('writeReportBtn');
+                    if (btn) btn.style.display = '';
+                });
+                // Also check on load
+                window.addEventListener('load', function() {
+                    if (window.currentStudyId) {
+                        const btn = document.getElementById('writeReportBtn');
+                        if (btn) btn.style.display = '';
+                    }
+                });
+                </script>
+                {% endif %}
                 <a class="btn" href="{% url 'worklist:dashboard' %}" title="Home">
                     <i class="fas fa-home"></i> Home
                 </a>
@@ -969,7 +999,7 @@
                             <button class="control-3d-btn" onclick="boneRotate(-1,0)" title="Tilt up">↑</button>
                             <button class="control-3d-btn" onclick="boneRotate(1,0)" title="Tilt down">↓</button>
                             <button class="control-3d-btn" onclick="boneCenter()" title="Center/pan reset">Center</button>
-                            <button class="control-3d-btn" onclick="export3DModel()" title="Export STL">Export</button>
+                            <button class="control-3d-btn" onclick="export3DModel()" title="Export 3D Model (OBJ)">Export OBJ</button>
                         </div>
                     </div>
                 </div>
@@ -1942,6 +1972,10 @@
                     rotation = (rotation + 90) % 360;
                     redrawCurrentImage();
                     break;
+                case 'rotate-ccw':
+                    rotation = ((rotation - 90) % 360 + 360) % 360;
+                    redrawCurrentImage();
+                    break;
                 case 'flip':
                     flipH = !flipH;
                     redrawCurrentImage();
@@ -2135,6 +2169,9 @@
                 
                 if (data && data.study && Array.isArray(data.series)) {
                     currentStudy = data.study;
+                    window.currentStudyId = currentStudy.id;
+                    // Notify listeners that a study has been loaded
+                    document.dispatchEvent(new CustomEvent('studyLoaded', { detail: { studyId: currentStudy.id } }));
                     displaySeriesList(data.series);
                     updatePatientInfo(currentStudy);
                     // Load related references automatically based on study context
@@ -6456,13 +6493,24 @@
             bone3D.animRaf = requestAnimationFrame(tick);
         }
 
+        function handleRotateCCW() {
+            rotation = ((rotation - 90) % 360 + 360) % 360;
+            redrawCurrentImage();
+        }
+
+        function handleFlipV() {
+            flipV = !flipV;
+            redrawCurrentImage();
+        }
+
         // Bone controls (buttons in the 3D quadrant)
-        function boneRotate(dPitch, dYaw) {
+        // dX = pitch (up/down tilt), dY = yaw (left/right rotation)
+        function boneRotate(dX, dY) {
             try {
                 if (!bone3D) return;
                 const step = 0.25; // radians per click (fast but controllable)
-                bone3D.targetRotX = Number(bone3D.targetRotX || 0) + (Number(dPitch || 0) * step);
-                bone3D.targetRotY = Number(bone3D.targetRotY || 0) + (Number(dYaw || 0) * step);
+                bone3D.targetRotX = Number(bone3D.targetRotX || 0) + (Number(dX || 0) * step);
+                bone3D.targetRotY = Number(bone3D.targetRotY || 0) + (Number(dY || 0) * step);
             } catch (e) {}
         }
         function boneZoomIn() {

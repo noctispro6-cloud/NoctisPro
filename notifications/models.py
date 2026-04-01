@@ -158,7 +158,23 @@ class UploadStatus(models.Model):
         return f"{self.file_name} - {self.status}"
 
 class NotificationPreference(models.Model):
-    """User notification preferences"""
+    """
+    User notification preferences.
+
+    Currently implemented:
+    - In-app web notifications (always active)
+    - SMS via Twilio (when preferred_method='sms' and urgent/high AI triage)
+    - Voice calls via Twilio (when preferred_method='call')
+
+    Not yet implemented (model fields exist for future use):
+    - Email notifications
+    - Push notifications
+    - Quiet hours enforcement
+    - Email digest
+
+    The preferred_method field for 'email' and 'push' values are not yet
+    enforced in services.py - they fall through to SMS/web.
+    """
     DELIVERY_METHODS = [
         ('web', 'Web Notification'),
         ('email', 'Email'),
@@ -196,7 +212,13 @@ class NotificationPreference(models.Model):
         return f"Preferences for {self.user.username}"
 
 class NotificationQueue(models.Model):
-    """Queue for processing notifications"""
+    """
+    Queue for asynchronous notification delivery.
+
+    NOTE: This model is defined but not yet wired to services.py.
+    Notifications are currently delivered synchronously in _push_realtime().
+    This queue model is intended for future async delivery via Celery.
+    """
     notification = models.OneToOneField(Notification, on_delete=models.CASCADE)
     delivery_method = models.CharField(max_length=20)
     attempts = models.IntegerField(default=0)

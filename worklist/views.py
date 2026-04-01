@@ -1759,10 +1759,13 @@ def api_studies(request):
 		# SPEED + correctness: compute counts in the DB (avoid per-study N+1 count loops)
 		studies_qs = (
 			studies
-			.select_related('patient', 'facility', 'modality', 'uploaded_by')
+			.select_related('patient', 'facility', 'modality', 'radiologist', 'uploaded_by')
+			.prefetch_related('series_set')
 			.annotate(
 				series_count_db=Count('series', distinct=True),
 				image_count_db=Count('series__images', distinct=True),
+				image_count_annotated=Count('series__dicomimage', distinct=True),
+				series_count_annotated=Count('series', distinct=True),
 			)
 			# IMPORTANT:
 			# Worklist UX expects the most recently *uploaded* studies first.

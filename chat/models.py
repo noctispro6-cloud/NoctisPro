@@ -46,10 +46,13 @@ class ChatRoom(models.Model):
         """Get unread message count for a specific user"""
         try:
             participant = self.participants.get(user=user)
+            if participant.last_read_at is None:
+                # Never read: count all messages
+                return self.messages.exclude(sender=user).count()
             return self.messages.filter(
-                created_at__gt=participant.last_read_at or timezone.now()
+                created_at__gt=participant.last_read_at
             ).exclude(sender=user).count()
-        except ChatParticipant.DoesNotExist:
+        except Exception:
             return 0
 
 class ChatParticipant(models.Model):

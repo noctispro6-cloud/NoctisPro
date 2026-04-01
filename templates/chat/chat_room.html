@@ -383,9 +383,12 @@
                     <i class="fas fa-cog me-2"></i>Room Settings
                 </button>
                 {% endif %}
-                <a href="{% url 'chat:leave_room' room.id %}" class="btn-control w-100">
-                    <i class="fas fa-sign-out-alt me-2"></i>Leave Room
-                </a>
+                <form method="post" action="{% url 'chat:leave_room' room.id %}" style="display:inline;width:100%;" onsubmit="return confirm('Leave this room?')">
+                    {% csrf_token %}
+                    <button type="submit" class="btn-control w-100">
+                        <i class="fas fa-sign-out-alt me-2"></i>Leave Room
+                    </button>
+                </form>
             </div>
         </div>
     </div>

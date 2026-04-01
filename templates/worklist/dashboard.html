@@ -624,6 +624,94 @@
             /* transform: translateY(-2px); */
         }
 
+        /* Right-click context menu */
+        .ctx-menu {
+            position: fixed;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+            z-index: 9999;
+            min-width: 190px;
+            padding: 4px 0;
+            display: none;
+        }
+        .ctx-menu.visible { display: block; }
+        .ctx-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            font-size: 11px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: background 0.15s;
+            white-space: nowrap;
+        }
+        .ctx-menu-item:hover { background: rgba(0,212,255,0.12); color: var(--accent-color); }
+        .ctx-menu-item.danger:hover { background: rgba(255,68,68,0.12); color: var(--danger-color); }
+        .ctx-menu-item i { width: 14px; text-align: center; opacity: 0.8; }
+        .ctx-menu-sep { height: 1px; background: var(--border-color); margin: 4px 0; }
+
+        /* Delete confirm modal */
+        .delete-modal-overlay {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+        .delete-modal-overlay.visible { display: flex; }
+        .delete-modal {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 28px 32px;
+            max-width: 420px;
+            width: 90%;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+        }
+        .delete-modal-icon { font-size: 36px; color: var(--danger-color); margin-bottom: 14px; }
+        .delete-modal h3 { color: var(--text-primary); font-size: 15px; margin: 0 0 8px; }
+        .delete-modal p { color: var(--text-secondary); font-size: 12px; margin: 0 0 20px; line-height: 1.6; }
+        .delete-modal-accession {
+            background: rgba(255,68,68,0.08);
+            border: 1px solid rgba(255,68,68,0.3);
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--danger-color);
+            margin-bottom: 20px;
+            display: inline-block;
+        }
+        .delete-modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        .btn-cancel-delete {
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 8px 18px;
+            border-radius: 5px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-cancel-delete:hover { background: var(--card-bg); color: var(--text-primary); }
+        .btn-confirm-delete {
+            background: var(--danger-color);
+            border: none;
+            color: #fff;
+            padding: 8px 18px;
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-confirm-delete:hover { background: #cc2222; }
+        .btn-confirm-delete:disabled { opacity: 0.6; cursor: not-allowed; }
+
         /* Responsive adjustments */
         @media (max-width: 1200px) {
             .data-table th,
@@ -805,17 +893,16 @@
                             <th class="sortable">SCHEDULED</th>
                             <th class="sortable">IMAGES</th>
                             <th class="sortable">FACILITY</th>
-                            <th class="sortable">ROOM</th>
-                            <th>DICOM VIEWER</th>
+                            <th class="sortable">UPLOADED BY</th>
                         </tr>
                     </thead>
                     <tbody id="studiesTableBody">
                         <!-- Studies will be dynamically loaded here -->
                         <tr id="noDataRow">
-                            <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                            <td colspan="11" style="text-align: center; padding: 40px; color: var(--text-muted);">
                                 <i class="fas fa-folder-open" style="font-size: 48px; opacity: 0.3; margin-bottom: 16px; display: block;"></i>
                                 <div style="font-size: 14px; margin-bottom: 8px;">No studies found</div>
-                                <div style="font-size: 12px;">Upload DICOM studies or check your filter settings</div>
+                                <div style="font-size: 12px;">Upload DICOM studies or check your filter settings. Right-click any study row for actions.</div>
                             </td>
                         </tr>
                     </tbody>
@@ -842,6 +929,38 @@
         </div>
     </div>
 
+    <!-- Right-click context menu -->
+    <div id="ctxMenu" class="ctx-menu">
+        <div class="ctx-menu-item" id="ctx-view"><i class="fas fa-eye"></i> View in DICOM Viewer</div>
+        {% if user.is_admin or user.is_radiologist %}
+        <div class="ctx-menu-item" id="ctx-report"><i class="fas fa-file-signature"></i> Write / Edit Report</div>
+        {% endif %}
+        {% if user.is_facility_user %}
+        <div class="ctx-menu-item" id="ctx-print"><i class="fas fa-print"></i> Print Report</div>
+        {% endif %}
+        <div class="ctx-menu-item" id="ctx-attach"><i class="fas fa-paperclip"></i> Attach Files</div>
+        <div class="ctx-menu-item" id="ctx-details"><i class="fas fa-folder-open"></i> Study Details</div>
+        {% if user.is_admin or user.is_radiologist %}
+        <div class="ctx-menu-sep"></div>
+        <div class="ctx-menu-item danger" id="ctx-delete"><i class="fas fa-trash"></i> Delete Study</div>
+        {% endif %}
+    </div>
+
+    <!-- Delete confirm modal -->
+    <div id="deleteModalOverlay" class="delete-modal-overlay">
+        <div class="delete-modal">
+            <div class="delete-modal-icon"><i class="fas fa-exclamation-triangle"></i></div>
+            <h3>Delete Study?</h3>
+            <p>This will permanently remove all associated data including DICOM images, series, reports, measurements, and annotations.</p>
+            <div class="delete-modal-accession" id="deleteModalAccession"></div>
+            <p style="color:var(--danger-color);font-size:11px;margin-bottom:20px;">This action cannot be undone.</p>
+            <div class="delete-modal-actions">
+                <button class="btn-cancel-delete" id="deleteModalCancel">Cancel</button>
+                <button class="btn-confirm-delete" id="deleteModalConfirm"><i class="fas fa-trash"></i> Yes, Delete</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // CSRF token from Django template context
         const csrf_token = '{{ csrf_token }}';
@@ -861,7 +980,7 @@
                 if (!silent) {
                     tbody.innerHTML = `
                         <tr>
-                            <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                            <td colspan="11" style="text-align: center; padding: 40px; color: var(--text-muted);">
                                 <i class="fas fa-spinner fa-spin" style="font-size: 48px; opacity: 0.3; margin-bottom: 16px; display: block;"></i>
                                 <div style="font-size: 14px; margin-bottom: 8px;">Loading studies...</div>
                                 <div style="font-size: 12px;">Please wait while we fetch the latest data</div>
@@ -1027,20 +1146,7 @@
                             ${imageCount} <small style="color: var(--text-secondary);">(${seriesCount}s)</small>
                         </td>
                         <td>${study.facility || '-'}</td>
-                        <td title="Uploaded: ${uploadTime} by ${study.uploaded_by || 'Unknown'}">${study.uploaded_by || '-'}</td>
-                        <td>
-                            <div class="viewer-buttons">
-                                <button type="button" class="btn-dicom-viewer btn-sm" onclick="openStudyInViewer('${study.id}', event); event.stopPropagation();" title="Open study in DICOM viewer">
-                                    <i class="fas fa-eye"></i> VIEW
-                                </button>
-                                {% if user.is_admin or user.is_radiologist %}<button type="button" class="btn-viewer" style="margin-left:6px" onclick="openReport('${study.id}'); event.stopPropagation();" title="Write/Edit report"><i class="fas fa-file-signature"></i> REPORT</button>{% endif %}
-                                {% if user.is_facility_user %}<button type="button" class="btn-viewer" style="margin-left:6px" onclick="printStudy('${study.id}'); event.stopPropagation();" title="Print"><i class="fas fa-print"></i> PRINT</button>{% endif %}
-                                <button type="button" class="btn-viewer" style="margin-left:6px" onclick="window.location.href='/worklist/study/${study.id}/upload/'; event.stopPropagation();" title="Attach files"><i class="fas fa-paperclip"></i> ATTACH</button>
-                                <button type="button" class="btn-viewer" style="margin-left:6px" onclick="window.location.href='/worklist/study/${study.id}/'; event.stopPropagation();" title="View study details"><i class="fas fa-folder-open"></i> DETAILS</button>
-                                {% if user.is_admin or user.is_radiologist %}<button type="button" class="btn-viewer" style="margin-left:6px;background:var(--danger-color)" onclick="deleteStudy('${study.id}','${study.accession_number}'); event.stopPropagation();" title="Delete study (admin/radiologist only)"><i class="fas fa-trash"></i> DELETE</button>{% endif %}
-                                ${isRecentUpload ? '<span style="color: var(--success-color); font-size: 10px; margin-left: 4px;">NEW</span>' : ''}
-                            </div>
-                        </td>
+                        <td title="Uploaded: ${uploadTime}">${study.uploaded_by || '-'}${isRecentUpload ? ' <span style="color:var(--success-color);font-size:9px;font-weight:bold;">NEW</span>' : ''}</td>
                     </tr>
                 `;
             }).join('');
@@ -1101,27 +1207,13 @@
         }
 
         async function deleteStudy(studyId, accession){
-            // Confirm deletion
-            if (!confirm(`Are you sure you want to delete study ${accession}?\n\nThis action cannot be undone and will permanently remove all associated data including:\n• DICOM images\n• Series data\n• Reports\n• Measurements\n• Annotations`)) {
-                return;
-            }
-            
             try{
-                // Get CSRF token (required for delete operations)
                 const csrfToken = getCSRFToken();
                 if (!csrfToken) {
                     showToast('Security token missing. Please refresh the page.', 'error');
                     return;
                 }
-                
-                // Show loading state
-                const deleteButton = document.querySelector(`button[onclick*="deleteStudy('${studyId}'"]`);
-                if (deleteButton) {
-                    deleteButton.disabled = true;
-                    deleteButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> DELETING...';
-                }
-                
-                // Prepare headers with CSRF token
+
                 const headers = {
                     'X-CSRFToken': csrfToken,
                     'Content-Type': 'application/json',
@@ -1161,52 +1253,133 @@
                 renderStudiesTable();
                 updateStatusCounts();
                 
-                // Show success toast
                 showToast(`Study ${accession} deleted successfully`, 'success');
                 
             }catch(err){
-                console.error('Delete failed:', err);
-                
-                // Show error toast with specific message
                 showToast(`Failed to delete study: ${err.message}`, 'error', 5000);
-                
-                // Reset button state
-                const deleteButton = document.querySelector(`button[onclick*="deleteStudy('${studyId}'"]`);
-                if (deleteButton) {
-                    deleteButton.disabled = false;
-                    deleteButton.innerHTML = '<i class="fas fa-trash"></i> DELETE';
-                }
             }
         }
-        
-        // Right-click context quick delete for admin
+
+        // ── Context menu ──────────────────────────────────────────────
         (function(){
+            const menu = document.getElementById('ctxMenu');
+            let activeStudyId = null;
+            let activeAccession = null;
+
+            function closeMenu() {
+                menu.classList.remove('visible');
+                activeStudyId = null;
+                activeAccession = null;
+            }
+
+            document.addEventListener('click', closeMenu);
+            document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeMenu(); });
+
             const tbody = document.getElementById('studiesTableBody');
             if (!tbody) return;
+
             tbody.addEventListener('contextmenu', function(e){
                 const row = e.target.closest('tr[data-study-id]');
                 if (!row) return;
                 e.preventDefault();
-                {% if user.role == 'admin' %}
-                const id = row.getAttribute('data-study-id');
-                const acc = (row.querySelector('.accession')||{}).textContent || '';
-                deleteStudy(id, acc);
-                {% endif %}
+                e.stopPropagation();
+
+                activeStudyId = row.getAttribute('data-study-id');
+                activeAccession = (row.querySelector('.accession')||{}).textContent || '';
+
+                // Position menu near cursor, keep it on screen
+                const x = Math.min(e.clientX, window.innerWidth - 200);
+                const y = Math.min(e.clientY, window.innerHeight - 260);
+                menu.style.left = x + 'px';
+                menu.style.top = y + 'px';
+                menu.classList.add('visible');
             });
+
+            // Menu item handlers
+            const el = id => document.getElementById(id);
+
+            el('ctx-view') && el('ctx-view').addEventListener('click', function(){
+                if (activeStudyId) openStudyInViewer(activeStudyId);
+                closeMenu();
+            });
+            {% if user.is_admin or user.is_radiologist %}
+            el('ctx-report') && el('ctx-report').addEventListener('click', function(){
+                if (activeStudyId) openReport(activeStudyId);
+                closeMenu();
+            });
+            {% endif %}
+            {% if user.is_facility_user %}
+            el('ctx-print') && el('ctx-print').addEventListener('click', function(){
+                if (activeStudyId) printStudy(activeStudyId);
+                closeMenu();
+            });
+            {% endif %}
+            el('ctx-attach') && el('ctx-attach').addEventListener('click', function(){
+                if (activeStudyId) window.location.href = '/worklist/study/' + activeStudyId + '/upload/';
+                closeMenu();
+            });
+            el('ctx-details') && el('ctx-details').addEventListener('click', function(){
+                if (activeStudyId) window.location.href = '/worklist/study/' + activeStudyId + '/';
+                closeMenu();
+            });
+            {% if user.is_admin or user.is_radiologist %}
+            el('ctx-delete') && el('ctx-delete').addEventListener('click', function(){
+                const sid = activeStudyId;
+                const acc = activeAccession;
+                closeMenu();
+                showDeleteModal(sid, acc);
+            });
+            {% endif %}
         })();
+
+        // ── Delete confirm modal ──────────────────────────────────────
+        function showDeleteModal(studyId, accession) {
+            const overlay = document.getElementById('deleteModalOverlay');
+            const accEl   = document.getElementById('deleteModalAccession');
+            const confirmBtn = document.getElementById('deleteModalConfirm');
+            const cancelBtn  = document.getElementById('deleteModalCancel');
+            if (!overlay) return;
+
+            accEl.textContent = 'Accession: ' + (accession || studyId);
+            overlay.classList.add('visible');
+
+            function cleanup() {
+                overlay.classList.remove('visible');
+                confirmBtn.removeEventListener('click', onConfirm);
+                cancelBtn.removeEventListener('click', onCancel);
+            }
+            function onCancel() { cleanup(); }
+            function onConfirm() {
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting…';
+                deleteStudy(studyId, accession).finally(function(){
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = '<i class="fas fa-trash"></i> Yes, Delete';
+                    cleanup();
+                });
+            }
+            confirmBtn.addEventListener('click', onConfirm);
+            cancelBtn.addEventListener('click', onCancel);
+            overlay.addEventListener('click', function(e){
+                if (e.target === overlay) cleanup();
+            }, { once: true });
+        }
 
         function updateStatusCounts() {
             const counts = studiesData.reduce((acc, study) => {
                 acc.total++;
-                acc[study.status] = (acc[study.status] || 0) + 1;
+                // Status counts (in_progress, completed, etc.)
+                const st = (study.status || '').replace('_', '-');
+                acc[st] = (acc[st] || 0) + 1;
+                // Urgent is a PRIORITY, not a status — count from study.priority
+                if ((study.priority || '').toLowerCase() === 'urgent') acc.urgentPriority++;
                 return acc;
-            }, { total: 0, urgent: 0, 'in-progress': 0, completed: 0 });
-            
-            // Update footer status
+            }, { total: 0, urgentPriority: 0, 'in-progress': 0, completed: 0 });
+
             const statusElements = document.querySelectorAll('.status-left span strong');
             if (statusElements.length >= 4) {
                 statusElements[0].textContent = counts.total;
-                statusElements[1].textContent = counts.urgent || 0;
+                statusElements[1].textContent = counts.urgentPriority;
                 statusElements[2].textContent = counts['in-progress'] || 0;
                 statusElements[3].textContent = counts.completed || 0;
             }
@@ -1216,7 +1389,7 @@
             const tbody = document.getElementById('studiesTableBody');
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="12" class="upload-area">
+                    <td colspan="11" class="upload-area">
                         <i class="fas fa-folder-open"></i>
                         <div class="upload-title">No DICOM Studies Found</div>
                         <div class="upload-subtitle">Upload DICOM folders to populate the worklist</div>

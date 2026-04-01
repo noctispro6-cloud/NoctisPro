@@ -28,7 +28,13 @@ ALLOWED_HOSTS = [
 ]
 
 # Generate secure secret key
-SECRET_KEY = 'django-insecure-universal-deployment-change-in-production-2024-noctispro-professional-grade-security-key'
+SECRET_KEY = os.environ.get('SECRET_KEY', '').strip()
+if not SECRET_KEY or SECRET_KEY.startswith('django-insecure'):
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured(
+        "SECRET_KEY must be set to a strong value in the environment. "
+        "See .env.example for all required variables."
+    )
 
 # Database configuration
 DATABASES = {
@@ -54,7 +60,11 @@ CACHES = {
     }
 }
 
-# Security middleware
+# WARNING: This file overrides the MIDDLEWARE list from settings.py.
+# It omits DatabaseOperationalErrorMiddleware and WhiteNoiseMiddleware.
+# Only use this settings module when those components are not needed
+# (e.g. standalone Windows Server deployment without Docker/nginx).
+# For standard deployments use settings.py or settings_development.py.
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
@@ -213,9 +223,8 @@ NOCTIS_VERSION = '1.0.0'
 NOCTIS_DEPLOYMENT_TYPE = 'universal'
 NOCTIS_PLATFORM = 'windows_server'
 
-print("🔧 NoctisPro Universal settings loaded successfully")
-print(f"   Debug: {DEBUG}")
-print(f"   Platform: {NOCTIS_PLATFORM}")
-print(f"   Deployment: {NOCTIS_DEPLOYMENT_TYPE}")
-print(f"   DICOM Port: {DICOM_SCP_PORT}")
-print(f"   AE Title: {DICOM_AE_TITLE}")
+import logging as _startup_logging
+_startup_logging.getLogger('noctis_pro').info(
+    "NoctisPro Universal settings loaded | debug=%s | platform=%s | deployment=%s | dicom_port=%s",
+    DEBUG, NOCTIS_PLATFORM, NOCTIS_DEPLOYMENT_TYPE, DICOM_SCP_PORT,
+)

@@ -750,13 +750,14 @@ if IS_NGROK:
     # Disable some checks that can cause issues with ngrok
     USE_TZ = True
     
-print(f"🚀 Noctis Pro PACS Settings Loaded:")
-print(f"   • Debug Mode: {DEBUG}")
-print(f"   • Ngrok Mode: {IS_NGROK}")
-print(f"   • Ngrok URL: {NGROK_URL or 'Not set'}")
-print(f"   • Allowed Hosts: {len(ALLOWED_HOSTS)} configured")
-print(f"   • Database: {DATABASES['default']['ENGINE'].split('.')[-1]}")
-print(f"   • Security: {'Development' if DEBUG else 'Production'} profile")
+import logging as _startup_logging
+_startup_logger = _startup_logging.getLogger('noctis_pro')
+_startup_logger.info(
+    "Noctis Pro PACS settings loaded | debug=%s | ngrok=%s | hosts=%d | db=%s | profile=%s",
+    DEBUG, IS_NGROK, len(ALLOWED_HOSTS),
+    DATABASES['default']['ENGINE'].split('.')[-1],
+    'development' if DEBUG else 'production',
+)
 
 
 # Masterpiece overrides removed to allow dynamic configuration via environment and NGROK_URL

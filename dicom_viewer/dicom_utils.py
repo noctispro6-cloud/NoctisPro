@@ -72,8 +72,6 @@ class DicomProcessor:
             't2_like': {'ww': 200, 'wl': 20, 'description': 'T2-weighted appearance'},
             
             # Projection radiography presets
-            'xray_chest': {'ww': 2000, 'wl': 500, 'description': 'Chest X-ray'},
-            'xray_bone': {'ww': 4000, 'wl': 2000, 'description': 'Bone X-ray'},
             'mammo': {'ww': 4000, 'wl': 2000, 'description': 'Mammography'},
         }
         
@@ -218,9 +216,11 @@ class DicomProcessor:
             return result.astype(np.float32)
             
         except ImportError:
-            # Fallback: simple noise reduction
-            kernel = np.ones((3,3)) / 9
-            return ndimage.convolve(image_data, kernel, mode='reflect')
+            # Fallback: simple box-blur noise reduction without scipy
+            from numpy.lib.stride_tricks import sliding_window_view
+            pad = np.pad(image_data, 1, mode='reflect')
+            windows = sliding_window_view(pad, (3, 3))
+            return windows.mean(axis=(-2, -1)).astype(np.float32)
     
     def _apply_adaptive_histogram_equalization(self, image_data, min_val, max_val):
         """Apply adaptive histogram equalization for improved local contrast"""

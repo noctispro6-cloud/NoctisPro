@@ -46,8 +46,36 @@ def is_admin_or_radiologist(user):
 
 @login_required
 def ai_dashboard(request):
-    """AI analysis dashboard with comprehensive overview"""
+    """AI analysis dashboard.
+
+    Access policy:
+    - Admins: always allowed.
+    - Radiologists: always allowed.
+    - Facility users: allowed only if their facility has an active AI subscription.
+    - Anyone else: redirected to the worklist with an informational message.
+    """
     user = request.user
+
+    if not (user.is_admin() or user.is_radiologist()):
+        # Facility user — check subscription
+        facility = getattr(user, 'facility', None)
+        if not facility or not facility.has_ai_subscription:
+            from django.contrib import messages as _msg
+            _msg.warning(
+                request,
+                'AI Worklist access requires an active AI subscription for your facility. '
+                'Contact your administrator to enable it.'
+            )
+            return redirect('worklist:dashboard')
+        # Also check expiry
+        if facility.subscription_expires_at and facility.subscription_expires_at < timezone.now():
+            from django.contrib import messages as _msg
+            _msg.warning(
+                request,
+                'Your facility\'s AI subscription has expired. '
+                'Contact your administrator to renew access.'
+            )
+            return redirect('worklist:dashboard')
     
     # Get AI models statistics
     total_models = AIModel.objects.filter(is_active=True).count()

@@ -751,10 +751,11 @@
                 <div class="nav-tab" onclick="window.location.href='{% url 'worklist:study_list' %}'">STUDIES</div>
                 <div class="nav-tab" onclick="window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
                 {% user_caps as caps %}
+                {# AI WORKLIST tab: visible to admin, radiologist, and facility users with an active subscription #}
                 {% if user.is_admin or user.is_radiologist %}
-                {% if caps.ai_visible %}
-                <div class="nav-tab" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI</div>
-                {% endif %}
+                <div class="nav-tab" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI WORKLIST</div>
+                {% elif user.is_facility_user and user.facility and user.facility.has_ai_subscription %}
+                <div class="nav-tab" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI WORKLIST</div>
                 {% endif %}
                 {% if user.is_admin %}
                 <div class="nav-tab" onclick="window.location.href='{% url 'admin_panel:dashboard' %}'"><i class="fas fa-user-cog"></i> ADMIN PANEL</div>

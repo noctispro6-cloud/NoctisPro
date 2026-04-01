@@ -23,15 +23,17 @@ def _can_manage_room(room: ChatRoom, user: User, participant: ChatParticipant | 
     return participant.role in ("admin", "moderator")
 
 
-def _can_invite_to_room(room: ChatRoom, inviter: User) -> bool:
-    # Keep it simple and safe:
-    # - Admin/radiologist can invite anyone
-    # - Facility users can only invite users in their facility
-    if hasattr(inviter, "is_admin") and inviter.is_admin():
+def _can_invite_to_room(room: ChatRoom, user: User) -> bool:
+    """Check if user can invite others to this room based on facility."""
+    if hasattr(user, "is_admin") and user.is_admin():
         return True
-    if hasattr(inviter, "is_radiologist") and inviter.is_radiologist():
-        return True
-    return True  # further restricted by facility filter below
+    if room.room_type == 'general':
+        return True  # Public rooms allow any invite
+    # For facility rooms: only invite users from the same facility
+    if room.room_type == 'facility' and room.facility:
+        return room.facility == getattr(user, 'facility', None)
+    # For other types: only room participants can invite
+    return room.participants.filter(user=user).exists()
 
 
 @login_required
@@ -316,10 +318,9 @@ def invite_user(request, room_id):
     if existing_participant and existing_participant.is_active:
         return JsonResponse({'ok': True, 'already_member': True})
 
-    # Facility restriction for non-admin/non-radiologist
-    if not ((hasattr(request.user, 'is_admin') and request.user.is_admin()) or (hasattr(request.user, 'is_radiologist') and request.user.is_radiologist())):
-        if getattr(request.user, 'facility_id', None) and invited_user.facility_id != request.user.facility_id:
-            return JsonResponse({'ok': False, 'error': 'You can only invite users in your facility'}, status=403)
+    # Facility restriction via helper
+    if not _can_invite_to_room(room, request.user):
+        return JsonResponse({'ok': False, 'error': 'You can only invite users to this room based on facility restrictions'}, status=403)
 
     # Create or refresh invitation
     expires_at = timezone.now() + timezone.timedelta(days=7)

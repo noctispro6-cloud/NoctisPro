@@ -18,7 +18,7 @@ DEFAULT_CAPS = {
     'manage_facilities': False,
     'view_logs': False,
     'manage_settings': False,
-    'run_backup': False,
+    'run_backup': True,   # Backup system implemented via backup_system mgmt command + Celery task
     'manage_permissions': False,
     # AI visibility is additionally gated by per-role toggles; default to True
     # here so the role toggle file is the primary control surface.

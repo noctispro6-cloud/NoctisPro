@@ -6408,8 +6408,12 @@ def send_to_printer(pdf_path, printer_name, paper_size, paper_type, print_qualit
     """
     try:
         if cups is None:
-            # Fallback to lp command if pycups is not available
-            return send_to_printer_fallback(pdf_path, printer_name, paper_size, paper_type, print_quality, copies)
+            # pycups not installed – return a helpful message so the client can show a fallback option
+            return {
+                'success': False,
+                'error': 'Physical printer support requires CUPS. Use "Download PDF" to print manually.',
+                'fallback': 'pdf',
+            }
         
         # Initialize CUPS connection
         conn = cups.Connection()

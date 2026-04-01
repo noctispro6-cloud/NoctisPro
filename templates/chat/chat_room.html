@@ -509,6 +509,9 @@
     <div class="composer">
         <div class="typing-indicator" id="typingIndicator"></div>
         <div class="composer-inner">
+            <span id="wsStatus" style="font-size:10px;color:#888;margin-right:8px;white-space:nowrap;align-self:center;">
+                <i class="fas fa-circle" style="font-size:6px;"></i> Connecting...
+            </span>
             <textarea id="chatInput" placeholder="Type a message… (Enter to send, Shift+Enter for newline)"></textarea>
             <button type="button" class="btn-control" id="sendBtn" title="Send">
                 <i class="fas fa-paper-plane"></i>
@@ -615,6 +618,12 @@ document.addEventListener('DOMContentLoaded', function() {
             sendBtn.disabled = !connected;
             input.disabled = !connected;
             input.placeholder = connected ? 'Type a message… (Enter to send, Shift+Enter for newline)' : 'Connecting…';
+            var status = document.getElementById('wsStatus');
+            if (status) {
+                status.innerHTML = connected
+                    ? '<i class="fas fa-circle" style="font-size:6px;color:#00ff88;"></i> Connected'
+                    : '<i class="fas fa-circle" style="font-size:6px;color:#ff4444;"></i> Reconnecting...';
+            }
         }
 
         function connect() {
@@ -800,7 +809,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!userId) return;
                 try {
                     var fd = new FormData();
-                    var url = '{% url "chat:remove_participant" room.id 0 %}'.replace('/0/remove/', '/' + String(userId) + '/remove/');
+                    var baseUrl = '{% url "chat:chat_room" room.id %}';
+                    var url = baseUrl + 'participants/' + String(userId) + '/remove/';
                     var res = await fetch(url, {
                         method: 'POST',
                         credentials: 'same-origin',
@@ -820,7 +830,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 try {
                     var fd = new FormData();
                     fd.append('role', role);
-                    var url = '{% url "chat:update_participant_role" room.id 0 %}'.replace('/0/role/', '/' + String(userId) + '/role/');
+                    var baseUrl = '{% url "chat:chat_room" room.id %}';
+                    var url = baseUrl + 'participants/' + String(userId) + '/role/';
                     var res = await fetch(url, {
                         method: 'POST',
                         credentials: 'same-origin',

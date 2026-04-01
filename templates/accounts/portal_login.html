@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Staff Portal Login - Noctis Pro PACS</title>
+    <title>Staff Portal - Noctis Pro PACS</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     {% load static %}
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -298,6 +298,11 @@
                 Noctis Pro PACS
             </div>
             <div class="subtitle">Staff Portal Login</div>
+
+            <div class="alert alert-warning" style="font-size:12px;margin-bottom:1.5rem;">
+                <i class="fas fa-info-circle"></i>
+                For administrators, please use the main login at <a href="/login/" style="color:inherit;text-decoration:underline;">/login/</a>
+            </div>
 
             {% if messages %}
                 {% for message in messages %}

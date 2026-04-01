@@ -224,10 +224,38 @@ def _auto_start_ai_for_study(study: Study) -> None:
 def dashboard(request):
 	"""Render the exact provided dashboard UI template"""
 	from django.middleware.csrf import get_token
-	return render(request, 'worklist/dashboard.html', {
-		'user': request.user,
-		'csrf_token': get_token(request)
-	})
+	user = request.user
+	context = {
+		'user': user,
+		'csrf_token': get_token(request),
+	}
+
+	# Role-specific dashboard stats
+	if user.is_authenticated and user.is_radiologist():
+		facility = getattr(user, 'facility', None)
+		facility_filter = {'facility': facility} if facility else {}
+		my_studies_count = Study.objects.filter(
+			radiologist=user, **facility_filter
+		).count()
+		unassigned_count = Study.objects.filter(
+			radiologist__isnull=True, **facility_filter
+		).count()
+		my_reports_count = 0
+		try:
+			from reports.models import Report as _Report
+			my_reports_count = _Report.objects.filter(radiologist=user).count()
+		except Exception:
+			pass
+		context.update({
+			'my_studies_count': my_studies_count,
+			'unassigned_count': unassigned_count,
+			'my_reports_count': my_reports_count,
+			'radiologist_view': True,
+		})
+	elif user.is_authenticated and user.is_admin():
+		context.update({'admin_view': True})
+
+	return render(request, 'worklist/dashboard.html', context)
 
 @login_required
 def study_list(request):

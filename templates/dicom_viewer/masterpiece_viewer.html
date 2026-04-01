@@ -1011,6 +1011,7 @@
                         <div id="measDropdown" class="nav-dropdown-menu" style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:150px;">
                             <div class="nav-dropdown-item" onclick="setActiveTool('measure')"><i class="fas fa-ruler-horizontal"></i> Length</div>
                             <div class="nav-dropdown-item" onclick="setActiveTool('angle')"><i class="fas fa-drafting-compass"></i> Angle</div>
+                            <div class="nav-dropdown-item" onclick="setActiveTool('cobb_angle')"><i class="fas fa-angle-double-up"></i> Cobb Angle</div>
                             <div class="nav-dropdown-item" onclick="setActiveTool('area')"><i class="fas fa-draw-polygon"></i> Area</div>
                             <div class="nav-dropdown-item" onclick="setActiveTool('roi')"><i class="fas fa-circle-notch"></i> HU ROI</div>
                             <div style="height:1px;background:#404040;margin:4px 0;"></div>
@@ -2985,6 +2986,11 @@
             drawCurrentMeasurement();
 
             updateOverlayLabels();
+
+            // Re-draw AI overlays if active (AI overlays must be re-applied after every canvas clear)
+            if (window._aiOverlaysActive && typeof renderAIOverlays === 'function') {
+                renderAIOverlays();
+            }
         }
 
         function renderServerRenderedImage() {
@@ -3108,7 +3114,8 @@
                     redrawCurrentImage();
                 } else if (activeTool === 'measure') {
                     startMeasurement(lastMouseX, lastMouseY);
-                } else if (activeTool === 'angle') {
+                } else if (activeTool === 'angle' || activeTool === 'cobb_angle') {
+                    // cobb_angle uses the same 3-point angle infrastructure
                     startAngleMeasurement(lastMouseX, lastMouseY);
                 } else if (activeTool === 'area') {
                     startAreaMeasurement(lastMouseX, lastMouseY);
@@ -3219,6 +3226,7 @@
                     break;
                 case 'measure':
                 case 'angle':
+                case 'cobb_angle':
                 case 'area':
                     if (currentMeasurement) {
                         updateMeasurement(mouseX, mouseY);
@@ -6928,6 +6936,38 @@
         function showLoading(show) {
             const indicator = document.getElementById('loadingIndicator');
             indicator.style.display = show ? 'flex' : 'none';
+        }
+
+        // AI overlay state and rendering
+        window._aiOverlaysActive = false;
+        window._aiOverlayData = null;
+
+        function renderAIOverlays() {
+            // Draw AI bounding boxes / findings on the canvas if _aiOverlayData is set
+            if (!window._aiOverlaysActive || !window._aiOverlayData || !ctx) return;
+            const findings = window._aiOverlayData.findings || [];
+            findings.forEach(function(f) {
+                if (!f.bbox) return;
+                const [x, y, w, h] = f.bbox;
+                ctx.save();
+                ctx.strokeStyle = '#ff4444';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 2]);
+                ctx.strokeRect(x, y, w, h);
+                if (f.label) {
+                    ctx.font = '11px Inter, sans-serif';
+                    ctx.fillStyle = '#ff4444';
+                    ctx.fillText(f.label, x, y > 12 ? y - 4 : y + h + 12);
+                }
+                ctx.restore();
+            });
+        }
+
+        function toggleAIPanel() {
+            const panel = document.getElementById('rightPanel');
+            if (panel) {
+                panel.style.display = (panel.style.display === 'none') ? '' : 'none';
+            }
         }
 
         function showToast(message, type = 'info', duration = 3000) {

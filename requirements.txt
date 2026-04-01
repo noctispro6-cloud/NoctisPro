@@ -35,7 +35,9 @@ SimpleITK
 pylibjpeg
 pylibjpeg-libjpeg
 pylibjpeg-openjpeg
-gdcm
+# gdcm removed: PyPI gdcm==1.1 is a broken stub requiring libgdcmMEXD.so.2.8 which
+# is not available in standard environments, and the package is not imported anywhere
+# in application code. DICOM decoding is handled by pydicom + pylibjpeg instead.
 highdicom
 
 # Image processing

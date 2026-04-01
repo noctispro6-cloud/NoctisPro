@@ -67,7 +67,7 @@ MIDDLEWARE = [
 ]
 
 # Security headers for internet exposure
-SECURE_BROWSER_XSS_FILTER = True
+# SECURE_BROWSER_XSS_FILTER removed — no longer processed by SecurityMiddleware since Django 4.0.
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
 X_FRAME_OPTIONS = 'SAMEORIGIN'  # Allow embedding for DICOM viewer

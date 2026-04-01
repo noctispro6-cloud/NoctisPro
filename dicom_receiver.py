@@ -350,16 +350,12 @@ class DicomReceiver:
             except Exception:
                 pass
         
-        # Event handlers
-        self.ae.on_c_store = self.handle_store
-        self.ae.on_c_echo = self.handle_echo
-        
         self.logger.info("Application Entity configured successfully")
     
     def handle_echo(self, event):
-        """Handle C-ECHO requests (DICOM ping) with enhanced logging"""
+        """Handle C-ECHO requests (DICOM ping) with enhanced logging (pynetdicom evt style)"""
         try:
-            calling_aet = event.assoc.requestor.ae_title.decode(errors='ignore').strip()
+            calling_aet = event.assoc.requestor.ae_title.strip()
             peer_ip = getattr(event.assoc.requestor, 'address', 'unknown')
 
             if not self._peer_allowed(peer_ip):
@@ -381,7 +377,7 @@ class DicomReceiver:
             return 0x0000  # Still return success for basic connectivity
     
     def handle_store(self, event):
-        """Handle C-STORE requests with comprehensive error handling"""
+        """Handle C-STORE requests with comprehensive error handling (pynetdicom evt style)"""
         calling_aet = None
         peer_ip = None
         
@@ -391,7 +387,7 @@ class DicomReceiver:
             self.stats['last_received'] = timezone.now()
             
             # Extract connection information
-            calling_aet = event.assoc.requestor.ae_title.decode(errors='ignore').strip()
+            calling_aet = event.assoc.requestor.ae_title.strip()
             peer_ip = getattr(event.assoc.requestor, 'address', 'unknown')
 
             # Optional network allowlist check
@@ -785,8 +781,14 @@ class DicomReceiver:
             self.logger.info("Waiting for DICOM connections...")
             self.logger.info("=" * 60)
             
+            # Register event handlers using the new pynetdicom evt style
+            evt_handlers = [
+                (evt.EVT_C_STORE, self.handle_store),
+                (evt.EVT_C_ECHO, self.handle_echo),
+            ]
+
             # Start the server (blocking)
-            self.ae.start_server(('', self.port), block=True)
+            self.ae.start_server(('', self.port), block=True, evt_handlers=evt_handlers)
             
         except KeyboardInterrupt:
             self.logger.info("DICOM receiver stopped by user (Ctrl+C)")

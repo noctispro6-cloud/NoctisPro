@@ -891,6 +891,7 @@
                             <th class="sortable">MODALITY</th>
                             <th class="sortable">STATUS</th>
                             <th class="sortable">PRIORITY</th>
+                            <th class="sortable">REPORT</th>
                             <th class="sortable">SCHEDULED</th>
                             <th class="sortable">IMAGES</th>
                             <th class="sortable">FACILITY</th>
@@ -900,7 +901,7 @@
                     <tbody id="studiesTableBody">
                         <!-- Studies will be dynamically loaded here -->
                         <tr id="noDataRow">
-                            <td colspan="11" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                            <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-muted);">
                                 <i class="fas fa-folder-open" style="font-size: 48px; opacity: 0.3; margin-bottom: 16px; display: block;"></i>
                                 <div style="font-size: 14px; margin-bottom: 8px;">No studies found</div>
                                 <div style="font-size: 12px;">Upload DICOM studies or check your filter settings. Right-click any study row for actions.</div>
@@ -981,7 +982,7 @@
                 if (!silent) {
                     tbody.innerHTML = `
                         <tr>
-                            <td colspan="11" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                            <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-muted);">
                                 <i class="fas fa-spinner fa-spin" style="font-size: 48px; opacity: 0.3; margin-bottom: 16px; display: block;"></i>
                                 <div style="font-size: 14px; margin-bottom: 8px;">Loading studies...</div>
                                 <div style="font-size: 12px;">Please wait while we fetch the latest data</div>
@@ -1106,6 +1107,12 @@
                                 const title = `AI flagged study (${label}${score !== '' ? ` score ${score}` : ''})`;
                                 return `<span class="ai-flag-badge ${cls}" title="${title.replace(/"/g,'&quot;')}"><i class="fas fa-robot"></i> ${label}</span>`;
                             })()}
+                        </td>
+                        <td>
+                            ${study.report_status
+                                ? `<span class="status-badge status-${study.report_status}" title="Report: ${study.report_status}">${study.report_status.toUpperCase()}</span>`
+                                : '<span style="color:var(--text-muted);font-size:9px;">NO REPORT</span>'
+                            }
                         </td>
                         <td class="timestamp">${scheduledTime}</td>
                         <td title="${seriesCount} series, ${imageCount} images">
@@ -1355,7 +1362,7 @@
             const tbody = document.getElementById('studiesTableBody');
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="11" class="upload-area">
+                    <td colspan="12" class="upload-area">
                         <i class="fas fa-folder-open"></i>
                         <div class="upload-title">No DICOM Studies Found</div>
                         <div class="upload-subtitle">Upload DICOM folders to populate the worklist</div>

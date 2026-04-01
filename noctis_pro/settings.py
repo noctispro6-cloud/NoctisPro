@@ -388,6 +388,20 @@ except Exception:
     # Don't crash settings import; storage errors will surface during request handling/logging.
     pass
 
+# Email configuration
+# Set EMAIL_BACKEND to smtp in production via environment variable
+EMAIL_BACKEND = os.environ.get(
+    'EMAIL_BACKEND',
+    'django.core.mail.backends.console.EmailBackend'  # Console by default (dev)
+)
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() == 'true'
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', f'noreply@{DOMAIN_NAME}')
+SERVER_EMAIL = os.environ.get('SERVER_EMAIL', f'server@{DOMAIN_NAME}')
+
 # Backup configuration
 # BACKUP_ROOT: local directory where backup files are written.
 # BACKUP_RETENTION_DAYS: how many days to keep old backup files before auto-deletion.

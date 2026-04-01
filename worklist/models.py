@@ -80,6 +80,30 @@ class Study(models.Model):
     upload_date = models.DateTimeField(auto_now_add=True)
     last_updated = models.DateTimeField(auto_now=True)
 
+    # Clinical workflow fields
+    requesting_physician = models.CharField(max_length=200, blank=True, default='', help_text='Ordering/requesting physician')
+    technologist = models.CharField(max_length=200, blank=True, default='', help_text='Technologist who performed the study')
+
+    # Technical fields
+    contrast_used = models.BooleanField(default=False, help_text='Was contrast agent used?')
+    contrast_agent = models.CharField(max_length=100, blank=True, default='')
+    radiation_dose = models.FloatField(null=True, blank=True, help_text='Radiation dose in mGy')
+
+    # Quality and workflow flags
+    qc_flag = models.BooleanField(default=False, help_text='Quality control flag')
+    peer_review_status = models.CharField(max_length=20, blank=True, default='',
+        choices=[('', 'Not requested'), ('requested', 'Requested'), ('in_progress', 'In Progress'), ('completed', 'Completed')])
+    teaching_file = models.BooleanField(default=False, help_text='Flag as teaching case')
+    second_opinion_requested = models.BooleanField(default=False, help_text='Second opinion requested')
+
+    # STAT/Rush flag
+    stat_flag = models.BooleanField(default=False, help_text='STAT/Rush study - requires immediate attention')
+
+    # Turnaround time tracking
+    order_time = models.DateTimeField(null=True, blank=True, help_text='When the study was ordered')
+    read_start_time = models.DateTimeField(null=True, blank=True, help_text='When radiologist started reading')
+    report_time = models.DateTimeField(null=True, blank=True, help_text='When report was completed')
+
     class Meta:
         ordering = ['-study_date']
 

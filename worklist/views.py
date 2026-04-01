@@ -395,13 +395,20 @@ def study_detail(request, study_id):
 	
 	# Get study notes
 	notes = study.notes.all().order_by('-created_at')
-	
+
+	# Prior studies for same patient
+	prior_studies = Study.objects.filter(
+		patient=study.patient
+	).exclude(pk=study.pk).order_by('-study_date')[:5]
+
 	context = {
 		'study': study,
 		'series_list': series_list,
 		'attachments': attachments,
 		'notes': notes,
 		'user': user,
+		'status_choices': Study.STUDY_STATUS_CHOICES,
+		'prior_studies': prior_studies,
 	}
 	
 	return render(request, 'worklist/study_detail.html', context)
@@ -1405,6 +1412,12 @@ def upload_study(request):
 								continue
 
 							# New SOP: save bytes and create DB row.
+							# Check for existing SOP instance to avoid orphan files from race conditions
+							existing_sop = DicomImage.objects.filter(sop_instance_uid=sop_uid).first()
+							if existing_sop:
+								images_processed += 1
+								continue
+
 							# Keep paths aligned with the model's `upload_to='dicom/images/'` and
 							# historical tooling that expects DICOM objects under `media/dicom/images/`.
 							rel_path = f"dicom/images/{study_uid}/{series_uid}/{sop_uid}.dcm"
@@ -1800,6 +1813,15 @@ def api_studies(request):
 			# The DB uses underscores (e.g. "in_progress"); the UI expects "in-progress".
 			status_key = (study.status or '').replace('_', '-')
 
+			# Report status
+			try:
+				_report = study.report_set.first() if hasattr(study, 'report_set') else None
+				_report_status = _report.status if _report else None
+				_report_id = _report.id if _report else None
+			except Exception:
+				_report_status = None
+				_report_id = None
+
 			# Professional study data formatting with medical precision
 			studies_data.append({
 				'id': study.id,
@@ -1826,6 +1848,8 @@ def api_studies(request):
 				'uploaded_by': study.uploaded_by.get_full_name() if study.uploaded_by else 'Unknown',
 				'body_part': getattr(study, 'body_part', ''),
 				'referring_physician': study.referring_physician,
+				'report_status': _report_status,
+				'report_id': _report_id,
 				'professional_metadata': {
 					'data_quality': 'EXCELLENT' if image_count > 0 else 'PENDING',
 					'completeness': 'COMPLETE' if series_count > 0 and image_count > 0 else 'PARTIAL',
@@ -2022,14 +2046,8 @@ def upload_attachment(request, study_id):
             return JsonResponse({'error': str(e)}, status=500)
     
     # GET request - show upload form
-    # Get previous studies for this patient
-    previous_studies = Study.objects.filter(
-        patient=study.patient
-    ).exclude(id=study.id).order_by('-study_date')[:10]
-    
     context = {
         'study': study,
-        'previous_studies': previous_studies,
     }
     
     return render(request, 'worklist/upload_attachment.html', context)

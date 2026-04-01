@@ -63,6 +63,11 @@
 				<a href="{% url 'worklist:study_list' %}" class="btn-control"><i class="fas fa-arrow-left"></i> Back</a>
 				<a href="{% url 'worklist:upload_attachment' study.id %}" class="btn-control"><i class="fas fa-paperclip"></i> Attach</a>
 				<a href="{% url 'dicom_viewer:viewer' %}?study={{ study.id }}" class="btn-dicom-viewer"><i class="fas fa-eye"></i> DICOM Viewer</a>
+				{% if user.is_admin or user.is_radiologist %}
+				<a href="{% url 'reports:write_report' study.id %}" class="btn-control">
+					<i class="fas fa-file-signature"></i> Write / View Report
+				</a>
+				{% endif %}
 			</div>
 		</div>
 		<div class="card-body">
@@ -71,7 +76,41 @@
 				<div><div class="label">Status</div><div class="value">{{ study.status|title }}</div></div>
 				<div><div class="label">Priority</div><div class="value">{{ study.priority|title }}</div></div>
 				<div><div class="label">Facility</div><div class="value">{{ study.facility.name }}</div></div>
+				{% if study.referring_physician %}
+				<div><div class="label">Referring Physician</div><div class="value">{{ study.referring_physician }}</div></div>
+				{% endif %}
+				{% if study.body_part %}
+				<div><div class="label">Body Part</div><div class="value">{{ study.body_part }}</div></div>
+				{% endif %}
+				{% if study.requesting_physician %}
+				<div><div class="label">Requesting Physician</div><div class="value">{{ study.requesting_physician }}</div></div>
+				{% endif %}
 			</div>
+
+			{% if user.is_admin or user.is_radiologist %}
+			<div class="mb-3 mt-3">
+				<label class="label me-2">Study Status:</label>
+				<select id="studyStatusSelect" class="form-select form-select-sm" style="width:auto;display:inline-block">
+					{% for val, label in status_choices %}
+					<option value="{{ val }}" {% if study.status == val %}selected{% endif %}>{{ label }}</option>
+					{% endfor %}
+				</select>
+				<button onclick="updateStudyStatus()" class="btn btn-sm btn-outline-light ms-2">Update</button>
+			</div>
+			<script>
+			async function updateStudyStatus() {
+				const s = document.getElementById('studyStatusSelect').value;
+				const resp = await fetch('{% url "worklist:api_update_study_status" study.id %}', {
+					method: 'POST', credentials: 'same-origin',
+					headers: {'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json'},
+					body: JSON.stringify({status: s})
+				});
+				const data = await resp.json();
+				if (data.success) location.reload();
+				else alert('Failed: ' + (data.error || 'Unknown error'));
+			}
+			</script>
+			{% endif %}
 
 			<div class="section-title">Clinical Information</div>
 			<div class="d-flex align-items-start justify-content-between" style="gap:8px;">
@@ -89,7 +128,6 @@
 						{% if a.file_type == 'pdf_document' %}<i class="fas fa-file-pdf"></i>{% elif a.file_type == 'image' %}<i class="fas fa-image"></i>{% elif a.file_type == 'dicom_study' %}<i class="fas fa-cubes"></i>{% else %}<i class="fas fa-paperclip"></i>{% endif %}
 						&nbsp;{{ a.name|truncatechars:30 }}
 					</a>
-					<!-- Delete attachment - only for admin/radiologist or same facility users -->
 					{% if user.is_admin or user.is_radiologist or user.facility == study.facility %}
 					<form method="post" action="{% url 'worklist:delete_attachment' a.id %}" class="d-inline ms-1">
 						{% csrf_token %}
@@ -105,24 +143,69 @@
 			</div>
 		</div>
 	</div>
+
+	{% if series_list %}
+	<div class="card mb-3 mt-3">
+		<div class="card-header">Series</div>
+		<div class="card-body p-0">
+			<table class="table table-sm table-dark mb-0">
+				<thead><tr><th>#</th><th>Description</th><th>Modality</th><th>Images</th></tr></thead>
+				<tbody>
+				{% for series in series_list %}
+				<tr>
+					<td>{{ series.series_number }}</td>
+					<td>{{ series.series_description|default:'-' }}</td>
+					<td>{{ series.modality|default:'-' }}</td>
+					<td>{{ series.images.count }}</td>
+				</tr>
+				{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	</div>
+	{% endif %}
+
+	{% if prior_studies %}
+	<div class="card mb-3 mt-3">
+		<div class="card-header">Prior Studies ({{ study.patient.full_name }})</div>
+		<div class="card-body p-0">
+			<table class="table table-sm table-dark mb-0">
+				<thead><tr><th>Date</th><th>Modality</th><th>Description</th><th>Actions</th></tr></thead>
+				<tbody>
+				{% for ps in prior_studies %}
+				<tr>
+					<td>{{ ps.study_date|date:"M d, Y" }}</td>
+					<td>{{ ps.modality.code|default:'-' }}</td>
+					<td>{{ ps.study_description|default:'-' }}</td>
+					<td>
+						<a href="{% url 'dicom_viewer:viewer' %}?study={{ ps.id }}" class="btn-sm btn-control">View</a>
+						{% if ps.report_set.exists %}<a href="{% url 'reports:write_report' ps.id %}" class="btn-sm btn-control ms-1">Report</a>{% endif %}
+					</td>
+				</tr>
+				{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	</div>
+	{% endif %}
 </div>
 
-<!-- Clinical Info Modal -->
-<div  role="dialog" aria-modal="true" id="clinicalInfoModal" tabindex="-1" aria-hidden="true">
-	<div  role="dialog" aria-modal="true">
-		<div  role="dialog" aria-modal="true" style="background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color);">
-			<div  role="dialog" aria-modal="true" style="border-bottom: 1px solid var(--border-color);">
-				<h5 class="modal-title"><i class="fas fa-notes-medical me-2"></i>Clinical Information</h5>
-				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+<!-- Clinical Info Modal (Bootstrap 5) -->
+<div class="modal fade" id="clinicalInfoModal" tabindex="-1" aria-labelledby="clinicalInfoModalLabel" aria-hidden="true">
+	<div class="modal-dialog">
+		<div class="modal-content bg-dark text-light">
+			<div class="modal-header">
+				<h5 class="modal-title" id="clinicalInfoModalLabel"><i class="fas fa-notes-medical me-2"></i>Clinical Information</h5>
+				<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
 			</div>
-			<div  role="dialog" aria-modal="true">
+			<div class="modal-body">
 				<input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
 				<label class="label mb-2">Enter clinical history / indication</label>
 				<textarea id="clinicalInfoInput" class="form-control" style="min-height: 140px;">{{ study.clinical_info }}</textarea>
 			</div>
-			<div  role="dialog" aria-modal="true" style="border-top: 1px solid var(--border-color);">
-				<button type="button" class="btn-control" data-bs-dismiss="modal">Cancel</button>
-				<button type="button" id="saveClinicalInfoBtn" class="btn-control primary"><i class="fas fa-save me-2"></i>Save</button>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+				<button type="button" id="saveClinicalInfoBtn" class="btn btn-primary"><i class="fas fa-save me-2"></i>Save</button>
 			</div>
 		</div>
 	</div>
@@ -166,7 +249,6 @@
 				const data = await res.json();
 				if (!data.success) throw new Error(data.error || 'Failed to update');
 				textEl.textContent = (newText && newText.trim()) ? newText : 'No clinical information yet.';
-				// Close modal
 				try { bootstrap.Modal.getOrCreateInstance(modalEl).hide(); } catch(e) {}
 			} catch(e) {
 				alert('Failed to save clinical information: ' + (e && e.message ? e.message : e));

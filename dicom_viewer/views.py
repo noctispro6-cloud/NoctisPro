@@ -27,7 +27,7 @@ from django.conf import settings
 from io import BytesIO
 from PIL import Image, ImageFilter
 import base64
-from pydicom.pixel_data_handlers.util import apply_voi_lut
+from pydicom.pixels import apply_voi_lut
 import scipy.ndimage as ndimage
 import logging
 import subprocess
@@ -165,7 +165,7 @@ def _convert_color_to_rgb_uint8(arr, ds=None):
             photo = str(getattr(ds, "PhotometricInterpretation", "") or "").upper() if ds is not None else ""
             if photo.startswith("YBR"):
                 try:
-                    from pydicom.pixel_data_handlers.util import convert_color_space as _ccs
+                    from pydicom.pixels import convert_color_space as _ccs
 
                     a = _ccs(a, current=photo, desired="RGB")
                 except Exception:
@@ -4281,7 +4281,7 @@ def web_dicom_image(request, image_id):
         try:
             modality = str(getattr(ds, 'Modality', '')).upper()
             if modality in ['DX', 'CR', 'XA', 'RF', 'MG']:
-                from pydicom.pixel_data_handlers.util import apply_voi_lut as _apply_voi_lut
+                from pydicom.pixels import apply_voi_lut as _apply_voi_lut
                 pixel_array = _apply_voi_lut(pixel_array, ds)
         except Exception:
             pass

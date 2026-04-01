@@ -106,6 +106,13 @@ class Study(models.Model):
 
     class Meta:
         ordering = ['-study_date']
+        indexes = [
+            models.Index(fields=['status'], name='worklist_study_status_idx'),
+            models.Index(fields=['facility'], name='worklist_study_facility_idx'),
+            models.Index(fields=['study_date'], name='worklist_study_date_idx'),
+            models.Index(fields=['priority'], name='worklist_study_priority_idx'),
+            models.Index(fields=['radiologist'], name='worklist_study_radiologist_idx'),
+        ]
 
     def __str__(self):
         return f"{self.accession_number} - {self.patient.full_name} ({self.modality.code})"
@@ -143,6 +150,9 @@ class Series(models.Model):
     class Meta:
         verbose_name_plural = "Series"
         ordering = ['series_number']
+        indexes = [
+            models.Index(fields=['study'], name='worklist_series_study_idx'),
+        ]
 
     def __str__(self):
         return f"Series {self.series_number} - {self.series_description}"
@@ -163,6 +173,9 @@ class DicomImage(models.Model):
 
     class Meta:
         ordering = ['instance_number']
+        indexes = [
+            models.Index(fields=['study'], name='worklist_dicomimage_study_idx'),
+        ]
 
     def __str__(self):
         return f"Image {self.instance_number} - {self.sop_instance_uid}"

@@ -380,7 +380,8 @@ class MasterpieceVolumeBuilder:
                             positions.append(pos_list[2])  # Z-coordinate
                         else:
                             positions.append(image.instance_number)
-                    except:
+                    except Exception as e:
+                        logger.debug('Image position parse failed for image %s: %s', image.id, e)
                         positions.append(image.instance_number)
                 else:
                     positions.append(image.instance_number)
@@ -432,8 +433,8 @@ class MasterpieceVolumeBuilder:
                     else:
                         spacing.append(spacing[0])  # Assume isotropic if not specified
                     return spacing
-            except:
-                pass
+            except Exception as e:
+                logger.debug('get_pixel_spacing failed: %s', e)
         return None
     
     def get_volume_metadata(self):

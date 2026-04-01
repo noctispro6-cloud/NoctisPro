@@ -767,8 +767,17 @@ def masterpiece_viewer(request):
             _schedule_mpr_disk_cache_build(sid, quality='high')
     except Exception:
         pass
+
+    study_id_param = request.GET.get('study', '')
+    try:
+        if study_id_param:
+            study_obj = Study.objects.get(pk=int(study_id_param))
+            log_audit(request, 'view_study', f'Opened study {study_obj.accession_number} in DICOM viewer', study_id=study_obj.id)
+    except Exception:
+        pass
+
     context = {
-        'study_id': request.GET.get('study', ''),
+        'study_id': study_id_param,
         'series_id': request.GET.get('series', ''),
         'current_date': timezone.now().strftime('%Y-%m-%d'),
         'user': request.user
@@ -5689,7 +5698,16 @@ def print_dicom_image(request):
         grid_cols = request.POST.get('grid_cols')
         
         # Get patient and study information
-        patient_name = request.POST.get('patient_name', 'Unknown Patient')
+        patient_name = request.POST.get('patient_name', '').strip()
+        if not patient_name and series_id:
+            try:
+                from worklist.models import Series as _SeriesPatient
+                _sp = _SeriesPatient.objects.select_related('study__patient').get(id=int(series_id))
+                patient_name = _sp.study.patient.full_name
+            except Exception:
+                pass
+        if not patient_name:
+            patient_name = 'Unknown Patient'
         study_date = request.POST.get('study_date', '')
         modality = request.POST.get('modality', '')
         series_description = request.POST.get('series_description', '')
@@ -6997,3 +7015,58 @@ def api_series_sr_export(request, series_id):
     study = series.study
     # Delegate to the study-level SR export
     return api_export_dicom_sr(request, study.id)
+
+
+@login_required
+def api_anonymize_study(request, study_id):
+    """Anonymize a DICOM study by removing PHI tags."""
+    if not (request.user.is_admin() or request.user.is_radiologist()):
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    try:
+        study = get_object_or_404(Study, pk=study_id)
+
+        phi_tags = [
+            'PatientName', 'PatientID', 'PatientBirthDate', 'PatientSex',
+            'PatientAge', 'PatientWeight', 'PatientAddress', 'PatientTelephoneNumbers',
+            'InstitutionName', 'InstitutionAddress', 'ReferringPhysicianName',
+            'PerformingPhysicianName', 'OperatorsName', 'AccessionNumber',
+        ]
+
+        anonymized_count = 0
+        errors = []
+
+        for series in study.series_set.all():
+            for image in series.dicomimage_set.all():
+                try:
+                    file_path = image.file_path.path
+                    ds = pydicom.dcmread(file_path)
+
+                    anon_id = f'ANON-{study.id}'
+                    for tag_name in phi_tags:
+                        if hasattr(ds, tag_name):
+                            try:
+                                setattr(ds, tag_name, anon_id if tag_name in ('PatientName', 'PatientID', 'AccessionNumber') else '')
+                            except Exception:
+                                pass
+
+                    anon_path = file_path.replace('/dicom/images/', '/dicom/anonymized/')
+                    os.makedirs(os.path.dirname(anon_path), exist_ok=True)
+                    ds.save_as(anon_path)
+                    anonymized_count += 1
+                except Exception as e:
+                    errors.append(str(e))
+
+        log_audit(request, 'anonymize_study', f'Anonymized study {study.accession_number}', study_id=study.id)
+
+        return JsonResponse({
+            'success': True,
+            'anonymized_images': anonymized_count,
+            'errors': errors[:5],
+            'message': f'Created anonymized copy with {anonymized_count} images',
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)

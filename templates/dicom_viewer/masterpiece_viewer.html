@@ -739,17 +739,22 @@
                 flex-direction: column;
             }
             
-            .toolbar {
-                width: 100%;
+            .toolbar, .left-toolbar {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                display: flex;
                 flex-direction: row;
-                flex-wrap: wrap;
-                justify-content: flex-start;
-                padding: 5px;
+                width: 100%;
                 height: auto;
-                min-height: 60px;
-                max-height: min(34dvh, 240px);
-                overflow-x: hidden;
-                overflow-y: auto;
+                overflow-x: auto;
+                overflow-y: hidden;
+                padding: 4px;
+                flex-wrap: nowrap;
+                min-height: unset;
+                max-height: unset;
+                justify-content: flex-start;
             }
             
             .right-panel {
@@ -760,10 +765,12 @@
             }
             
             .tool-btn {
-                width: 45px;
-                height: 45px;
+                min-width: 36px;
+                width: 36px;
+                height: 36px;
                 margin: 0 2px;
-                min-width: 45px;
+                font-size: 14px;
+                flex-shrink: 0;
             }
         }
 
@@ -2102,7 +2109,17 @@
                 const data = await response.json();
                 
                 if (data && data.study && Array.isArray(data.series)) {
-                    currentStudy = data.study;
+                    const studyData = data.study;
+                    currentStudy = {
+                        ...studyData,
+                        patient_name: studyData.patient_name || studyData.patient || 'Unknown Patient',
+                        patient_id: studyData.patient_id || '',
+                        accession_number: studyData.accession_number || studyData.accession || '',
+                        modality: studyData.modality || '',
+                        institution: studyData.facility || studyData.institution || 'Medical Facility',
+                        study_description: studyData.study_description || '',
+                    };
+                    window.currentStudy = currentStudy;
                     window.currentStudyId = currentStudy.id;
                     // Notify listeners that a study has been loaded
                     document.dispatchEvent(new CustomEvent('studyLoaded', { detail: { studyId: currentStudy.id } }));

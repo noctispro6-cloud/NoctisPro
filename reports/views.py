@@ -274,107 +274,15 @@ def print_report_stub(request, study_id):
             letterhead_url = f"data:{ctype};base64," + base64.b64encode(b).decode('ascii')
     except Exception:
         letterhead_url = ''
-    facility_name = escape(getattr(study.facility, 'name', '') or '')
-    facility_address = escape(getattr(study.facility, 'address', '') or '')
-    patient_name = escape(getattr(study.patient, 'full_name', '') or '')
-    patient_id = escape(getattr(study.patient, 'patient_id', '') or '')
-    accession_number = escape(getattr(study, 'accession_number', '') or '')
-    modality_code = escape(getattr(getattr(study, 'modality', None), 'code', '') or '')
-    study_date_display = escape(str(getattr(study, 'study_date', '') or ''))
-
-    clinical_text = escape(((report.clinical_history if report else (study.clinical_info or '')) or '-') or '-')
-    technique_text = escape(((report.technique if report else '') or '-') or '-')
-    comparison_text = escape(((report.comparison if report else '') or '-') or '-')
-    findings_text = escape(((report.findings if report else '') or '-') or '-')
-    impression_text = escape(((report.impression if report else '') or '-') or '-')
-    recommendations_text = escape(((report.recommendations if report else '') or '-') or '-')
-    report_status = escape(getattr(report, 'status', '') or '')
-
-    author_name = ''
-    author_license = ''
-    signed_date = ''
-    if report and getattr(report, 'radiologist', None):
-        try:
-            author_name = report.radiologist.get_full_name() or report.radiologist.username
-            author_license = getattr(report.radiologist, 'license_number', '') or ''
-        except Exception:
-            pass
-    if report and report.signed_date:
-        signed_date = report.signed_date.strftime('%Y-%m-%d %H:%M')
-
-    # Optional signature image from Base64 (data URL or raw b64)
-    sig_img_html = ''
-    if report and (report.digital_signature or '').strip():
-        ds = report.digital_signature.strip()
-        if not ds.startswith('data:image'):
-            try:
-                ds = 'data:image/png;base64,' + ds
-            except Exception:
-                ds = ''
-        if ds:
-            sig_img_html = f'<img src="{ds}" alt="Signature" style="height:60px;" />'
-
-    html = f"""
-    <html>
-      <head>
-        <title>Report {study.accession_number}</title>
-        <style>
-          body {{ font-family: Arial, sans-serif; color: #000; margin: 24px; }}
-          .letterhead {{ text-align:center; margin-bottom: 12px; }}
-          .letterhead img {{ max-width: 100%; height: auto; }}
-          .header {{ border-bottom:1px solid #000; padding-bottom:6px; margin-bottom:10px; }}
-          .section {{ margin-bottom: 12px; }}
-          .label {{ font-weight:bold; }}
-          pre {{ white-space: pre-wrap; font-family: inherit; }}
-          .footer {{ border-top:1px solid #000; padding-top:8px; margin-top:12px; display:flex; justify-content: space-between; align-items:center; gap: 16px; }}
-          .qr {{ text-align:center; font-size: 11px; }}
-          .sign {{ margin-top: 8px; }}
-          @media print {{ .noprint {{ display:none; }} }}
-        </style>
-      </head>
-      <body>
-        <div class="letterhead">{f'<img src="{letterhead_url}" alt="Letterhead" />' if letterhead_url else f'<h2 style="margin:0">{facility_name}</h2><div>{facility_address}</div>'}</div>
-        <div class="header">
-          <div style="display:flex; justify-content: space-between;">
-            <div>
-              <div class="label">Patient:</div>
-              <div>{patient_name} ({patient_id})</div>
-            </div>
-            <div style="text-align:right">
-              <div><span class="label">Accession:</span> {accession_number}</div>
-              <div><span class="label">Modality:</span> {modality_code} &nbsp; <span class="label">Date:</span> {study_date_display}</div>
-              {f'<div><span class="label">Status:</span> {report_status}</div>' if report_status else ''}
-            </div>
-          </div>
-        </div>
-        <div class="section"><span class="label">Clinical Information:</span><br/><pre>{clinical_text}</pre></div>
-        <div class="section"><span class="label">Technique:</span><br/><pre>{technique_text}</pre></div>
-        <div class="section"><span class="label">Comparison:</span><br/><pre>{comparison_text}</pre></div>
-        <div class="section"><span class="label">Findings:</span><br/><pre>{findings_text}</pre></div>
-        <div class="section"><span class="label">Impression:</span><br/><pre>{impression_text}</pre></div>
-        <div class="section"><span class="label">Recommendations:</span><br/><pre>{recommendations_text}</pre></div>
-        <div class="sign">
-          <div class="label">Signed by:</div>
-          <div>{author_name}{(' - ' + author_license) if author_license else ''}{(' on ' + signed_date) if signed_date else ''}</div>
-          {sig_img_html}
-        </div>
-        <div class="footer">
-          <div class="qr">
-            {f'<img src="{qr_viewer_b64}" alt="QR Images" style="height:100px;" />' if qr_viewer_b64 else ''}
-            <div>Scan to view images</div>
-            <div style="word-break: break-all; max-width: 260px;">{viewer_url}</div>
-          </div>
-          <div class="qr">
-            {f'<img src="{qr_report_b64}" alt="QR Report" style="height:100px;" />' if qr_report_b64 else ''}
-            <div>Scan to view report</div>
-            <div style="word-break: break-all; max-width: 260px;">{report_url}</div>
-          </div>
-        </div>
-        <div class="noprint" style="margin-top: 12px;"><button onclick="window.print()">Print</button></div>
-      </body>
-    </html>
-    """
-    return HttpResponse(html)
+    return render(request, 'reports/print_report.html', {
+        'study': study,
+        'report': report,
+        'patient': study.patient,
+        'facility': study.facility,
+        'qr_viewer': qr_viewer_b64,
+        'qr_report': qr_report_b64,
+        'letterhead_b64': letterhead_url,
+    })
 
 
 @login_required

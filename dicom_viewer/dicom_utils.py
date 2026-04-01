@@ -304,7 +304,8 @@ class DicomProcessor:
                 from scipy import ndimage
                 enhanced = ndimage.convolve(normalized_data, kernel, mode='reflect')
                 return np.clip(enhanced, 0.0, 1.0)
-            except:
+            except Exception as e:
+                logger.debug('scipy convolve failed, returning normalized data: %s', e)
                 return normalized_data
     
     def get_optimal_preset_for_hu_range(self, hu_min, hu_max, modality='CT'):
@@ -358,8 +359,9 @@ class DicomProcessor:
             window_level = (p_high + p_low) / 2
             
             return float(window_width), float(window_level)
-        except:
-            return 400.0, 40.0  # Safe defaults
+        except Exception as e:
+            logger.debug('auto_window_from_data failed, using safe defaults: %s', e)
+            return 400.0, 40.0
 
     def get_pixel_spacing(self, dicom_data):
         try:
@@ -549,8 +551,8 @@ class DicomProcessor:
             water_candidates = hu_array[(hu_array > -50) & (hu_array < 50)]
             if len(water_candidates) > 100:  # Need sufficient samples
                 return float(np.median(water_candidates))
-        except:
-            pass
+        except Exception as e:
+            logger.debug('_estimate_water_hu failed: %s', e)
         return None
 
     def _estimate_air_hu(self, hu_array):
@@ -560,8 +562,8 @@ class DicomProcessor:
             air_candidates = hu_array[hu_array < -900]
             if len(air_candidates) > 100:  # Need sufficient samples
                 return float(np.median(air_candidates))
-        except:
-            pass
+        except Exception as e:
+            logger.debug('_estimate_air_hu failed: %s', e)
         return None
 
     def _calculate_noise_level(self, hu_array):
@@ -572,8 +574,8 @@ class DicomProcessor:
             center_region = self._get_center_region(hu_array)
             if center_region is not None and len(center_region) > 100:
                 return float(np.std(center_region))
-        except:
-            pass
+        except Exception as e:
+            logger.debug('_calculate_noise_level failed: %s', e)
         return None
 
     def _get_center_region(self, hu_array, fraction=0.1):
@@ -589,7 +591,8 @@ class DicomProcessor:
             end_w = center_w + region_w // 2
             
             return hu_array[start_h:end_h, start_w:end_w].flatten()
-        except:
+        except Exception as e:
+            logger.debug('_get_center_region failed: %s', e)
             return None
 
     def generate_hu_calibration_report(self, dicom_data, pixel_array=None):

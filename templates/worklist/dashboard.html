@@ -736,6 +736,18 @@
                 padding: 3px 6px;
             }
         }
+
+        @media (max-width: 768px) {
+            .data-table { font-size: 10px; }
+            .data-table th, .data-table td { padding: 3px 6px; }
+            .controls-bar { flex-wrap: wrap; gap: 6px; padding: 6px 8px; height: auto; }
+            .top-navbar { padding: 6px 8px; }
+            .nav-tabs { overflow-x: auto; }
+            .nav-tab { font-size: 9px; padding: 4px 8px; white-space: nowrap; }
+            /* Hide less important columns on small screens */
+            .data-table th:nth-child(n+9),
+            .data-table td:nth-child(n+9) { display: none; }
+        }
     </style>
 </head>
 <body>

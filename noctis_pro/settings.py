@@ -750,6 +750,14 @@ if IS_NGROK:
     # Disable some checks that can cause issues with ngrok
     USE_TZ = True
     
+if not DEBUG:
+    _test_packages = {'debug_toolbar', 'django_debug_toolbar', 'django.test'}
+    _installed = set(INSTALLED_APPS)
+    _bad = _test_packages & _installed
+    if _bad:
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured(f"Test-only packages found in INSTALLED_APPS in production: {_bad}")
+
 import logging as _startup_logging
 _startup_logger = _startup_logging.getLogger('noctis_pro')
 _startup_logger.info(

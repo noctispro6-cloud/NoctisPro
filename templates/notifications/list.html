@@ -199,7 +199,13 @@
                         </div>
                         <div style="flex: 1; min-width: 0;">
                             <div style="display:flex;justify-content:space-between;gap:12px;align-items:start;">
-                                <div class="notification-title">{{ n.title }}</div>
+                                <div class="notification-title">
+                                    {% if n.action_url %}
+                                        <a href="{{ n.action_url }}" style="color:inherit;text-decoration:none;" title="Go to action">{{ n.title }}</a>
+                                    {% else %}
+                                        {{ n.title }}
+                                    {% endif %}
+                                </div>
                                 <div>
                                     {% if not n.is_read %}
                                     <button type="button" class="btn-control notif-mark-read" data-id="{{ n.id }}">

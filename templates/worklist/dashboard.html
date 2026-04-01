@@ -750,6 +750,7 @@
                 <div class="nav-tab active">WORKLIST</div>
                 <div class="nav-tab" onclick="window.location.href='{% url 'worklist:study_list' %}'">STUDIES</div>
                 <div class="nav-tab" onclick="window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
+                <div class="nav-tab" onclick="window.location.href='{% url 'dicom_viewer:viewer' %}'"><i class="fas fa-images"></i> DICOM VIEWER</div>
                 {% user_caps as caps %}
                 {# AI WORKLIST tab: visible to admin, radiologist, and facility users with an active subscription #}
                 {% if user.is_admin or user.is_radiologist %}
@@ -839,7 +840,6 @@
                     <option value="in-progress">In Progress</option>
                     <option value="completed">Completed</option>
                     <option value="suspended">Suspended</option>
-                    <option value="pending">Pending</option>
                     <option value="cancelled">Cancelled</option>
                 </select>
             </div>
@@ -924,7 +924,7 @@
                     <div class="connection-dot"></div>
                     <span>DICOM Server Connected</span>
                 </div>
-                <span>Last Update: <strong>14:32:15</strong></span>
+                <span>Last Update: <strong id="lastUpdateTime">--:--:--</strong></span>
                 <span>Auto-refresh: <strong>ON</strong></span>
             </div>
         </div>
@@ -1022,8 +1022,6 @@
                         if (!silent) showToast(`Loaded ${studiesData.length} studies`, 'success', 2000);
                     }
                     
-                    // Show upload stats if available
-                    await loadUploadStats();
                 } else {
                     console.error('API returned error:', data.error);
                     showToast(data.message || 'Failed to load studies', 'error');
@@ -1034,39 +1032,6 @@
                 console.error('Error loading studies data:', error);
                 showToast(`Connection error: ${error.message}`, 'error');
                 showNoDataMessage();
-            }
-        }
-
-        // Load upload statistics
-        async function loadUploadStats() {
-            try {
-                const response = await fetch('{% url "worklist:api_get_upload_stats" %}');
-                
-                if (!response.ok) {
-                    console.error('Failed to fetch upload stats:', response.status, response.statusText);
-                    return;
-                }
-                
-                let data;
-                try {
-                    data = await response.json();
-                } catch (jsonErr) {
-                    console.error('JSON parsing error in upload stats:', jsonErr.message);
-                    return;
-                }
-                
-                if (data.success) {
-                    const stats = data.stats;
-                    // Update stats display if elements exist
-                    const statsElements = document.querySelectorAll('.upload-stats .stat-value');
-                    if (statsElements.length >= 3) {
-                        statsElements[0].textContent = stats.total_studies;
-                        statsElements[1].textContent = stats.total_series;
-                        statsElements[2].textContent = stats.total_images;
-                    }
-                }
-            } catch (error) {
-                console.error('Error loading upload stats:', error);
             }
         }
 
@@ -1535,15 +1500,14 @@
             
             // Reload studies data with enhanced API
             Promise.all([
-                loadStudiesData(),
-                loadUploadStats()
+                loadStudiesData()
             ]).then(() => {
                 icon.classList.remove('fa-spin');
                 btn.disabled = false;
                 
                 // Update last update time
                 const now = new Date();
-                const timeElement = document.querySelector('.footer-status .status-right span:nth-last-child(2) strong');
+                const timeElement = document.getElementById('lastUpdateTime') || document.querySelector('.footer-status .status-right span:nth-last-child(2) strong');
                 if (timeElement) {
                     timeElement.textContent = now.toLocaleTimeString('en-US', { hour12: false });
                 }
@@ -1643,7 +1607,7 @@
                     
                     // Update last update time
                     const now = new Date();
-                    const timeElement = document.querySelector('.footer-status .status-right span:nth-last-child(2) strong');
+                    const timeElement = document.getElementById('lastUpdateTime') || document.querySelector('.footer-status .status-right span:nth-last-child(2) strong');
                     if (timeElement) {
                         timeElement.textContent = now.toLocaleTimeString('en-US', { hour12: false });
                     }

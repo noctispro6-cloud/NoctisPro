@@ -238,6 +238,13 @@ def profile_view(request):
         pref = None
     
     if request.method == 'POST':
+        # Validate email uniqueness before saving
+        new_email = request.POST.get('email', '').strip().lower()
+        if new_email and new_email != (user.email or '').lower():
+            if User.objects.filter(email__iexact=new_email).exclude(pk=user.pk).exists():
+                messages.error(request, 'That email address is already in use by another account.')
+                return render(request, 'accounts/profile.html', {'user': user, 'notification_pref': pref, 'recent_sessions': UserSession.objects.filter(user=user).order_by('-login_time')[:10]})
+
         # Update profile information
         user.first_name = request.POST.get('first_name', user.first_name)
         user.last_name = request.POST.get('last_name', user.last_name)
@@ -348,6 +355,18 @@ def user_api_info(request):
             'is_facility_user': user.is_facility_user(),
         }
     })
+
+
+@login_required
+def session_extend(request):
+    """Extend the current session (called by idle timeout warning)."""
+    return JsonResponse({'status': 'ok'})
+
+
+@login_required
+def session_keep_alive(request):
+    """Keep-alive endpoint for session management."""
+    return JsonResponse({'status': 'ok', 'session_age': request.session.get_expiry_age()})
 
 
 def portal_login(request):

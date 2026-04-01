@@ -2004,11 +2004,19 @@ def upload_attachment(request, study_id):
             except Exception:
                 pass
             
-            return JsonResponse({
-                'success': True,
-                'message': f'Successfully uploaded {len(uploaded_attachments)} file(s)',
-                'attachments': uploaded_attachments
-            })
+            # If the request prefers JSON (AJAX), return JSON; otherwise redirect back to study detail.
+            wants_json = (
+                'application/json' in (request.headers.get('Accept') or '')
+                or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+            )
+            if wants_json:
+                return JsonResponse({
+                    'success': True,
+                    'message': f'Successfully uploaded {len(uploaded_attachments)} file(s)',
+                    'attachments': uploaded_attachments
+                })
+            messages.success(request, f'Successfully uploaded {len(uploaded_attachments)} file(s).')
+            return redirect('worklist:study_detail', study_id=study.id)
             
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)

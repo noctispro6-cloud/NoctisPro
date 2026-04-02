@@ -244,14 +244,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
     def save_message(self, content, reply_to_id=None):
         try:
             room = ChatRoom.objects.get(id=self.room_id, is_active=True)
-            
+
             reply_to = None
             if reply_to_id:
                 try:
                     reply_to = ChatMessage.objects.get(id=reply_to_id, room=room)
                 except ChatMessage.DoesNotExist:
                     pass
-            
+
             message = ChatMessage.objects.create(
                 room=room,
                 sender=self.user,
@@ -259,11 +259,31 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 reply_to=reply_to,
                 message_type='text'
             )
-            
+
             # Update room's last activity
             room.last_activity = timezone.now()
             room.save()
-            
+
+            # Create in-app notification for other participants
+            try:
+                from notifications.models import Notification, NotificationType
+                notif_type, _ = NotificationType.objects.get_or_create(
+                    code='new_chat_message',
+                    defaults={'name': 'New Chat Message'}
+                )
+                for participant in room.participants.exclude(user=message.sender).select_related('user'):
+                    if participant.last_read_at and participant.last_read_at >= message.created_at:
+                        continue
+                    Notification.objects.create(
+                        recipient=participant.user,
+                        notification_type=notif_type,
+                        title=f'New message in {room.name}',
+                        message=f'{message.sender.get_full_name() or message.sender.username}: {message.content[:100]}',
+                        data={'room_id': str(room.id), 'action_url': f'/chat/room/{room.id}/'},
+                    )
+            except Exception:
+                pass
+
             return message
         except Exception as e:
             logger.error(f"Error saving message: {str(e)}")

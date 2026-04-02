@@ -39,4 +39,5 @@ urlpatterns = [
     path('api/upload-stats/', views.api_get_upload_stats, name='api_get_upload_stats'),
     path('api/upload-processing-status/', views.api_upload_processing_status, name='api_upload_processing_status'),
     path('api/study/<int:study_id>/reassign-facility/', views.api_reassign_study_facility, name='api_reassign_study_facility'),
+    path('api/study/<int:study_id>/chat-room/', views.api_study_chat_room, name='api_study_chat_room'),
 ]

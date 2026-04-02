@@ -229,10 +229,26 @@ def write_report(request, study_id):
             # Stay on the same page for continued editing
             return redirect('reports:write_report', study_id=study_id)
     
+    # Load DB-driven macros
+    from .models import MacroText
+    modality_code = study.modality.code if study.modality else ''
+    macros = list(
+        MacroText.objects.filter(modality=modality_code).values('name', 'text', 'section')
+    ) + list(
+        MacroText.objects.filter(modality='').values('name', 'text', 'section')
+    )
+
+    # Load active report templates for this modality
+    report_templates = ReportTemplate.objects.filter(is_active=True)
+    if study.modality:
+        report_templates = report_templates.filter(modality=study.modality.code)
+
     context = {
         'study': study,
         'report': report,
         'is_new_report': is_new_report,
+        'macros': macros,
+        'report_templates': report_templates,
     }
     
     return render(request, 'reports/write_report.html', context)
@@ -440,6 +456,23 @@ def export_report_pdf(request, study_id):
         return resp
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+@login_required
+def api_get_template(request, template_id):
+    """Return report template fields as JSON for pre-filling the write report form."""
+    from .models import ReportTemplate
+    try:
+        tmpl = ReportTemplate.objects.get(pk=template_id, is_active=True)
+        return JsonResponse({
+            'clinical_history': tmpl.template_html if hasattr(tmpl, 'clinical_history') else '',
+            'technique': tmpl.technique if hasattr(tmpl, 'technique') else '',
+            'findings': tmpl.findings if hasattr(tmpl, 'findings') else '',
+            'impression': tmpl.impression if hasattr(tmpl, 'impression') else '',
+            'recommendations': tmpl.recommendations if hasattr(tmpl, 'recommendations') else '',
+        })
+    except ReportTemplate.DoesNotExist:
+        return JsonResponse({'error': 'Template not found'}, status=404)
 
 
 @login_required

@@ -328,13 +328,19 @@
                         </div>
                         <div class="col-12 col-md-6">
                             <label class="form-label" style="color: var(--text-secondary); font-size: 11px;">Room type</label>
-                            <select name="room_type" class="form-control">
+                            <select name="room_type" id="createRoomType" class="form-control" onchange="toggleDmSection(this.value)">
                                 <option value="general">General Discussion</option>
                                 <option value="facility">Facility Discussion</option>
                                 <option value="study">Study Discussion</option>
                                 <option value="support">Technical Support</option>
                                 <option value="direct">Direct Message</option>
                             </select>
+                        </div>
+                        <div class="col-12" id="dmUserSection" style="display:none;">
+                            <label class="form-label" style="color: var(--text-secondary); font-size: 11px;">Select User</label>
+                            <input type="text" id="dmUserSearch" class="form-control" placeholder="Search by username..." oninput="searchDmUser(this.value)">
+                            <div id="dmUserResults" class="mt-1"></div>
+                            <input type="hidden" name="dm_user_id" id="dmUserId">
                         </div>
                         <div class="col-12">
                             <label class="form-label" style="color: var(--text-secondary); font-size: 11px;">Description (optional)</label>
@@ -361,6 +367,37 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+    function toggleDmSection(roomType) {
+        const section = document.getElementById('dmUserSection');
+        if (section) section.style.display = roomType === 'direct' ? 'block' : 'none';
+    }
+
+    async function searchDmUser(query) {
+        if (!query || query.length < 2) return;
+        try {
+            const resp = await fetch('/chat/api/search-users/?q=' + encodeURIComponent(query));
+            const data = await resp.json();
+            const resultsDiv = document.getElementById('dmUserResults');
+            if (!resultsDiv) return;
+            resultsDiv.innerHTML = (data.users || []).map(u =>
+                `<div style="cursor:pointer;padding:4px 8px;background:#252525;border-radius:3px;margin-bottom:2px;"
+                      onclick="selectDmUser('${u.id}', '${u.username}')">
+                    ${u.username} ${u.full_name ? '(' + u.full_name + ')' : ''}
+                </div>`
+            ).join('');
+        } catch(e) {}
+    }
+
+    function selectDmUser(id, username) {
+        const idEl = document.getElementById('dmUserId');
+        const searchEl = document.getElementById('dmUserSearch');
+        const resultsEl = document.getElementById('dmUserResults');
+        if (idEl) idEl.value = id;
+        if (searchEl) searchEl.value = username;
+        if (resultsEl) resultsEl.innerHTML = '';
+    }
+</script>
 <script>
     (function () {
         function normalize(s) { return (s || '').toString().toLowerCase().trim(); }

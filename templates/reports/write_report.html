@@ -3,6 +3,7 @@
 {% block title %}Write Report - Noctis Pro PACS{% endblock %}
 
 {% block extra_css %}
+<link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
 <style>
         /* NOTE: no local :root overrides; inherit theme from base.html (dark/light) */
 
@@ -289,15 +290,22 @@
                     </div>
                 </div>
 
-                <!-- DICOM Image Viewer -->
-                <div class="image-viewer-panel">
-                    <div class="text-center">
-                        <i class="fas fa-image fa-3x mb-3"></i>
-                        <h5>DICOM Image Viewer</h5>
-                        <p>Click to open full DICOM viewer</p>
-                        <a href="{% url 'dicom_viewer:viewer' %}?study={{ study.id }}" class="btn-dicom-viewer">
-                            <i class="fas fa-external-link-alt"></i>Launch DICOM Viewer
+                <!-- Embedded DICOM viewer panel -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="fas fa-images"></i> DICOM Images</span>
+                        <a href="{% url 'dicom_viewer:viewer' %}?study={{ study.id }}" target="_blank" class="btn-sm btn-control">
+                            <i class="fas fa-expand"></i> Full Screen
                         </a>
+                    </div>
+                    <div class="card-body p-0" style="height:350px;overflow:hidden;">
+                        <iframe
+                            src="{% url 'dicom_viewer:viewer' %}?study={{ study.id }}&embedded=1"
+                            style="width:100%;height:100%;border:none;"
+                            title="DICOM Viewer"
+                            loading="lazy"
+                            sandbox="allow-scripts allow-same-origin allow-forms">
+                        </iframe>
                     </div>
                 </div>
             </div>
@@ -337,6 +345,34 @@
                     <div class="form-body">
                         <form id="reportForm" method="post">
                             {% csrf_token %}
+
+                            <!-- Report Template Selector -->
+                            {% if report_templates %}
+                            <div class="mb-3 p-3 border rounded" style="background:rgba(0,212,255,0.05);border-color:var(--accent-color) !important;">
+                                <label class="form-label fw-bold"><i class="fas fa-file-alt"></i> Load Report Template</label>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    {% for tmpl in report_templates %}
+                                    <button type="button" class="btn-sm btn-outline-info" onclick="loadTemplate('{{ tmpl.id }}')">
+                                        {{ tmpl.name }}
+                                    </button>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <script>
+                            async function loadTemplate(templateId) {
+                                if (!confirm('Load this template? This will overwrite unsaved text.')) return;
+                                try {
+                                    const resp = await fetch('/reports/api/template/' + templateId + '/');
+                                    const data = await resp.json();
+                                    if (data.clinical_history) document.getElementById('id_clinical_history').value = data.clinical_history;
+                                    if (data.technique) document.getElementById('id_technique').value = data.technique;
+                                    if (data.findings) document.getElementById('id_findings').value = data.findings;
+                                    if (data.impression) document.getElementById('id_impression').value = data.impression;
+                                    if (data.recommendations) document.getElementById('id_recommendations').value = data.recommendations;
+                                } catch(e) { alert('Failed to load template'); }
+                            }
+                            </script>
+                            {% endif %}
                             
                             <!-- Status Control -->
                             <div class="status-controls">
@@ -354,62 +390,103 @@
                             <div class="form-section">
                                 <h5><i class="fas fa-history me-2"></i>Clinical History</h5>
                                 <div class="macro-buttons">
-                                    <button type="button" class="macro-btn" onclick="insertMacro('clinicalHistory', 'No significant clinical history.')" type="button"  >No History</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('clinicalHistory', 'Patient presents with...')" type="button"  >Presenting Complaint</button>
+                                    {% if macros %}
+                                        {% for macro in macros %}{% if macro.section == 'clinical_history' or macro.section == 'clinicalHistory' %}
+                                        <button type="button" class="macro-btn" onclick="insertMacro('id_clinical_history', '{{ macro.text|escapejs }}')" title="{{ macro.name }}">{{ macro.name }}</button>
+                                        {% endif %}{% endfor %}
+                                    {% endif %}
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_clinical_history', 'No significant clinical history.')">No History</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_clinical_history', 'Patient presents with...')">Presenting Complaint</button>
                                 </div>
-                                <textarea id="clinicalHistory" name="clinical_history" class="form-textarea" placeholder="Enter clinical history and indication for study...">{{ report.clinical_history|default:study.clinical_info }}</textarea>
+                                <textarea id="id_clinical_history" name="clinical_history" class="form-textarea" placeholder="Enter clinical history and indication for study...">{{ report.clinical_history|default:study.clinical_info }}</textarea>
                             </div>
 
                             <!-- Technique -->
                             <div class="form-section">
                                 <h5><i class="fas fa-cogs me-2"></i>Technique</h5>
                                 <div class="macro-buttons">
-                                    <button type="button" class="macro-btn" onclick="insertMacro('technique', 'Standard protocol imaging performed.')" type="button"  >Standard Protocol</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('technique', 'Contrast-enhanced imaging performed.')" type="button"  >With Contrast</button>
+                                    {% if macros %}
+                                        {% for macro in macros %}{% if macro.section == 'technique' %}
+                                        <button type="button" class="macro-btn" onclick="insertMacro('id_technique', '{{ macro.text|escapejs }}')" title="{{ macro.name }}">{{ macro.name }}</button>
+                                        {% endif %}{% endfor %}
+                                    {% endif %}
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_technique', 'Standard protocol imaging performed.')">Standard Protocol</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_technique', 'Contrast-enhanced imaging performed.')">With Contrast</button>
                                 </div>
-                                <textarea id="technique" name="technique" class="form-textarea" placeholder="Describe imaging technique and protocols used...">{{ report.technique|default:"" }}</textarea>
+                                <textarea id="id_technique" name="technique" class="form-textarea" placeholder="Describe imaging technique and protocols used...">{{ report.technique|default:"" }}</textarea>
                             </div>
 
                             <!-- Comparison -->
                             <div class="form-section">
                                 <h5><i class="fas fa-exchange-alt me-2"></i>Comparison</h5>
                                 <div class="macro-buttons">
-                                    <button type="button" class="macro-btn" onclick="insertMacro('comparison', 'No prior studies available for comparison.')" type="button"  >No Priors</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('comparison', 'Compared to prior study dated...')" type="button"  >Prior Study</button>
+                                    {% if macros %}
+                                        {% for macro in macros %}{% if macro.section == 'comparison' %}
+                                        <button type="button" class="macro-btn" onclick="insertMacro('id_comparison', '{{ macro.text|escapejs }}')" title="{{ macro.name }}">{{ macro.name }}</button>
+                                        {% endif %}{% endfor %}
+                                    {% endif %}
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_comparison', 'No prior studies available for comparison.')">No Priors</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_comparison', 'Compared to prior study dated...')">Prior Study</button>
                                 </div>
-                                <textarea id="comparison" name="comparison" class="form-textarea" placeholder="Comparison with prior studies...">{{ report.comparison|default:"" }}</textarea>
+                                <textarea id="id_comparison" name="comparison" class="form-textarea" placeholder="Comparison with prior studies...">{{ report.comparison|default:"" }}</textarea>
                             </div>
 
                             <!-- Findings -->
                             <div class="form-section">
                                 <h5><i class="fas fa-search me-2"></i>Findings</h5>
                                 <div class="macro-buttons">
-                                    <button type="button" class="macro-btn" onclick="insertMacro('findings', 'Study is within normal limits.')" type="button"  >Normal Study</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('findings', 'No acute findings.')" type="button"  >No Acute Findings</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('findings', 'Findings consistent with...')" type="button"  >Abnormal Finding</button>
+                                    {% if macros %}
+                                        {% for macro in macros %}{% if macro.section == 'findings' %}
+                                        <button type="button" class="macro-btn" onclick="insertMacro('id_findings', '{{ macro.text|escapejs }}')" title="{{ macro.name }}">{{ macro.name }}</button>
+                                        {% endif %}{% endfor %}
+                                    {% endif %}
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_findings', 'Study is within normal limits.')">Normal Study</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_findings', 'No acute findings.')">No Acute Findings</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_findings', 'Findings consistent with...')">Abnormal Finding</button>
                                 </div>
-                                <textarea id="findings" name="findings" class="form-textarea" placeholder="Detailed description of findings..." rows="8">{{ report.findings|default:"" }}</textarea>
+                                <textarea id="id_findings" name="findings" class="form-textarea" placeholder="Detailed description of findings..." rows="8">{{ report.findings|default:"" }}</textarea>
                             </div>
 
                             <!-- Impression -->
                             <div class="form-section">
                                 <h5><i class="fas fa-bullseye me-2"></i>Impression</h5>
                                 <div class="macro-buttons">
-                                    <button type="button" class="macro-btn" onclick="insertMacro('impression', 'Normal study.')" type="button"  >Normal</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('impression', 'No significant abnormality.')" type="button"  >No Abnormality</button>
+                                    {% if macros %}
+                                        {% for macro in macros %}{% if macro.section == 'impression' %}
+                                        <button type="button" class="macro-btn" onclick="insertMacro('id_impression', '{{ macro.text|escapejs }}')" title="{{ macro.name }}">{{ macro.name }}</button>
+                                        {% endif %}{% endfor %}
+                                    {% endif %}
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_impression', 'Normal study.')">Normal</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_impression', 'No significant abnormality.')">No Abnormality</button>
                                 </div>
-                                <textarea id="impression" name="impression" class="form-textarea" placeholder="Clinical impression and diagnosis...">{{ report.impression|default:"" }}</textarea>
+                                <textarea id="id_impression" name="impression" class="form-textarea" placeholder="Clinical impression and diagnosis...">{{ report.impression|default:"" }}</textarea>
                             </div>
 
                             <!-- Recommendations -->
                             <div class="form-section">
                                 <h5><i class="fas fa-clipboard-list me-2"></i>Recommendations</h5>
                                 <div class="macro-buttons">
-                                    <button type="button" class="macro-btn" onclick="insertMacro('recommendations', 'No further imaging required.')" type="button"  >No Follow-up</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('recommendations', 'Follow-up imaging recommended.')" type="button"  >Follow-up</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('recommendations', 'Clinical correlation recommended.')" type="button"  >Clinical Correlation</button>
+                                    {% if macros %}
+                                        {% for macro in macros %}{% if macro.section == 'recommendations' %}
+                                        <button type="button" class="macro-btn" onclick="insertMacro('id_recommendations', '{{ macro.text|escapejs }}')" title="{{ macro.name }}">{{ macro.name }}</button>
+                                        {% endif %}{% endfor %}
+                                    {% endif %}
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_recommendations', 'No further imaging required.')">No Follow-up</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_recommendations', 'Follow-up imaging recommended.')">Follow-up</button>
+                                    <button type="button" class="macro-btn" onclick="insertMacro('id_recommendations', 'Clinical correlation recommended.')">Clinical Correlation</button>
                                 </div>
-                                <textarea id="recommendations" name="recommendations" class="form-textarea" placeholder="Recommendations for follow-up or additional studies...">{{ report.recommendations|default:"" }}</textarea>
+                                <textarea id="id_recommendations" name="recommendations" class="form-textarea" placeholder="Recommendations for follow-up or additional studies...">{{ report.recommendations|default:"" }}</textarea>
+                            </div>
+
+                            <!-- Digital signature for final reports -->
+                            <div id="signatureSection" class="mb-3" style="display:none;">
+                                <label class="form-label fw-bold"><i class="fas fa-signature"></i> Electronic Signature</label>
+                                <canvas id="signatureCanvas" style="border:1px solid #404040;border-radius:4px;background:#fff;cursor:crosshair;display:block;width:100%;height:100px;"></canvas>
+                                <div class="mt-1 d-flex gap-2">
+                                    <button type="button" onclick="clearSignature()" class="btn-sm btn-control"><i class="fas fa-eraser"></i> Clear</button>
+                                    <button type="button" onclick="confirmSignature()" class="btn-sm btn-control reset"><i class="fas fa-check"></i> Apply Signature</button>
+                                </div>
+                                <input type="hidden" name="digital_signature" id="digitalSignatureInput">
                             </div>
 
                             <!-- Action Buttons -->
@@ -448,9 +525,63 @@
 <script>
 function insertMacro(fieldId, text) {
     const textarea = document.getElementById(fieldId);
+    if (!textarea) return;
     const currentText = textarea.value;
     textarea.value = currentText + (currentText ? '\n\n' : '') + text;
     textarea.focus();
+}
+
+// Digital signature pad
+document.addEventListener('DOMContentLoaded', function() {
+    const submitFinalBtn = document.querySelector('button[name="action"][value="submit"]');
+    if (submitFinalBtn) {
+        submitFinalBtn.addEventListener('click', function(e) {
+            const statusEl = document.getElementById('reportStatus');
+            if (statusEl && statusEl.value === 'final') {
+                e.preventDefault();
+                const sigSection = document.getElementById('signatureSection');
+                if (sigSection) {
+                    sigSection.style.display = 'block';
+                    sigSection.scrollIntoView({behavior: 'smooth'});
+                    initSignaturePad();
+                }
+            }
+        });
+    }
+});
+
+let sigCtx, sigDrawing = false;
+function initSignaturePad() {
+    const canvas = document.getElementById('signatureCanvas');
+    if (!canvas || canvas._initialized) return;
+    canvas._initialized = true;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width || 400;
+    canvas.height = 100;
+    sigCtx = canvas.getContext('2d');
+    sigCtx.strokeStyle = '#000';
+    sigCtx.lineWidth = 2;
+    sigCtx.lineCap = 'round';
+    canvas.addEventListener('mousedown', function(e) { sigDrawing = true; sigCtx.beginPath(); sigCtx.moveTo(e.offsetX, e.offsetY); });
+    canvas.addEventListener('mousemove', function(e) { if (!sigDrawing) return; sigCtx.lineTo(e.offsetX, e.offsetY); sigCtx.stroke(); });
+    canvas.addEventListener('mouseup', function() { sigDrawing = false; });
+    canvas.addEventListener('mouseleave', function() { sigDrawing = false; });
+}
+function clearSignature() {
+    const canvas = document.getElementById('signatureCanvas');
+    if (sigCtx) sigCtx.clearRect(0, 0, canvas.width, canvas.height);
+}
+function confirmSignature() {
+    const canvas = document.getElementById('signatureCanvas');
+    const data = canvas.toDataURL('image/png').split(',')[1];
+    document.getElementById('digitalSignatureInput').value = data;
+    const form = canvas.closest('form');
+    if (form) {
+        const action = document.createElement('input');
+        action.type = 'hidden'; action.name = 'action'; action.value = 'submit';
+        form.appendChild(action);
+        form.submit();
+    }
 }
 
 function _setAiAssistStatus(msg) {
@@ -650,7 +781,56 @@ window.addEventListener('beforeunload', function(e) {
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
 <script>
-// Intentionally empty: avoid duplicating functions defined above.
+// Initialize Quill rich text editors for report sections
+(function() {
+    const quillFields = [
+        {id: 'id_clinical_history', label: 'Clinical History'},
+        {id: 'id_technique', label: 'Technique'},
+        {id: 'id_comparison', label: 'Comparison'},
+        {id: 'id_findings', label: 'Findings'},
+        {id: 'id_impression', label: 'Impression'},
+        {id: 'id_recommendations', label: 'Recommendations'},
+    ];
+
+    quillFields.forEach(function(field) {
+        const textarea = document.getElementById(field.id);
+        if (!textarea) return;
+
+        const container = document.createElement('div');
+        container.style.cssText = 'background:#1a1a1a;border:1px solid #404040;border-radius:4px;margin-bottom:4px;';
+        textarea.parentNode.insertBefore(container, textarea);
+        textarea.style.display = 'none';
+
+        const quill = new Quill(container, {
+            theme: 'snow',
+            modules: {
+                toolbar: [
+                    ['bold', 'italic', 'underline'],
+                    [{'list': 'ordered'}, {'list': 'bullet'}],
+                    ['clean']
+                ]
+            },
+            placeholder: 'Enter ' + field.label + '...',
+        });
+
+        if (textarea.value) {
+            quill.root.innerHTML = textarea.value;
+        }
+
+        const form = textarea.closest('form');
+        if (form) {
+            form.addEventListener('submit', function() {
+                textarea.value = quill.root.innerHTML;
+            }, {capture: true});
+        }
+
+        const toolbar = container.querySelector('.ql-toolbar');
+        const qlContainer = container.querySelector('.ql-container');
+        if (toolbar) toolbar.style.cssText = 'border-color:#404040;background:#252525;';
+        if (qlContainer) qlContainer.style.cssText = 'border-color:#404040;color:#fff;font-size:13px;min-height:80px;';
+    });
+})();
 </script>
 {% endblock %}

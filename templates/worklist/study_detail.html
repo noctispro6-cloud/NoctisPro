@@ -68,6 +68,9 @@
 					<i class="fas fa-file-signature"></i> Write / View Report
 				</a>
 				{% endif %}
+				<button onclick="openStudyChatRoom({{ study.id }})" class="btn-control">
+					<i class="fas fa-comments"></i> Study Discussion
+				</button>
 			</div>
 		</div>
 		<div class="card-body">
@@ -213,6 +216,22 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+async function openStudyChatRoom(studyId) {
+    try {
+        const resp = await fetch('/worklist/api/study/' + studyId + '/chat-room/', {
+            method: 'POST', credentials: 'same-origin',
+            headers: {'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json'},
+        });
+        const data = await resp.json();
+        if (data.room_id) {
+            window.location.href = '/chat/room/' + data.room_id + '/';
+        } else {
+            alert('Could not open discussion room: ' + (data.error || 'Unknown error'));
+        }
+    } catch(e) { alert('Could not open discussion room'); }
+}
+</script>
 <script>
 (function(){
 	function getCookie(name){

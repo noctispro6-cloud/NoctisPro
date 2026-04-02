@@ -9,4 +9,5 @@ urlpatterns = [
     path('print/<int:study_id>/', views.print_report_stub, name='print_report'),
     path('export/pdf/<int:study_id>/', views.export_report_pdf, name='export_report_pdf'),
     path('export/docx/<int:study_id>/', views.export_report_docx, name='export_report_docx'),
+    path('api/template/<int:template_id>/', views.api_get_template, name='api_get_template'),
 ]

@@ -228,6 +228,7 @@ def dashboard(request):
 	context = {
 		'user': user,
 		'csrf_token': get_token(request),
+		'status_columns': Study.STUDY_STATUS_CHOICES if hasattr(Study, 'STUDY_STATUS_CHOICES') else [],
 	}
 
 	# Role-specific dashboard stats
@@ -1803,7 +1804,15 @@ def api_studies(request):
 			.order_by('-upload_date', '-study_date')
 		)
 
-		for study in studies_qs[:200]:
+		# Pagination support
+		page = int(request.GET.get('page', 1))
+		page_size = int(request.GET.get('page_size', 200))
+		page_size = min(page_size, 500)
+		offset = (page - 1) * page_size
+		total_count = studies_qs.count()
+		paginated_qs = studies_qs[offset:offset + page_size]
+
+		for study in paginated_qs:
 			# Professional medical data extraction
 			# Dashboard columns:
 			# - TIME: show upload time (what users perceive as "new on the worklist")
@@ -1903,6 +1912,10 @@ def api_studies(request):
 			'success': True,
 			'message': '🏥 Professional medical imaging data retrieved successfully',
 			'studies': studies_data,
+			'total_count': total_count,
+			'page': page,
+			'page_size': page_size,
+			'has_more': (page * page_size) < total_count,
 			'professional_metadata': {
 				'api_version': 'v2.0 Enhanced',
 				'processing_time_ms': api_processing_time,
@@ -2794,6 +2807,35 @@ def process_attachment_metadata(attachment):
     except Exception:
         # If metadata extraction fails, continue silently
         pass
+
+@login_required
+def api_study_chat_room(request, study_id):
+	"""Get or create a study-linked chat room."""
+	if request.method != 'POST':
+		return JsonResponse({'error': 'POST required'}, status=405)
+
+	study = get_object_or_404(Study, pk=study_id)
+
+	user = request.user
+	if user.is_facility_user() and study.facility != getattr(user, 'facility', None):
+		return JsonResponse({'error': 'Access denied'}, status=403)
+
+	try:
+		from chat.models import ChatRoom, ChatParticipant
+		room = ChatRoom.objects.filter(study=study).first()
+		if not room:
+			room = ChatRoom.objects.create(
+				name=f'Study Discussion: {study.accession_number}',
+				room_type='study',
+				study=study,
+				facility=study.facility,
+				created_by=user,
+			)
+		ChatParticipant.objects.get_or_create(room=room, user=user, defaults={'role': 'member'})
+		return JsonResponse({'room_id': str(room.id)})
+	except Exception as e:
+		return JsonResponse({'error': str(e)}, status=500)
+
 
 def generate_attachment_thumbnail(attachment):
     """Generate thumbnail for supported file types"""

@@ -230,6 +230,7 @@ INSTALLED_APPS = [
     'chat',  # ENABLED - CRITICAL FOR MEDICAL COMMUNICATION
     'notifications',  # ENABLED - CRITICAL FOR MEDICAL ALERTS
     'ai_analysis',  # ENABLED - CRITICAL FOR MEDICAL AI
+    'django_ratelimit',  # Brute force protection
 ]
 
 MIDDLEWARE = [
@@ -808,6 +809,11 @@ if not DEBUG:
     if _bad:
         from django.core.exceptions import ImproperlyConfigured
         raise ImproperlyConfigured(f"Test-only packages found in INSTALLED_APPS in production: {_bad}")
+
+# django-ratelimit: fail open when cache backend isn't shared (dev fallback)
+# In production with Redis, this setting has no effect since E003 won't trigger.
+RATELIMIT_FAIL_OPEN = True
+SILENCED_SYSTEM_CHECKS = ['django_ratelimit.E003', 'django_ratelimit.W001']
 
 import logging as _startup_logging
 _startup_logger = _startup_logging.getLogger('noctis_pro')

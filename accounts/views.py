@@ -8,6 +8,8 @@ from django.utils import timezone
 from django.contrib.auth.forms import AuthenticationForm
 from django.conf import settings
 from .models import User, UserSession, Facility
+from django_ratelimit.decorators import ratelimit
+from django_ratelimit.exceptions import Ratelimited
 import json
 
 def _get_or_create_session_key(request) -> str:
@@ -92,6 +94,7 @@ def _bootstrap_admin_user_if_enabled() -> None:
         # Silent best-effort by design (never block login page rendering).
         pass
 
+@ratelimit(key='ip', rate='10/m', method='POST', block=False)
 def login_view(request):
     """Custom login view with enhanced security tracking"""
     # Avoid surprising side-effects on the login page; bootstrap is explicit opt-in.
@@ -105,6 +108,10 @@ def login_view(request):
         list(messages.get_messages(request))
     
     if request.method == 'POST':
+        was_limited = getattr(request, 'limited', False)
+        if was_limited:
+            messages.error(request, 'Too many login attempts. Please wait a minute before trying again.')
+            return render(request, 'accounts/login.html', {'hide_navbar': True})
         identifier = (request.POST.get('username') or '').strip()
         password = request.POST.get('password') or ''
 
@@ -369,6 +376,7 @@ def session_keep_alive(request):
     return JsonResponse({'status': 'ok', 'session_age': request.session.get_expiry_age()})
 
 
+@ratelimit(key='ip', rate='10/m', method='POST', block=False)
 def portal_login(request):
     """Staff portal login for radiologists and facility users (no admin-only restriction)."""
     _bootstrap_admin_user_if_enabled()
@@ -379,6 +387,11 @@ def portal_login(request):
         list(messages.get_messages(request))
 
     if request.method == 'POST':
+        was_limited = getattr(request, 'limited', False)
+        if was_limited:
+            messages.error(request, 'Too many login attempts. Please wait a minute before trying again.')
+            return render(request, 'accounts/portal_login.html', {'hide_navbar': True})
+
         identifier = (request.POST.get('username') or '').strip()
         password = request.POST.get('password') or ''
 

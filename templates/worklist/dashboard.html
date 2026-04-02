@@ -763,6 +763,7 @@
                 <div class="nav-tab" onclick="window.location.href='{% url 'worklist:study_list' %}'">STUDIES</div>
                 <div class="nav-tab" onclick="window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
                 <div class="nav-tab" onclick="window.location.href='{% url 'dicom_viewer:viewer' %}'"><i class="fas fa-images"></i> DICOM VIEWER</div>
+                <div class="nav-tab" id="boardViewTab" onclick="toggleBoardView()"><i class="fas fa-th"></i> BOARD</div>
                 {% user_caps as caps %}
                 {# AI WORKLIST tab: visible to admin, radiologist, and facility users with an active subscription #}
                 {% if user.is_admin or user.is_radiologist %}
@@ -895,12 +896,24 @@
             </button>
         </div>
 
+        <!-- Bulk Action Bar (hidden until selections made) -->
+        <div id="bulkActionBar" style="display:none;background:rgba(0,212,255,0.1);border-bottom:1px solid var(--accent-color);padding:6px 16px;align-items:center;gap:12px;">
+            <span id="selectedCount" style="font-size:11px;">0 selected</span>
+            <button onclick="bulkUpdateStatus('completed')" class="btn-control" style="font-size:10px;">Mark Completed</button>
+            <button onclick="bulkUpdateStatus('cancelled')" class="btn-control" style="font-size:10px;">Mark Cancelled</button>
+            {% if user.is_admin %}
+            <button onclick="bulkDelete()" class="btn-control" style="font-size:10px;background:var(--danger-color);color:#fff;">Delete Selected</button>
+            {% endif %}
+            <button onclick="clearSelection()" class="btn-control" style="font-size:10px;">Clear</button>
+        </div>
+
         <!-- Main Content -->
         <div class="main-content">
-            <div class="data-table-container">
+            <div class="data-table-container" id="dataTableContainer">
                 <table class="data-table">
                     <thead>
                         <tr>
+                            <th style="width:30px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)" title="Select All"></th>
                             <th class="sortable" data-sort="study_time" onclick="sortTable('study_time')" style="cursor:pointer">TIME ↕</th>
                             <th class="sortable" data-sort="patient_id" onclick="sortTable('patient_id')" style="cursor:pointer">PATIENT ID ↕</th>
                             <th class="sortable" data-sort="patient_name" onclick="sortTable('patient_name')" style="cursor:pointer">NAME ↕</th>
@@ -918,7 +931,7 @@
                     <tbody id="studiesTableBody">
                         <!-- Studies will be dynamically loaded here -->
                         <tr id="noDataRow">
-                            <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                            <td colspan="13" style="text-align: center; padding: 40px; color: var(--text-muted);">
                                 <i class="fas fa-folder-open" style="font-size: 48px; opacity: 0.3; margin-bottom: 16px; display: block;"></i>
                                 <div style="font-size: 14px; margin-bottom: 8px;">No studies found</div>
                                 <div style="font-size: 12px;">Upload DICOM studies or check your filter settings. Right-click any study row for actions.</div>
@@ -927,11 +940,28 @@
                     </tbody>
                 </table>
             </div>
+
+            <!-- Board / Kanban View -->
+            <div id="boardView" style="display:none;overflow-x:auto;padding:12px;">
+                <div style="display:flex;gap:12px;min-width:900px;">
+                    {% for status_val, status_label in status_columns %}
+                    <div style="flex:1;min-width:180px;background:var(--secondary-bg);border:1px solid var(--border-color);border-radius:6px;padding:8px;">
+                        <div style="font-size:10px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border-color);">
+                            {{ status_label }}
+                        </div>
+                        <div id="board-{{ status_val }}" class="board-column" style="min-height:100px;"></div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
         </div>
 
         <!-- Footer Status Bar -->
         <div class="footer-status">
             <div class="status-left">
+                <button id="loadMoreBtn" style="display:none;" onclick="loadMore()" class="btn-control">
+                    <i class="fas fa-chevron-down"></i> Load More Studies
+                </button>
                 <span>Total Studies: <strong>{{ total_studies|default:0 }}</strong></span>
                 <span>Urgent: <strong style="color: var(--urgent-color);">{{ urgent_studies|default:0 }}</strong></span>
                 <span>In Progress: <strong style="color: var(--in-progress-color);">{{ in_progress_studies|default:0 }}</strong></span>
@@ -1077,6 +1107,13 @@
                         updateStatusCounts();
                         if (!silent) showToast(`Loaded ${studiesData.length} studies`, 'success', 2000);
                     }
+
+                    // Show Load More button if there are more results
+                    const loadMoreBtn = document.getElementById('loadMoreBtn');
+                    if (loadMoreBtn) {
+                        loadMoreBtn.style.display = data.has_more ? 'inline-block' : 'none';
+                        loadMoreBtn.setAttribute('data-next-page', '2');
+                    }
                     
                 } else {
                     console.error('API returned error:', data.error);
@@ -1142,6 +1179,7 @@
                 
                 return `
                     <tr onclick="selectStudy(this)" data-study-id="${study.id}" ${isRecentUpload ? 'class="recent-upload"' : ''}>
+                        <td onclick="event.stopPropagation()"><input type="checkbox" class="study-checkbox" data-id="${study.id}" onchange="updateBulkActions()" onclick="event.stopPropagation()"></td>
                         <td class="timestamp">${studyTime}</td>
                         <td class="patient-id">${study.patient_id}</td>
                         <td class="patient-name">${study.patient_name}</td>
@@ -1794,6 +1832,111 @@
             });
             
             renderStudiesTable();
+        }
+
+        // ---- Load More ----
+        async function loadMore() {
+            const btn = document.getElementById('loadMoreBtn');
+            const nextPage = btn ? parseInt(btn.getAttribute('data-next-page') || '2', 10) : 2;
+            try {
+                const resp = await fetch('{% url "worklist:api_studies" %}?page=' + nextPage, {
+                    credentials: 'same-origin',
+                    headers: {'Accept': 'application/json'}
+                });
+                const data = await resp.json();
+                if (data.success && data.studies && data.studies.length > 0) {
+                    studiesData = studiesData.concat(data.studies);
+                    applyFilters();
+                    if (btn) {
+                        btn.setAttribute('data-next-page', String(nextPage + 1));
+                        btn.style.display = data.has_more ? 'inline-block' : 'none';
+                    }
+                }
+            } catch(e) { console.error('Load more error:', e); }
+        }
+
+        // ---- Board / Kanban View ----
+        function toggleBoardView() {
+            const boardView = document.getElementById('boardView');
+            const tableContainer = document.getElementById('dataTableContainer');
+            const tab = document.getElementById('boardViewTab');
+            const isBoard = boardView && boardView.style.display !== 'none';
+            if (isBoard) {
+                if (boardView) boardView.style.display = 'none';
+                if (tableContainer) tableContainer.style.display = '';
+                if (tab) tab.classList.remove('active');
+            } else {
+                if (tableContainer) tableContainer.style.display = 'none';
+                if (boardView) { boardView.style.display = 'block'; renderBoardView(); }
+                if (tab) tab.classList.add('active');
+            }
+        }
+
+        function renderBoardView() {
+            const statuses = ['scheduled', 'in_progress', 'completed', 'suspended', 'cancelled'];
+            statuses.forEach(function(status) {
+                const col = document.getElementById('board-' + status);
+                if (!col) return;
+                const dbStatus = status;
+                const uiStatus = status.replace('_', '-');
+                const items = studiesData.filter(s => s.status === dbStatus || s.status === uiStatus);
+                col.innerHTML = items.map(s => `
+                    <div style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:4px;padding:8px;margin-bottom:6px;cursor:pointer;"
+                         onclick="openStudyInViewer('${s.id}')">
+                        <div style="font-weight:bold;font-size:11px;color:var(--accent-color);">${s.accession_number || ''}</div>
+                        <div style="font-size:10px;">${s.patient_name || ''}</div>
+                        <div style="font-size:9px;color:var(--text-muted);">${s.modality || ''}</div>
+                    </div>
+                `).join('') || '<div style="color:var(--text-muted);font-size:10px;text-align:center;">Empty</div>';
+            });
+        }
+
+        // ---- Bulk Select ----
+        function toggleSelectAll(cb) {
+            document.querySelectorAll('.study-checkbox').forEach(c => { c.checked = cb.checked; });
+            updateBulkActions();
+        }
+        function updateBulkActions() {
+            const checked = document.querySelectorAll('.study-checkbox:checked');
+            const bar = document.getElementById('bulkActionBar');
+            const count = document.getElementById('selectedCount');
+            if (bar) bar.style.display = checked.length > 0 ? 'flex' : 'none';
+            if (count) count.textContent = checked.length + ' selected';
+        }
+        function clearSelection() {
+            document.querySelectorAll('.study-checkbox').forEach(c => c.checked = false);
+            const selAll = document.getElementById('selectAll');
+            if (selAll) selAll.checked = false;
+            updateBulkActions();
+        }
+        async function bulkUpdateStatus(status) {
+            const ids = Array.from(document.querySelectorAll('.study-checkbox:checked')).map(c => c.dataset.id);
+            if (!ids.length) return;
+            if (!confirm('Update ' + ids.length + ' studies to ' + status + '?')) return;
+            const csrf = getCSRFToken();
+            for (const id of ids) {
+                await fetch('/worklist/api/study/' + id + '/update-status/', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'X-CSRFToken': csrf, 'Content-Type': 'application/json'},
+                    body: JSON.stringify({status: status})
+                }).catch(() => {});
+            }
+            clearSelection();
+            await loadStudiesData();
+        }
+        async function bulkDelete() {
+            const ids = Array.from(document.querySelectorAll('.study-checkbox:checked')).map(c => c.dataset.id);
+            if (!ids.length) return;
+            if (!confirm('Delete ' + ids.length + ' studies? This cannot be undone.')) return;
+            const csrf = getCSRFToken();
+            for (const id of ids) {
+                await fetch('/worklist/api/study/' + id + '/delete/', {
+                    method: 'DELETE', credentials: 'same-origin',
+                    headers: {'X-CSRFToken': csrf}
+                }).catch(() => {});
+            }
+            clearSelection();
+            await loadStudiesData();
         }
     </script>
     

@@ -852,3 +852,30 @@ DICOM_VIEWER_SETTINGS = {
     'ENABLE_QR_CODES': True,
     'ENABLE_LETTERHEADS': True,
 }
+
+# ── AI Report Generation (LLM) ────────────────────────────────────────────
+# Three backends in priority order:
+# 1. External OpenAI-compatible API (fastest, best quality)
+# 2. Local HuggingFace model (offline, CPU-capable, downloads on first use)
+# 3. Deterministic template fallback (always available)
+#
+# To use the external API:
+#   AI_REPORT_API_URL=https://api.openai.com/v1
+#   AI_REPORT_API_KEY=sk-...
+#   AI_REPORT_MODEL=gpt-4o-mini   (or gpt-3.5-turbo, claude-3-haiku, etc.)
+#
+# To use a different local model (default: google/flan-t5-base — 250MB, CPU):
+#   AI_LOCAL_MODEL=google/flan-t5-large   (780MB, better quality)
+#   AI_LOCAL_MODEL=microsoft/phi-2        (2.7B, excellent quality, needs ~6GB RAM)
+#   AI_LOCAL_MODEL=Qwen/Qwen2.5-0.5B-Instruct  (fast, good quality, ~1GB)
+#
+# To disable local model (use deterministic only):
+#   AI_USE_LOCAL_MODEL=false
+
+AI_REPORT_API_URL = os.environ.get('AI_REPORT_API_URL', '')
+AI_REPORT_API_KEY = os.environ.get('AI_REPORT_API_KEY', '')
+AI_REPORT_MODEL = os.environ.get('AI_REPORT_MODEL', 'gpt-3.5-turbo')
+AI_LOCAL_MODEL = os.environ.get('AI_LOCAL_MODEL', 'google/flan-t5-base')
+AI_USE_LOCAL_MODEL = os.environ.get('AI_USE_LOCAL_MODEL', 'true')
+AI_REPORT_MAX_TOKENS = int(os.environ.get('AI_REPORT_MAX_TOKENS', '400'))
+AI_REPORT_TIMEOUT = int(os.environ.get('AI_REPORT_TIMEOUT', '30'))

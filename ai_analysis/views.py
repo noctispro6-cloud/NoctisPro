@@ -739,10 +739,10 @@ def generate_auto_report(request, study_id):
                 is_active=True
             ).first()
         
-        if not template:
-            return JsonResponse({'error': 'No suitable report template found'}, status=400)
-        
-        # Generate report content
+        # Template is optional — LLM generation works without it
+        # (template provides style/structure hints but is not required)
+
+        # Generate report content (uses LLM when available)
         report_data = generate_report_content(study, analyses, template)
         
         # Create auto-generated report
@@ -771,6 +771,7 @@ def generate_auto_report(request, study_id):
             'recommendations': auto_report.generated_recommendations,
             'confidence': auto_report.overall_confidence,
             'requires_review': auto_report.requires_review,
+            'llm_used': report_data.get('llm_used', 'deterministic'),
             'triage': {
                 'triage_level': m.get('triage_level'),
                 'triage_score': m.get('triage_score'),
@@ -1266,3 +1267,148 @@ def api_medical_references(request):
         
     references = _get_online_references(keywords)
     return JsonResponse({'references': references})
+
+
+@login_required
+def api_llm_status(request):
+    """
+    Return the current LLM backend status and configuration.
+    Useful for the AI dashboard to show what report generation engine is active.
+    """
+    from django.conf import settings as _s
+    import os
+
+    api_url = getattr(_s, 'AI_REPORT_API_URL', '') or os.environ.get('AI_REPORT_API_URL', '')
+    api_key = getattr(_s, 'AI_REPORT_API_KEY', '') or os.environ.get('AI_REPORT_API_KEY', '')
+    local_model = getattr(_s, 'AI_LOCAL_MODEL', 'google/flan-t5-base')
+    use_local = str(getattr(_s, 'AI_USE_LOCAL_MODEL', 'true')).lower() in ('1', 'true', 'yes')
+
+    status = {
+        'api_configured': bool(api_url and api_key),
+        'api_model': getattr(_s, 'AI_REPORT_MODEL', 'gpt-3.5-turbo') if api_url else None,
+        'local_model_enabled': use_local,
+        'local_model_id': local_model if use_local else None,
+        'local_model_loaded': False,
+        'local_model_error': None,
+        'active_backend': 'deterministic',
+    }
+
+    # Check if local model is already loaded in memory
+    try:
+        from ai_analysis.llm_reporting import _local_pipeline, _local_pipeline_error
+        status['local_model_loaded'] = _local_pipeline is not None
+        status['local_model_error'] = _local_pipeline_error
+    except Exception:
+        pass
+
+    # Determine active backend label
+    if status['api_configured']:
+        status['active_backend'] = f"api:{status['api_model']}"
+    elif use_local and status['local_model_loaded']:
+        status['active_backend'] = f"local:{local_model}"
+    elif use_local:
+        status['active_backend'] = f"local:{local_model} (not yet loaded)"
+
+    return JsonResponse(status)
+
+
+@login_required
+def api_llm_warmup(request):
+    """
+    Trigger local model download/load in a background thread.
+    Returns immediately; the model loads asynchronously.
+    Call GET to check status, POST to trigger download.
+    """
+    if request.method == 'GET':
+        return api_llm_status(request)
+
+    if not (request.user.is_admin() or request.user.is_radiologist()):
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+
+    import threading
+
+    def _load():
+        try:
+            from ai_analysis.llm_reporting import _load_local_model
+            _load_local_model()
+        except Exception as exc:
+            import logging
+            logging.getLogger('ai_analysis').error('Model warmup failed: %s', exc)
+
+    t = threading.Thread(target=_load, daemon=True)
+    t.start()
+    return JsonResponse({
+        'success': True,
+        'message': 'Model download/load started in background. Check /api/llm-status/ for progress.',
+    })
+
+
+@login_required
+def api_generate_llm_report(request, study_id):
+    """
+    Generate a preliminary radiology report for a study using the LLM pipeline.
+    Can be called directly (without a prior AI analysis) using study metadata only.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    study = get_object_or_404(Study, id=study_id)
+    user = request.user
+
+    if user.is_facility_user() and study.facility != user.facility:
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except Exception:
+        data = {}
+
+    # Allow caller to override fields
+    modality = data.get('modality') or (study.modality.code if study.modality else '')
+    body_part = data.get('body_part') or (study.body_part or '')
+    clinical_info = data.get('clinical_info') or (study.clinical_info or '')
+    findings_summary = data.get('findings_summary', '')
+    abnormalities = data.get('abnormalities', [])
+    triage_level = data.get('triage_level', '')
+    confidence = float(data.get('confidence', 0.0))
+
+    # Try to get from latest AI analysis if not provided
+    if not findings_summary or not abnormalities:
+        latest = AIAnalysis.objects.filter(study=study, status='completed').order_by('-completed_at').first()
+        if latest:
+            findings_summary = findings_summary or (getattr(latest, 'findings', '') or '')
+            if not abnormalities:
+                raw = getattr(latest, 'abnormalities_detected', []) or []
+                abnormalities = [
+                    (item.get('label') or item.get('type') or str(item)).strip()
+                    for item in raw if item
+                ] if isinstance(raw, list) else []
+            if not triage_level:
+                m = getattr(latest, 'measurements', {}) or {}
+                triage_level = m.get('triage_level', '')
+            if not confidence:
+                confidence = float(getattr(latest, 'confidence_score', 0.0) or 0.0)
+
+    try:
+        from ai_analysis.llm_reporting import generate_llm_report
+        result = generate_llm_report(
+            modality=modality,
+            body_part=body_part,
+            clinical_info=clinical_info,
+            findings_summary=findings_summary,
+            abnormalities=abnormalities,
+            triage_level=triage_level,
+            confidence=confidence,
+        )
+        return JsonResponse({
+            'success': True,
+            'findings': result.get('findings', ''),
+            'impression': result.get('impression', ''),
+            'recommendations': result.get('recommendations', ''),
+            'disclaimer': result.get('disclaimer', ''),
+            'llm_used': result.get('llm_used', 'deterministic'),
+        })
+    except Exception as exc:
+        import logging
+        logging.getLogger('ai_analysis').error('LLM report generation API error: %s', exc, exc_info=True)
+        return JsonResponse({'error': str(exc)}, status=500)

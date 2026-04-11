@@ -23,15 +23,17 @@ def _can_manage_room(room: ChatRoom, user: User, participant: ChatParticipant | 
     return participant.role in ("admin", "moderator")
 
 
-def _can_invite_to_room(room: ChatRoom, inviter: User) -> bool:
-    # Keep it simple and safe:
-    # - Admin/radiologist can invite anyone
-    # - Facility users can only invite users in their facility
-    if hasattr(inviter, "is_admin") and inviter.is_admin():
+def _can_invite_to_room(room: ChatRoom, user: User) -> bool:
+    """Check if user can invite others to this room based on facility."""
+    if hasattr(user, "is_admin") and user.is_admin():
         return True
-    if hasattr(inviter, "is_radiologist") and inviter.is_radiologist():
-        return True
-    return True  # further restricted by facility filter below
+    if room.room_type == 'general':
+        return True  # Public rooms allow any invite
+    # For facility rooms: only invite users from the same facility
+    if room.room_type == 'facility' and room.facility:
+        return room.facility == getattr(user, 'facility', None)
+    # For other types: only room participants can invite
+    return room.participants.filter(user=user).exists()
 
 
 @login_required
@@ -145,7 +147,18 @@ def create_room(request):
             user=request.user,
             role='admin'
         )
-        
+
+        # For direct messages, also add the other user
+        dm_user_id = request.POST.get('dm_user_id')
+        if room_type == 'direct' and dm_user_id:
+            try:
+                other_user = User.objects.get(pk=dm_user_id)
+                ChatParticipant.objects.get_or_create(room=room, user=other_user, defaults={'role': 'member'})
+                room.name = f'DM: {request.user.username} & {other_user.username}'
+                room.save(update_fields=['name'])
+            except Exception:
+                pass
+
         messages.success(request, f'Chat room "{name}" created successfully!')
         return redirect('chat:chat_room', room_id=room.id)
     
@@ -316,10 +329,9 @@ def invite_user(request, room_id):
     if existing_participant and existing_participant.is_active:
         return JsonResponse({'ok': True, 'already_member': True})
 
-    # Facility restriction for non-admin/non-radiologist
-    if not ((hasattr(request.user, 'is_admin') and request.user.is_admin()) or (hasattr(request.user, 'is_radiologist') and request.user.is_radiologist())):
-        if getattr(request.user, 'facility_id', None) and invited_user.facility_id != request.user.facility_id:
-            return JsonResponse({'ok': False, 'error': 'You can only invite users in your facility'}, status=403)
+    # Facility restriction via helper
+    if not _can_invite_to_room(room, request.user):
+        return JsonResponse({'ok': False, 'error': 'You can only invite users to this room based on facility restrictions'}, status=403)
 
     # Create or refresh invitation
     expires_at = timezone.now() + timezone.timedelta(days=7)
@@ -438,3 +450,61 @@ def decline_invitation(request, invitation_id: int):
     invitation.decline()
     messages.success(request, 'Invitation declined.')
     return redirect('chat:chat_rooms')
+
+
+@login_required
+def upload_chat_attachment(request, room_id):
+    """Upload a file attachment to a chat room."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    room = get_object_or_404(ChatRoom, pk=room_id)
+    if not room.participants.filter(user=request.user).exists():
+        return JsonResponse({'error': 'Not a member of this room'}, status=403)
+
+    uploaded_file = request.FILES.get('file')
+    if not uploaded_file:
+        return JsonResponse({'error': 'No file provided'}, status=400)
+
+    if uploaded_file.size > 10 * 1024 * 1024:
+        return JsonResponse({'error': 'File too large (max 10MB)'}, status=400)
+
+    msg = ChatMessage.objects.create(
+        room=room,
+        sender=request.user,
+        content=f'[Attachment: {uploaded_file.name}]',
+        message_type='file',
+        attachment=uploaded_file,
+        attachment_name=uploaded_file.name,
+    )
+
+    return JsonResponse({
+        'success': True,
+        'message_id': str(msg.id),
+        'filename': uploaded_file.name,
+        'url': msg.attachment.url if msg.attachment else None,
+    })
+
+
+@login_required
+def api_search_users_global(request):
+    """Search users for DM creation (global, not room-scoped)."""
+    q = (request.GET.get('q') or '').strip()
+    if len(q) < 2:
+        return JsonResponse({'users': []})
+
+    users = User.objects.filter(is_active=True).filter(
+        Q(username__icontains=q) |
+        Q(first_name__icontains=q) |
+        Q(last_name__icontains=q)
+    ).exclude(pk=request.user.pk).order_by('username')[:12]
+
+    results = [
+        {
+            'id': u.id,
+            'username': u.username,
+            'full_name': u.get_full_name(),
+        }
+        for u in users
+    ]
+    return JsonResponse({'users': results})

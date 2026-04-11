@@ -72,8 +72,6 @@ class DicomProcessor:
             't2_like': {'ww': 200, 'wl': 20, 'description': 'T2-weighted appearance'},
             
             # Projection radiography presets
-            'xray_chest': {'ww': 2000, 'wl': 500, 'description': 'Chest X-ray'},
-            'xray_bone': {'ww': 4000, 'wl': 2000, 'description': 'Bone X-ray'},
             'mammo': {'ww': 4000, 'wl': 2000, 'description': 'Mammography'},
         }
         
@@ -218,9 +216,11 @@ class DicomProcessor:
             return result.astype(np.float32)
             
         except ImportError:
-            # Fallback: simple noise reduction
-            kernel = np.ones((3,3)) / 9
-            return ndimage.convolve(image_data, kernel, mode='reflect')
+            # Fallback: simple box-blur noise reduction without scipy
+            from numpy.lib.stride_tricks import sliding_window_view
+            pad = np.pad(image_data, 1, mode='reflect')
+            windows = sliding_window_view(pad, (3, 3))
+            return windows.mean(axis=(-2, -1)).astype(np.float32)
     
     def _apply_adaptive_histogram_equalization(self, image_data, min_val, max_val):
         """Apply adaptive histogram equalization for improved local contrast"""
@@ -304,7 +304,8 @@ class DicomProcessor:
                 from scipy import ndimage
                 enhanced = ndimage.convolve(normalized_data, kernel, mode='reflect')
                 return np.clip(enhanced, 0.0, 1.0)
-            except:
+            except Exception as e:
+                logger.debug('scipy convolve failed, returning normalized data: %s', e)
                 return normalized_data
     
     def get_optimal_preset_for_hu_range(self, hu_min, hu_max, modality='CT'):
@@ -358,8 +359,9 @@ class DicomProcessor:
             window_level = (p_high + p_low) / 2
             
             return float(window_width), float(window_level)
-        except:
-            return 400.0, 40.0  # Safe defaults
+        except Exception as e:
+            logger.debug('auto_window_from_data failed, using safe defaults: %s', e)
+            return 400.0, 40.0
 
     def get_pixel_spacing(self, dicom_data):
         try:
@@ -549,8 +551,8 @@ class DicomProcessor:
             water_candidates = hu_array[(hu_array > -50) & (hu_array < 50)]
             if len(water_candidates) > 100:  # Need sufficient samples
                 return float(np.median(water_candidates))
-        except:
-            pass
+        except Exception as e:
+            logger.debug('_estimate_water_hu failed: %s', e)
         return None
 
     def _estimate_air_hu(self, hu_array):
@@ -560,8 +562,8 @@ class DicomProcessor:
             air_candidates = hu_array[hu_array < -900]
             if len(air_candidates) > 100:  # Need sufficient samples
                 return float(np.median(air_candidates))
-        except:
-            pass
+        except Exception as e:
+            logger.debug('_estimate_air_hu failed: %s', e)
         return None
 
     def _calculate_noise_level(self, hu_array):
@@ -572,8 +574,8 @@ class DicomProcessor:
             center_region = self._get_center_region(hu_array)
             if center_region is not None and len(center_region) > 100:
                 return float(np.std(center_region))
-        except:
-            pass
+        except Exception as e:
+            logger.debug('_calculate_noise_level failed: %s', e)
         return None
 
     def _get_center_region(self, hu_array, fraction=0.1):
@@ -589,7 +591,8 @@ class DicomProcessor:
             end_w = center_w + region_w // 2
             
             return hu_array[start_h:end_h, start_w:end_w].flatten()
-        except:
+        except Exception as e:
+            logger.debug('_get_center_region failed: %s', e)
             return None
 
     def generate_hu_calibration_report(self, dicom_data, pixel_array=None):

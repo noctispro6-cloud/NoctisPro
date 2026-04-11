@@ -80,8 +80,39 @@ class Study(models.Model):
     upload_date = models.DateTimeField(auto_now_add=True)
     last_updated = models.DateTimeField(auto_now=True)
 
+    # Clinical workflow fields
+    requesting_physician = models.CharField(max_length=200, blank=True, default='', help_text='Ordering/requesting physician')
+    technologist = models.CharField(max_length=200, blank=True, default='', help_text='Technologist who performed the study')
+
+    # Technical fields
+    contrast_used = models.BooleanField(default=False, help_text='Was contrast agent used?')
+    contrast_agent = models.CharField(max_length=100, blank=True, default='')
+    radiation_dose = models.FloatField(null=True, blank=True, help_text='Radiation dose in mGy')
+
+    # Quality and workflow flags
+    qc_flag = models.BooleanField(default=False, help_text='Quality control flag')
+    peer_review_status = models.CharField(max_length=20, blank=True, default='',
+        choices=[('', 'Not requested'), ('requested', 'Requested'), ('in_progress', 'In Progress'), ('completed', 'Completed')])
+    teaching_file = models.BooleanField(default=False, help_text='Flag as teaching case')
+    second_opinion_requested = models.BooleanField(default=False, help_text='Second opinion requested')
+
+    # STAT/Rush flag
+    stat_flag = models.BooleanField(default=False, help_text='STAT/Rush study - requires immediate attention')
+
+    # Turnaround time tracking
+    order_time = models.DateTimeField(null=True, blank=True, help_text='When the study was ordered')
+    read_start_time = models.DateTimeField(null=True, blank=True, help_text='When radiologist started reading')
+    report_time = models.DateTimeField(null=True, blank=True, help_text='When report was completed')
+
     class Meta:
         ordering = ['-study_date']
+        indexes = [
+            models.Index(fields=['status'], name='worklist_study_status_idx'),
+            models.Index(fields=['facility'], name='worklist_study_facility_idx'),
+            models.Index(fields=['study_date'], name='worklist_study_date_idx'),
+            models.Index(fields=['priority'], name='worklist_study_priority_idx'),
+            models.Index(fields=['radiologist'], name='worklist_study_radiologist_idx'),
+        ]
 
     def __str__(self):
         return f"{self.accession_number} - {self.patient.full_name} ({self.modality.code})"
@@ -119,6 +150,9 @@ class Series(models.Model):
     class Meta:
         verbose_name_plural = "Series"
         ordering = ['series_number']
+        indexes = [
+            models.Index(fields=['study'], name='worklist_series_study_idx'),
+        ]
 
     def __str__(self):
         return f"Series {self.series_number} - {self.series_description}"
@@ -139,6 +173,9 @@ class DicomImage(models.Model):
 
     class Meta:
         ordering = ['instance_number']
+        indexes = [
+            models.Index(fields=['study'], name='worklist_dicomimage_study_idx'),
+        ]
 
     def __str__(self):
         return f"Image {self.instance_number} - {self.sop_instance_uid}"

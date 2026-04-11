@@ -5,7 +5,6 @@ from django.http import JsonResponse
 from django.db import transaction
 from django.db.models import Q, Count
 from django.core.paginator import Paginator
-from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 from accounts.models import User, Facility
 from .utils import get_user_caps
@@ -148,9 +147,39 @@ def responsive_qa(request):
 @login_required
 @user_passes_test(can_view_logs)
 def system_logs(request):
-    """Placeholder: system logs view."""
-    messages.info(request, 'System Logs view is under construction.')
-    return dashboard(request)
+    """System audit logs view."""
+    if not request.user.is_admin():
+        messages.error(request, 'Access denied')
+        return redirect('admin_panel:dashboard')
+
+    queryset = AuditLog.objects.select_related('user').order_by('-timestamp')
+
+    # Filters
+    user_filter = request.GET.get('user', '').strip()
+    action_filter = request.GET.get('action', '').strip()
+    date_from = request.GET.get('date_from', '').strip()
+    date_to = request.GET.get('date_to', '').strip()
+
+    if user_filter:
+        queryset = queryset.filter(user__username__icontains=user_filter)
+    if action_filter:
+        queryset = queryset.filter(action__icontains=action_filter)
+    if date_from:
+        queryset = queryset.filter(timestamp__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(timestamp__date__lte=date_to)
+
+    paginator = Paginator(queryset, 50)
+    page = request.GET.get('page', 1)
+    logs = paginator.get_page(page)
+
+    return render(request, 'admin_panel/system_logs.html', {
+        'logs': logs,
+        'user_filter': user_filter,
+        'action_filter': action_filter,
+        'date_from': date_from,
+        'date_to': date_to,
+    })
 
 @login_required
 @user_passes_test(can_manage_settings)
@@ -259,9 +288,8 @@ def settings_view(request):
 @login_required
 @user_passes_test(can_manage_facilities)
 def upload_facilities(request):
-    """Placeholder: upload facilities view."""
-    messages.info(request, 'Upload facilities view is under construction.')
-    return dashboard(request)
+    messages.info(request, 'Bulk facility upload can be done via Django admin at /admin/accounts/facility/')
+    return redirect('admin_panel:facility_management')
 
 @login_required
 @user_passes_test(can_manage_users)
@@ -632,23 +660,24 @@ def user_edit(request, user_id):
 @login_required
 @user_passes_test(can_manage_users)
 def user_delete(request, user_id):
-    """Delete user immediately without confirmation"""
+    """Show confirmation page on GET; perform deletion on POST."""
     user = get_object_or_404(User, id=user_id)
-    username = user.username
 
-    # Log the action before deleting
-    AuditLog.objects.create(
-        user=request.user,
-        action='delete',
-        model_name='User',
-        object_id=str(user.id),
-        object_repr=str(user),
-        description=f'Deleted user {username}'
-    )
+    if request.method == 'POST':
+        username = user.username
+        AuditLog.objects.create(
+            user=request.user,
+            action='delete',
+            model_name='User',
+            object_id=str(user.id),
+            object_repr=str(user),
+            description=f'Deleted user {username}'
+        )
+        user.delete()
+        messages.success(request, f'User {username} deleted successfully')
+        return redirect('admin_panel:user_management')
 
-    user.delete()
-    messages.success(request, f'User {username} deleted successfully')
-    return redirect('admin_panel:user_management')
+    return render(request, 'admin_panel/user_confirm_delete.html', {'user_obj': user})
 
 @login_required
 @user_passes_test(can_manage_facilities)
@@ -703,9 +732,12 @@ def facility_management(request):
     facilities_page = paginator.get_page(page_number)
     
     # Statistics
+    from django.db.models import Max
     total_users = User.objects.count()
-    total_studies = Study.objects.count() if hasattr(facilities.first(), 'study_set') else 0
-    
+    total_studies = Study.objects.count()
+    total_facilities = facilities.count()
+    active_facilities = facilities.filter(is_active=True).count()
+
     context = {
         'facilities': facilities_page,
         'search_query': search_query,
@@ -713,6 +745,8 @@ def facility_management(request):
         'sort_by': sort_by,
         'total_users': total_users,
         'total_studies': total_studies,
+        'total_facilities': total_facilities,
+        'active_facilities': active_facilities,
     }
     
     return render(request, 'admin_panel/facility_management.html', context)
@@ -865,7 +899,6 @@ def export_facilities_data(facilities, format):
     # Default to CSV
     return export_facilities_data(facilities, 'csv')
 
-@csrf_exempt
 @login_required
 @user_passes_test(can_manage_users)
 def bulk_user_action(request):
@@ -904,7 +937,6 @@ def bulk_user_action(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
 @login_required
 @user_passes_test(can_manage_facilities)
 def bulk_facility_action(request):

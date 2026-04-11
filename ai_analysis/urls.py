@@ -24,4 +24,9 @@ urlpatterns = [
 
     # Evidence and references
     path('api/references/', views.api_medical_references, name='api_medical_references'),
+
+    # LLM report generation
+    path('api/llm-status/', views.api_llm_status, name='api_llm_status'),
+    path('api/llm-warmup/', views.api_llm_warmup, name='api_llm_warmup'),
+    path('api/study/<int:study_id>/llm-report/', views.api_generate_llm_report, name='api_generate_llm_report'),
 ]

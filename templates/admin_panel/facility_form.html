@@ -140,6 +140,42 @@
                         {% endif %}
                     </div>
 
+                    <!-- Subscription Management -->
+                    <div class="col-12 mt-4">
+                        <h5 class="text-white mb-3">
+                            <i class="fas fa-robot me-2"></i>AI Subscription
+                        </h5>
+                        <hr class="border-secondary mb-4">
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check form-switch">
+                            {{ form.has_ai_subscription }}
+                            <label class="form-check-label text-white" for="id_has_ai_subscription">
+                                AI Subscription Active
+                            </label>
+                        </div>
+                        <div class="form-text text-secondary">
+                            <small>Enable to grant this facility access to AI analysis features.</small>
+                        </div>
+                        {% if form.has_ai_subscription.errors %}
+                          {% for error in form.has_ai_subscription.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <label for="id_subscription_expires_at" class="form-label text-white">Subscription Expires At</label>
+                        {{ form.subscription_expires_at }}
+                        <div class="form-text text-secondary">
+                            <small>Leave blank for no expiry. Set a date to auto-expire access.</small>
+                        </div>
+                        {% if form.subscription_expires_at.errors %}
+                          {% for error in form.subscription_expires_at.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
                     <!-- Optional Facility Login -->
                     <div class="col-12 mt-4">
                         <h5 class="text-white mb-3">

@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}System Logs - Admin Panel{% endblock %}
+
+{% block content %}
+<div class="np-page">
+    <div class="np-page-header">
+        <div>
+            <h1 class="np-page-title">
+                <i class="fas fa-clipboard-list"></i> System Audit Logs
+            </h1>
+            <div class="np-page-subtitle">Review all system activity and user actions.</div>
+        </div>
+        <div class="np-actions">
+            <a href="{% url 'admin_panel:dashboard' %}" class="btn-control">
+                <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+            </a>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="np-card mb-4">
+        <div class="np-card-body">
+            <form method="get" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label text-white">User</label>
+                    <input type="text" name="user" value="{{ user_filter }}"
+                           class="form-control form-control-medical" placeholder="Username…">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label text-white">Action</label>
+                    <input type="text" name="action" value="{{ action_filter }}"
+                           class="form-control form-control-medical" placeholder="e.g. create, delete…">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label text-white">From</label>
+                    <input type="date" name="date_from" value="{{ date_from }}"
+                           class="form-control form-control-medical">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label text-white">To</label>
+                    <input type="date" name="date_to" value="{{ date_to }}"
+                           class="form-control form-control-medical">
+                </div>
+                <div class="col-md-2 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn-control flex-fill">
+                        <i class="fas fa-filter me-1"></i>Filter
+                    </button>
+                    <a href="{% url 'admin_panel:system_logs' %}" class="btn-control">
+                        <i class="fas fa-times"></i>
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Log Table -->
+    <div class="np-card">
+        <div class="np-card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>User</th>
+                            <th>Action</th>
+                            <th>Model</th>
+                            <th>Object</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in logs %}
+                        <tr>
+                            <td class="text-secondary small text-nowrap">{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
+                            <td>
+                                {% if log.user %}
+                                    <span class="text-info">{{ log.user.username }}</span>
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if log.action == 'create' %}
+                                    <span class="badge bg-success">{{ log.action }}</span>
+                                {% elif log.action == 'delete' %}
+                                    <span class="badge bg-danger">{{ log.action }}</span>
+                                {% elif log.action == 'update' %}
+                                    <span class="badge bg-warning text-dark">{{ log.action }}</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">{{ log.action }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-secondary small">{{ log.model_name }}</td>
+                            <td class="text-secondary small">{{ log.object_repr|truncatechars:40 }}</td>
+                            <td class="text-secondary small">{{ log.description|truncatechars:80 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="6" class="text-center text-secondary py-5">
+                                <i class="fas fa-clipboard fa-3x mb-3 opacity-50"></i>
+                                <div>No audit log entries found.</div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pagination -->
+    {% if logs.has_other_pages %}
+    <div class="d-flex justify-content-center mt-4">
+        <nav>
+            <ul class="pagination">
+                {% if logs.has_previous %}
+                <li class="page-item">
+                    <a class="page-link" href="?page=1{% if user_filter %}&user={{ user_filter }}{% endif %}{% if action_filter %}&action={{ action_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">First</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ logs.previous_page_number }}{% if user_filter %}&user={{ user_filter }}{% endif %}{% if action_filter %}&action={{ action_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Previous</a>
+                </li>
+                {% endif %}
+
+                {% for num in logs.paginator.page_range %}
+                    {% if logs.number == num %}
+                    <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                    {% elif num > logs.number|add:'-3' and num < logs.number|add:'3' %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ num }}{% if user_filter %}&user={{ user_filter }}{% endif %}{% if action_filter %}&action={{ action_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">{{ num }}</a>
+                    </li>
+                    {% endif %}
+                {% endfor %}
+
+                {% if logs.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ logs.next_page_number }}{% if user_filter %}&user={{ user_filter }}{% endif %}{% if action_filter %}&action={{ action_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Next</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ logs.paginator.num_pages }}{% if user_filter %}&user={{ user_filter }}{% endif %}{% if action_filter %}&action={{ action_filter }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}">Last</a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

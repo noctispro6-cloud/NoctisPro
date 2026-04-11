@@ -431,14 +431,14 @@ class DicomWebStowView(APIView):
         errors: List[dict] = []
         client_ip = _get_request_ip(request)
 
-        with transaction.atomic():
-            for idx, blob in enumerate(dicom_blobs):
-                try:
+        for idx, blob in enumerate(dicom_blobs):
+            try:
+                with transaction.atomic():
                     ds = pydicom.dcmread(BytesIO(blob), force=True)
                     result = _store_one_instance(ds, facility=facility, user=request.user, overwrite=overwrite)
                     stored.append(result)
-                except Exception as e:
-                    errors.append({"index": idx, "error": str(e), "client_ip": client_ip})
+            except Exception as e:
+                errors.append({"index": idx, "error": str(e), "client_ip": client_ip})
 
         try:
             log_audit(

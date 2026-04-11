@@ -14,6 +14,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/responsive-ui-scaling.css' %}">
+    <!-- masterpiece_3d_reconstruction.js: defines MasterpieceBoneReconstruction3D class
+         which is currently unused - the viewer uses inline Three.js instead.
+         TODO: remove or wire up in a future refactor -->
     <script src="{% static 'js/masterpiece_3d_reconstruction.js' %}"></script>
     <script src="{% static 'js/vendor/dicomParser.min.js' %}"></script>
     <script src="{% static 'js/dicom-viewer-enhanced.js' %}"></script>
@@ -736,17 +739,22 @@
                 flex-direction: column;
             }
             
-            .toolbar {
-                width: 100%;
+            .toolbar, .left-toolbar {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                display: flex;
                 flex-direction: row;
-                flex-wrap: wrap;
-                justify-content: flex-start;
-                padding: 5px;
+                width: 100%;
                 height: auto;
-                min-height: 60px;
-                max-height: min(34dvh, 240px);
-                overflow-x: hidden;
-                overflow-y: auto;
+                overflow-x: auto;
+                overflow-y: hidden;
+                padding: 4px;
+                flex-wrap: nowrap;
+                min-height: unset;
+                max-height: unset;
+                justify-content: flex-start;
             }
             
             .right-panel {
@@ -757,10 +765,12 @@
             }
             
             .tool-btn {
-                width: 45px;
-                height: 45px;
+                min-width: 36px;
+                width: 36px;
+                height: 36px;
                 margin: 0 2px;
-                min-width: 45px;
+                font-size: 14px;
+                flex-shrink: 0;
             }
         }
 
@@ -801,11 +811,25 @@
         }
 
         /* NOTE: Removed MPR crosshair rotation UI/overlay (keeps the original crosshair only). */
+
+        .nav-dropdown-item {
+            padding: 7px 14px;
+            font-size: 11px;
+            color: var(--text-primary, #fff);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+        .nav-dropdown-item:hover {
+            background: rgba(0,212,255,0.12);
+            color: var(--accent-color, #00d4ff);
+        }
     </style>
 </head>
 <body>
     <div class="viewer-container">
-        <button class="ui-toggle" onclick="toggleUI()"><i class="fas fa-eye-slash"></i> UI</button>
         <!-- Left Toolbar -->
         <div class="toolbar">
             <button class="tool-btn active" data-tool="windowing" title="Window/Level">
@@ -856,13 +880,21 @@
                 <i class="fas fa-adjust"></i>
                 <span>Invert</span>
             </button>
-            <button class="tool-btn" data-tool="rotate" title="Rotate">
+            <button class="tool-btn" data-tool="rotate" title="Rotate Clockwise (+90°)">
                 <i class="fas fa-redo"></i>
                 <span>Rotate</span>
             </button>
-            <button class="tool-btn" data-tool="flip" title="Flip">
+            <button class="tool-btn" data-tool="rotate-ccw" title="Rotate Counter-Clockwise (-90°)" onclick="handleRotateCCW(); event.stopPropagation();">
+                <i class="fas fa-undo"></i>
+                <span>Rot CCW</span>
+            </button>
+            <button class="tool-btn" data-tool="flip" title="Flip Horizontal">
                 <i class="fas fa-exchange-alt"></i>
-                <span>Flip</span>
+                <span>Flip H</span>
+            </button>
+            <button class="tool-btn" data-tool="flipv" title="Flip Vertical" onclick="handleFlipV(); event.stopPropagation();">
+                <i class="fas fa-arrows-alt-v"></i>
+                <span>Flip V</span>
             </button>
             <button class="tool-btn" data-tool="reset" title="Reset View">
                 <i class="fas fa-undo"></i>
@@ -916,12 +948,108 @@
                     Patient: - | Study Date: - | Modality: -
                 </div>
 
-                <a class="btn" href="{% url 'worklist:dashboard' %}" title="Back to Dashboard">
-                    <i class="fas fa-arrow-left"></i> Dashboard
+                {% if user.is_admin or user.is_radiologist %}
+                <a id="writeReportBtn" class="btn" href="#" onclick="if(window.currentStudyId){ window.location.href='/reports/write/'+window.currentStudyId+'/'; } else { alert('Please load a study first'); } return false;" title="Write Report for current study" style="display:none">
+                    <i class="fas fa-file-signature"></i> Report
+                </a>
+                <script>
+                // Show write report button when a study is loaded
+                document.addEventListener('studyLoaded', function(e) {
+                    const btn = document.getElementById('writeReportBtn');
+                    if (btn) btn.style.display = '';
+                });
+                // Also check on load
+                window.addEventListener('load', function() {
+                    if (window.currentStudyId) {
+                        const btn = document.getElementById('writeReportBtn');
+                        if (btn) btn.style.display = '';
+                    }
+                });
+                </script>
+                {% endif %}
+                <a class="btn" href="{% url 'worklist:dashboard' %}" title="Home">
+                    <i class="fas fa-home"></i> Home
                 </a>
                 <button class="btn" onclick="toggleUI()" title="Toggle UI Auto Hide">
                     <i class="fas fa-eye-slash"></i> UI
                 </button>
+
+                <!-- Navbar dropdowns -->
+                <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+
+                    <!-- Window/Level presets dropdown -->
+                    <div class="nav-dropdown-group" style="position:relative;">
+                        <button class="btn" onclick="toggleDropdown('wlDropdown')" title="Window/Level Presets">
+                            <i class="fas fa-adjust"></i> W/L ▾
+                        </button>
+                        <div id="wlDropdown" class="nav-dropdown-menu" style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:140px;">
+                            <div class="nav-dropdown-item" onclick="applyPreset('lung')"><i class="fas fa-lungs"></i> Lung</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('bone')"><i class="fas fa-bone"></i> Bone</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('soft')"><i class="fas fa-circle"></i> Soft Tissue</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('brain')"><i class="fas fa-brain"></i> Brain</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('liver')"><i class="fas fa-circle"></i> Liver</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('default')"><i class="fas fa-undo"></i> Reset W/L</div>
+                        </div>
+                    </div>
+
+                    <!-- Navigation/Cine dropdown -->
+                    <div class="nav-dropdown-group" style="position:relative;">
+                        <button class="btn" onclick="toggleDropdown('navDropdown')" title="Navigation">
+                            <i class="fas fa-sliders-h"></i> Nav ▾
+                        </button>
+                        <div id="navDropdown" class="nav-dropdown-menu" style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:200px;">
+                            <div style="padding:8px 12px;">
+                                <label style="font-size:10px;color:#999;">Slice</label>
+                                <input type="range" id="sliceSlider2" min="0" max="100" value="0" oninput="updateSlice(this.value)" style="width:100%">
+                            </div>
+                            <div style="padding:4px 12px;">
+                                <label style="font-size:10px;color:#999;">Zoom</label>
+                                <input type="range" id="zoomSlider2" min="0.1" max="5" step="0.1" value="1" oninput="updateZoom(this.value)" style="width:100%">
+                            </div>
+                            <div class="nav-dropdown-item" onclick="toggleCineMode()"><i class="fas fa-play"></i> Cine Play/Stop</div>
+                        </div>
+                    </div>
+
+                    <!-- Measurements dropdown -->
+                    <div class="nav-dropdown-group" style="position:relative;">
+                        <button class="btn" onclick="toggleDropdown('measDropdown')" title="Measurements">
+                            <i class="fas fa-ruler"></i> Measure ▾
+                        </button>
+                        <div id="measDropdown" class="nav-dropdown-menu" style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:150px;">
+                            <div class="nav-dropdown-item" onclick="setActiveTool('measure')"><i class="fas fa-ruler-horizontal"></i> Length</div>
+                            <div class="nav-dropdown-item" onclick="setActiveTool('angle')"><i class="fas fa-drafting-compass"></i> Angle</div>
+                            <div class="nav-dropdown-item" onclick="setActiveTool('cobb_angle')"><i class="fas fa-angle-double-up"></i> Cobb Angle</div>
+                            <div class="nav-dropdown-item" onclick="setActiveTool('area')"><i class="fas fa-draw-polygon"></i> Area</div>
+                            <div class="nav-dropdown-item" onclick="setActiveTool('roi')"><i class="fas fa-circle-notch"></i> HU ROI</div>
+                            <div style="height:1px;background:#404040;margin:4px 0;"></div>
+                            <div class="nav-dropdown-item" onclick="clearAllMeasurements()"><i class="fas fa-trash"></i> Clear All</div>
+                        </div>
+                    </div>
+
+                    <!-- 3D/MPR dropdown -->
+                    <div class="nav-dropdown-group" style="position:relative;">
+                        <button class="btn" onclick="toggleDropdown('threeDDropdown')" title="3D/MPR">
+                            <i class="fas fa-cube"></i> 3D ▾
+                        </button>
+                        <div id="threeDDropdown" class="nav-dropdown-menu" style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:150px;">
+                            <div class="nav-dropdown-item" onclick="generateMPRViews()"><i class="fas fa-th-large"></i> MPR Views</div>
+                            <div class="nav-dropdown-item" onclick="generateMIP()"><i class="fas fa-layer-group"></i> MIP</div>
+                            <div class="nav-dropdown-item" onclick="toggle3DView()"><i class="fas fa-cube"></i> 3D Reconstruction</div>
+                        </div>
+                    </div>
+
+                    <!-- Export/Print dropdown -->
+                    <div class="nav-dropdown-group" style="position:relative;">
+                        <button class="btn" onclick="toggleDropdown('exportDropdown')" title="Export/Print">
+                            <i class="fas fa-download"></i> Export ▾
+                        </button>
+                        <div id="exportDropdown" class="nav-dropdown-menu" style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:160px;">
+                            <div class="nav-dropdown-item" onclick="exportCurrentImage()"><i class="fas fa-image"></i> Download Image</div>
+                            <div class="nav-dropdown-item" onclick="printCurrentImage()"><i class="fas fa-print"></i> Print / PDF</div>
+                        </div>
+                    </div>
+
+                </div>
             </div>
 
             <!-- Viewport -->
@@ -969,7 +1097,7 @@
                             <button class="control-3d-btn" onclick="boneRotate(-1,0)" title="Tilt up">↑</button>
                             <button class="control-3d-btn" onclick="boneRotate(1,0)" title="Tilt down">↓</button>
                             <button class="control-3d-btn" onclick="boneCenter()" title="Center/pan reset">Center</button>
-                            <button class="control-3d-btn" onclick="export3DModel()" title="Export STL">Export</button>
+                            <button class="control-3d-btn" onclick="export3DModel()" title="Export 3D Model (OBJ)">Export OBJ</button>
                         </div>
                     </div>
                 </div>
@@ -1009,236 +1137,79 @@
                 </div>
             </details>
 
-            <!-- AI Analysis Panel -->
-            <details class="panel-section ai-panel" style="display:none;">
-                <summary class="panel-title">
-                    <i class="fas fa-brain"></i>
-                    AI Analysis
-                </summary>
-                <div class="panel-body">
-                    <div style="margin-bottom: 6px;">
-                        <select class="select" id="aiModelSelect" style="width: 100%;">
-                            <option value="">Select AI Model (Loading...)</option>
-                        </select>
-                    </div>
-                    
-                    <button class="btn btn-primary" onclick="runQuickAI()" style="width: 100%;">
-                        <i class="fas fa-bolt"></i> Quick AI Scan
-                    </button>
-                    
-                    <div id="aiFindingsList" style="margin-top: 10px; font-size: 12px; color: var(--text-primary);">
-                        <!-- Results will appear here -->
-                    </div>
+            <!-- Hidden elements needed by JS but not displayed in the right panel -->
+            <!-- W/L sliders (hidden, controlled via navbar dropdowns) -->
+            <div style="display:none;">
+                <input type="range" id="windowWidthSlider" min="1" max="4000" value="400" oninput="updateWindowWidth(this.value)">
+                <input type="range" id="windowLevelSlider" min="-1000" max="1000" value="40" oninput="updateWindowLevel(this.value)">
+                <span id="wwValue">400</span>
+                <span id="wlValue">40</span>
+                <input type="range" id="sliceSlider" min="0" max="0" value="0" oninput="updateSlice(this.value)">
+                <span id="sliceValue">1</span>
+                <input type="range" id="zoomSlider" min="25" max="500" value="100" oninput="updateZoom(this.value)">
+                <span id="zoomValue">100%</span>
+                <div id="frameControls">
+                    <input type="range" id="frameSlider" min="0" max="0" value="0" oninput="updateFrame(this.value)">
+                    <select id="cineFpsSelect" onchange="setCineFps(this.value)">
+                        <option value="3">3</option>
+                        <option value="5" selected>5</option>
+                        <option value="10">10</option>
+                        <option value="15">15</option>
+                        <option value="24">24</option>
+                    </select>
                 </div>
-            </details>
-
-            <!-- Window/Level Controls -->
-            <details class="panel-section" open>
-                <summary class="panel-title">
-                    <i class="fas fa-adjust"></i>
-                    Window/Level
-                </summary>
-                <div class="panel-body">
-                
-                <div class="slider-group">
-                    <div class="slider-header">
-                        <span class="slider-label">Window Width</span>
-                        <span class="slider-value" id="wwValue">400</span>
-                    </div>
-                    <input type="range" class="custom-slider" id="windowWidthSlider" 
-                           min="1" max="4000" value="400" oninput="updateWindowWidth(this.value)">
-                </div>
-
-                <div class="slider-group">
-                    <div class="slider-header">
-                        <span class="slider-label">Window Level</span>
-                        <span class="slider-value" id="wlValue">40</span>
-                    </div>
-                    <input type="range" class="custom-slider" id="windowLevelSlider" 
-                           min="-1000" max="1000" value="40" oninput="updateWindowLevel(this.value)">
-                </div>
-
-                <div class="preset-grid">
-                    <button class="preset-btn" onclick="applyPreset('lung')">Lung</button>
-                    <button class="preset-btn" onclick="applyPreset('bone')">Bone</button>
-                    <button class="preset-btn" onclick="applyPreset('soft')">Soft Tissue</button>
-                    <button class="preset-btn" onclick="applyPreset('brain')">Brain</button>
-                </div>
-                </div>
-            </details>
-
-            <!-- Navigation -->
-            <details class="panel-section" open>
-                <summary class="panel-title">
-                    <i class="fas fa-arrows-alt"></i>
-                    Navigation
-                </summary>
-                <div class="panel-body">
-                
-                <div class="slider-group">
-                    <div class="slider-header">
-                        <span class="slider-label">Slice</span>
-                        <span class="slider-value" id="sliceValue">1</span>
-                    </div>
-                    <input type="range" class="custom-slider" id="sliceSlider" 
-                           min="0" max="0" value="0" oninput="updateSlice(this.value)">
-                </div>
-
-                <div class="slider-group" id="frameControls" style="display:none;">
-                    <div class="slider-header">
-                        <span class="slider-label">Frame</span>
-                        <span class="slider-value"><span id="frameValue">1</span>/<span id="totalFrames">1</span></span>
-                    </div>
-                    <input type="range" class="custom-slider" id="frameSlider"
-                           min="0" max="0" value="0"
-                           oninput="updateFrame(this.value)">
-                    <div style="display:flex; gap: 8px; margin-top: 8px; align-items:center; justify-content: space-between;">
-                        <button class="btn" style="padding: 6px 10px;" onclick="toggleCineMode()" title="Play/Pause cine">
-                            <i class="fas fa-play"></i> Cine
-                        </button>
-                        <div style="display:flex; gap: 8px; align-items:center;">
-                            <span style="color: var(--text-secondary); font-size: 11px;">FPS</span>
-                            <select id="cineFpsSelect" class="btn" style="padding: 6px 10px;" onchange="setCineFps(this.value)">
-                                <option value="3">3</option>
-                                <option value="5" selected>5</option>
-                                <option value="10">10</option>
-                                <option value="15">15</option>
-                                <option value="24">24</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="slider-group">
-                    <div class="slider-header">
-                        <span class="slider-label">Zoom</span>
-                        <span class="slider-value" id="zoomValue">100%</span>
-                    </div>
-                    <input type="range" class="custom-slider" id="zoomSlider" 
-                           min="25" max="500" value="100" oninput="updateZoom(this.value)">
-                </div>
-                </div>
-            </details>
-
-            <!-- 3D Reconstruction Controls -->
-            <details class="panel-section" open>
-                <summary class="panel-title">
-                    <i class="fas fa-cube"></i>
-                    3D Reconstruction
-                </summary>
-                <div class="panel-body">
-                
-                <div class="recon-controls">
-                    <button class="recon-btn" onclick="generateMPR()">
-                        <i class="fas fa-th-large"></i>
-                        <span>MPR</span>
-                    </button>
-                    <button class="recon-btn" onclick="generateMIP()">
-                        <i class="fas fa-compress-arrows-alt"></i>
-                        <span>MIP</span>
-                    </button>
-                </div>
-
-                    <div class="bone-settings">
-                    <div class="threshold-group">
-                        <div class="threshold-label">
-                            <span>Iso Threshold (HU)</span>
-                            <span class="threshold-value" id="boneThresholdValue">200</span>
-                        </div>
-                        <input type="range" class="custom-slider" id="boneThresholdSlider" 
-                               min="-1000" max="2000" value="200" oninput="updateBoneThreshold(this.value)">
-                    </div>
-
-                    <div class="threshold-group">
-                        <div class="threshold-label">
-                            <span>Opacity</span>
-                            <span class="threshold-value" id="boneOpacityValue">0.8</span>
-                        </div>
-                        <input type="range" class="custom-slider" id="boneOpacitySlider" 
-                               min="0.1" max="1.0" step="0.1" value="0.8" oninput="updateBoneOpacity(this.value)">
-                    </div>
-
-                    <div class="slider-header">
-                        <span class="slider-label">Smooth Surface</span>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="smoothToggle" onchange="toggleSmoothing(this.checked)">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-                </div>
-            </details>
-
-            <!-- Image Information -->
-            <details class="panel-section">
-                <summary class="panel-title">
-                    <i class="fas fa-info-circle"></i>
-                    Image Info
-                </summary>
-                <div class="panel-body">
-                
-                <div class="info-card">
-                    <div class="info-label">Dimensions</div>
-                    <div class="info-value" id="imageDimensions">-</div>
-                </div>
-                
-                <div class="info-card">
-                    <div class="info-label">Pixel Spacing</div>
-                    <div class="info-value" id="pixelSpacing">-</div>
-                </div>
-                
-                <div class="info-card">
-                    <div class="info-label">Series</div>
-                    <div class="info-value" id="seriesDescription">-</div>
-                </div>
-                
-                <div class="info-card">
-                    <div class="info-label">Institution</div>
-                    <div class="info-value" id="institutionName">-</div>
-                </div>
-                </div>
-            </details>
-
-            <!-- Measurements -->
-            <details class="panel-section">
-                <summary class="panel-title">
-                    <i class="fas fa-ruler-combined"></i>
-                    Measurements
-                </summary>
-                <div class="panel-body">
-                
-                <button class="clear-btn" onclick="clearAllMeasurements()">
-                    <i class="fas fa-trash"></i> Clear All
-                </button>
-                
-                <div class="measurements-list" id="measurementsList">
-                    <div class="measurement-item">
-                        No measurements yet. Use the measure tool to add measurements.
-                    </div>
-                </div>
-                </div>
-            </details>
-
-            <!-- Related References -->
-            <details class="panel-section">
-                <summary class="panel-title">
-                    <i class="fas fa-book-medical"></i>
-                    Related References
-                </summary>
-                <div class="panel-body">
-                <div style="display:flex; gap:6px; margin-bottom:8px;">
-                    <input id="refQuery" class="form-control" placeholder="e.g., CT head hemorrhage" style="flex:1;">
-                    <button class="btn" onclick="fetchReferences()"><i class="fas fa-search"></i></button>
-                </div>
-                <div id="referencesList" style="max-height:180px; overflow:auto; font-size:12px; color: var(--text-secondary);">
-                    Enter a query or load a study to see suggestions.
-                </div>
-                </div>
-            </details>
+                <input type="range" id="boneThresholdSlider" min="-1000" max="2000" value="200" oninput="updateBoneThreshold(this.value)">
+                <span id="boneThresholdValue">200</span>
+                <input type="range" id="boneOpacitySlider" min="0.1" max="1.0" step="0.1" value="0.8" oninput="updateBoneOpacity(this.value)">
+                <span id="boneOpacityValue">0.8</span>
+                <input type="checkbox" id="smoothToggle" onchange="toggleSmoothing(this.checked)">
+                <select id="aiModelSelect"><option value="">Select AI Model (Loading...)</option></select>
+                <div id="aiFindingsList"></div>
+                <div id="imageDimensions">-</div>
+                <div id="pixelSpacing">-</div>
+                <div id="seriesDescription">-</div>
+                <div id="institutionName">-</div>
+                <div id="measurementsList"></div>
+                <input id="refQuery" class="form-control" placeholder="e.g., CT head hemorrhage">
+                <div id="referencesList"></div>
+            </div>
         </div>
     </div>
 
     <script>
+        function toggleDropdown(id) {
+            const menu = document.getElementById(id);
+            if (!menu) return;
+            const isOpen = menu.style.display !== 'none';
+            document.querySelectorAll('.nav-dropdown-menu').forEach(m => m.style.display = 'none');
+            if (!isOpen) menu.style.display = 'block';
+        }
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.nav-dropdown-group')) {
+                document.querySelectorAll('.nav-dropdown-menu').forEach(m => m.style.display = 'none');
+            }
+        });
+        function setActiveTool(tool) {
+            const btn = document.querySelector(`.tool-btn[data-tool="${tool}"]`);
+            if (btn) btn.click();
+        }
+        function generateMPRViews() {
+            const btn = document.querySelector('.tool-btn[data-tool="mpr"]');
+            if (btn) btn.click();
+        }
+        function toggle3DView() {
+            const btn = document.querySelector('.tool-btn[data-tool="3d"]');
+            if (btn) btn.click();
+        }
+        function exportCurrentImage() {
+            const btn = document.querySelector('.tool-btn[data-tool="export"]');
+            if (btn) btn.click();
+        }
+        function printCurrentImage() {
+            const btn = document.querySelector('.tool-btn[data-tool="print"]');
+            if (btn) btn.click();
+        }
+
         // Global Variables
         let currentStudy = null;
         let currentSeries = null;
@@ -1942,6 +1913,10 @@
                     rotation = (rotation + 90) % 360;
                     redrawCurrentImage();
                     break;
+                case 'rotate-ccw':
+                    rotation = ((rotation - 90) % 360 + 360) % 360;
+                    redrawCurrentImage();
+                    break;
                 case 'flip':
                     flipH = !flipH;
                     redrawCurrentImage();
@@ -2134,7 +2109,20 @@
                 const data = await response.json();
                 
                 if (data && data.study && Array.isArray(data.series)) {
-                    currentStudy = data.study;
+                    const studyData = data.study;
+                    currentStudy = {
+                        ...studyData,
+                        patient_name: studyData.patient_name || studyData.patient || 'Unknown Patient',
+                        patient_id: studyData.patient_id || '',
+                        accession_number: studyData.accession_number || studyData.accession || '',
+                        modality: studyData.modality || '',
+                        institution: studyData.facility || studyData.institution || 'Medical Facility',
+                        study_description: studyData.study_description || '',
+                    };
+                    window.currentStudy = currentStudy;
+                    window.currentStudyId = currentStudy.id;
+                    // Notify listeners that a study has been loaded
+                    document.dispatchEvent(new CustomEvent('studyLoaded', { detail: { studyId: currentStudy.id } }));
                     displaySeriesList(data.series);
                     updatePatientInfo(currentStudy);
                     // Load related references automatically based on study context
@@ -3015,6 +3003,11 @@
             drawCurrentMeasurement();
 
             updateOverlayLabels();
+
+            // Re-draw AI overlays if active (AI overlays must be re-applied after every canvas clear)
+            if (window._aiOverlaysActive && typeof renderAIOverlays === 'function') {
+                renderAIOverlays();
+            }
         }
 
         function renderServerRenderedImage() {
@@ -3138,7 +3131,8 @@
                     redrawCurrentImage();
                 } else if (activeTool === 'measure') {
                     startMeasurement(lastMouseX, lastMouseY);
-                } else if (activeTool === 'angle') {
+                } else if (activeTool === 'angle' || activeTool === 'cobb_angle') {
+                    // cobb_angle uses the same 3-point angle infrastructure
                     startAngleMeasurement(lastMouseX, lastMouseY);
                 } else if (activeTool === 'area') {
                     startAreaMeasurement(lastMouseX, lastMouseY);
@@ -3249,6 +3243,7 @@
                     break;
                 case 'measure':
                 case 'angle':
+                case 'cobb_angle':
                 case 'area':
                     if (currentMeasurement) {
                         updateMeasurement(mouseX, mouseY);
@@ -6456,13 +6451,24 @@
             bone3D.animRaf = requestAnimationFrame(tick);
         }
 
+        function handleRotateCCW() {
+            rotation = ((rotation - 90) % 360 + 360) % 360;
+            redrawCurrentImage();
+        }
+
+        function handleFlipV() {
+            flipV = !flipV;
+            redrawCurrentImage();
+        }
+
         // Bone controls (buttons in the 3D quadrant)
-        function boneRotate(dPitch, dYaw) {
+        // dX = pitch (up/down tilt), dY = yaw (left/right rotation)
+        function boneRotate(dX, dY) {
             try {
                 if (!bone3D) return;
                 const step = 0.25; // radians per click (fast but controllable)
-                bone3D.targetRotX = Number(bone3D.targetRotX || 0) + (Number(dPitch || 0) * step);
-                bone3D.targetRotY = Number(bone3D.targetRotY || 0) + (Number(dYaw || 0) * step);
+                bone3D.targetRotX = Number(bone3D.targetRotX || 0) + (Number(dX || 0) * step);
+                bone3D.targetRotY = Number(bone3D.targetRotY || 0) + (Number(dY || 0) * step);
             } catch (e) {}
         }
         function boneZoomIn() {
@@ -6949,6 +6955,38 @@
             indicator.style.display = show ? 'flex' : 'none';
         }
 
+        // AI overlay state and rendering
+        window._aiOverlaysActive = false;
+        window._aiOverlayData = null;
+
+        function renderAIOverlays() {
+            // Draw AI bounding boxes / findings on the canvas if _aiOverlayData is set
+            if (!window._aiOverlaysActive || !window._aiOverlayData || !ctx) return;
+            const findings = window._aiOverlayData.findings || [];
+            findings.forEach(function(f) {
+                if (!f.bbox) return;
+                const [x, y, w, h] = f.bbox;
+                ctx.save();
+                ctx.strokeStyle = '#ff4444';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 2]);
+                ctx.strokeRect(x, y, w, h);
+                if (f.label) {
+                    ctx.font = '11px Inter, sans-serif';
+                    ctx.fillStyle = '#ff4444';
+                    ctx.fillText(f.label, x, y > 12 ? y - 4 : y + h + 12);
+                }
+                ctx.restore();
+            });
+        }
+
+        function toggleAIPanel() {
+            const panel = document.getElementById('rightPanel');
+            if (panel) {
+                panel.style.display = (panel.style.display === 'none') ? '' : 'none';
+            }
+        }
+
         function showToast(message, type = 'info', duration = 3000) {
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
@@ -7095,6 +7133,39 @@
                 try { _closeModal('printExportModal'); } catch (e) {}
             }
         }, true);
+
+        // HIPAA: idle timeout warning at 25 minutes, lock at 30 minutes
+        (function() {
+            var idleTimer, warningShown = false;
+            var WARNING_MS = 25 * 60 * 1000; // 25 min
+            var LOCK_MS = 30 * 60 * 1000;    // 30 min
+
+            function resetIdleTimer() {
+                clearTimeout(idleTimer);
+                warningShown = false;
+                var warn = document.getElementById('idleWarning');
+                if (warn) warn.style.display = 'none';
+                idleTimer = setTimeout(showIdleWarning, WARNING_MS);
+            }
+
+            function showIdleWarning() {
+                if (warningShown) return;
+                warningShown = true;
+                var warn = document.getElementById('idleWarning');
+                if (warn) warn.style.display = 'flex';
+                idleTimer = setTimeout(lockScreen, LOCK_MS - WARNING_MS);
+            }
+
+            function lockScreen() {
+                window.location.href = '/logout/?next=' + encodeURIComponent(window.location.href);
+            }
+
+            ['mousemove','mousedown','keydown','scroll','touchstart'].forEach(function(evt) {
+                document.addEventListener(evt, resetIdleTimer, {passive: true});
+            });
+
+            resetIdleTimer();
+        })();
     </script>
 
     <!-- Directory Loader Modal -->
@@ -7292,6 +7363,13 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <div id="idleWarning" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;align-items:center;justify-content:center;flex-direction:column;color:#fff;font-family:sans-serif;">
+        <i class="fas fa-lock" style="font-size:48px;color:#ffaa00;margin-bottom:16px;"></i>
+        <h2>Session Idle</h2>
+        <p style="color:#b3b3b3;">You will be logged out shortly due to inactivity.</p>
+        <button onclick="location.reload()" style="background:#00d4ff;color:#000;border:none;padding:10px 24px;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer;margin-top:12px;">I'm Still Here</button>
     </div>
 </body>
 </html>

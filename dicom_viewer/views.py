@@ -27,7 +27,7 @@ from django.conf import settings
 from io import BytesIO
 from PIL import Image, ImageFilter
 import base64
-from pydicom.pixel_data_handlers.util import apply_voi_lut
+from pydicom.pixels import apply_voi_lut
 import scipy.ndimage as ndimage
 import logging
 import subprocess
@@ -165,7 +165,7 @@ def _convert_color_to_rgb_uint8(arr, ds=None):
             photo = str(getattr(ds, "PhotometricInterpretation", "") or "").upper() if ds is not None else ""
             if photo.startswith("YBR"):
                 try:
-                    from pydicom.pixel_data_handlers.util import convert_color_space as _ccs
+                    from pydicom.pixels import convert_color_space as _ccs
 
                     a = _ccs(a, current=photo, desired="RGB")
                 except Exception:
@@ -767,8 +767,17 @@ def masterpiece_viewer(request):
             _schedule_mpr_disk_cache_build(sid, quality='high')
     except Exception:
         pass
+
+    study_id_param = request.GET.get('study', '')
+    try:
+        if study_id_param:
+            study_obj = Study.objects.get(pk=int(study_id_param))
+            log_audit(request, 'view_study', f'Opened study {study_obj.accession_number} in DICOM viewer', study_id=study_obj.id)
+    except Exception:
+        pass
+
     context = {
-        'study_id': request.GET.get('study', ''),
+        'study_id': study_id_param,
         'series_id': request.GET.get('series', ''),
         'current_date': timezone.now().strftime('%Y-%m-%d'),
         'user': request.user
@@ -4281,7 +4290,7 @@ def web_dicom_image(request, image_id):
         try:
             modality = str(getattr(ds, 'Modality', '')).upper()
             if modality in ['DX', 'CR', 'XA', 'RF', 'MG']:
-                from pydicom.pixel_data_handlers.util import apply_voi_lut as _apply_voi_lut
+                from pydicom.pixels import apply_voi_lut as _apply_voi_lut
                 pixel_array = _apply_voi_lut(pixel_array, ds)
         except Exception:
             pass
@@ -5689,11 +5698,28 @@ def print_dicom_image(request):
         grid_cols = request.POST.get('grid_cols')
         
         # Get patient and study information
-        patient_name = request.POST.get('patient_name', 'Unknown Patient')
+        patient_name = request.POST.get('patient_name', '').strip()
+        if not patient_name and series_id:
+            try:
+                from worklist.models import Series as _SeriesPatient
+                _sp = _SeriesPatient.objects.select_related('study__patient').get(id=int(series_id))
+                patient_name = _sp.study.patient.full_name
+            except Exception:
+                pass
+        if not patient_name:
+            patient_name = 'Unknown Patient'
         study_date = request.POST.get('study_date', '')
         modality = request.POST.get('modality', '')
         series_description = request.POST.get('series_description', '')
         institution_name = request.POST.get('institution_name', request.user.facility.name if hasattr(request.user, 'facility') and request.user.facility else 'Medical Facility')
+        accession_number = request.POST.get('accession_number', '')
+        if not accession_number and series_id:
+            try:
+                from worklist.models import Series as _SeriesAcc
+                _sa = _SeriesAcc.objects.select_related('study').get(id=int(series_id))
+                accession_number = getattr(_sa.study, 'accession_number', '') or ''
+            except Exception:
+                pass
         
         # Optional windowing overrides for server-rendered slices
         try:
@@ -5803,6 +5829,7 @@ def print_dicom_image(request):
                 institution_name,
                 grid_rows=(int(grid_rows) if (grid_rows and str(grid_rows).strip()) else None),
                 grid_cols=(int(grid_cols) if (grid_cols and str(grid_cols).strip()) else None),
+                accession_number=accession_number,
             )
 
             # Optionally return the generated PDF to the browser instead of sending to CUPS.
@@ -5935,7 +5962,7 @@ def print_dicom_image(request):
         logger.error(f"Error in print_dicom_image: {str(e)}")
         return JsonResponse({'success': False, 'error': str(e)})
 
-def create_medical_print_pdf_enhanced(image_paths, output_path, paper_size, layout_type, print_medium, modality, patient_name, study_date, series_description, institution_name, grid_rows: int | None = None, grid_cols: int | None = None):
+def create_medical_print_pdf_enhanced(image_paths, output_path, paper_size, layout_type, print_medium, modality, patient_name, study_date, series_description, institution_name, grid_rows: int | None = None, grid_cols: int | None = None, accession_number: str = ''):
     """
     Create a PDF optimized for medical image printing with multiple layout options for different modalities.
     Supports both paper and film printing with modality-specific layouts.
@@ -5967,7 +5994,7 @@ def create_medical_print_pdf_enhanced(image_paths, output_path, paper_size, layo
     header_lines = [
         f"{institution_name}".strip(),
         f"Patient: {patient_name}".strip(),
-        f"Study: {study_date} | Modality: {modality} | Series: {series_description}".strip(),
+        f"Accession: {accession_number} | Study: {study_date} | Modality: {modality} | Series: {series_description}".strip(),
     ]
     footer_text = f"Printed: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')} | NoctisPro Medical Imaging"
     
@@ -6399,8 +6426,12 @@ def send_to_printer(pdf_path, printer_name, paper_size, paper_type, print_qualit
     """
     try:
         if cups is None:
-            # Fallback to lp command if pycups is not available
-            return send_to_printer_fallback(pdf_path, printer_name, paper_size, paper_type, print_quality, copies)
+            # pycups not installed – return a helpful message so the client can show a fallback option
+            return {
+                'success': False,
+                'error': 'Physical printer support requires CUPS. Use "Download PDF" to print manually.',
+                'fallback': 'pdf',
+            }
         
         # Initialize CUPS connection
         conn = cups.Connection()
@@ -6710,114 +6741,11 @@ endsolid AI_Enhanced_Model_{series_id}
 @login_required
 @require_http_methods(["POST"])
 def advanced_reconstruction_api(request, series_id):
-    """
-    Perform advanced AI-enhanced reconstruction on DICOM series.
-    """
-    try:
-        series = get_object_or_404(Series, id=series_id)
-        
-        # Check user permissions
-        if not request.user.has_perm('dicom_viewer.can_use_advanced_reconstruction'):
-            return JsonResponse({
-                'success': False,
-                'error': 'Permission denied for advanced reconstruction'
-            })
-        
-        # Parse request data
-        data = json.loads(request.body) if request.body else {}
-        reconstruction_type = data.get('reconstruction_type', 'ai_enhanced')
-        include_mpr = data.get('include_mpr', True)
-        include_mip = data.get('include_mip', True)
-        include_volume_rendering = data.get('include_volume_rendering', True)
-        
-        # Get DICOM images for the series
-        images = DicomImage.objects.filter(series=series).order_by('instance_number')
-        if not images.exists():
-            return JsonResponse({
-                'success': False,
-                'error': 'No DICOM images found for this series'
-            })
-        
-        # Create reconstruction job
-        job = ReconstructionJob.objects.create(
-            series=series,
-            user=request.user,
-            reconstruction_type='advanced_ai',
-            parameters={
-                'reconstruction_type': reconstruction_type,
-                'include_mpr': include_mpr,
-                'include_mip': include_mip,
-                'include_volume_rendering': include_volume_rendering
-            },
-            status='processing'
-        )
-        
-        # For demo purposes, simulate advanced reconstruction
-        # In a real implementation, this would call advanced AI reconstruction services
-        try:
-            # Simulate processing time
-            import time
-            time.sleep(3)
-            
-            # Generate mock reconstruction results
-            reconstructions = []
-            
-            if include_mpr:
-                # Generate mock MPR views
-                for view in ['axial', 'sagittal', 'coronal']:
-                    mock_url = f"/dicom-viewer/api/mock-reconstruction/{series_id}/{view}/"
-                    reconstructions.append({
-                        'type': 'mpr',
-                        'view': view,
-                        'url': mock_url,
-                        'description': f'AI-Enhanced {view.title()} MPR'
-                    })
-            
-            if include_mip:
-                # Generate mock MIP views
-                mock_url = f"/dicom-viewer/api/mock-reconstruction/{series_id}/mip/"
-                reconstructions.append({
-                    'type': 'mip',
-                    'view': 'composite',
-                    'url': mock_url,
-                    'description': 'AI-Enhanced Maximum Intensity Projection'
-                })
-            
-            if include_volume_rendering:
-                # Generate mock volume rendering
-                mock_url = f"/dicom-viewer/api/mock-reconstruction/{series_id}/volume/"
-                reconstructions.append({
-                    'type': 'volume',
-                    'view': '3d',
-                    'url': mock_url,
-                    'description': 'AI-Enhanced Volume Rendering'
-                })
-            
-            # Update job status
-            job.status = 'completed'
-            job.result_data = {'reconstructions': reconstructions}
-            job.save()
-            
-            return JsonResponse({
-                'success': True,
-                'message': 'Advanced reconstruction completed successfully',
-                'reconstructions': [r['url'] for r in reconstructions],
-                'details': reconstructions,
-                'job_id': job.id
-            })
-            
-        except Exception as e:
-            job.status = 'failed'
-            job.error_message = str(e)
-            job.save()
-            raise e
-            
-    except Exception as e:
-        logger.error(f"Advanced reconstruction error for series {series_id}: {str(e)}")
-        return JsonResponse({
-            'success': False,
-            'error': f'Failed to perform advanced reconstruction: {str(e)}'
-        })
+    """Advanced reconstruction - not yet implemented."""
+    return JsonResponse(
+        {'error': 'Advanced reconstruction is not yet available. Use standard 3D reconstruction.'},
+        status=501
+    )
 
 
 @login_required
@@ -7087,3 +7015,58 @@ def api_series_sr_export(request, series_id):
     study = series.study
     # Delegate to the study-level SR export
     return api_export_dicom_sr(request, study.id)
+
+
+@login_required
+def api_anonymize_study(request, study_id):
+    """Anonymize a DICOM study by removing PHI tags."""
+    if not (request.user.is_admin() or request.user.is_radiologist()):
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    try:
+        study = get_object_or_404(Study, pk=study_id)
+
+        phi_tags = [
+            'PatientName', 'PatientID', 'PatientBirthDate', 'PatientSex',
+            'PatientAge', 'PatientWeight', 'PatientAddress', 'PatientTelephoneNumbers',
+            'InstitutionName', 'InstitutionAddress', 'ReferringPhysicianName',
+            'PerformingPhysicianName', 'OperatorsName', 'AccessionNumber',
+        ]
+
+        anonymized_count = 0
+        errors = []
+
+        for series in study.series_set.all():
+            for image in series.dicomimage_set.all():
+                try:
+                    file_path = image.file_path.path
+                    ds = pydicom.dcmread(file_path)
+
+                    anon_id = f'ANON-{study.id}'
+                    for tag_name in phi_tags:
+                        if hasattr(ds, tag_name):
+                            try:
+                                setattr(ds, tag_name, anon_id if tag_name in ('PatientName', 'PatientID', 'AccessionNumber') else '')
+                            except Exception:
+                                pass
+
+                    anon_path = file_path.replace('/dicom/images/', '/dicom/anonymized/')
+                    os.makedirs(os.path.dirname(anon_path), exist_ok=True)
+                    ds.save_as(anon_path)
+                    anonymized_count += 1
+                except Exception as e:
+                    errors.append(str(e))
+
+        log_audit(request, 'anonymize_study', f'Anonymized study {study.accession_number}', study_id=study.id)
+
+        return JsonResponse({
+            'success': True,
+            'anonymized_images': anonymized_count,
+            'errors': errors[:5],
+            'message': f'Created anonymized copy with {anonymized_count} images',
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)

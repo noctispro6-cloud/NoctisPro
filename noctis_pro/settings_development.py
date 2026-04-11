@@ -1,3 +1,11 @@
+# IMPORTANT: settings_development.py disables HTTPS enforcement.
+# Never use this settings module in production.
+# For production, use settings.py and set:
+#   SSL_ENABLED=True
+#   SECURE_SSL_REDIRECT=True
+#   SESSION_COOKIE_SECURE=True
+#   CSRF_COOKIE_SECURE=True
+
 # Development settings for NoctisPro
 # This file provides SQLite fallback for development when PostgreSQL is not available
 

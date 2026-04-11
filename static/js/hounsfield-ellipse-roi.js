@@ -159,7 +159,8 @@
             clearBtn?.addEventListener('click', () => this.clearAllROIs());
             
             // Canvas/viewport mouse events
-            const canvas = document.querySelector('#dicom-canvas') || 
+            const canvas = document.querySelector('#dicomCanvas') || 
+                          document.querySelector('#dicom-canvas') ||
                           document.querySelector('canvas') ||
                           document.querySelector('#viewport');
             
@@ -309,7 +310,8 @@
         
         // Draw ROI ellipse on canvas
         drawROI: function(roi) {
-            const canvas = document.querySelector('#dicom-canvas') || 
+            const canvas = document.querySelector('#dicomCanvas') ||
+                          document.querySelector('#dicom-canvas') ||
                           document.querySelector('canvas');
             
             if (!canvas) return;
@@ -373,7 +375,9 @@
         // Calculate ROI statistics
         calculateROIStatistics: function(roi) {
             // Get pixel data from canvas (simplified - in real implementation, get from DICOM data)
-            const canvas = document.querySelector('#dicom-canvas') || document.querySelector('canvas');
+            const canvas = document.querySelector('#dicomCanvas') ||
+                          document.querySelector('#dicom-canvas') ||
+                          document.querySelector('canvas');
             if (!canvas) return;
             
             const ctx = canvas.getContext('2d');

@@ -624,6 +624,94 @@
             /* transform: translateY(-2px); */
         }
 
+        /* Right-click context menu */
+        .ctx-menu {
+            position: fixed;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+            z-index: 9999;
+            min-width: 190px;
+            padding: 4px 0;
+            display: none;
+        }
+        .ctx-menu.visible { display: block; }
+        .ctx-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            font-size: 11px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: background 0.15s;
+            white-space: nowrap;
+        }
+        .ctx-menu-item:hover { background: rgba(0,212,255,0.12); color: var(--accent-color); }
+        .ctx-menu-item.danger:hover { background: rgba(255,68,68,0.12); color: var(--danger-color); }
+        .ctx-menu-item i { width: 14px; text-align: center; opacity: 0.8; }
+        .ctx-menu-sep { height: 1px; background: var(--border-color); margin: 4px 0; }
+
+        /* Delete confirm modal */
+        .delete-modal-overlay {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+        .delete-modal-overlay.visible { display: flex; }
+        .delete-modal {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 28px 32px;
+            max-width: 420px;
+            width: 90%;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+        }
+        .delete-modal-icon { font-size: 36px; color: var(--danger-color); margin-bottom: 14px; }
+        .delete-modal h3 { color: var(--text-primary); font-size: 15px; margin: 0 0 8px; }
+        .delete-modal p { color: var(--text-secondary); font-size: 12px; margin: 0 0 20px; line-height: 1.6; }
+        .delete-modal-accession {
+            background: rgba(255,68,68,0.08);
+            border: 1px solid rgba(255,68,68,0.3);
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--danger-color);
+            margin-bottom: 20px;
+            display: inline-block;
+        }
+        .delete-modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        .btn-cancel-delete {
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 8px 18px;
+            border-radius: 5px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-cancel-delete:hover { background: var(--card-bg); color: var(--text-primary); }
+        .btn-confirm-delete {
+            background: var(--danger-color);
+            border: none;
+            color: #fff;
+            padding: 8px 18px;
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-confirm-delete:hover { background: #cc2222; }
+        .btn-confirm-delete:disabled { opacity: 0.6; cursor: not-allowed; }
+
         /* Responsive adjustments */
         @media (max-width: 1200px) {
             .data-table th,
@@ -648,6 +736,18 @@
                 padding: 3px 6px;
             }
         }
+
+        @media (max-width: 768px) {
+            .data-table { font-size: 10px; }
+            .data-table th, .data-table td { padding: 3px 6px; }
+            .controls-bar { flex-wrap: wrap; gap: 6px; padding: 6px 8px; height: auto; }
+            .top-navbar { padding: 6px 8px; }
+            .nav-tabs { overflow-x: auto; }
+            .nav-tab { font-size: 9px; padding: 4px 8px; white-space: nowrap; }
+            /* Hide less important columns on small screens */
+            .data-table th:nth-child(n+9),
+            .data-table td:nth-child(n+9) { display: none; }
+        }
     </style>
 </head>
 <body>
@@ -662,11 +762,14 @@
                 <div class="nav-tab active">WORKLIST</div>
                 <div class="nav-tab" onclick="window.location.href='{% url 'worklist:study_list' %}'">STUDIES</div>
                 <div class="nav-tab" onclick="window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
+                <div class="nav-tab" onclick="window.location.href='{% url 'dicom_viewer:viewer' %}'"><i class="fas fa-images"></i> DICOM VIEWER</div>
+                <div class="nav-tab" id="boardViewTab" onclick="toggleBoardView()"><i class="fas fa-th"></i> BOARD</div>
                 {% user_caps as caps %}
+                {# AI WORKLIST tab: visible to admin, radiologist, and facility users with an active subscription #}
                 {% if user.is_admin or user.is_radiologist %}
-                {% if caps.ai_visible %}
-                <div class="nav-tab" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI</div>
-                {% endif %}
+                <div class="nav-tab" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI WORKLIST</div>
+                {% elif user.is_facility_user and user.facility and user.facility.has_ai_subscription %}
+                <div class="nav-tab" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI WORKLIST</div>
                 {% endif %}
                 {% if user.is_admin %}
                 <div class="nav-tab" onclick="window.location.href='{% url 'admin_panel:dashboard' %}'"><i class="fas fa-user-cog"></i> ADMIN PANEL</div>
@@ -747,10 +850,9 @@
                 <select class="control-select" id="statusFilter">
                     <option value="">All Status</option>
                     <option value="scheduled">Scheduled</option>
-                    <option value="urgent">Urgent</option>
                     <option value="in-progress">In Progress</option>
                     <option value="completed">Completed</option>
-                    <option value="pending">Pending</option>
+                    <option value="suspended">Suspended</option>
                     <option value="cancelled">Cancelled</option>
                 </select>
             </div>
@@ -775,6 +877,11 @@
                     <option value="low">Low</option>
                 </select>
             </div>
+            <div class="control-group">
+                <button type="button" class="btn-control" id="todayToggle" onclick="toggleTodayFilter()" title="Toggle Today/All studies">
+                    <i class="fas fa-calendar-day"></i> Today
+                </button>
+            </div>
             <button type="button" class="btn-control reset" onclick="refreshData()" title="Refresh">
                 <i class="fas fa-sync-alt"></i>
             </button>
@@ -789,55 +896,121 @@
             </button>
         </div>
 
+        <!-- Bulk Action Bar (hidden until selections made) -->
+        <div id="bulkActionBar" style="display:none;background:rgba(0,212,255,0.1);border-bottom:1px solid var(--accent-color);padding:6px 16px;align-items:center;gap:12px;">
+            <span id="selectedCount" style="font-size:11px;">0 selected</span>
+            <button onclick="bulkUpdateStatus('completed')" class="btn-control" style="font-size:10px;">Mark Completed</button>
+            <button onclick="bulkUpdateStatus('cancelled')" class="btn-control" style="font-size:10px;">Mark Cancelled</button>
+            {% if user.is_admin %}
+            <button onclick="bulkDelete()" class="btn-control" style="font-size:10px;background:var(--danger-color);color:#fff;">Delete Selected</button>
+            {% endif %}
+            <button onclick="clearSelection()" class="btn-control" style="font-size:10px;">Clear</button>
+        </div>
+
         <!-- Main Content -->
         <div class="main-content">
-            <div class="data-table-container">
+            <div class="data-table-container" id="dataTableContainer">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th class="sortable">TIME</th>
-                            <th class="sortable">PATIENT ID</th>
-                            <th class="sortable">NAME</th>
-                            <th class="sortable">ACCESSION</th>
+                            <th style="width:30px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)" title="Select All"></th>
+                            <th class="sortable" data-sort="study_time" onclick="sortTable('study_time')" style="cursor:pointer">TIME ↕</th>
+                            <th class="sortable" data-sort="patient_id" onclick="sortTable('patient_id')" style="cursor:pointer">PATIENT ID ↕</th>
+                            <th class="sortable" data-sort="patient_name" onclick="sortTable('patient_name')" style="cursor:pointer">NAME ↕</th>
+                            <th class="sortable" data-sort="accession_number" onclick="sortTable('accession_number')" style="cursor:pointer">ACCESSION ↕</th>
                             <th class="sortable">MODALITY</th>
-                            <th class="sortable">STATUS</th>
-                            <th class="sortable">PRIORITY</th>
-                            <th class="sortable">SCHEDULED</th>
+                            <th class="sortable" data-sort="status" onclick="sortTable('status')" style="cursor:pointer">STATUS ↕</th>
+                            <th class="sortable" data-sort="priority" onclick="sortTable('priority')" style="cursor:pointer">PRIORITY ↕</th>
+                            <th class="sortable">REPORT</th>
+                            <th class="sortable" data-sort="scheduled_time" onclick="sortTable('scheduled_time')" style="cursor:pointer">SCHEDULED ↕</th>
                             <th class="sortable">IMAGES</th>
                             <th class="sortable">FACILITY</th>
-                            <th class="sortable">ROOM</th>
-                            <th>DICOM VIEWER</th>
+                            <th class="sortable">UPLOADED BY</th>
                         </tr>
                     </thead>
                     <tbody id="studiesTableBody">
                         <!-- Studies will be dynamically loaded here -->
                         <tr id="noDataRow">
-                            <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                            <td colspan="13" style="text-align: center; padding: 40px; color: var(--text-muted);">
                                 <i class="fas fa-folder-open" style="font-size: 48px; opacity: 0.3; margin-bottom: 16px; display: block;"></i>
                                 <div style="font-size: 14px; margin-bottom: 8px;">No studies found</div>
-                                <div style="font-size: 12px;">Upload DICOM studies or check your filter settings</div>
+                                <div style="font-size: 12px;">Upload DICOM studies or check your filter settings. Right-click any study row for actions.</div>
                             </td>
                         </tr>
                     </tbody>
                 </table>
+            </div>
+
+            <!-- Board / Kanban View -->
+            <div id="boardView" style="display:none;overflow-x:auto;padding:12px;">
+                <div style="display:flex;gap:12px;min-width:900px;">
+                    {% for status_val, status_label in status_columns %}
+                    <div style="flex:1;min-width:180px;background:var(--secondary-bg);border:1px solid var(--border-color);border-radius:6px;padding:8px;">
+                        <div style="font-size:10px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border-color);">
+                            {{ status_label }}
+                        </div>
+                        <div id="board-{{ status_val }}" class="board-column" style="min-height:100px;"></div>
+                    </div>
+                    {% endfor %}
+                </div>
             </div>
         </div>
 
         <!-- Footer Status Bar -->
         <div class="footer-status">
             <div class="status-left">
+                <button id="loadMoreBtn" style="display:none;" onclick="loadMore()" class="btn-control">
+                    <i class="fas fa-chevron-down"></i> Load More Studies
+                </button>
                 <span>Total Studies: <strong>{{ total_studies|default:0 }}</strong></span>
                 <span>Urgent: <strong style="color: var(--urgent-color);">{{ urgent_studies|default:0 }}</strong></span>
                 <span>In Progress: <strong style="color: var(--in-progress-color);">{{ in_progress_studies|default:0 }}</strong></span>
                 <span>Completed: <strong style="color: var(--completed-color);">{{ completed_studies|default:0 }}</strong></span>
+                {% if radiologist_view %}
+                <span>My Studies: <strong>{{ my_studies_count|default:0 }}</strong></span>
+                <span>Unassigned: <strong style="color:var(--warning-color);">{{ unassigned_count|default:0 }}</strong></span>
+                <span>My Reports: <strong style="color:var(--completed-color);">{{ my_reports_count|default:0 }}</strong></span>
+                {% endif %}
             </div>
             <div class="status-right">
                 <div class="connection-status">
                     <div class="connection-dot"></div>
                     <span>DICOM Server Connected</span>
                 </div>
-                <span>Last Update: <strong>14:32:15</strong></span>
+                <span>Last Update: <strong id="lastUpdateTime">--:--:--</strong></span>
                 <span>Auto-refresh: <strong>ON</strong></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right-click context menu -->
+    <div id="ctxMenu" class="ctx-menu">
+        <div class="ctx-menu-item" id="ctx-view"><i class="fas fa-eye"></i> View in DICOM Viewer</div>
+        {% if user.is_admin or user.is_radiologist %}
+        <div class="ctx-menu-item" id="ctx-report"><i class="fas fa-file-signature"></i> Write / Edit Report</div>
+        {% endif %}
+        {% if user.is_facility_user %}
+        <div class="ctx-menu-item" id="ctx-print"><i class="fas fa-print"></i> Print Report</div>
+        {% endif %}
+        <div class="ctx-menu-item" id="ctx-attach"><i class="fas fa-paperclip"></i> Attach Files</div>
+        <div class="ctx-menu-item" id="ctx-details"><i class="fas fa-folder-open"></i> Study Details</div>
+        {% if user.is_admin or user.is_radiologist %}
+        <div class="ctx-menu-sep"></div>
+        <div class="ctx-menu-item danger" id="ctx-delete"><i class="fas fa-trash"></i> Delete Study</div>
+        {% endif %}
+    </div>
+
+    <!-- Delete confirm modal -->
+    <div id="deleteModalOverlay" class="delete-modal-overlay">
+        <div class="delete-modal">
+            <div class="delete-modal-icon"><i class="fas fa-exclamation-triangle"></i></div>
+            <h3>Delete Study?</h3>
+            <p>This will permanently remove all associated data including DICOM images, series, reports, measurements, and annotations.</p>
+            <div class="delete-modal-accession" id="deleteModalAccession"></div>
+            <p style="color:var(--danger-color);font-size:11px;margin-bottom:20px;">This action cannot be undone.</p>
+            <div class="delete-modal-actions">
+                <button class="btn-cancel-delete" id="deleteModalCancel">Cancel</button>
+                <button class="btn-confirm-delete" id="deleteModalConfirm"><i class="fas fa-trash"></i> Yes, Delete</button>
             </div>
         </div>
     </div>
@@ -849,6 +1022,39 @@
         // Data loading and management
         let studiesData = [];
         let filteredData = [];
+
+        // Column sort state
+        let sortColumn = null;
+        let sortAsc = true;
+
+        function sortTable(column) {
+            if (sortColumn === column) {
+                sortAsc = !sortAsc;
+            } else {
+                sortColumn = column;
+                sortAsc = true;
+            }
+            // Update header arrow indicators
+            document.querySelectorAll('th.sortable').forEach(th => {
+                th.textContent = th.textContent.replace(/ [↑↓↕]$/, '');
+                th.textContent += ' ↕';
+            });
+            const activeHeader = document.querySelector(`th.sortable[data-sort="${column}"]`);
+            if (activeHeader) {
+                activeHeader.textContent = activeHeader.textContent.replace(/ [↑↓↕]$/, '');
+                activeHeader.textContent += sortAsc ? ' ↑' : ' ↓';
+            }
+            filteredData.sort((a, b) => {
+                let valA = a[column] !== undefined ? a[column] : '';
+                let valB = b[column] !== undefined ? b[column] : '';
+                if (typeof valA === 'string') valA = valA.toLowerCase();
+                if (typeof valB === 'string') valB = valB.toLowerCase();
+                if (valA < valB) return sortAsc ? -1 : 1;
+                if (valA > valB) return sortAsc ? 1 : -1;
+                return 0;
+            });
+            renderStudiesTable();
+        }
 
         // Enhanced studies loading with better support for uploaded studies
         // `opts.silent`: don't show loading spinner / "Loaded X studies" toast (used for polling refresh).
@@ -901,9 +1107,14 @@
                         updateStatusCounts();
                         if (!silent) showToast(`Loaded ${studiesData.length} studies`, 'success', 2000);
                     }
+
+                    // Show Load More button if there are more results
+                    const loadMoreBtn = document.getElementById('loadMoreBtn');
+                    if (loadMoreBtn) {
+                        loadMoreBtn.style.display = data.has_more ? 'inline-block' : 'none';
+                        loadMoreBtn.setAttribute('data-next-page', '2');
+                    }
                     
-                    // Show upload stats if available
-                    await loadUploadStats();
                 } else {
                     console.error('API returned error:', data.error);
                     showToast(data.message || 'Failed to load studies', 'error');
@@ -914,39 +1125,6 @@
                 console.error('Error loading studies data:', error);
                 showToast(`Connection error: ${error.message}`, 'error');
                 showNoDataMessage();
-            }
-        }
-
-        // Load upload statistics
-        async function loadUploadStats() {
-            try {
-                const response = await fetch('{% url "worklist:api_get_upload_stats" %}');
-                
-                if (!response.ok) {
-                    console.error('Failed to fetch upload stats:', response.status, response.statusText);
-                    return;
-                }
-                
-                let data;
-                try {
-                    data = await response.json();
-                } catch (jsonErr) {
-                    console.error('JSON parsing error in upload stats:', jsonErr.message);
-                    return;
-                }
-                
-                if (data.success) {
-                    const stats = data.stats;
-                    // Update stats display if elements exist
-                    const statsElements = document.querySelectorAll('.upload-stats .stat-value');
-                    if (statsElements.length >= 3) {
-                        statsElements[0].textContent = stats.total_studies;
-                        statsElements[1].textContent = stats.total_series;
-                        statsElements[2].textContent = stats.total_images;
-                    }
-                }
-            } catch (error) {
-                console.error('Error loading upload stats:', error);
             }
         }
 
@@ -1001,6 +1179,7 @@
                 
                 return `
                     <tr onclick="selectStudy(this)" data-study-id="${study.id}" ${isRecentUpload ? 'class="recent-upload"' : ''}>
+                        <td onclick="event.stopPropagation()"><input type="checkbox" class="study-checkbox" data-id="${study.id}" onchange="updateBulkActions()" onclick="event.stopPropagation()"></td>
                         <td class="timestamp">${studyTime}</td>
                         <td class="patient-id">${study.patient_id}</td>
                         <td class="patient-name">${study.patient_name}</td>
@@ -1022,25 +1201,18 @@
                                 return `<span class="ai-flag-badge ${cls}" title="${title.replace(/"/g,'&quot;')}"><i class="fas fa-robot"></i> ${label}</span>`;
                             })()}
                         </td>
+                        <td>
+                            ${study.report_status
+                                ? `<span class="status-badge status-${study.report_status}" title="Report: ${study.report_status}">${study.report_status.toUpperCase()}</span>`
+                                : '<span style="color:var(--text-muted);font-size:9px;">NO REPORT</span>'
+                            }
+                        </td>
                         <td class="timestamp">${scheduledTime}</td>
                         <td title="${seriesCount} series, ${imageCount} images">
                             ${imageCount} <small style="color: var(--text-secondary);">(${seriesCount}s)</small>
                         </td>
                         <td>${study.facility || '-'}</td>
-                        <td title="Uploaded: ${uploadTime} by ${study.uploaded_by || 'Unknown'}">${study.uploaded_by || '-'}</td>
-                        <td>
-                            <div class="viewer-buttons">
-                                <button type="button" class="btn-dicom-viewer btn-sm" onclick="openStudyInViewer('${study.id}', event); event.stopPropagation();" title="Open study in DICOM viewer">
-                                    <i class="fas fa-eye"></i> VIEW
-                                </button>
-                                {% if user.is_admin or user.is_radiologist %}<button type="button" class="btn-viewer" style="margin-left:6px" onclick="openReport('${study.id}'); event.stopPropagation();" title="Write/Edit report"><i class="fas fa-file-signature"></i> REPORT</button>{% endif %}
-                                {% if user.is_facility_user %}<button type="button" class="btn-viewer" style="margin-left:6px" onclick="printStudy('${study.id}'); event.stopPropagation();" title="Print"><i class="fas fa-print"></i> PRINT</button>{% endif %}
-                                <button type="button" class="btn-viewer" style="margin-left:6px" onclick="window.location.href='/worklist/study/${study.id}/upload/'; event.stopPropagation();" title="Attach files"><i class="fas fa-paperclip"></i> ATTACH</button>
-                                <button type="button" class="btn-viewer" style="margin-left:6px" onclick="window.location.href='/worklist/study/${study.id}/'; event.stopPropagation();" title="View study details"><i class="fas fa-folder-open"></i> DETAILS</button>
-                                {% if user.is_admin or user.is_radiologist %}<button type="button" class="btn-viewer" style="margin-left:6px;background:var(--danger-color)" onclick="deleteStudy('${study.id}','${study.accession_number}'); event.stopPropagation();" title="Delete study (admin/radiologist only)"><i class="fas fa-trash"></i> DELETE</button>{% endif %}
-                                ${isRecentUpload ? '<span style="color: var(--success-color); font-size: 10px; margin-left: 4px;">NEW</span>' : ''}
-                            </div>
-                        </td>
+                        <td title="Uploaded: ${uploadTime}">${study.uploaded_by || '-'}${isRecentUpload ? ' <span style="color:var(--success-color);font-size:9px;font-weight:bold;">NEW</span>' : ''}</td>
                     </tr>
                 `;
             }).join('');
@@ -1101,27 +1273,13 @@
         }
 
         async function deleteStudy(studyId, accession){
-            // Confirm deletion
-            if (!confirm(`Are you sure you want to delete study ${accession}?\n\nThis action cannot be undone and will permanently remove all associated data including:\n• DICOM images\n• Series data\n• Reports\n• Measurements\n• Annotations`)) {
-                return;
-            }
-            
             try{
-                // Get CSRF token (required for delete operations)
                 const csrfToken = getCSRFToken();
                 if (!csrfToken) {
                     showToast('Security token missing. Please refresh the page.', 'error');
                     return;
                 }
-                
-                // Show loading state
-                const deleteButton = document.querySelector(`button[onclick*="deleteStudy('${studyId}'"]`);
-                if (deleteButton) {
-                    deleteButton.disabled = true;
-                    deleteButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> DELETING...';
-                }
-                
-                // Prepare headers with CSRF token
+
                 const headers = {
                     'X-CSRFToken': csrfToken,
                     'Content-Type': 'application/json',
@@ -1161,52 +1319,133 @@
                 renderStudiesTable();
                 updateStatusCounts();
                 
-                // Show success toast
                 showToast(`Study ${accession} deleted successfully`, 'success');
                 
             }catch(err){
-                console.error('Delete failed:', err);
-                
-                // Show error toast with specific message
                 showToast(`Failed to delete study: ${err.message}`, 'error', 5000);
-                
-                // Reset button state
-                const deleteButton = document.querySelector(`button[onclick*="deleteStudy('${studyId}'"]`);
-                if (deleteButton) {
-                    deleteButton.disabled = false;
-                    deleteButton.innerHTML = '<i class="fas fa-trash"></i> DELETE';
-                }
             }
         }
-        
-        // Right-click context quick delete for admin
+
+        // ── Context menu ──────────────────────────────────────────────
         (function(){
+            const menu = document.getElementById('ctxMenu');
+            let activeStudyId = null;
+            let activeAccession = null;
+
+            function closeMenu() {
+                menu.classList.remove('visible');
+                activeStudyId = null;
+                activeAccession = null;
+            }
+
+            document.addEventListener('click', closeMenu);
+            document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeMenu(); });
+
             const tbody = document.getElementById('studiesTableBody');
             if (!tbody) return;
+
             tbody.addEventListener('contextmenu', function(e){
                 const row = e.target.closest('tr[data-study-id]');
                 if (!row) return;
                 e.preventDefault();
-                {% if user.role == 'admin' %}
-                const id = row.getAttribute('data-study-id');
-                const acc = (row.querySelector('.accession')||{}).textContent || '';
-                deleteStudy(id, acc);
-                {% endif %}
+                e.stopPropagation();
+
+                activeStudyId = row.getAttribute('data-study-id');
+                activeAccession = (row.querySelector('.accession')||{}).textContent || '';
+
+                // Position menu near cursor, keep it on screen
+                const x = Math.min(e.clientX, window.innerWidth - 200);
+                const y = Math.min(e.clientY, window.innerHeight - 260);
+                menu.style.left = x + 'px';
+                menu.style.top = y + 'px';
+                menu.classList.add('visible');
             });
+
+            // Menu item handlers
+            const el = id => document.getElementById(id);
+
+            el('ctx-view') && el('ctx-view').addEventListener('click', function(){
+                if (activeStudyId) openStudyInViewer(activeStudyId);
+                closeMenu();
+            });
+            {% if user.is_admin or user.is_radiologist %}
+            el('ctx-report') && el('ctx-report').addEventListener('click', function(){
+                if (activeStudyId) openReport(activeStudyId);
+                closeMenu();
+            });
+            {% endif %}
+            {% if user.is_facility_user %}
+            el('ctx-print') && el('ctx-print').addEventListener('click', function(){
+                if (activeStudyId) printStudy(activeStudyId);
+                closeMenu();
+            });
+            {% endif %}
+            el('ctx-attach') && el('ctx-attach').addEventListener('click', function(){
+                if (activeStudyId) window.location.href = '/worklist/study/' + activeStudyId + '/upload/';
+                closeMenu();
+            });
+            el('ctx-details') && el('ctx-details').addEventListener('click', function(){
+                if (activeStudyId) window.location.href = '/worklist/study/' + activeStudyId + '/';
+                closeMenu();
+            });
+            {% if user.is_admin or user.is_radiologist %}
+            el('ctx-delete') && el('ctx-delete').addEventListener('click', function(){
+                const sid = activeStudyId;
+                const acc = activeAccession;
+                closeMenu();
+                showDeleteModal(sid, acc);
+            });
+            {% endif %}
         })();
+
+        // ── Delete confirm modal ──────────────────────────────────────
+        function showDeleteModal(studyId, accession) {
+            const overlay = document.getElementById('deleteModalOverlay');
+            const accEl   = document.getElementById('deleteModalAccession');
+            const confirmBtn = document.getElementById('deleteModalConfirm');
+            const cancelBtn  = document.getElementById('deleteModalCancel');
+            if (!overlay) return;
+
+            accEl.textContent = 'Accession: ' + (accession || studyId);
+            overlay.classList.add('visible');
+
+            function cleanup() {
+                overlay.classList.remove('visible');
+                confirmBtn.removeEventListener('click', onConfirm);
+                cancelBtn.removeEventListener('click', onCancel);
+            }
+            function onCancel() { cleanup(); }
+            function onConfirm() {
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting…';
+                deleteStudy(studyId, accession).finally(function(){
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = '<i class="fas fa-trash"></i> Yes, Delete';
+                    cleanup();
+                });
+            }
+            confirmBtn.addEventListener('click', onConfirm);
+            cancelBtn.addEventListener('click', onCancel);
+            overlay.addEventListener('click', function(e){
+                if (e.target === overlay) cleanup();
+            }, { once: true });
+        }
 
         function updateStatusCounts() {
             const counts = studiesData.reduce((acc, study) => {
                 acc.total++;
-                acc[study.status] = (acc[study.status] || 0) + 1;
+                // Status counts (in_progress, completed, etc.)
+                const st = (study.status || '').replace('_', '-');
+                acc[st] = (acc[st] || 0) + 1;
+                // Urgent is a PRIORITY, not a status — count from study.priority
+                if ((study.priority || '').toLowerCase() === 'urgent') acc.urgentPriority++;
                 return acc;
-            }, { total: 0, urgent: 0, 'in-progress': 0, completed: 0 });
-            
-            // Update footer status
+            }, { total: 0, urgentPriority: 0, 'in-progress': 0, completed: 0 });
+
             const statusElements = document.querySelectorAll('.status-left span strong');
             if (statusElements.length >= 4) {
                 statusElements[0].textContent = counts.total;
-                statusElements[1].textContent = counts.urgent || 0;
+                statusElements[1].textContent = counts.urgentPriority;
                 statusElements[2].textContent = counts['in-progress'] || 0;
                 statusElements[3].textContent = counts.completed || 0;
             }
@@ -1344,10 +1583,29 @@
             document.getElementById('modalityFilter').value = '';
             document.getElementById('priorityFilter').value = '';
             document.getElementById('searchFilter').value = '';
+            // Reset today toggle state
+            showingToday = false;
+            const todayBtn = document.getElementById('todayToggle');
+            if (todayBtn) { todayBtn.style.background = ''; todayBtn.style.color = ''; }
             
             // Reset filtered data to show all studies
             filteredData = [...studiesData];
             renderStudiesTable();
+        }
+
+        let showingToday = false;
+        function toggleTodayFilter() {
+            showingToday = !showingToday;
+            const btn = document.getElementById('todayToggle');
+            if (showingToday) {
+                const today = new Date().toISOString().slice(0,10);
+                document.getElementById('dateFilter').value = today;
+                if (btn) { btn.style.background = 'var(--accent-color)'; btn.style.color = 'var(--primary-bg)'; }
+            } else {
+                document.getElementById('dateFilter').value = '';
+                if (btn) { btn.style.background = ''; btn.style.color = ''; }
+            }
+            applyFilters();
         }
 
         // Enhanced refresh function with better error handling
@@ -1361,15 +1619,14 @@
             
             // Reload studies data with enhanced API
             Promise.all([
-                loadStudiesData(),
-                loadUploadStats()
+                loadStudiesData()
             ]).then(() => {
                 icon.classList.remove('fa-spin');
                 btn.disabled = false;
                 
                 // Update last update time
                 const now = new Date();
-                const timeElement = document.querySelector('.footer-status .status-right span:nth-last-child(2) strong');
+                const timeElement = document.getElementById('lastUpdateTime') || document.querySelector('.footer-status .status-right span:nth-last-child(2) strong');
                 if (timeElement) {
                     timeElement.textContent = now.toLocaleTimeString('en-US', { hour12: false });
                 }
@@ -1469,7 +1726,7 @@
                     
                     // Update last update time
                     const now = new Date();
-                    const timeElement = document.querySelector('.footer-status .status-right span:nth-last-child(2) strong');
+                    const timeElement = document.getElementById('lastUpdateTime') || document.querySelector('.footer-status .status-right span:nth-last-child(2) strong');
                     if (timeElement) {
                         timeElement.textContent = now.toLocaleTimeString('en-US', { hour12: false });
                     }
@@ -1483,9 +1740,10 @@
                 .then(r => r.json())
                 .then(d => {
                     const badge = document.getElementById('notifBadge');
-                    if (badge && d && typeof d.unread_count === 'number') {
-                        if (d.unread_count > 0) {
-                            badge.textContent = d.unread_count;
+                    const cnt = d && (d.count !== undefined ? d.count : (d.unread_count !== undefined ? d.unread_count : d.unread));
+                    if (badge && typeof cnt === 'number') {
+                        if (cnt > 0) {
+                            badge.textContent = cnt;
                             badge.style.display = 'inline-block';
                         } else {
                             badge.style.display = 'none';
@@ -1574,6 +1832,111 @@
             });
             
             renderStudiesTable();
+        }
+
+        // ---- Load More ----
+        async function loadMore() {
+            const btn = document.getElementById('loadMoreBtn');
+            const nextPage = btn ? parseInt(btn.getAttribute('data-next-page') || '2', 10) : 2;
+            try {
+                const resp = await fetch('{% url "worklist:api_studies" %}?page=' + nextPage, {
+                    credentials: 'same-origin',
+                    headers: {'Accept': 'application/json'}
+                });
+                const data = await resp.json();
+                if (data.success && data.studies && data.studies.length > 0) {
+                    studiesData = studiesData.concat(data.studies);
+                    applyFilters();
+                    if (btn) {
+                        btn.setAttribute('data-next-page', String(nextPage + 1));
+                        btn.style.display = data.has_more ? 'inline-block' : 'none';
+                    }
+                }
+            } catch(e) { console.error('Load more error:', e); }
+        }
+
+        // ---- Board / Kanban View ----
+        function toggleBoardView() {
+            const boardView = document.getElementById('boardView');
+            const tableContainer = document.getElementById('dataTableContainer');
+            const tab = document.getElementById('boardViewTab');
+            const isBoard = boardView && boardView.style.display !== 'none';
+            if (isBoard) {
+                if (boardView) boardView.style.display = 'none';
+                if (tableContainer) tableContainer.style.display = '';
+                if (tab) tab.classList.remove('active');
+            } else {
+                if (tableContainer) tableContainer.style.display = 'none';
+                if (boardView) { boardView.style.display = 'block'; renderBoardView(); }
+                if (tab) tab.classList.add('active');
+            }
+        }
+
+        function renderBoardView() {
+            const statuses = ['scheduled', 'in_progress', 'completed', 'suspended', 'cancelled'];
+            statuses.forEach(function(status) {
+                const col = document.getElementById('board-' + status);
+                if (!col) return;
+                const dbStatus = status;
+                const uiStatus = status.replace('_', '-');
+                const items = studiesData.filter(s => s.status === dbStatus || s.status === uiStatus);
+                col.innerHTML = items.map(s => `
+                    <div style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:4px;padding:8px;margin-bottom:6px;cursor:pointer;"
+                         onclick="openStudyInViewer('${s.id}')">
+                        <div style="font-weight:bold;font-size:11px;color:var(--accent-color);">${s.accession_number || ''}</div>
+                        <div style="font-size:10px;">${s.patient_name || ''}</div>
+                        <div style="font-size:9px;color:var(--text-muted);">${s.modality || ''}</div>
+                    </div>
+                `).join('') || '<div style="color:var(--text-muted);font-size:10px;text-align:center;">Empty</div>';
+            });
+        }
+
+        // ---- Bulk Select ----
+        function toggleSelectAll(cb) {
+            document.querySelectorAll('.study-checkbox').forEach(c => { c.checked = cb.checked; });
+            updateBulkActions();
+        }
+        function updateBulkActions() {
+            const checked = document.querySelectorAll('.study-checkbox:checked');
+            const bar = document.getElementById('bulkActionBar');
+            const count = document.getElementById('selectedCount');
+            if (bar) bar.style.display = checked.length > 0 ? 'flex' : 'none';
+            if (count) count.textContent = checked.length + ' selected';
+        }
+        function clearSelection() {
+            document.querySelectorAll('.study-checkbox').forEach(c => c.checked = false);
+            const selAll = document.getElementById('selectAll');
+            if (selAll) selAll.checked = false;
+            updateBulkActions();
+        }
+        async function bulkUpdateStatus(status) {
+            const ids = Array.from(document.querySelectorAll('.study-checkbox:checked')).map(c => c.dataset.id);
+            if (!ids.length) return;
+            if (!confirm('Update ' + ids.length + ' studies to ' + status + '?')) return;
+            const csrf = getCSRFToken();
+            for (const id of ids) {
+                await fetch('/worklist/api/study/' + id + '/update-status/', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'X-CSRFToken': csrf, 'Content-Type': 'application/json'},
+                    body: JSON.stringify({status: status})
+                }).catch(() => {});
+            }
+            clearSelection();
+            await loadStudiesData();
+        }
+        async function bulkDelete() {
+            const ids = Array.from(document.querySelectorAll('.study-checkbox:checked')).map(c => c.dataset.id);
+            if (!ids.length) return;
+            if (!confirm('Delete ' + ids.length + ' studies? This cannot be undone.')) return;
+            const csrf = getCSRFToken();
+            for (const id of ids) {
+                await fetch('/worklist/api/study/' + id + '/delete/', {
+                    method: 'DELETE', credentials: 'same-origin',
+                    headers: {'X-CSRFToken': csrf}
+                }).catch(() => {});
+            }
+            clearSelection();
+            await loadStudiesData();
         }
     </script>
     

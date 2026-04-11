@@ -567,16 +567,27 @@ class DicomViewerEnhanced {
 
     exportImage() {
         try {
+            // Try Cornerstone element first, fall back to #dicomCanvas (masterpiece viewer)
+            let canvas = null;
             if (typeof cornerstone !== 'undefined' && this.currentElement) {
-                const canvas = cornerstone.getEnabledElement(this.currentElement).canvas;
-                const link = document.createElement('a');
-                link.download = `dicom-export-${Date.now()}.png`;
-                link.href = canvas.toDataURL();
-                link.click();
-                this.showToast('Image exported successfully', 'success');
-            } else {
-                this.showToast('No image to export', 'warning');
+                try {
+                    canvas = cornerstone.getEnabledElement(this.currentElement).canvas;
+                } catch (csErr) {
+                    canvas = null;
+                }
             }
+            if (!canvas) {
+                canvas = document.getElementById('dicomCanvas');
+            }
+            if (!canvas) {
+                this.showToast('No image loaded', 'warning');
+                return;
+            }
+            const link = document.createElement('a');
+            link.download = `dicom-export-${Date.now()}.png`;
+            link.href = canvas.toDataURL();
+            link.click();
+            this.showToast('Image exported successfully', 'success');
         } catch (error) {
             this.showToast('Failed to export image', 'error');
         }

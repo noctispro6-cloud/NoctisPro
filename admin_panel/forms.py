@@ -79,7 +79,8 @@ class CustomUserCreationForm(UserCreationForm):
         widgets = {
             'username': forms.TextInput(attrs={
                 'class': 'form-control form-control-medical',
-                'placeholder': 'Enter unique username'
+                'placeholder': 'Enter unique username',
+                'required': True,
             }),
         }
 
@@ -155,8 +156,9 @@ class CustomUserCreationForm(UserCreationForm):
         user.phone = self.cleaned_data.get('phone', '')
         user.license_number = self.cleaned_data.get('license_number', '')
         user.specialization = self.cleaned_data.get('specialization', '')
-        user.is_verified = True  # New users are verified by default
-        user.is_active = True   # New users are active by default
+        # Auto-verify new users created via admin panel (they're already vetted by an admin)
+        user.is_verified = True
+        user.is_active = True
         
         if commit:
             user.save()
@@ -195,7 +197,7 @@ class CustomUserUpdateForm(forms.ModelForm):
             'phone', 'license_number', 'specialization', 'is_active', 'is_verified'
         ]
         widgets = {
-            'username': forms.TextInput(attrs={'class': 'form-control form-control-medical'}),
+            'username': forms.TextInput(attrs={'class': 'form-control form-control-medical', 'required': True}),
             'email': forms.EmailInput(attrs={'class': 'form-control form-control-medical'}),
             'first_name': forms.TextInput(attrs={'class': 'form-control form-control-medical'}),
             'last_name': forms.TextInput(attrs={'class': 'form-control form-control-medical'}),
@@ -293,7 +295,7 @@ class FacilityForm(forms.ModelForm):
 
     class Meta:
         model = Facility
-        fields = ['name', 'address', 'phone', 'email', 'license_number', 'ae_title', 'letterhead', 'is_active']
+        fields = ['name', 'address', 'phone', 'email', 'license_number', 'ae_title', 'letterhead', 'is_active', 'has_ai_subscription', 'subscription_expires_at']
         widgets = {
             'name': forms.TextInput(attrs={
                 'class': 'form-control form-control-medical',
@@ -326,6 +328,14 @@ class FacilityForm(forms.ModelForm):
                 'accept': 'image/*'
             }),
             'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'has_ai_subscription': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'subscription_expires_at': forms.DateTimeInput(
+                attrs={
+                    'class': 'form-control form-control-medical',
+                    'type': 'datetime-local',
+                },
+                format='%Y-%m-%dT%H:%M',
+            ),
         }
 
     def clean_name(self):

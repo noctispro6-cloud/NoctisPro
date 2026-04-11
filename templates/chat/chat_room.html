@@ -224,6 +224,8 @@
         .participants-sidebar { display: none; }
         .messages-container { max-height: calc(100vh - 220px); }
     }
+
+    .message-item:hover .msg-actions { display: flex !important; }
 </style>
 {% endblock %}
 
@@ -325,6 +327,19 @@
                             {{ message.content|linebreaks }}
                         {% endif %}
                     </div>
+                    <div class="msg-actions" style="display:none;gap:4px;margin-top:4px;">
+                        {% if message.sender == user %}
+                        <button onclick="editMessage('{{ message.id }}')" style="font-size:10px;padding:2px 6px;background:transparent;border:1px solid #404040;color:#888;border-radius:3px;cursor:pointer;">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button onclick="deleteMessage('{{ message.id }}')" style="font-size:10px;padding:2px 6px;background:transparent;border:1px solid #404040;color:#888;border-radius:3px;cursor:pointer;">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        {% endif %}
+                        <button onclick="reactMessage('{{ message.id }}')" style="font-size:10px;padding:2px 6px;background:transparent;border:1px solid #404040;color:#888;border-radius:3px;cursor:pointer;">
+                            <i class="fas fa-smile"></i> 👍
+                        </button>
+                    </div>
                 </div>
                 {% endfor %}
             {% else %}
@@ -383,9 +398,12 @@
                     <i class="fas fa-cog me-2"></i>Room Settings
                 </button>
                 {% endif %}
-                <a href="{% url 'chat:leave_room' room.id %}" class="btn-control w-100">
-                    <i class="fas fa-sign-out-alt me-2"></i>Leave Room
-                </a>
+                <form method="post" action="{% url 'chat:leave_room' room.id %}" style="display:inline;width:100%;" onsubmit="return confirm('Leave this room?')">
+                    {% csrf_token %}
+                    <button type="submit" class="btn-control w-100">
+                        <i class="fas fa-sign-out-alt me-2"></i>Leave Room
+                    </button>
+                </form>
             </div>
         </div>
     </div>
@@ -506,6 +524,13 @@
     <div class="composer">
         <div class="typing-indicator" id="typingIndicator"></div>
         <div class="composer-inner">
+            <span id="wsStatus" style="font-size:10px;color:#888;margin-right:8px;white-space:nowrap;align-self:center;">
+                <i class="fas fa-circle" style="font-size:6px;"></i> Connecting...
+            </span>
+            <label for="chatFileInput" class="btn-control" style="cursor:pointer;margin-right:4px;" title="Attach file">
+                <i class="fas fa-paperclip"></i>
+            </label>
+            <input type="file" id="chatFileInput" style="display:none" onchange="uploadChatFile(this)">
             <textarea id="chatInput" placeholder="Type a message… (Enter to send, Shift+Enter for newline)"></textarea>
             <button type="button" class="btn-control" id="sendBtn" title="Send">
                 <i class="fas fa-paper-plane"></i>
@@ -612,6 +637,12 @@ document.addEventListener('DOMContentLoaded', function() {
             sendBtn.disabled = !connected;
             input.disabled = !connected;
             input.placeholder = connected ? 'Type a message… (Enter to send, Shift+Enter for newline)' : 'Connecting…';
+            var status = document.getElementById('wsStatus');
+            if (status) {
+                status.innerHTML = connected
+                    ? '<i class="fas fa-circle" style="font-size:6px;color:#00ff88;"></i> Connected'
+                    : '<i class="fas fa-circle" style="font-size:6px;color:#ff4444;"></i> Reconnecting...';
+            }
         }
 
         function connect() {
@@ -797,7 +828,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!userId) return;
                 try {
                     var fd = new FormData();
-                    var url = '{% url "chat:remove_participant" room.id 0 %}'.replace('/0/remove/', '/' + String(userId) + '/remove/');
+                    var baseUrl = '{% url "chat:chat_room" room.id %}';
+                    var url = baseUrl + 'participants/' + String(userId) + '/remove/';
                     var res = await fetch(url, {
                         method: 'POST',
                         credentials: 'same-origin',
@@ -817,7 +849,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 try {
                     var fd = new FormData();
                     fd.append('role', role);
-                    var url = '{% url "chat:update_participant_role" room.id 0 %}'.replace('/0/role/', '/' + String(userId) + '/role/');
+                    var baseUrl = '{% url "chat:chat_room" room.id %}';
+                    var url = baseUrl + 'participants/' + String(userId) + '/role/';
                     var res = await fetch(url, {
                         method: 'POST',
                         credentials: 'same-origin',
@@ -870,7 +903,54 @@ document.addEventListener('DOMContentLoaded', function() {
         setConnectedUi(false);
         // prefill typing indicator empty
         if (typingEl) typingEl.textContent = '';
+
+        // expose socket for action functions
+        window._chatSocket = function() { return socket; };
     });
 })();
+
+// Message action functions
+function editMessage(msgId) {
+    const newContent = prompt('Edit message:');
+    if (newContent) {
+        const s = window._chatSocket && window._chatSocket();
+        if (s && s.readyState === 1) {
+            s.send(JSON.stringify({type: 'edit_message', message_id: msgId, content: newContent}));
+        }
+    }
+}
+function deleteMessage(msgId) {
+    if (confirm('Delete this message?')) {
+        const s = window._chatSocket && window._chatSocket();
+        if (s && s.readyState === 1) {
+            s.send(JSON.stringify({type: 'delete_message', message_id: msgId}));
+        }
+    }
+}
+function reactMessage(msgId) {
+    const s = window._chatSocket && window._chatSocket();
+    if (s && s.readyState === 1) {
+        s.send(JSON.stringify({type: 'reaction', message_id: msgId, emoji: '👍', action: 'add'}));
+    }
+}
+
+// File attachment upload
+async function uploadChatFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+        const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
+            (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+        const resp = await fetch('{% url "chat:upload_chat_attachment" room.id %}', {
+            method: 'POST', body: formData, credentials: 'same-origin',
+            headers: {'X-CSRFToken': csrf}
+        });
+        const data = await resp.json();
+        if (!data.success) alert('Upload failed: ' + (data.error || 'Unknown error'));
+    } catch(e) { alert('Upload failed'); }
+    input.value = '';
+}
 </script>
 {% endblock %}

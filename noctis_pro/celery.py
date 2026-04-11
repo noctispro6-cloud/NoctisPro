@@ -18,3 +18,18 @@ app.autodiscover_tasks()
 @app.task(bind=True)
 def debug_task(self):
     print(f'Request: {self.request!r}')
+
+
+from celery.schedules import crontab  # noqa: E402
+app.conf.beat_schedule = {
+    'daily-database-backup': {
+        'task': 'noctis_pro.tasks.run_backup',
+        'schedule': crontab(hour=2, minute=0),  # 2 AM daily
+        'kwargs': {'db_only': True},
+    },
+    'weekly-full-backup': {
+        'task': 'noctis_pro.tasks.run_backup',
+        'schedule': crontab(hour=3, minute=0, day_of_week='sunday'),  # 3 AM Sunday
+        'kwargs': {},
+    },
+}

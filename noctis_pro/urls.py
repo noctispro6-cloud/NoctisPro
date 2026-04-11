@@ -25,6 +25,7 @@ from worklist import views as worklist_views  # ENABLED
 from django.views.generic.base import RedirectView
 from . import views
 from . import health as health_views
+from .views import subscription_expired as subscription_expired_view
 
 def home_redirect(request):
     """Redirect home page to login or dashboard based on authentication"""
@@ -63,7 +64,8 @@ urlpatterns = [
     path('admin-panel/', include('admin_panel.urls')),
     path('chat/', include('chat.urls')),
     path('notifications/', include('notifications.urls')),
-    path('ai/', include('ai_analysis.urls'))
+    path('ai/', include('ai_analysis.urls')),
+    path('subscription-expired/', subscription_expired_view, name='subscription_expired'),
 ]
 
 # Serve media files during development and production (for ngrok deployment)

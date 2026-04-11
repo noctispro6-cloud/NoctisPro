@@ -63,8 +63,11 @@ def _push_realtime(recipient_id: int, message: str) -> None:
                 "message": message,
             },
         )
-    except Exception:
-        # Never break uploads because realtime isn't configured.
+    except Exception as exc:
+        import logging
+        logging.getLogger('notifications').warning(
+            'Real-time push failed (Channels may not be configured): %s', exc
+        )
         return
 
 

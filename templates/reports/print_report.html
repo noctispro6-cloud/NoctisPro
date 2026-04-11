@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report {% if study %}{{ study.accession_number }}{% endif %}</title>
+    <style>
+        @page {
+            margin: 2cm;
+            size: A4;
+        }
+
+        @media print {
+            .noprint { display: none !important; }
+            .section { page-break-inside: avoid; }
+            body { margin: 0; }
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Arial', 'Helvetica Neue', Helvetica, sans-serif;
+            font-size: 11pt;
+            color: #1a1a1a;
+            margin: 0;
+            padding: 24px;
+            background: #fff;
+            line-height: 1.5;
+        }
+
+        /* ── Letterhead ── */
+        .letterhead {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            padding-bottom: 14px;
+            margin-bottom: 12px;
+            border-bottom: 3px solid #003d7a;
+        }
+
+        .letterhead-logo {
+            max-height: 80px;
+            max-width: 220px;
+            object-fit: contain;
+        }
+
+        .letterhead-text {
+            text-align: right;
+        }
+
+        .letterhead-text h1 {
+            font-size: 18pt;
+            font-weight: 700;
+            color: #003d7a;
+            margin: 0 0 4px 0;
+        }
+
+        .letterhead-text .facility-address {
+            font-size: 9pt;
+            color: #555;
+            margin: 0;
+        }
+
+        /* ── Report title ── */
+        .report-title {
+            text-align: center;
+            font-size: 13pt;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: #003d7a;
+            margin: 10px 0 14px 0;
+        }
+
+        /* ── Patient info bar ── */
+        .patient-bar {
+            background: #e8f0fb;
+            border-left: 4px solid #003d7a;
+            border-radius: 0 4px 4px 0;
+            padding: 10px 14px;
+            margin-bottom: 18px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            position: relative;
+        }
+
+        .patient-field {
+            flex: 1 1 140px;
+            min-width: 120px;
+        }
+
+        .patient-field .pf-label {
+            font-size: 8pt;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #003d7a;
+            font-weight: 700;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .patient-field .pf-value {
+            font-size: 10.5pt;
+            font-weight: 600;
+            color: #111;
+        }
+
+        /* ── Status stamp ── */
+        .status-stamp {
+            position: absolute;
+            top: 50%;
+            right: 16px;
+            transform: translateY(-50%) rotate(-15deg);
+            border: 3px solid currentColor;
+            padding: 6px 14px;
+            font-size: 18pt;
+            font-weight: 900;
+            border-radius: 4px;
+            opacity: 0.65;
+            pointer-events: none;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            white-space: nowrap;
+        }
+
+        .status-stamp.preliminary { color: #e07800; }
+        .status-stamp.amended     { color: #1a5fa3; }
+        .status-stamp.draft       { color: #cc2222; }
+
+        /* ── Sections ── */
+        .section {
+            margin-bottom: 16px;
+        }
+
+        .section-heading {
+            font-size: 10pt;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #003d7a;
+            border-bottom: 1px solid #b8cde8;
+            padding-bottom: 3px;
+            margin-bottom: 6px;
+        }
+
+        .section-body {
+            font-size: 10.5pt;
+            color: #222;
+            white-space: pre-wrap;
+            font-family: inherit;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* ── Signature ── */
+        .signature-block {
+            margin-top: 20px;
+            padding: 12px 14px;
+            border: 1px solid #dde4ef;
+            border-radius: 4px;
+            background: #fafbfd;
+        }
+
+        .signature-block .sig-heading {
+            font-size: 9pt;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-weight: 700;
+            color: #003d7a;
+            margin-bottom: 6px;
+        }
+
+        .signature-block .sig-name {
+            font-size: 11pt;
+            font-weight: 600;
+        }
+
+        .signature-block .sig-detail {
+            font-size: 9pt;
+            color: #555;
+        }
+
+        .signature-block .sig-timestamp {
+            font-size: 10px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        /* ── Amendments ── */
+        .amendments-block {
+            margin-top: 20px;
+            border-top: 2px solid #4a90e2;
+            padding-top: 16px;
+        }
+
+        .amendments-block h3 {
+            color: #4a90e2;
+            font-size: 11pt;
+            margin: 0 0 10px 0;
+        }
+
+        .amendment-item {
+            background: #f0f4f8;
+            padding: 12px;
+            margin-bottom: 12px;
+            border-radius: 4px;
+            border-left: 3px solid #4a90e2;
+        }
+
+        .amendment-item .amend-meta {
+            font-size: 9pt;
+            color: #555;
+            margin-bottom: 6px;
+        }
+
+        /* ── Footer ── */
+        .footer {
+            margin-top: 24px;
+            padding-top: 12px;
+            border-top: 1px solid #b8cde8;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .qr-block {
+            text-align: center;
+            font-size: 9pt;
+            color: #555;
+            flex: 0 0 auto;
+        }
+
+        .qr-block img {
+            height: 90px;
+            width: 90px;
+            display: block;
+            margin: 0 auto 4px auto;
+        }
+
+        .qr-block .qr-url {
+            font-size: 7pt;
+            word-break: break-all;
+            max-width: 180px;
+            color: #777;
+        }
+
+        /* ── Print button ── */
+        .print-btn {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 10px 24px;
+            background: #003d7a;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 11pt;
+            cursor: pointer;
+        }
+
+        .print-btn:hover { background: #00509e; }
+    </style>
+</head>
+<body>
+
+    <!-- ── Letterhead ── -->
+    <div class="letterhead">
+        <div class="letterhead-logo-wrap">
+            {% if letterhead_b64 %}
+                <img class="letterhead-logo" src="{{ letterhead_b64 }}" alt="Facility Letterhead">
+            {% else %}
+                <div style="width:1px;"></div>
+            {% endif %}
+        </div>
+        <div class="letterhead-text">
+            <h1>{{ facility.name|default:"Medical Facility" }}</h1>
+            {% if facility.address %}
+                <p class="facility-address">{{ facility.address }}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="report-title">Radiology Report</div>
+
+    <!-- ── Patient info bar ── -->
+    <div class="patient-bar">
+        <div class="patient-field">
+            <span class="pf-label">Patient</span>
+            <span class="pf-value">{{ patient.full_name|default:"—" }}</span>
+        </div>
+        <div class="patient-field">
+            <span class="pf-label">Patient ID</span>
+            <span class="pf-value">{{ patient.patient_id|default:"—" }}</span>
+        </div>
+        <div class="patient-field">
+            <span class="pf-label">Accession</span>
+            <span class="pf-value">{{ study.accession_number|default:"—" }}</span>
+        </div>
+        <div class="patient-field">
+            <span class="pf-label">Modality</span>
+            <span class="pf-value">{{ study.modality.code|default:"—" }}</span>
+        </div>
+        <div class="patient-field">
+            <span class="pf-label">Study Date</span>
+            <span class="pf-value">{{ study.study_date|default:"—" }}</span>
+        </div>
+        {% if report %}
+        <div class="patient-field">
+            <span class="pf-label">Status</span>
+            <span class="pf-value">{{ report.get_status_display|default:"—" }}</span>
+        </div>
+        {% endif %}
+
+        {% if report and report.status != 'final' %}
+        <div class="status-stamp {% if report.status == 'preliminary' %}preliminary{% elif report.status == 'amended' %}amended{% else %}draft{% endif %}">
+            {{ report.get_status_display }}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- ── Report sections ── -->
+    {% if report %}
+
+    {% if report.clinical_history or study.clinical_info %}
+    <div class="section">
+        <div class="section-heading">Clinical Information</div>
+        <pre class="section-body">{{ report.clinical_history|default:study.clinical_info|default:"—" }}</pre>
+    </div>
+    {% endif %}
+
+    {% if report.technique %}
+    <div class="section">
+        <div class="section-heading">Technique</div>
+        <pre class="section-body">{{ report.technique|default:"—" }}</pre>
+    </div>
+    {% endif %}
+
+    {% if report.comparison %}
+    <div class="section">
+        <div class="section-heading">Comparison</div>
+        <pre class="section-body">{{ report.comparison|default:"—" }}</pre>
+    </div>
+    {% endif %}
+
+    <div class="section">
+        <div class="section-heading">Findings</div>
+        <pre class="section-body">{{ report.findings|default:"—" }}</pre>
+    </div>
+
+    <div class="section">
+        <div class="section-heading">Impression</div>
+        <pre class="section-body">{{ report.impression|default:"—" }}</pre>
+    </div>
+
+    {% if report.recommendations %}
+    <div class="section">
+        <div class="section-heading">Recommendations</div>
+        <pre class="section-body">{{ report.recommendations|default:"—" }}</pre>
+    </div>
+    {% endif %}
+
+    <!-- ── Signature block ── -->
+    <div class="signature-block section">
+        <div class="sig-heading">Signed By</div>
+        {% if report.radiologist %}
+            <div class="sig-name">{{ report.radiologist.get_full_name|default:report.radiologist.username }}</div>
+            {% if report.radiologist.license_number %}
+                <div class="sig-detail">License: {{ report.radiologist.license_number }}</div>
+            {% endif %}
+        {% endif %}
+        {% if report.signed_date %}
+            <div class="sig-detail">Date: {{ report.signed_date|date:"M d, Y H:i" }}</div>
+        {% endif %}
+        {% if report.digital_signature %}
+            <div style="margin-top:8px;">
+                <img src="data:image/png;base64,{{ report.digital_signature }}" alt="Signature" style="max-height:60px;">
+            </div>
+        {% endif %}
+        {% if report.signature_timestamp %}
+            <div class="sig-timestamp">Signed: {{ report.signature_timestamp|date:"M d, Y H:i" }}</div>
+        {% endif %}
+    </div>
+
+    <!-- ── Amendments ── -->
+    {% if report.amendments.exists %}
+    <div class="amendments-block section">
+        <h3>Amendments</h3>
+        {% for amendment in report.amendments.all %}
+        <div class="amendment-item">
+            <div class="amend-meta">
+                Amended by {{ amendment.radiologist.get_full_name }} on {{ amendment.amended_at|date:"M d, Y H:i" }}
+            </div>
+            {% if amendment.amendment_reason %}<p><strong>Reason:</strong> {{ amendment.amendment_reason }}</p>{% endif %}
+            {% if amendment.findings %}<p><strong>Amended Findings:</strong> {{ amendment.findings }}</p>{% endif %}
+            {% if amendment.impression %}<p><strong>Amended Impression:</strong> {{ amendment.impression }}</p>{% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="section">
+        <p style="color:#888;font-style:italic;">No report has been written for this study yet.</p>
+    </div>
+    {% endif %}
+
+    <!-- ── Footer: QR codes ── -->
+    <div class="footer">
+        {% if qr_viewer %}
+        <div class="qr-block">
+            <img src="{{ qr_viewer }}" alt="QR Images">
+            <div>Scan to view images</div>
+        </div>
+        {% endif %}
+        {% if qr_report %}
+        <div class="qr-block">
+            <img src="{{ qr_report }}" alt="QR Report">
+            <div>Scan to view report</div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- ── Print button (hidden when printing) ── -->
+    <div class="noprint" style="text-align:center;">
+        <button class="print-btn" onclick="window.print()">Print Report</button>
+    </div>
+
+</body>
+</html>

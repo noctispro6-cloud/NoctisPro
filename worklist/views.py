@@ -224,10 +224,39 @@ def _auto_start_ai_for_study(study: Study) -> None:
 def dashboard(request):
 	"""Render the exact provided dashboard UI template"""
 	from django.middleware.csrf import get_token
-	return render(request, 'worklist/dashboard.html', {
-		'user': request.user,
-		'csrf_token': get_token(request)
-	})
+	user = request.user
+	context = {
+		'user': user,
+		'csrf_token': get_token(request),
+		'status_columns': Study.STUDY_STATUS_CHOICES if hasattr(Study, 'STUDY_STATUS_CHOICES') else [],
+	}
+
+	# Role-specific dashboard stats
+	if user.is_authenticated and user.is_radiologist():
+		facility = getattr(user, 'facility', None)
+		facility_filter = {'facility': facility} if facility else {}
+		my_studies_count = Study.objects.filter(
+			radiologist=user, **facility_filter
+		).count()
+		unassigned_count = Study.objects.filter(
+			radiologist__isnull=True, **facility_filter
+		).count()
+		my_reports_count = 0
+		try:
+			from reports.models import Report as _Report
+			my_reports_count = _Report.objects.filter(radiologist=user).count()
+		except Exception:
+			pass
+		context.update({
+			'my_studies_count': my_studies_count,
+			'unassigned_count': unassigned_count,
+			'my_reports_count': my_reports_count,
+			'radiologist_view': True,
+		})
+	elif user.is_authenticated and user.is_admin():
+		context.update({'admin_view': True})
+
+	return render(request, 'worklist/dashboard.html', context)
 
 @login_required
 def study_list(request):
@@ -395,13 +424,20 @@ def study_detail(request, study_id):
 	
 	# Get study notes
 	notes = study.notes.all().order_by('-created_at')
-	
+
+	# Prior studies for same patient
+	prior_studies = Study.objects.filter(
+		patient=study.patient
+	).exclude(pk=study.pk).order_by('-study_date')[:5]
+
 	context = {
 		'study': study,
 		'series_list': series_list,
 		'attachments': attachments,
 		'notes': notes,
 		'user': user,
+		'status_choices': Study.STUDY_STATUS_CHOICES,
+		'prior_studies': prior_studies,
 	}
 	
 	return render(request, 'worklist/study_detail.html', context)
@@ -1405,6 +1441,12 @@ def upload_study(request):
 								continue
 
 							# New SOP: save bytes and create DB row.
+							# Check for existing SOP instance to avoid orphan files from race conditions
+							existing_sop = DicomImage.objects.filter(sop_instance_uid=sop_uid).first()
+							if existing_sop:
+								images_processed += 1
+								continue
+
 							# Keep paths aligned with the model's `upload_to='dicom/images/'` and
 							# historical tooling that expects DICOM objects under `media/dicom/images/`.
 							rel_path = f"dicom/images/{study_uid}/{series_uid}/{sop_uid}.dcm"
@@ -1746,10 +1788,13 @@ def api_studies(request):
 		# SPEED + correctness: compute counts in the DB (avoid per-study N+1 count loops)
 		studies_qs = (
 			studies
-			.select_related('patient', 'facility', 'modality', 'uploaded_by')
+			.select_related('patient', 'facility', 'modality', 'radiologist', 'uploaded_by')
+			.prefetch_related('series_set')
 			.annotate(
 				series_count_db=Count('series', distinct=True),
 				image_count_db=Count('series__images', distinct=True),
+				image_count_annotated=Count('series__dicomimage', distinct=True),
+				series_count_annotated=Count('series', distinct=True),
 			)
 			# IMPORTANT:
 			# Worklist UX expects the most recently *uploaded* studies first.
@@ -1759,7 +1804,15 @@ def api_studies(request):
 			.order_by('-upload_date', '-study_date')
 		)
 
-		for study in studies_qs[:200]:
+		# Pagination support
+		page = int(request.GET.get('page', 1))
+		page_size = int(request.GET.get('page_size', 200))
+		page_size = min(page_size, 500)
+		offset = (page - 1) * page_size
+		total_count = studies_qs.count()
+		paginated_qs = studies_qs[offset:offset + page_size]
+
+		for study in paginated_qs:
 			# Professional medical data extraction
 			# Dashboard columns:
 			# - TIME: show upload time (what users perceive as "new on the worklist")
@@ -1800,6 +1853,15 @@ def api_studies(request):
 			# The DB uses underscores (e.g. "in_progress"); the UI expects "in-progress".
 			status_key = (study.status or '').replace('_', '-')
 
+			# Report status
+			try:
+				_report = study.report_set.first() if hasattr(study, 'report_set') else None
+				_report_status = _report.status if _report else None
+				_report_id = _report.id if _report else None
+			except Exception:
+				_report_status = None
+				_report_id = None
+
 			# Professional study data formatting with medical precision
 			studies_data.append({
 				'id': study.id,
@@ -1826,6 +1888,8 @@ def api_studies(request):
 				'uploaded_by': study.uploaded_by.get_full_name() if study.uploaded_by else 'Unknown',
 				'body_part': getattr(study, 'body_part', ''),
 				'referring_physician': study.referring_physician,
+				'report_status': _report_status,
+				'report_id': _report_id,
 				'professional_metadata': {
 					'data_quality': 'EXCELLENT' if image_count > 0 else 'PENDING',
 					'completeness': 'COMPLETE' if series_count > 0 and image_count > 0 else 'PARTIAL',
@@ -1848,6 +1912,10 @@ def api_studies(request):
 			'success': True,
 			'message': '🏥 Professional medical imaging data retrieved successfully',
 			'studies': studies_data,
+			'total_count': total_count,
+			'page': page,
+			'page_size': page_size,
+			'has_more': (page * page_size) < total_count,
 			'professional_metadata': {
 				'api_version': 'v2.0 Enhanced',
 				'processing_time_ms': api_processing_time,
@@ -1896,9 +1964,11 @@ def upload_attachment(request, study_id):
     """Upload attachment to study"""
     study = get_object_or_404(Study, id=study_id)
     user = request.user
-    
-    # All authenticated users can upload attachments regardless of facility
-    
+
+    # Facility users can only attach to their own facility's studies
+    if user.is_facility_user() and study.facility != user.facility:
+        return JsonResponse({'error': 'Access denied'}, status=403)
+
     if request.method == 'POST':
         try:
             files = request.FILES.getlist('files')
@@ -2002,24 +2072,26 @@ def upload_attachment(request, study_id):
             except Exception:
                 pass
             
-            return JsonResponse({
-                'success': True,
-                'message': f'Successfully uploaded {len(uploaded_attachments)} file(s)',
-                'attachments': uploaded_attachments
-            })
+            # If the request prefers JSON (AJAX), return JSON; otherwise redirect back to study detail.
+            wants_json = (
+                'application/json' in (request.headers.get('Accept') or '')
+                or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+            )
+            if wants_json:
+                return JsonResponse({
+                    'success': True,
+                    'message': f'Successfully uploaded {len(uploaded_attachments)} file(s)',
+                    'attachments': uploaded_attachments
+                })
+            messages.success(request, f'Successfully uploaded {len(uploaded_attachments)} file(s).')
+            return redirect('worklist:study_detail', study_id=study.id)
             
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
     
     # GET request - show upload form
-    # Get previous studies for this patient
-    previous_studies = Study.objects.filter(
-        patient=study.patient
-    ).exclude(id=study.id).order_by('-study_date')[:10]
-    
     context = {
         'study': study,
-        'previous_studies': previous_studies,
     }
     
     return render(request, 'worklist/upload_attachment.html', context)
@@ -2278,9 +2350,19 @@ def api_update_study_status(request, study_id):
     try:
         data = json.loads(request.body)
         new_status = data.get('status', '').strip()
-        
+
+        ALLOWED_STATUS_BY_ROLE = {
+            'facility': {'scheduled', 'in_progress'},
+            'radiologist': {'scheduled', 'in_progress', 'completed', 'suspended', 'cancelled'},
+            'admin': {'scheduled', 'in_progress', 'completed', 'suspended', 'cancelled'},
+        }
+        user_role = getattr(user, 'role', 'facility')
+        allowed = ALLOWED_STATUS_BY_ROLE.get(user_role, set())
+        if new_status and new_status not in allowed:
+            return JsonResponse({'error': f'Your role cannot set status to {new_status}'}, status=403)
+
         # Validate status
-        valid_statuses = ['scheduled', 'in_progress', 'completed', 'cancelled']
+        valid_statuses = ['scheduled', 'in_progress', 'completed', 'suspended', 'cancelled']
         if new_status not in valid_statuses:
             return JsonResponse({'error': 'Invalid status'}, status=400)
         
@@ -2397,7 +2479,12 @@ def api_delete_study(request, study_id):
     
     try:
         study = get_object_or_404(Study, id=study_id)
-        
+
+        # Non-superusers (including radiologists) scoped to their facility
+        if not request.user.is_superuser and hasattr(request.user, 'facility') and request.user.facility:
+            if study.facility and study.facility != request.user.facility:
+                return JsonResponse({'error': 'Permission denied: study belongs to a different facility'}, status=403)
+
         # Store study info for logging before deletion
         study_info = {
             'id': study.id,
@@ -2720,6 +2807,35 @@ def process_attachment_metadata(attachment):
     except Exception:
         # If metadata extraction fails, continue silently
         pass
+
+@login_required
+def api_study_chat_room(request, study_id):
+	"""Get or create a study-linked chat room."""
+	if request.method != 'POST':
+		return JsonResponse({'error': 'POST required'}, status=405)
+
+	study = get_object_or_404(Study, pk=study_id)
+
+	user = request.user
+	if user.is_facility_user() and study.facility != getattr(user, 'facility', None):
+		return JsonResponse({'error': 'Access denied'}, status=403)
+
+	try:
+		from chat.models import ChatRoom, ChatParticipant
+		room = ChatRoom.objects.filter(study=study).first()
+		if not room:
+			room = ChatRoom.objects.create(
+				name=f'Study Discussion: {study.accession_number}',
+				room_type='study',
+				study=study,
+				facility=study.facility,
+				created_by=user,
+			)
+		ChatParticipant.objects.get_or_create(room=room, user=user, defaults={'role': 'member'})
+		return JsonResponse({'room_id': str(room.id)})
+	except Exception as e:
+		return JsonResponse({'error': str(e)}, status=500)
+
 
 def generate_attachment_thumbnail(attachment):
     """Generate thumbnail for supported file types"""

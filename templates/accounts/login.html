@@ -370,19 +370,15 @@
                 {% for message in messages %}
                     {% if 'error' in message.tags or 'warning' in message.tags %}
                         {% if 'error' in message.tags %}
-                            {% with alert_tag='danger' icon='exclamation-triangle' %}
-                                <div class="alert alert-error" id="alert-{{ forloop.counter }}">
-                                    <i class="fas fa-{{ icon }}"></i>
-                                    {{ message }}
-                                </div>
-                            {% endwith %}
+                            <div class="alert alert-error" id="alert-{{ forloop.counter }}">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                {{ message }}
+                            </div>
                         {% else %}
-                            {% with alert_tag='warning' icon='info-circle' %}
-                                <div class="alert alert-warning" id="alert-{{ forloop.counter }}">
-                                    <i class="fas fa-{{ icon }}"></i>
-                                    {{ message }}
-                                </div>
-                            {% endwith %}
+                            <div class="alert alert-warning" id="alert-{{ forloop.counter }}">
+                                <i class="fas fa-info-circle"></i>
+                                {{ message }}
+                            </div>
                         {% endif %}
                     {% endif %}
                 {% endfor %}
@@ -391,13 +387,13 @@
             <form method="post" id="loginForm" action="{% url 'accounts:login' %}" novalidate>
                 {% csrf_token %}
                 <div class="form-group">
-                    <label class="form-label" for="username">Username</label>
+                    <label class="form-label" for="username">Username or Email</label>
                     <div class="input-group">
                         <input type="text" 
                                class="form-control" 
                                id="username" 
                                name="username" 
-                               placeholder="Enter your username" 
+                               placeholder="Enter your username or email" 
                                required 
                                autocomplete="username" 
                                autocapitalize="none" 
@@ -466,12 +462,9 @@
             const value = input.value.trim();
             if (value.length === 0) {
                 input.classList.remove('is-valid', 'is-invalid');
-            } else if (value.length >= 3) {
+            } else {
                 input.classList.remove('is-invalid');
                 input.classList.add('is-valid');
-            } else {
-                input.classList.remove('is-valid');
-                input.classList.add('is-invalid');
             }
         }
 
@@ -495,14 +488,14 @@
             existingAlerts.forEach(alert => alert.remove());
             
             // Validate inputs
-            if (!username || username.length < 3) {
-                showAlert('Please enter a valid username (minimum 3 characters)', 'danger');
+            if (!username || username.length < 1) {
+                showAlert('Please enter your username or email', 'danger');
                 usernameInput.focus();
                 return;
             }
             
-            if (!password || password.length < 3) {
-                showAlert('Please enter a valid password', 'danger');
+            if (!password || password.length < 1) {
+                showAlert('Please enter your password', 'danger');
                 passwordInput.focus();
                 return;
             }

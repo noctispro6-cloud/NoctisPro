@@ -18,7 +18,9 @@ urlpatterns = [
     # Study attachments
     path('study/<int:study_id>/upload/', views.upload_attachment, name='upload_attachment'),
     path('attachment/<int:attachment_id>/view/', views.view_attachment, name='view_attachment'),
-    path('attachment/<int:attachment_id>/comments/', views.attachment_comments, name='attachment_comments'),
+    # attachment_comments is a JSON-only API endpoint; no template links to it yet.
+    # Uncomment when a UI consumer is added.
+    # path('attachment/<int:attachment_id>/comments/', views.attachment_comments, name='attachment_comments'),
     path('attachment/<int:attachment_id>/delete/', views.delete_attachment, name='delete_attachment'),
     
     # Attachment viewer - COMMENTED OUT until functions are implemented
@@ -37,4 +39,5 @@ urlpatterns = [
     path('api/upload-stats/', views.api_get_upload_stats, name='api_get_upload_stats'),
     path('api/upload-processing-status/', views.api_upload_processing_status, name='api_upload_processing_status'),
     path('api/study/<int:study_id>/reassign-facility/', views.api_reassign_study_facility, name='api_reassign_study_facility'),
+    path('api/study/<int:study_id>/chat-room/', views.api_study_chat_room, name='api_study_chat_room'),
 ]

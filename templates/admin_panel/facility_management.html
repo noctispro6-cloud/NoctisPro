@@ -410,38 +410,26 @@
     <div class="row mb-4">
         <div class="col-md-3">
             <div class="stats-card">
-                <div class="stats-number">{{ facilities.count }}</div>
+                <div class="stats-number">{{ total_facilities|default:"0" }}</div>
                 <div class="stats-label">Total Facilities</div>
-                <div class="stats-change positive">
-                    <i class="fas fa-arrow-up me-1"></i>+2 this month
-                </div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="stats-card">
-                <div class="stats-number">{{ facilities|length|add:"-2" }}</div>
+                <div class="stats-number">{{ active_facilities|default:"0" }}</div>
                 <div class="stats-label">Active Facilities</div>
-                <div class="stats-change positive">
-                    <i class="fas fa-check-circle me-1"></i>98% active
-                </div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="stats-card">
                 <div class="stats-number">{{ total_users|default:"0" }}</div>
                 <div class="stats-label">Total Users</div>
-                <div class="stats-change positive">
-                    <i class="fas fa-arrow-up me-1"></i>+15 this week
-                </div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="stats-card">
                 <div class="stats-number">{{ total_studies|default:"0" }}</div>
                 <div class="stats-label">Total Studies</div>
-                <div class="stats-change positive">
-                    <i class="fas fa-arrow-up me-1"></i>+127 today
-                </div>
             </div>
         </div>
     </div>
@@ -602,7 +590,7 @@
                         <div class="facility-stat-label">Studies</div>
                     </div>
                     <div class="facility-stat">
-                        <div class="facility-stat-number">{{ facility.user_set.count|add:facility.study_set.count|default:"0" }}</div>
+                        <div class="facility-stat-number">{{ facility.study_set.count }}</div>
                         <div class="facility-stat-label">Activity</div>
                     </div>
                     <div class="facility-stat">

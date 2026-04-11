@@ -10,8 +10,16 @@ import os
 
 logger = logging.getLogger(__name__)
 
-@shared_task
-def run_ai_analysis(analysis_id):
+@shared_task(
+    name='ai_analysis.tasks.run_ai_analysis',
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    max_retries=3,
+    acks_late=True,
+)
+def run_ai_analysis(self, analysis_id):
     """
     Celery task to run AI analysis for a specific analysis request.
     """
@@ -19,6 +27,8 @@ def run_ai_analysis(analysis_id):
         analysis = AIAnalysis.objects.get(id=analysis_id)
     except AIAnalysis.DoesNotExist:
         logger.error(f"AIAnalysis {analysis_id} not found.")
+        # Don't retry - object doesn't exist and won't appear on retry
+        self.request.callbacks = None
         return
 
     try:
@@ -54,16 +64,15 @@ def run_ai_analysis(analysis_id):
         # Apply AI triage/flagging to the parent study (severity → study.priority)
         try:
             _apply_ai_triage(analysis)
-        except Exception:
-            # Never fail the background worker due to triage/notification issues
-            pass
+        except Exception as exc:
+            logger.error('Failed in _apply_ai_triage: %s', exc, exc_info=True)
 
         # Persist a final, structured preliminary report for UI display.
         try:
             analysis.refresh_from_db()
             persist_report_on_analysis(analysis)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.error('Failed in persist_report_on_analysis: %s', exc, exc_info=True)
         
         # Update model statistics
         model = analysis.ai_model

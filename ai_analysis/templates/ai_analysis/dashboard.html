@@ -242,7 +242,7 @@
 
     <div class="d-flex flex-wrap gap-2 justify-content-center">
         <a href="{% url 'worklist:dashboard' %}" class="btn-control">
-            <i class="fas fa-arrow-left me-1"></i>Back to Dashboard
+            <i class="fas fa-home me-1"></i>Home
         </a>
         <a href="{% url 'ai_analysis:study_picker' %}" class="btn-control reset">
             <i class="fas fa-play me-1"></i>Start Analysis
@@ -250,6 +250,14 @@
         <a href="{% url 'ai_analysis:model_management' %}" class="btn-control">
             <i class="fas fa-cog me-1"></i>Manage Models
         </a>
+    </div>
+
+    <!-- LLM Report Engine Status -->
+    <div class="mt-4 p-3 border rounded" style="background:rgba(0,212,255,0.05);border-color:rgba(0,212,255,0.3) !important;">
+        <h6 class="mb-2" style="color:var(--accent-color);"><i class="fas fa-brain me-2"></i>Report Generation Engine</h6>
+        <div id="llmStatus" class="small text-secondary">
+            <span class="spinner-border spinner-border-sm me-1" role="status"></span> Checking LLM status...
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -269,6 +277,72 @@
                 }, 60);
             }, index * 60);
         });
+
+        // LLM backend status
+        (async function() {
+            try {
+                const resp = await fetch('{% url "ai_analysis:api_llm_status" %}', {credentials: 'same-origin'});
+                const data = await resp.json();
+                const el = document.getElementById('llmStatus');
+                if (!el) return;
+                
+                let icon = '<i class="fas fa-check-circle text-success me-1"></i>';
+                let backend = data.active_backend || 'deterministic';
+                let desc = '';
+                
+                if (backend.startsWith('api:')) {
+                    desc = `<strong style="color:#00ff88;">External API</strong> — ${backend.replace('api:', '')}`;
+                } else if (backend.startsWith('local:')) {
+                    const modelName = backend.replace('local:', '').replace(' (not yet loaded)', '');
+                    const loaded = data.local_model_loaded;
+                    desc = `<strong style="color:#00d4ff;">Local Model</strong> — ${modelName}`;
+                    if (!loaded) {
+                        desc += ' <span class="badge bg-warning text-dark" style="font-size:9px;">Will download on first use</span>';
+                        icon = '<i class="fas fa-cloud-download-alt text-warning me-1"></i>';
+                    }
+                } else {
+                    desc = '<strong style="color:#ffa500;">Deterministic fallback</strong> — structured template (no LLM configured)';
+                    icon = '<i class="fas fa-info-circle text-warning me-1"></i>';
+                }
+                
+                let warmupBtn = '';
+                if (data.local_model_enabled && !data.local_model_loaded && !data.api_configured) {
+                    warmupBtn = ' <button onclick="warmupModel()" class="btn-sm btn-control ms-2" style="font-size:10px;padding:2px 8px;"><i class="fas fa-download me-1"></i>Load AI Model</button>';
+                }
+                el.innerHTML = icon + desc + warmupBtn +
+                    '<br><small class="text-muted mt-1 d-block">Configure AI_REPORT_API_URL + AI_REPORT_API_KEY for external LLM, or AI_LOCAL_MODEL for local inference.</small>';
+                
+                if (data.local_model_error) {
+                    el.innerHTML += `<br><small class="text-danger">Local model error: ${data.local_model_error}</small>`;
+                }
+            } catch(e) {
+                const el = document.getElementById('llmStatus');
+                if (el) el.innerHTML = '<i class="fas fa-exclamation-circle text-warning me-1"></i>Could not fetch LLM status';
+            }
+        })();
+
+        async function warmupModel() {
+            try {
+                const resp = await fetch('{% url "ai_analysis:api_llm_warmup" %}', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'X-CSRFToken': '{{ csrf_token }}'}
+                });
+                const data = await resp.json();
+                const el = document.getElementById('llmStatus');
+                if (el) el.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Downloading AI model — this may take a few minutes on first run...';
+                // Poll status every 5 seconds
+                let polls = 0;
+                const poll = setInterval(async function() {
+                    polls++;
+                    const sr = await fetch('{% url "ai_analysis:api_llm_status" %}', {credentials: 'same-origin'});
+                    const sd = await sr.json();
+                    if (sd.local_model_loaded || polls > 36) { // timeout after 3 min
+                        clearInterval(poll);
+                        location.reload();
+                    }
+                }, 5000);
+            } catch(e) { alert('Failed to start model download'); }
+        }
 
         // Live polling for background AI status updates
         let lastUpdate = new Date().toISOString();

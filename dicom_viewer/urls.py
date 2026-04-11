@@ -87,7 +87,7 @@ if os.environ.get("ENABLE_CPP_COMPAT_API", "False").lower() in ("1", "true", "ye
 
 urlpatterns += [
     # Web viewer pages
-    path('web/', views.web_index, name='index'),
+    path('web/', lambda request: __import__('django.shortcuts', fromlist=['redirect']).redirect('dicom_viewer:viewer'), name='index'),
     path('web/viewer/', views.web_viewer, name='web_viewer'),
 
 
@@ -119,6 +119,9 @@ urlpatterns += [
     path('print/printers/', views.get_available_printers, name='get_available_printers'),
     path('print/layouts/', views.get_print_layouts, name='get_print_layouts'),
     path('print/settings/', views.print_settings_view, name='print_settings'),
+
+    # Anonymization
+    path('api/study/<int:study_id>/anonymize/', views.api_anonymize_study, name='api_anonymize_study'),
     
     # AI and Advanced Features
     path('api/ai-3d-print/<int:series_id>/', views.ai_3d_print_api, name='ai_3d_print_api'),

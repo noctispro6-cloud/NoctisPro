@@ -187,8 +187,25 @@ def render_report_text(sections: Dict[str, str]) -> str:
 def persist_report_on_analysis(analysis) -> Dict[str, Any]:
     """
     Store report in analysis.measurements['report'] and return it.
+
+    Tries LLM-based generation first (via llm_reporting.generate_llm_report_from_analysis),
+    then falls back to the deterministic builder if LLM is unavailable.
     """
-    sections = build_report_sections_from_analysis(analysis)
+    # Attempt LLM-based generation
+    try:
+        from .llm_reporting import generate_llm_report_from_analysis
+        sections = generate_llm_report_from_analysis(analysis)
+        # llm_reporting already sets disclaimer; ensure all keys present
+        sections.setdefault("findings", "")
+        sections.setdefault("impression", "")
+        sections.setdefault("recommendations", "")
+    except Exception as exc:
+        import logging
+        logging.getLogger("ai_analysis").warning(
+            "LLM report generation failed, falling back to deterministic: %s", exc
+        )
+        sections = build_report_sections_from_analysis(analysis)
+
     text = render_report_text(sections)
 
     m = getattr(analysis, "measurements", {}) or {}
@@ -210,21 +227,29 @@ def generate_report_content(study, analyses, template=None) -> Dict[str, Any]:
     """
     Backwards-compatible helper for views.generate_auto_report.
     Produces dict with findings/impression/recommendations/confidence.
+    Uses LLM generation when available, deterministic fallback otherwise.
     """
     primary = analyses.first() if hasattr(analyses, "first") else (analyses[0] if analyses else None)
     if not primary:
         return {"findings": "", "impression": "", "recommendations": "", "confidence": 0.0}
 
+    conf = float(getattr(primary, "confidence_score", 0.0) or 0.0)
     report = (getattr(primary, "measurements", {}) or {}).get("report") or {}
+
     if not report:
-        # Build on the fly (no persistence here)
-        sections = build_report_sections_from_analysis(primary)
-        report = {**sections, "confidence": float(getattr(primary, "confidence_score", 0.0) or 0.0)}
+        # Generate on the fly using LLM pipeline
+        try:
+            from .llm_reporting import generate_llm_report_from_analysis
+            sections = generate_llm_report_from_analysis(primary)
+        except Exception:
+            sections = build_report_sections_from_analysis(primary)
+        report = {**sections, "confidence": conf}
 
     return {
         "findings": report.get("findings", "") or "",
         "impression": report.get("impression", "") or "",
         "recommendations": report.get("recommendations", "") or "",
-        "confidence": float(getattr(primary, "confidence_score", 0.0) or 0.0),
+        "confidence": conf,
+        "llm_used": report.get("llm_used", "deterministic"),
     }
 

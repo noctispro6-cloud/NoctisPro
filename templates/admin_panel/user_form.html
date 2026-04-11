@@ -644,10 +644,14 @@
     }
 
     function validatePasswordMatch() {
-      if (password.value !== passwordConfirm.value) {
-        passwordConfirm.setCustomValidity("Passwords don't match");
+      // Support both create mode (id_password1/id_password2) and edit mode (id_password/id_confirm_password)
+      const pw1 = document.getElementById('id_password1') || document.getElementById('id_password');
+      const pw2 = document.getElementById('id_password2') || document.getElementById('id_confirm_password');
+      if (!pw1 || !pw2) return true;
+      if (pw1.value !== pw2.value) {
+        pw2.setCustomValidity("Passwords don't match");
       } else {
-        passwordConfirm.setCustomValidity('');
+        pw2.setCustomValidity('');
       }
     }
 

@@ -19,7 +19,7 @@ from typing import Optional
 import numpy as np
 import pydicom
 from fastapi import FastAPI, Request
-from pydicom.pixel_data_handlers.util import apply_voi_lut
+from pydicom.pixels import apply_voi_lut
 from starlette.responses import FileResponse, RedirectResponse, Response
 
 from django.conf import settings

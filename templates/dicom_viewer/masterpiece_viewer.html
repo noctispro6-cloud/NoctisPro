@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -207,20 +208,23 @@
         .mpr-container.active {
             display: grid;
         }
-        
+
         /* MPR maximize: click a pane to show it full-size */
         .mpr-container.maximized {
             grid-template-columns: 1fr;
             grid-template-rows: 1fr;
         }
+
         .mpr-container.maximized .mpr-view {
             display: none;
         }
+
         .mpr-container.maximized .mpr-view.maximized {
             display: block;
             grid-column: 1 / -1;
             grid-row: 1 / -1;
         }
+
         .mpr-view.is-active {
             outline: 2px solid var(--accent-color);
             outline-offset: -2px;
@@ -290,20 +294,35 @@
             transition: opacity 0.25s ease, transform 0.25s ease;
         }
 
-        .toolbar, .top-bar {
+        .toolbar,
+        .top-bar {
             transition: opacity 0.25s ease, transform 0.25s ease;
         }
 
-        .ui-hidden .toolbar { opacity: 0; transform: translateX(-12px); pointer-events: none; }
-        .ui-hidden .top-bar { opacity: 0; transform: translateY(-12px); pointer-events: none; }
-        .ui-hidden .right-panel { opacity: 0; transform: translateX(12px); pointer-events: none; }
+        .ui-hidden .toolbar {
+            opacity: 0;
+            transform: translateX(-12px);
+            pointer-events: none;
+        }
+
+        .ui-hidden .top-bar {
+            opacity: 0;
+            transform: translateY(-12px);
+            pointer-events: none;
+        }
+
+        .ui-hidden .right-panel {
+            opacity: 0;
+            transform: translateX(12px);
+            pointer-events: none;
+        }
 
         .ui-toggle {
             position: absolute;
             top: 10px;
             right: 10px;
             z-index: 20;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0, 0, 0, 0.5);
             color: #fff;
             border: 1px solid var(--border-color);
             border-radius: 16px;
@@ -326,21 +345,30 @@
             padding: 0;
             overflow: hidden;
         }
-        details.panel-section > summary.panel-title {
+
+        details.panel-section>summary.panel-title {
             list-style: none;
             cursor: pointer;
             user-select: none;
             padding: 16px 18px;
             margin: 0;
         }
-        details.panel-section > summary.panel-title::-webkit-details-marker { display: none; }
-        details.panel-section > summary.panel-title::after {
+
+        details.panel-section>summary.panel-title::-webkit-details-marker {
+            display: none;
+        }
+
+        details.panel-section>summary.panel-title::after {
             content: '▾';
             margin-left: auto;
             color: var(--text-muted);
             font-size: 12px;
         }
-        details.panel-section:not([open]) > summary.panel-title::after { content: '▸'; }
+
+        details.panel-section:not([open])>summary.panel-title::after {
+            content: '▸';
+        }
+
         details.panel-section .panel-body {
             padding: 0 18px 16px 18px;
         }
@@ -576,8 +604,13 @@
         }
 
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
         }
 
         /* Clear button */
@@ -668,11 +701,11 @@
             border-radius: 50%;
         }
 
-        input:checked + .toggle-slider {
+        input:checked+.toggle-slider {
             background-color: var(--accent-color);
         }
 
-        input:checked + .toggle-slider:before {
+        input:checked+.toggle-slider:before {
             transform: translateX(24px);
         }
 
@@ -707,6 +740,7 @@
             gap: 8px;
             margin: 10px 0 12px 0;
         }
+
         .series-nav .series-nav-btn {
             flex: 1;
             padding: 8px 10px;
@@ -722,11 +756,13 @@
             justify-content: center;
             gap: 8px;
         }
+
         .series-nav .series-nav-btn:hover {
             background: rgba(0, 212, 255, 0.12);
             border-color: rgba(0, 212, 255, 0.35);
             transform: translateY(-1px);
         }
+
         .series-nav .series-nav-btn:disabled {
             opacity: 0.55;
             cursor: not-allowed;
@@ -738,8 +774,9 @@
             .viewer-container {
                 flex-direction: column;
             }
-            
-            .toolbar, .left-toolbar {
+
+            .toolbar,
+            .left-toolbar {
                 position: fixed;
                 bottom: 0;
                 left: 0;
@@ -756,14 +793,14 @@
                 max-height: unset;
                 justify-content: flex-start;
             }
-            
+
             .right-panel {
                 width: 100%;
                 height: 300px;
                 border-left: none;
                 border-top: 2px solid var(--border-color);
             }
-            
+
             .tool-btn {
                 min-width: 36px;
                 width: 36px;
@@ -822,12 +859,14 @@
             gap: 8px;
             white-space: nowrap;
         }
+
         .nav-dropdown-item:hover {
-            background: rgba(0,212,255,0.12);
+            background: rgba(0, 212, 255, 0.12);
             color: var(--accent-color, #00d4ff);
         }
     </style>
 </head>
+
 <body>
     <div class="viewer-container">
         <!-- Left Toolbar -->
@@ -884,7 +923,8 @@
                 <i class="fas fa-redo"></i>
                 <span>Rotate</span>
             </button>
-            <button class="tool-btn" data-tool="rotate-ccw" title="Rotate Counter-Clockwise (-90°)" onclick="handleRotateCCW(); event.stopPropagation();">
+            <button class="tool-btn" data-tool="rotate-ccw" title="Rotate Counter-Clockwise (-90°)"
+                onclick="handleRotateCCW(); event.stopPropagation();">
                 <i class="fas fa-undo"></i>
                 <span>Rot CCW</span>
             </button>
@@ -892,7 +932,8 @@
                 <i class="fas fa-exchange-alt"></i>
                 <span>Flip H</span>
             </button>
-            <button class="tool-btn" data-tool="flipv" title="Flip Vertical" onclick="handleFlipV(); event.stopPropagation();">
+            <button class="tool-btn" data-tool="flipv" title="Flip Vertical"
+                onclick="handleFlipV(); event.stopPropagation();">
                 <i class="fas fa-arrows-alt-v"></i>
                 <span>Flip V</span>
             </button>
@@ -931,40 +972,34 @@
                     <i class="fas fa-hospital-symbol"></i>
                     Noctis Pro DICOM Viewer
                 </div>
-                
+
                 <button class="btn" onclick="window.loadFromLocalFiles()">
                     <i class="fas fa-folder-open"></i> Load Local DICOM
                 </button>
 
-                <button class="btn" onclick="loadStudies()">
-                    <i class="fas fa-list"></i> Load Studies
-                </button>
-                
-                <select class="btn" id="studySelector" onchange="selectStudy()" style="min-width: 200px;">
-                    <option value="">Select a Study</option>
-                </select>
-                
                 <div class="patient-info" id="patientInfo">
                     Patient: - | Study Date: - | Modality: -
                 </div>
 
                 {% if user.is_admin or user.is_radiologist %}
-                <a id="writeReportBtn" class="btn" href="#" onclick="if(window.currentStudyId){ window.location.href='/reports/write/'+window.currentStudyId+'/'; } else { alert('Please load a study first'); } return false;" title="Write Report for current study" style="display:none">
+                <a id="writeReportBtn" class="btn" href="#"
+                    onclick="if(window.currentStudyId){ window.location.href='/reports/write/'+window.currentStudyId+'/'; } else { alert('Please load a study first'); } return false;"
+                    title="Write Report for current study" style="display:none">
                     <i class="fas fa-file-signature"></i> Report
                 </a>
                 <script>
-                // Show write report button when a study is loaded
-                document.addEventListener('studyLoaded', function(e) {
-                    const btn = document.getElementById('writeReportBtn');
-                    if (btn) btn.style.display = '';
-                });
-                // Also check on load
-                window.addEventListener('load', function() {
-                    if (window.currentStudyId) {
+                    // Show write report button when a study is loaded
+                    document.addEventListener('studyLoaded', function (e) {
                         const btn = document.getElementById('writeReportBtn');
                         if (btn) btn.style.display = '';
-                    }
-                });
+                    });
+                    // Also check on load
+                    window.addEventListener('load', function () {
+                        if (window.currentStudyId) {
+                            const btn = document.getElementById('writeReportBtn');
+                            if (btn) btn.style.display = '';
+                        }
+                    });
                 </script>
                 {% endif %}
                 <a class="btn" href="{% url 'worklist:dashboard' %}" title="Home">
@@ -982,13 +1017,20 @@
                         <button class="btn" onclick="toggleDropdown('wlDropdown')" title="Window/Level Presets">
                             <i class="fas fa-adjust"></i> W/L ▾
                         </button>
-                        <div id="wlDropdown" class="nav-dropdown-menu" style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:140px;">
-                            <div class="nav-dropdown-item" onclick="applyPreset('lung')"><i class="fas fa-lungs"></i> Lung</div>
-                            <div class="nav-dropdown-item" onclick="applyPreset('bone')"><i class="fas fa-bone"></i> Bone</div>
-                            <div class="nav-dropdown-item" onclick="applyPreset('soft')"><i class="fas fa-circle"></i> Soft Tissue</div>
-                            <div class="nav-dropdown-item" onclick="applyPreset('brain')"><i class="fas fa-brain"></i> Brain</div>
-                            <div class="nav-dropdown-item" onclick="applyPreset('liver')"><i class="fas fa-circle"></i> Liver</div>
-                            <div class="nav-dropdown-item" onclick="applyPreset('default')"><i class="fas fa-undo"></i> Reset W/L</div>
+                        <div id="wlDropdown" class="nav-dropdown-menu"
+                            style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:140px;">
+                            <div class="nav-dropdown-item" onclick="applyPreset('lung')"><i class="fas fa-lungs"></i>
+                                Lung</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('bone')"><i class="fas fa-bone"></i>
+                                Bone</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('soft')"><i class="fas fa-circle"></i>
+                                Soft Tissue</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('brain')"><i class="fas fa-brain"></i>
+                                Brain</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('liver')"><i class="fas fa-circle"></i>
+                                Liver</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('default')"><i class="fas fa-undo"></i>
+                                Reset W/L</div>
                         </div>
                     </div>
 
@@ -997,16 +1039,20 @@
                         <button class="btn" onclick="toggleDropdown('navDropdown')" title="Navigation">
                             <i class="fas fa-sliders-h"></i> Nav ▾
                         </button>
-                        <div id="navDropdown" class="nav-dropdown-menu" style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:200px;">
+                        <div id="navDropdown" class="nav-dropdown-menu"
+                            style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:200px;">
                             <div style="padding:8px 12px;">
                                 <label style="font-size:10px;color:#999;">Slice</label>
-                                <input type="range" id="sliceSlider2" min="0" max="100" value="0" oninput="updateSlice(this.value)" style="width:100%">
+                                <input type="range" id="sliceSlider2" min="0" max="100" value="0"
+                                    oninput="updateSlice(this.value)" style="width:100%">
                             </div>
                             <div style="padding:4px 12px;">
                                 <label style="font-size:10px;color:#999;">Zoom</label>
-                                <input type="range" id="zoomSlider2" min="0.1" max="5" step="0.1" value="1" oninput="updateZoom(this.value)" style="width:100%">
+                                <input type="range" id="zoomSlider2" min="0.1" max="5" step="0.1" value="1"
+                                    oninput="updateZoom(this.value)" style="width:100%">
                             </div>
-                            <div class="nav-dropdown-item" onclick="toggleCineMode()"><i class="fas fa-play"></i> Cine Play/Stop</div>
+                            <div class="nav-dropdown-item" onclick="toggleCineMode()"><i class="fas fa-play"></i> Cine
+                                Play/Stop</div>
                         </div>
                     </div>
 
@@ -1015,14 +1061,21 @@
                         <button class="btn" onclick="toggleDropdown('measDropdown')" title="Measurements">
                             <i class="fas fa-ruler"></i> Measure ▾
                         </button>
-                        <div id="measDropdown" class="nav-dropdown-menu" style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:150px;">
-                            <div class="nav-dropdown-item" onclick="setActiveTool('measure')"><i class="fas fa-ruler-horizontal"></i> Length</div>
-                            <div class="nav-dropdown-item" onclick="setActiveTool('angle')"><i class="fas fa-drafting-compass"></i> Angle</div>
-                            <div class="nav-dropdown-item" onclick="setActiveTool('cobb_angle')"><i class="fas fa-angle-double-up"></i> Cobb Angle</div>
-                            <div class="nav-dropdown-item" onclick="setActiveTool('area')"><i class="fas fa-draw-polygon"></i> Area</div>
-                            <div class="nav-dropdown-item" onclick="setActiveTool('roi')"><i class="fas fa-circle-notch"></i> HU ROI</div>
+                        <div id="measDropdown" class="nav-dropdown-menu"
+                            style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:150px;">
+                            <div class="nav-dropdown-item" onclick="setActiveTool('measure')"><i
+                                    class="fas fa-ruler-horizontal"></i> Length</div>
+                            <div class="nav-dropdown-item" onclick="setActiveTool('angle')"><i
+                                    class="fas fa-drafting-compass"></i> Angle</div>
+                            <div class="nav-dropdown-item" onclick="setActiveTool('cobb_angle')"><i
+                                    class="fas fa-angle-double-up"></i> Cobb Angle</div>
+                            <div class="nav-dropdown-item" onclick="setActiveTool('area')"><i
+                                    class="fas fa-draw-polygon"></i> Area</div>
+                            <div class="nav-dropdown-item" onclick="setActiveTool('roi')"><i
+                                    class="fas fa-circle-notch"></i> HU ROI</div>
                             <div style="height:1px;background:#404040;margin:4px 0;"></div>
-                            <div class="nav-dropdown-item" onclick="clearAllMeasurements()"><i class="fas fa-trash"></i> Clear All</div>
+                            <div class="nav-dropdown-item" onclick="clearAllMeasurements()"><i class="fas fa-trash"></i>
+                                Clear All</div>
                         </div>
                     </div>
 
@@ -1031,10 +1084,14 @@
                         <button class="btn" onclick="toggleDropdown('threeDDropdown')" title="3D/MPR">
                             <i class="fas fa-cube"></i> 3D ▾
                         </button>
-                        <div id="threeDDropdown" class="nav-dropdown-menu" style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:150px;">
-                            <div class="nav-dropdown-item" onclick="generateMPRViews()"><i class="fas fa-th-large"></i> MPR Views</div>
-                            <div class="nav-dropdown-item" onclick="generateMIP()"><i class="fas fa-layer-group"></i> MIP</div>
-                            <div class="nav-dropdown-item" onclick="toggle3DView()"><i class="fas fa-cube"></i> 3D Reconstruction</div>
+                        <div id="threeDDropdown" class="nav-dropdown-menu"
+                            style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:150px;">
+                            <div class="nav-dropdown-item" onclick="generateMPRViews()"><i class="fas fa-th-large"></i>
+                                MPR Views</div>
+                            <div class="nav-dropdown-item" onclick="generateMIP()"><i class="fas fa-layer-group"></i>
+                                MIP</div>
+                            <div class="nav-dropdown-item" onclick="toggle3DView()"><i class="fas fa-cube"></i> 3D
+                                Reconstruction</div>
                         </div>
                     </div>
 
@@ -1043,9 +1100,12 @@
                         <button class="btn" onclick="toggleDropdown('exportDropdown')" title="Export/Print">
                             <i class="fas fa-download"></i> Export ▾
                         </button>
-                        <div id="exportDropdown" class="nav-dropdown-menu" style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:160px;">
-                            <div class="nav-dropdown-item" onclick="exportCurrentImage()"><i class="fas fa-image"></i> Download Image</div>
-                            <div class="nav-dropdown-item" onclick="printCurrentImage()"><i class="fas fa-print"></i> Print / PDF</div>
+                        <div id="exportDropdown" class="nav-dropdown-menu"
+                            style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:160px;">
+                            <div class="nav-dropdown-item" onclick="exportCurrentImage()"><i class="fas fa-image"></i>
+                                Download Image</div>
+                            <div class="nav-dropdown-item" onclick="printCurrentImage()"><i class="fas fa-print"></i>
+                                Print / PDF</div>
                         </div>
                     </div>
 
@@ -1061,7 +1121,8 @@
                         <div>WW: <span id="windowWidth">400</span></div>
                         <div>WL: <span id="windowLevel">40</span></div>
                         <div>Slice: <span id="currentSlice">1</span>/<span id="totalSlices">1</span></div>
-                        <div id="frameOverlay" style="display:none;">Frame: <span id="frameValue">1</span>/<span id="totalFrames">1</span></div>
+                        <div id="frameOverlay" style="display:none;">Frame: <span id="frameValue">1</span>/<span
+                                id="totalFrames">1</span></div>
                         <div>HU: <span id="hounsfield">-</span></div>
                     </div>
                     <div class="zoom-info" id="zoomInfo">
@@ -1088,16 +1149,20 @@
                         <canvas id="bone3DCanvas"></canvas>
                         <div class="controls-3d" id="controls3D">
                             <button class="control-3d-btn" onclick="reset3DView()" title="Reset view">Reset</button>
-                            <button class="control-3d-btn" onclick="toggle3DRotation()" title="Toggle auto-rotate">Auto Rotate</button>
-                            <button class="control-3d-btn" onclick="toggleBoneWireframe()" title="Toggle wireframe">Wire</button>
+                            <button class="control-3d-btn" onclick="toggle3DRotation()" title="Toggle auto-rotate">Auto
+                                Rotate</button>
+                            <button class="control-3d-btn" onclick="toggleBoneWireframe()"
+                                title="Toggle wireframe">Wire</button>
                             <button class="control-3d-btn" onclick="boneZoomIn()" title="Zoom in">+</button>
                             <button class="control-3d-btn" onclick="boneZoomOut()" title="Zoom out">−</button>
                             <button class="control-3d-btn" onclick="boneRotate(0,-1)" title="Rotate left">⟲</button>
                             <button class="control-3d-btn" onclick="boneRotate(0,1)" title="Rotate right">⟳</button>
                             <button class="control-3d-btn" onclick="boneRotate(-1,0)" title="Tilt up">↑</button>
                             <button class="control-3d-btn" onclick="boneRotate(1,0)" title="Tilt down">↓</button>
-                            <button class="control-3d-btn" onclick="boneCenter()" title="Center/pan reset">Center</button>
-                            <button class="control-3d-btn" onclick="export3DModel()" title="Export 3D Model (OBJ)">Export OBJ</button>
+                            <button class="control-3d-btn" onclick="boneCenter()"
+                                title="Center/pan reset">Center</button>
+                            <button class="control-3d-btn" onclick="export3DModel()"
+                                title="Export 3D Model (OBJ)">Export OBJ</button>
                         </div>
                     </div>
                 </div>
@@ -1118,30 +1183,32 @@
                     Series
                 </summary>
                 <div class="panel-body">
-                <div class="series-nav">
-                    <button class="series-nav-btn" id="prevSeriesBtn" type="button" title="Previous series ([)">
-                        <i class="fas fa-chevron-left"></i>
-                        Prev
-                    </button>
-                    <button class="series-nav-btn" id="nextSeriesBtn" type="button" title="Next series (])">
-                        Next
-                        <i class="fas fa-chevron-right"></i>
-                    </button>
-                </div>
-                <div class="series-list" id="seriesList">
-                    <div class="series-item">
-                        <div class="series-title">No series loaded</div>
-                        <div class="series-details">Load a study first</div>
+                    <div class="series-nav">
+                        <button class="series-nav-btn" id="prevSeriesBtn" type="button" title="Previous series ([)">
+                            <i class="fas fa-chevron-left"></i>
+                            Prev
+                        </button>
+                        <button class="series-nav-btn" id="nextSeriesBtn" type="button" title="Next series (])">
+                            Next
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
                     </div>
-                </div>
+                    <div class="series-list" id="seriesList">
+                        <div class="series-item">
+                            <div class="series-title">No series loaded</div>
+                            <div class="series-details">Load a study first</div>
+                        </div>
+                    </div>
                 </div>
             </details>
 
             <!-- Hidden elements needed by JS but not displayed in the right panel -->
             <!-- W/L sliders (hidden, controlled via navbar dropdowns) -->
             <div style="display:none;">
-                <input type="range" id="windowWidthSlider" min="1" max="4000" value="400" oninput="updateWindowWidth(this.value)">
-                <input type="range" id="windowLevelSlider" min="-1000" max="1000" value="40" oninput="updateWindowLevel(this.value)">
+                <input type="range" id="windowWidthSlider" min="1" max="4000" value="400"
+                    oninput="updateWindowWidth(this.value)">
+                <input type="range" id="windowLevelSlider" min="-1000" max="1000" value="40"
+                    oninput="updateWindowLevel(this.value)">
                 <span id="wwValue">400</span>
                 <span id="wlValue">40</span>
                 <input type="range" id="sliceSlider" min="0" max="0" value="0" oninput="updateSlice(this.value)">
@@ -1158,12 +1225,16 @@
                         <option value="24">24</option>
                     </select>
                 </div>
-                <input type="range" id="boneThresholdSlider" min="-1000" max="2000" value="200" oninput="updateBoneThreshold(this.value)">
+                <input type="range" id="boneThresholdSlider" min="-1000" max="2000" value="200"
+                    oninput="updateBoneThreshold(this.value)">
                 <span id="boneThresholdValue">200</span>
-                <input type="range" id="boneOpacitySlider" min="0.1" max="1.0" step="0.1" value="0.8" oninput="updateBoneOpacity(this.value)">
+                <input type="range" id="boneOpacitySlider" min="0.1" max="1.0" step="0.1" value="0.8"
+                    oninput="updateBoneOpacity(this.value)">
                 <span id="boneOpacityValue">0.8</span>
                 <input type="checkbox" id="smoothToggle" onchange="toggleSmoothing(this.checked)">
-                <select id="aiModelSelect"><option value="">Select AI Model (Loading...)</option></select>
+                <select id="aiModelSelect">
+                    <option value="">Select AI Model (Loading...)</option>
+                </select>
                 <div id="aiFindingsList"></div>
                 <div id="imageDimensions">-</div>
                 <div id="pixelSpacing">-</div>
@@ -1184,7 +1255,7 @@
             document.querySelectorAll('.nav-dropdown-menu').forEach(m => m.style.display = 'none');
             if (!isOpen) menu.style.display = 'block';
         }
-        document.addEventListener('click', function(e) {
+        document.addEventListener('click', function (e) {
             if (!e.target.closest('.nav-dropdown-group')) {
                 document.querySelectorAll('.nav-dropdown-menu').forEach(m => m.style.display = 'none');
             }
@@ -1222,11 +1293,11 @@
         let annotations = [];
         let fabric3DCanvas = null;
         let boneReconstructionData = null;
-        
+
         // Canvas and context
         let canvas, ctx;
         let mprCanvases = {};
-        
+
         // MPR state (per-plane slice index + render mapping info)
         let mprState = {
             counts: { axial: 0, sagittal: 0, coronal: 0 },
@@ -1270,12 +1341,12 @@
         let mprQuality = 'high';
 
         let _mprSyncTimer = null;
-        
+
         // ROI tool (ellipse) - live draft while dragging
         let roiDraft = null;
         // MPR ROI: capture mouseup/move on window so ROI works even if cursor leaves small panes.
         let _mprRoiCapture = null; // { plane, onMove, onUp }
-        
+
         // Bone 3D renderer (Three.js)
         let bone3D = {
             renderer: null,
@@ -1293,7 +1364,7 @@
             vertices: null,
             faces: null,
         };
-        
+
         // Display parameters
         let windowWidth = 400;
         let windowLevel = 40;
@@ -1315,7 +1386,7 @@
             }
         }
         function _saveWindowingStore(obj) {
-            try { localStorage.setItem(_WINDOWING_STORE_KEY, JSON.stringify(obj || {})); } catch (e) {}
+            try { localStorage.setItem(_WINDOWING_STORE_KEY, JSON.stringify(obj || {})); } catch (e) { }
         }
         function _getSeriesWindowing(seriesId) {
             const store = _loadWindowingStore();
@@ -1348,9 +1419,9 @@
             inverted = !!s.inverted;
             windowingLockedByUser = true;
             inversionLockedByUser = true;
-            try { updateSliders(); } catch (e) {}
-            try { updateOverlayLabels(); } catch (e) {}
-            try { updateToolStates(); } catch (e) {}
+            try { updateSliders(); } catch (e) { }
+            try { updateOverlayLabels(); } catch (e) { }
+            try { updateToolStates(); } catch (e) { }
             return true;
         }
         // Dynamic WL/WW bounds per image (supports CT/MR/CR/DX/MG/etc without hard clamps).
@@ -1607,21 +1678,15 @@
         }
 
         // Initialize on page load
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             initializeViewer();
             setupEventListeners();
             // Auto-hide disabled by default; user can manually toggle UI
-            
-            // Check if study ID is provided in URL
+            // Only load a study if studyId is present in URL
             const urlParams = new URLSearchParams(window.location.search);
             const studyId = urlParams.get('study');
-            
             if (studyId) {
-                // Load specific study
                 loadSpecificStudy(studyId);
-            } else {
-                // Load all studies for selection
-                loadStudies();
             }
         });
 
@@ -1630,11 +1695,11 @@
             ctx = canvas.getContext('2d');
 
             setupMagnifier();
-            
+
             // Set canvas size
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
-            
+
             // Initialize MPR canvases
             mprCanvases = {
                 axial: document.getElementById('axialCanvas'),
@@ -1642,7 +1707,7 @@
                 coronal: document.getElementById('coronalCanvas'),
                 bone3d: document.getElementById('bone3DCanvas')
             };
-            
+
             // Set up 3D canvas for bone reconstruction
             setupBone3DCanvas();
         }
@@ -1687,7 +1752,7 @@
                     container.classList.add('ui-hidden');
                 }, 2000);
             };
-            ['mousemove','mousedown','wheel','keydown','touchstart','touchmove'].forEach(ev => {
+            ['mousemove', 'mousedown', 'wheel', 'keydown', 'touchstart', 'touchmove'].forEach(ev => {
                 window.addEventListener(ev, resetTimer, { passive: true });
             });
             resetTimer();
@@ -1757,7 +1822,7 @@
 
             if (!cw || !ch) {
                 requestAnimationFrame(() => {
-                    try { resizeCanvas(); } catch (e) {}
+                    try { resizeCanvas(); } catch (e) { }
                 });
                 return;
             }
@@ -1766,7 +1831,7 @@
             canvas.height = Math.max(2, Math.floor(ch * dpr));
             canvas.style.width = cw + 'px';
             canvas.style.height = ch + 'px';
-            
+
             // Resize MPR canvases
             Object.values(mprCanvases).forEach(c => {
                 if (c && c.parentElement) {
@@ -1778,7 +1843,7 @@
                     c.style.height = h + 'px';
                 }
             });
-            
+
             redrawCurrentImage();
             if (viewMode === 'mpr') {
                 // Recompute per-plane render meta after resize (keeps HU/ROI/crosshair aligned).
@@ -1797,26 +1862,26 @@
                         // Update base meta, then redraw applies user pan/zoom and refreshes renderMeta
                         if (mprState.baseMeta) mprState.baseMeta[p] = { w: iw, h: ih, dx, dy, dw, dh };
                         redrawMPRPlane(p);
-                    } catch (e) {}
+                    } catch (e) { }
                 });
             }
             if (viewMode === 'mpr' && bone3D && bone3D.renderer && bone3D.scene && bone3D.camera) {
-                try { renderBoneFrame(); } catch (e) {}
+                try { renderBoneFrame(); } catch (e) { }
             }
         }
 
         function setupEventListeners() {
             // Tool button clicks
             document.querySelectorAll('.tool-btn').forEach(btn => {
-                btn.addEventListener('click', function(e) {
+                btn.addEventListener('click', function (e) {
                     const tool = this.dataset.tool;
                     handleToolClick(tool, e, this);
                 });
             });
 
             // Series navigation (useful during MPR)
-            document.getElementById('prevSeriesBtn')?.addEventListener('click', () => { prevSeries().catch(() => {}); });
-            document.getElementById('nextSeriesBtn')?.addEventListener('click', () => { nextSeries().catch(() => {}); });
+            document.getElementById('prevSeriesBtn')?.addEventListener('click', () => { prevSeries().catch(() => { }); });
+            document.getElementById('nextSeriesBtn')?.addEventListener('click', () => { nextSeries().catch(() => { }); });
 
             // Canvas mouse events
             canvas.addEventListener('mousedown', handleMouseDown);
@@ -1824,7 +1889,7 @@
             canvas.addEventListener('mouseup', handleMouseUp);
             canvas.addEventListener('wheel', handleWheel);
             canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // Prevent default right-click menu
-            
+
             // MPR canvases: click-to-activate/maximize, wheel-to-scroll slices, ROI/HU interactions
             ['axial', 'sagittal', 'coronal'].forEach((plane) => {
                 const c = mprCanvases[plane];
@@ -1867,7 +1932,7 @@
 
         function handleToolClick(tool, event, buttonEl) {
             // Handle specific tools
-            switch(tool) {
+            switch (tool) {
                 case 'reset':
                     resetAllDefaults();
                     break;
@@ -1947,7 +2012,7 @@
         function toggleCineMode() {
             cineMode = !cineMode;
             const btn = document.querySelector('[data-tool="cine"]');
-            
+
             if (cineMode) {
                 btn.classList.add('active');
                 btn.innerHTML = '<i class="fas fa-pause"></i><span>Stop</span>';
@@ -1970,7 +2035,7 @@
                     currentFrameIndex = (currentFrameIndex + 1) % Math.max(1, Number(currentFrameCount || 1));
                     _setFrameUIState();
                     // Reload same image ID but different frame
-                    loadCurrentImage(currentImageIndex).catch(() => {});
+                    loadCurrentImage(currentImageIndex).catch(() => { });
                 }, intervalMs);
                 return;
             }
@@ -1994,7 +2059,7 @@
             try {
                 const n = Number(v);
                 if (Number.isFinite(n) && n > 0) cineFps = n;
-            } catch (e) {}
+            } catch (e) { }
             // If cine is already running, restart with new FPS.
             if (cineMode) {
                 stopCine();
@@ -2007,14 +2072,14 @@
             currentFrameIndex = Math.max(0, Math.min(n - 1, Number(v || 0)));
             _setFrameUIState();
             // Reload the same image ID but different frame
-            loadCurrentImage(currentImageIndex).catch(() => {});
+            loadCurrentImage(currentImageIndex).catch(() => { });
         }
 
         function toggleMPRView() {
             const singleView = document.getElementById('singleView');
             const mprView = document.getElementById('mprView');
             const controls3D = document.getElementById('controls3D');
-            
+
             if (viewMode === 'single') {
                 // Don't switch to MPR if there's no series loaded (otherwise panes look "blank").
                 if (!currentSeries || currentSeries.id == null) {
@@ -2028,7 +2093,7 @@
                 // Ensure canvases have non-zero size now that MPR is visible.
                 // Use rAF so layout has applied the new grid before reading client sizes.
                 requestAnimationFrame(() => {
-                    try { resizeCanvas(); } catch (e) {}
+                    try { resizeCanvas(); } catch (e) { }
                     setMPRMaximizedPlane(null);
                     setActiveMPRPlane('axial');
                     generateMPRViews({ refreshBone: true, quiet: false, preserveSlices: false });
@@ -2043,8 +2108,8 @@
                 // Coming back from MPR can leave the single-view canvas sized to 0 if the container
                 // was hidden during a resize/layout pass. Ensure it's non-zero before redrawing.
                 requestAnimationFrame(() => {
-                    try { resizeCanvas(); } catch (e) {}
-                    try { redrawCurrentImage(); } catch (e) {}
+                    try { resizeCanvas(); } catch (e) { }
+                    try { redrawCurrentImage(); } catch (e) { }
                 });
             }
         }
@@ -2068,7 +2133,7 @@
                 setActiveMPRPlane('bone3d');
                 setMPRMaximizedPlane('bone3d');
                 requestAnimationFrame(() => {
-                    try { resizeCanvas(); } catch (e) {}
+                    try { resizeCanvas(); } catch (e) { }
                 });
             } else {
                 setActiveMPRPlane('bone3d');
@@ -2081,17 +2146,17 @@
                 showLoading(true);
                 const response = await fetch('/dicom-viewer/api/realtime/studies/');
                 const data = await response.json();
-                
+
                 const selector = document.getElementById('studySelector');
                 selector.innerHTML = '<option value="">Select a Study</option>';
-                
+
                 data.studies.forEach(study => {
                     const option = document.createElement('option');
                     option.value = study.id;
                     option.textContent = `${study.patient_name} - ${study.study_date} - ${study.modality}`;
                     selector.appendChild(option);
                 });
-                
+
                 showLoading(false);
                 showToast('Studies loaded successfully', 'success');
             } catch (error) {
@@ -2107,7 +2172,7 @@
                 // Load the specific study
                 const response = await fetch(`/dicom-viewer/api/study/${studyId}/data/`);
                 const data = await response.json();
-                
+
                 if (data && data.study && Array.isArray(data.series)) {
                     const studyData = data.study;
                     currentStudy = {
@@ -2126,8 +2191,8 @@
                     displaySeriesList(data.series);
                     updatePatientInfo(currentStudy);
                     // Load related references automatically based on study context
-                    try { fetchReferences(); } catch (e) {}
-                    
+                    try { fetchReferences(); } catch (e) { }
+
                     // Auto-load the "best" series (largest diagnostic stack) so local uploads
                     // look identical to worklist-opened studies. First series is often a low-res scout/localizer.
                     if (data.series.length > 0) {
@@ -2136,12 +2201,12 @@
                         const best = pickBestSeriesForDisplay(candidateList);
                         await loadSeries((best && best.id) ? best.id : candidateList[0].id);
                     }
-                    
+
                     showToast(`Loaded study: ${currentStudy.patient_name}`, 'success');
                 } else {
                     showToast('Failed to load study', 'error');
                 }
-                
+
                 showLoading(false);
             } catch (error) {
                 console.error('Error loading specific study:', error);
@@ -2196,7 +2261,7 @@
         async function selectStudy() {
             const studyId = document.getElementById('studySelector').value;
             if (!studyId) return;
-            
+
             await loadSpecificStudy(studyId);
         }
 
@@ -2210,23 +2275,23 @@
             const hasList = studySeriesList.length > 0;
             if (prevBtn) prevBtn.disabled = !hasList;
             if (nextBtn) nextBtn.disabled = !hasList;
-            
+
             series.forEach((s, index) => {
                 const item = document.createElement('div');
                 item.className = 'series-item';
                 if (index === 0) item.classList.add('active');
-                
+
                 item.innerHTML = `
                     <div class="series-title">Series ${s.series_number}: ${s.description}</div>
                     <div class="series-details">${s.modality} • ${s.image_count} images</div>
                 `;
-                
+
                 item.addEventListener('click', () => {
                     document.querySelectorAll('.series-item').forEach(el => el.classList.remove('active'));
                     item.classList.add('active');
                     loadSeries(s.id);
                 });
-                
+
                 container.appendChild(item);
             });
         }
@@ -2238,19 +2303,19 @@
                 items.forEach((el) => el.classList.remove('active'));
                 const idx = (studySeriesList || []).findIndex((s) => Number(s && s.id) === id);
                 if (idx >= 0 && items[idx]) items[idx].classList.add('active');
-            } catch (e) {}
+            } catch (e) { }
         }
 
         function _abortMPRRequestsAndTimers() {
             try {
                 Object.keys(_mprPlaneAbort || {}).forEach((p) => {
-                    try { _mprPlaneAbort[p]?.abort?.(); } catch (e) {}
+                    try { _mprPlaneAbort[p]?.abort?.(); } catch (e) { }
                 });
-            } catch (e) {}
-            try { _mprHUAbort?.abort?.(); } catch (e) {}
-            try { if (_mprHUTimer) { clearTimeout(_mprHUTimer); _mprHUTimer = null; } } catch (e) {}
-            try { if (_mprSyncTimer) { clearTimeout(_mprSyncTimer); _mprSyncTimer = null; } } catch (e) {}
-            try { if (_mprRefreshTimer) { clearTimeout(_mprRefreshTimer); _mprRefreshTimer = null; } } catch (e) {}
+            } catch (e) { }
+            try { _mprHUAbort?.abort?.(); } catch (e) { }
+            try { if (_mprHUTimer) { clearTimeout(_mprHUTimer); _mprHUTimer = null; } } catch (e) { }
+            try { if (_mprSyncTimer) { clearTimeout(_mprSyncTimer); _mprSyncTimer = null; } } catch (e) { }
+            try { if (_mprRefreshTimer) { clearTimeout(_mprRefreshTimer); _mprRefreshTimer = null; } } catch (e) { }
         }
 
         async function loadSeries(seriesId) {
@@ -2282,7 +2347,7 @@
                 windowingLockedByUser = false;
                 inversionLockedByUser = false;
                 _restoreSeriesWindowing(currentSeries && currentSeries.id);
-                
+
                 // Update UI
                 _setActiveSeriesListItem(seriesId);
                 const sliceSlider = document.getElementById('sliceSlider');
@@ -2296,7 +2361,7 @@
                 }
                 if (totalSlicesEl) totalSlicesEl.textContent = String(imageData.length);
                 if (currentSliceEl) currentSliceEl.textContent = imageData.length ? '1' : '0';
-                
+
                 updateImageInfo(currentSeries);
                 if (!imageData.length) {
                     showLoading(false);
@@ -2307,11 +2372,11 @@
 
                 // If already in MPR mode, refresh MPR views for the new series automatically.
                 if (viewMode === 'mpr') {
-                    try { resizeCanvas(); } catch (e) {}
+                    try { resizeCanvas(); } catch (e) { }
                     await generateMPRViews({ refreshBone: false, quiet: true, preserveSlices: false });
-                    try { generateBoneReconstruction(); } catch (e) {}
+                    try { generateBoneReconstruction(); } catch (e) { }
                 }
-                
+
                 showLoading(false);
                 showToast(`Loaded ${imageData.length} images`, 'success');
             } catch (error) {
@@ -2525,7 +2590,7 @@
         function _resetServerRendered() {
             _serverRendered = { enabled: false, imageId: null, image: null, dataUrl: null, info: null, key: null };
             if (_serverRenderRefreshTimer) {
-                try { clearTimeout(_serverRenderRefreshTimer); } catch (e) {}
+                try { clearTimeout(_serverRenderRefreshTimer); } catch (e) { }
                 _serverRenderRefreshTimer = null;
             }
         }
@@ -2560,11 +2625,11 @@
             params.set('invert', inverted ? 'true' : 'false');
             try {
                 if (Number(currentFrameIndex || 0) > 0) params.set('frame', String(Number(currentFrameIndex || 0)));
-            } catch (e) {}
+            } catch (e) { }
 
             const srcUrl = `/dicom-viewer/api/image/${encodeURIComponent(id)}/render.png?${params.toString()}`;
             const img = new Image();
-            try { img.decoding = 'async'; } catch (e) {}
+            try { img.decoding = 'async'; } catch (e) { }
             img.src = srcUrl;
             await new Promise((resolve, reject) => {
                 img.onload = resolve;
@@ -2601,7 +2666,7 @@
             // Preserve multi-frame selection if applicable.
             try {
                 if (Number(currentFrameIndex || 0) > 0) params.set('frame', String(Number(currentFrameIndex || 0)));
-            } catch (e) {}
+            } catch (e) { }
             let url = `/dicom-viewer/api/image/${encodeURIComponent(id)}/display/${params.toString() ? `?${params.toString()}` : ''}`;
             let resp = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
             let data = await resp.json().catch(() => ({}));
@@ -2637,10 +2702,10 @@
                     if (Number.isFinite(Number(data.windowing.window_level))) windowLevel = Number(data.windowing.window_level);
                     updateSliders();
                 }
-            } catch (e) {}
+            } catch (e) { }
 
             const img = new Image();
-            try { img.decoding = 'async'; } catch (e) {}
+            try { img.decoding = 'async'; } catch (e) { }
             img.src = srcUrl;
             await new Promise((resolve, reject) => {
                 img.onload = resolve;
@@ -2669,12 +2734,12 @@
             const id = imageId != null ? String(imageId) : null;
             if (!id) return;
             if (_serverRenderRefreshTimer) {
-                try { clearTimeout(_serverRenderRefreshTimer); } catch (e) {}
+                try { clearTimeout(_serverRenderRefreshTimer); } catch (e) { }
             }
             // Debounce so WW/WL sliders don't spam the server.
             _serverRenderRefreshTimer = setTimeout(() => {
                 _serverRenderRefreshTimer = null;
-                _loadServerRenderedFrame(id, { quiet: true }).catch(() => {});
+                _loadServerRenderedFrame(id, { quiet: true }).catch(() => { });
             }, 120);
         }
 
@@ -2715,7 +2780,7 @@
                 const fi = Number(data && (data.frame_index ?? data.frame));
                 if (Number.isFinite(fi) && fi >= 0) currentFrameIndex = Math.floor(fi);
                 _setFrameUIState();
-            } catch (e) {}
+            } catch (e) { }
             renderDicomImage(data);
             _scheduleMPRRefresh();
         }
@@ -2783,16 +2848,16 @@
             // During wheel scrubbing, show a quick PNG preview (no raw-pixel payload).
             if (fastPreview && !forceFull) {
                 // Abort any in-flight raw pixel fetch (we're only previewing).
-                try { _imageLoadAbortController?.abort(); } catch (e) {}
+                try { _imageLoadAbortController?.abort(); } catch (e) { }
                 _imageLoadAbortController = null;
                 // Keep UI responsive without spamming loaders.
-                try { showLoading(false); } catch (e) {}
+                try { showLoading(false); } catch (e) { }
                 try {
                     await _loadServerRenderedFrameFast(imageId, { quiet: true });
                     _scheduleMPRRefresh();
                 } catch (e) {
                     // Fall back to the full (correctness-first) server render if direct render fails.
-                    _loadServerRenderedFrame(imageId, { quiet: true }).catch(() => {});
+                    _loadServerRenderedFrame(imageId, { quiet: true }).catch(() => { });
                 }
                 return;
             }
@@ -2806,7 +2871,7 @@
             }
 
             // Abort any in-flight image load (latest-slice-wins during scrolling).
-            try { _imageLoadAbortController?.abort(); } catch (e) {}
+            try { _imageLoadAbortController?.abort(); } catch (e) { }
             _imageLoadAbortController = new AbortController();
             const seq = ++_imageLoadSeq;
 
@@ -2842,7 +2907,7 @@
                     if (data && Number.isFinite(Number(data.window_width))) windowWidth = Number(data.window_width);
                     if (data && Number.isFinite(Number(data.window_center))) windowLevel = Number(data.window_center);
                     updateSliders();
-                } catch (e) {}
+                } catch (e) { }
 
                 if (!data || !data.pixel_data || !data.columns || !data.rows) {
                     // Don't silently render nothing — try server-rendered PNG fallback (still supports pan/zoom/rotate).
@@ -2886,7 +2951,7 @@
                     _fetchImagePayloadBinary(id, undefined)
                         .then((d) => d ? d : _fetchImagePayloadJsonPacked(id, undefined))
                         .then((d) => { if (d) _cacheSetPayload(id, d); })
-                        .catch(() => {});
+                        .catch(() => { });
                 });
             }, 140);
         }
@@ -2897,7 +2962,7 @@
             // Defensive: ensure the main canvas has a real size before drawing.
             // If the container was hidden during a layout pass, the canvas can get stuck at 0x0.
             if (!canvas || canvas.width <= 2 || canvas.height <= 2) {
-                try { resizeCanvas(); } catch (e) {}
+                try { resizeCanvas(); } catch (e) { }
                 if (!canvas || canvas.width <= 2 || canvas.height <= 2) return;
             }
 
@@ -2915,13 +2980,13 @@
                 if (actual !== expected) {
                     const id = imageData.id != null ? String(imageData.id) : String(lastLoadedImageId || '');
                     console.warn('Pixel buffer size mismatch; falling back to server render', { id, imgW, imgH, expected, actual });
-                    if (id) _loadServerRenderedFrame(id, { quiet: true }).catch(() => {});
+                    if (id) _loadServerRenderedFrame(id, { quiet: true }).catch(() => { });
                     return;
                 }
             } catch (e) {
                 const id = imageData.id != null ? String(imageData.id) : String(lastLoadedImageId || '');
                 console.warn('Pixel buffer validation failed; falling back to server render', e);
-                if (id) _loadServerRenderedFrame(id, { quiet: true }).catch(() => {});
+                if (id) _loadServerRenderedFrame(id, { quiet: true }).catch(() => { });
                 return;
             }
             const photometric = (imageData.photometric_interpretation || '').toString().toUpperCase();
@@ -2972,7 +3037,7 @@
                 } catch (e) {
                     const id = imageData.id != null ? String(imageData.id) : String(lastLoadedImageId || '');
                     console.error('Canvas render failed; falling back to server render', e);
-                    if (id) _loadServerRenderedFrame(id, { quiet: true }).catch(() => {});
+                    if (id) _loadServerRenderedFrame(id, { quiet: true }).catch(() => { });
                     return;
                 }
             }
@@ -2992,7 +3057,7 @@
             // Nearest-neighbor is crisp when zooming in; enable smoothing only when downscaling to avoid aliasing.
             const effScale = Math.max(Math.abs(sx), Math.abs(sy));
             ctx.imageSmoothingEnabled = effScale < 1;
-            try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
+            try { ctx.imageSmoothingQuality = 'high'; } catch (e) { }
             ctx.drawImage(_frameCanvas, -imgW / 2, -imgH / 2);
             ctx.restore();
 
@@ -3018,7 +3083,7 @@
 
             // Defensive: ensure the main canvas has a real size before drawing.
             if (!canvas || canvas.width <= 2 || canvas.height <= 2) {
-                try { resizeCanvas(); } catch (e) {}
+                try { resizeCanvas(); } catch (e) { }
                 if (!canvas || canvas.width <= 2 || canvas.height <= 2) return;
             }
 
@@ -3043,7 +3108,7 @@
             ctx.scale(sx, sy);
             const effScale = Math.max(Math.abs(sx), Math.abs(sy));
             ctx.imageSmoothingEnabled = effScale < 1;
-            try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
+            try { ctx.imageSmoothingQuality = 'high'; } catch (e) { }
             ctx.drawImage(img, -imgW / 2, -imgH / 2);
             ctx.restore();
 
@@ -3074,11 +3139,11 @@
             const pxy = _canvasClientToCanvasPx(canvas, event.clientX, event.clientY);
             lastMouseX = pxy.x;
             lastMouseY = pxy.y;
-            
+
             // Handle right-click for context menu
             if (event.button === 2) {
                 event.preventDefault();
-                
+
                 // Check if right-click is on a measurement
                 const clickedMeasurement = findMeasurementAtPoint(lastMouseX, lastMouseY);
                 if (clickedMeasurement !== -1) {
@@ -3086,12 +3151,12 @@
                     showContextMenu(event.clientX, event.clientY, clickedMeasurement);
                     return;
                 }
-                
+
                 // Hide context menu if clicking elsewhere
                 hideContextMenu();
                 return;
             }
-            
+
             // Handle left-click (button 0)
             if (event.button === 0) {
                 // Crosshair rotate: drag the handle to rotate to any degree (single-view).
@@ -3104,7 +3169,7 @@
                     _crosshairRotateDrag.baseDeg = Number(rotation) || 0;
                     _crosshairRotateHover = true;
                     isDragging = true;
-                    try { canvas.style.cursor = 'grabbing'; } catch (_) {}
+                    try { canvas.style.cursor = 'grabbing'; } catch (_) { }
                     redrawCurrentImage();
                     return;
                 }
@@ -3123,7 +3188,7 @@
 
                 isDragging = true;
                 hideContextMenu(); // Hide any open context menu
-                
+
                 if (activeTool === 'roi') {
                     const p = canvasPointToImagePx(lastMouseX, lastMouseY);
                     if (!p) return;
@@ -3145,7 +3210,7 @@
         function findMeasurementAtPoint(x, y) {
             for (let i = measurements.length - 1; i >= 0; i--) {
                 const measurement = measurements[i];
-                if (measurement.bounds && 
+                if (measurement.bounds &&
                     x >= measurement.bounds.x1 && x <= measurement.bounds.x2 &&
                     y >= measurement.bounds.y1 && y <= measurement.bounds.y2) {
                     return i;
@@ -3158,7 +3223,7 @@
             const pxy = _canvasClientToCanvasPx(canvas, event.clientX, event.clientY);
             const mouseX = pxy.x;
             const mouseY = pxy.y;
-            
+
             // Update Hounsfield value display
             updateHounsfieldValue(mouseX, mouseY);
 
@@ -3171,11 +3236,11 @@
                 const hover = _hitTestCrosshairRotateHandle(mouseX, mouseY);
                 if (hover !== _crosshairRotateHover) {
                     _crosshairRotateHover = hover;
-                    try { canvas.style.cursor = _crosshairRotateDrag.active ? 'grabbing' : (hover ? 'grab' : 'crosshair'); } catch (_) {}
+                    try { canvas.style.cursor = _crosshairRotateDrag.active ? 'grabbing' : (hover ? 'grab' : 'crosshair'); } catch (_) { }
                     // Only redraw when the highlight state changes.
-                    try { redrawCurrentImage(); } catch (_) {}
+                    try { redrawCurrentImage(); } catch (_) { }
                 } else {
-                    try { canvas.style.cursor = _crosshairRotateDrag.active ? 'grabbing' : (hover ? 'grab' : 'crosshair'); } catch (_) {}
+                    try { canvas.style.cursor = _crosshairRotateDrag.active ? 'grabbing' : (hover ? 'grab' : 'crosshair'); } catch (_) { }
                 }
             }
 
@@ -3195,13 +3260,13 @@
                 lastMouseY = mouseY;
                 return;
             }
-            
+
             if (!isDragging) return;
-            
+
             const deltaX = mouseX - lastMouseX;
             const deltaY = mouseY - lastMouseY;
-            
-            switch(activeTool) {
+
+            switch (activeTool) {
                 case 'roi':
                     if (roiDraft && roiDraft.mode === 'single') {
                         const p = canvasPointToImagePx(mouseX, mouseY);
@@ -3250,7 +3315,7 @@
                     }
                     break;
             }
-            
+
             lastMouseX = mouseX;
             lastMouseY = mouseY;
         }
@@ -3342,8 +3407,8 @@
             // End crosshair rotation drag (single-view)
             if (_crosshairRotateDrag && _crosshairRotateDrag.active) {
                 _crosshairRotateDrag.active = false;
-                try { canvas.style.cursor = _crosshairRotateHover ? 'grab' : 'crosshair'; } catch (_) {}
-                try { redrawCurrentImage(); } catch (_) {}
+                try { canvas.style.cursor = _crosshairRotateHover ? 'grab' : 'crosshair'; } catch (_) { }
+                try { redrawCurrentImage(); } catch (_) { }
                 // Don't fall through into ROI/measurement finalize logic for this mouseup.
                 return;
             }
@@ -3399,7 +3464,7 @@
 
         function handleWheel(event) {
             event.preventDefault();
-            
+
             if (event.ctrlKey) {
                 // Zoom
                 const zoomDelta = event.deltaY > 0 ? 0.9 : 1.1;
@@ -3425,30 +3490,30 @@
                 // When the user stops scrolling, load the raw pixel payload for the final resting slice
                 // (enables accurate measurements/HU without making scrolling feel heavy).
                 if (_scrubIdleTimer) {
-                    try { clearTimeout(_scrubIdleTimer); } catch (e) {}
+                    try { clearTimeout(_scrubIdleTimer); } catch (e) { }
                 }
                 _scrubIdleTimer = setTimeout(() => {
                     _scrubIdleTimer = null;
                     const id = imageData && imageData[currentImageIndex] ? imageData[currentImageIndex].id : null;
                     if (!id) return;
                     // Force full load for the current slice.
-                    loadCurrentImage(currentImageIndex, { forceFull: true }).catch(() => {});
+                    loadCurrentImage(currentImageIndex, { forceFull: true }).catch(() => { });
                 }, 180);
             }
         }
 
         function handleKeyDown(event) {
-            switch(event.key) {
+            switch (event.key) {
                 case '[':
                     if (viewMode === 'mpr') {
                         event.preventDefault();
-                        prevSeries().catch(() => {});
+                        prevSeries().catch(() => { });
                     }
                     break;
                 case ']':
                     if (viewMode === 'mpr') {
                         event.preventDefault();
-                        nextSeries().catch(() => {});
+                        nextSeries().catch(() => { });
                     }
                     break;
                 case 'ArrowUp':
@@ -3516,8 +3581,8 @@
                     currentMeasurement = null;
                     roiDraft = null;
                     if (_mprRoiCapture) {
-                        try { window.removeEventListener('mousemove', _mprRoiCapture.onMove); } catch (e) {}
-                        try { window.removeEventListener('mouseup', _mprRoiCapture.onUp); } catch (e) {}
+                        try { window.removeEventListener('mousemove', _mprRoiCapture.onMove); } catch (e) { }
+                        try { window.removeEventListener('mouseup', _mprRoiCapture.onUp); } catch (e) { }
                         _mprRoiCapture = null;
                     }
                     if (viewMode === 'single') redrawCurrentImage();
@@ -3631,25 +3696,25 @@
 
         function resetAllDefaults() {
             // Stop any continuous modes / in-flight interactions
-            try { stopCine(); } catch (e) {}
+            try { stopCine(); } catch (e) { }
             cineMode = false;
 
             // Abort MPR timers/requests to avoid stale updates after reset
-            try { _abortMPRRequestsAndTimers(); } catch (e) {}
+            try { _abortMPRRequestsAndTimers(); } catch (e) { }
 
             // Cancel ROI/measurement drafts
             currentMeasurement = null;
             roiDraft = null;
             if (_mprRoiCapture) {
-                try { window.removeEventListener('mousemove', _mprRoiCapture.onMove); } catch (e) {}
-                try { window.removeEventListener('mouseup', _mprRoiCapture.onUp); } catch (e) {}
+                try { window.removeEventListener('mousemove', _mprRoiCapture.onMove); } catch (e) { }
+                try { window.removeEventListener('mouseup', _mprRoiCapture.onUp); } catch (e) { }
                 _mprRoiCapture = null;
             }
 
             // Clear overlays + lists
             measurements = [];
             annotations = [];
-            try { updateMeasurementsList(); } catch (e) {}
+            try { updateMeasurementsList(); } catch (e) { }
 
             // Reset primary tools/state toggles
             activeTool = 'windowing';
@@ -3674,11 +3739,11 @@
             windowWidth = 400;
             windowLevel = 40;
             currentImageStats = null;
-            try { updateSliders(); } catch (e) {}
-            try { updateZoomSlider(); } catch (e) {}
+            try { updateSliders(); } catch (e) { }
+            try { updateZoomSlider(); } catch (e) { }
 
             // Clear persisted windowing for this series (so defaults can re-derive).
-            try { _clearSeriesWindowing(currentSeries && currentSeries.id); } catch (e) {}
+            try { _clearSeriesWindowing(currentSeries && currentSeries.id); } catch (e) { }
 
             // Reset MPR state to defaults and return to single-view default layout
             mprCrosshairVoxel = null;
@@ -3691,16 +3756,16 @@
                 mprState.renderMeta = { axial: null, sagittal: null, coronal: null };
                 mprState.lastImage = { axial: null, sagittal: null, coronal: null };
             }
-            try { setMPRMaximizedPlane(null); } catch (e) {}
-            try { setActiveMPRPlane('axial'); } catch (e) {}
+            try { setMPRMaximizedPlane(null); } catch (e) { }
+            try { setActiveMPRPlane('axial'); } catch (e) { }
 
             // Reset 3D defaults
             boneThreshold = 200;
             boneOpacity = 0.8;
             smoothSurface = true;
             autoRotate = false;
-            try { stopBoneAnimationLoop(); } catch (e) {}
-            try { reset3DView(); } catch (e) {}
+            try { stopBoneAnimationLoop(); } catch (e) { }
+            try { reset3DView(); } catch (e) { }
             // Sync UI widgets if present
             try {
                 const t = document.getElementById('boneThresholdSlider');
@@ -3711,7 +3776,7 @@
                 if (tv) tv.textContent = String(boneThreshold);
                 const ov = document.getElementById('boneOpacityValue');
                 if (ov) ov.textContent = String(boneOpacity);
-            } catch (e) {}
+            } catch (e) { }
 
             // Return to default single view UI (do not change the loaded series/slice)
             const singleView = document.getElementById('singleView');
@@ -3723,7 +3788,7 @@
             viewMode = 'single';
 
             // Re-render
-            try { redrawCurrentImage(); } catch (e) {}
+            try { redrawCurrentImage(); } catch (e) { }
             refreshToolButtonStates(activeTool);
             showToast('Reset to defaults', 'success');
         }
@@ -3783,7 +3848,7 @@
             if (!currentMeasurement) return;
             const p = canvasPointToImagePx(x, y);
             if (!p) return;
-            
+
             if (currentMeasurement.type === 'distance') {
                 currentMeasurement.endX = p.x;
                 currentMeasurement.endY = p.y;
@@ -3795,7 +3860,7 @@
                     currentMeasurement.points[currentMeasurement.points.length - 1] = { x: p.x, y: p.y };
                 }
             }
-            
+
             redrawCurrentImage();
         }
 
@@ -3823,7 +3888,7 @@
             try {
                 finalized.mode = 'single';
                 finalized.image_id = (imageData && imageData[currentImageIndex]) ? imageData[currentImageIndex].id : null;
-            } catch (_) {}
+            } catch (_) { }
 
             measurements.push(finalized);
             saveMeasurement(finalized);
@@ -3835,14 +3900,14 @@
 
         function drawMeasurements() {
             if (!measurements || measurements.length === 0) return;
-            
+
             ctx.strokeStyle = '#ff0000';
             ctx.lineWidth = 2;
             ctx.fillStyle = '#ff0000';
             ctx.font = '14px Arial';
             ctx.textAlign = 'center';
             const curImageId = (imageData && imageData[currentImageIndex]) ? imageData[currentImageIndex].id : null;
-            
+
             measurements.forEach((measurement, index) => {
                 // Single-view overlays should be per-slice (per DicomImage) and should never render MPR measurements.
                 const mode = (measurement && measurement.mode) ? measurement.mode : 'single';
@@ -3860,7 +3925,7 @@
                     ctx.moveTo(a.x, a.y);
                     ctx.lineTo(b.x, b.y);
                     ctx.stroke();
-                    
+
                     // Draw measurement points
                     ctx.fillStyle = '#ff0000';
                     ctx.beginPath();
@@ -3869,20 +3934,20 @@
                     ctx.beginPath();
                     ctx.arc(b.x, b.y, 4, 0, 2 * Math.PI);
                     ctx.fill();
-                    
+
                     // Draw distance text with background
                     const distance = calculateDistance(measurement);
                     const midX = (a.x + b.x) / 2;
                     const midY = (a.y + b.y) / 2;
-                    
+
                     // Text background
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
                     ctx.fillRect(midX - 30, midY - 20, 60, 16);
-                    
+
                     // Text
                     ctx.fillStyle = '#ffff00';
                     ctx.fillText(distance.text, midX, midY - 8);
-                    
+
                     // Store measurement bounds for context menu
                     measurement.bounds = {
                         x1: Math.min(a.x, b.x) - 10,
@@ -3901,17 +3966,17 @@
                     ctx.lineTo(points[1].x, points[1].y);
                     ctx.lineTo(points[2].x, points[2].y);
                     ctx.stroke();
-                    
+
                     // Draw angle arc
                     const angle = calculateAngle(points[0], points[1], points[2]);
                     ctx.beginPath();
                     ctx.arc(points[1].x, points[1].y, 20, 0, angle.radians);
                     ctx.stroke();
-                    
+
                     // Draw angle text
                     ctx.fillStyle = '#ffff00';
                     ctx.fillText(`${angle.degrees.toFixed(1)}°`, points[1].x + 25, points[1].y - 10);
-                    
+
                     measurement.bounds = {
                         x1: Math.min(...points.map(p => p.x)) - 10,
                         y1: Math.min(...points.map(p => p.y)) - 10,
@@ -3931,19 +3996,19 @@
                     }
                     ctx.closePath();
                     ctx.stroke();
-                    
+
                     // Fill with transparent color
                     ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
                     ctx.fill();
-                    
+
                     // Calculate and display area (mm²/cm² when PixelSpacing available)
                     const area = calculateArea(points);
                     const centerX = points.reduce((sum, p) => sum + p.x, 0) / points.length;
                     const centerY = points.reduce((sum, p) => sum + p.y, 0) / points.length;
-                    
+
                     ctx.fillStyle = '#ffff00';
                     ctx.fillText(area.text, centerX, centerY);
-                    
+
                     measurement.bounds = {
                         x1: Math.min(...points.map(p => p.x)) - 10,
                         y1: Math.min(...points.map(p => p.y)) - 10,
@@ -4014,11 +4079,11 @@
             }
 
             if (!currentMeasurement) return;
-            
+
             ctx.strokeStyle = '#ffff00';
             ctx.lineWidth = 2;
             ctx.setLineDash([5, 5]);
-            
+
             if (currentMeasurement.type === 'distance') {
                 const a = imagePxToCanvasPoint({ x: currentMeasurement.startX, y: currentMeasurement.startY });
                 const b = imagePxToCanvasPoint({ x: currentMeasurement.endX, y: currentMeasurement.endY });
@@ -4029,7 +4094,7 @@
                     ctx.stroke();
                 }
             }
-            
+
             ctx.setLineDash([]);
         }
 
@@ -4143,7 +4208,7 @@
             ctx.moveTo(centerX + (-half) * ydx, centerY + (-half) * ydy);
             ctx.lineTo(centerX + (half) * ydx, centerY + (half) * ydy);
             ctx.stroke();
-            
+
             ctx.setLineDash([]);
 
             // Rotation handle (drag to rotate crosshair to any degree).
@@ -4286,7 +4351,7 @@
 
         async function saveMeasurement(measurement) {
             if (!currentSeries) return;
-            
+
             try {
                 const typeMap = { distance: 'length', angle: 'angle', area: 'area' };
                 const backendType = typeMap[measurement.type] || measurement.type;
@@ -4310,7 +4375,7 @@
                             : (measurement.unit || (spacing ? 'mm' : 'px'))
                     })
                 });
-                
+
                 if (response.ok) {
                     console.log('Measurement saved successfully');
                 }
@@ -4340,7 +4405,7 @@
 
         async function saveAnnotation(annotation) {
             if (!currentSeries) return;
-            
+
             try {
                 const response = await fetch('/dicom-viewer/annotations/save/', {
                     method: 'POST',
@@ -4356,7 +4421,7 @@
                         color: annotation.color
                     })
                 });
-                
+
                 if (response.ok) {
                     console.log('Annotation saved successfully');
                 }
@@ -4368,16 +4433,16 @@
         function updateMeasurementsList() {
             const container = document.getElementById('measurementsList');
             container.innerHTML = '';
-            
+
             if (measurements.length === 0) {
                 container.innerHTML = '<div class="measurement-item">No measurements yet. Use the measure tool to add measurements.</div>';
                 return;
             }
-            
+
             measurements.forEach((measurement, index) => {
                 const item = document.createElement('div');
                 item.className = 'measurement-item';
-                
+
                 if (measurement.type === 'distance') {
                     const distance = calculateDistance(measurement);
                     item.innerHTML = `
@@ -4412,7 +4477,7 @@
                         Min/Max: ${min} / ${max} &nbsp; N: ${n}
                     `;
                 }
-                
+
                 container.appendChild(item);
             });
         }
@@ -4451,10 +4516,10 @@
             const a = Math.sqrt(Math.pow(p2.x - p3.x, 2) + Math.pow(p2.y - p3.y, 2));
             const b = Math.sqrt(Math.pow(p1.x - p3.x, 2) + Math.pow(p1.y - p3.y, 2));
             const c = Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
-            
+
             const radians = Math.acos((a * a + c * c - b * b) / (2 * a * c));
             const degrees = radians * (180 / Math.PI);
-            
+
             return { radians, degrees };
         }
 
@@ -4465,7 +4530,7 @@
         // Context Menu Functions
         function showContextMenu(x, y, measurementIndex) {
             hideContextMenu();
-            
+
             const contextMenu = document.createElement('div');
             contextMenu.id = 'measurementContextMenu';
             contextMenu.style.cssText = `
@@ -4481,7 +4546,7 @@
                 padding: 5px 0;
                 font-size: 14px;
             `;
-            
+
             const deleteOption = document.createElement('div');
             deleteOption.style.cssText = `
                 padding: 8px 16px;
@@ -4499,7 +4564,7 @@
             deleteOption.addEventListener('click', () => {
                 deleteMeasurement(measurementIndex);
             });
-            
+
             const copyOption = document.createElement('div');
             copyOption.style.cssText = `
                 padding: 8px 16px;
@@ -4517,11 +4582,11 @@
             copyOption.addEventListener('click', () => {
                 copyMeasurementValue(measurementIndex);
             });
-            
+
             contextMenu.appendChild(deleteOption);
             contextMenu.appendChild(copyOption);
             document.body.appendChild(contextMenu);
-            
+
             // Close context menu when clicking elsewhere
             setTimeout(() => {
                 document.addEventListener('click', hideContextMenu, { once: true });
@@ -4539,7 +4604,7 @@
             if (index >= 0 && index < measurements.length) {
                 const measurement = measurements[index];
                 let value = '';
-                
+
                 if (measurement.type === 'distance') {
                     const distance = calculateDistance(measurement);
                     value = distance.text;
@@ -4553,7 +4618,7 @@
                     const s = measurement.stats;
                     value = (s && typeof s.mean === 'number') ? `${s.mean.toFixed(1)} HU` : 'N/A';
                 }
-                
+
                 navigator.clipboard.writeText(value).then(() => {
                     showToast(`Copied: ${value}`, 'success');
                     hideContextMenu();
@@ -4565,20 +4630,20 @@
         }
 
         function updatePatientInfo(study) {
-            document.getElementById('patientInfo').textContent = 
+            document.getElementById('patientInfo').textContent =
                 `Patient: ${study.patient_name} | Study Date: ${study.study_date} | Modality: ${study.modality}`;
         }
 
         function updateImageInfo(series) {
-            document.getElementById('imageDimensions').textContent = 
+            document.getElementById('imageDimensions').textContent =
                 series.image_count > 0 ? `${imageData[0].columns} × ${imageData[0].rows}` : '-';
-            
-            document.getElementById('pixelSpacing').textContent = 
+
+            document.getElementById('pixelSpacing').textContent =
                 (() => {
                     const ps = _normalizePixelSpacing(series && series.pixel_spacing) || currentPixelSpacing;
                     return ps ? `${ps.row} × ${ps.col} mm` : '-';
                 })();
-            
+
             document.getElementById('seriesDescription').textContent = series.description || '-';
             document.getElementById('institutionName').textContent = currentStudy?.institution_name || '-';
         }
@@ -4639,11 +4704,11 @@
                 return;
             }
             const { refreshBone = false, quiet = false, preserveSlices = true } = opts || {};
-            
+
             try {
                 showLoading(true);
                 // MPR canvases might have been hidden at first load (0x0). Resize before rendering.
-                try { resizeCanvas(); } catch (e) {}
+                try { resizeCanvas(); } catch (e) { }
 
                 const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
                 // Always use high quality for crisp MPR rendering.
@@ -4838,7 +4903,7 @@
                 ]);
             } catch (e) {
                 // If upgrade fails, keep fast mode; user still has a working MPR.
-                try { mprQuality = 'high'; } catch (_) {}
+                try { mprQuality = 'high'; } catch (_) { }
             }
         }
 
@@ -4881,7 +4946,7 @@
                 throw new Error(`Unable to acquire 2D context for MPR canvas (${viewType})`);
             }
             const img = new Image();
-            try { img.decoding = 'async'; } catch (_) {}
+            try { img.decoding = 'async'; } catch (_) { }
             // Backend may return:
             // - a full data URL: "data:image/png;base64,..."
             // - raw base64: "<base64...>"
@@ -4965,7 +5030,7 @@
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     ctx.imageSmoothingEnabled = true;
-                    try { ctx.imageSmoothingQuality = 'high'; } catch (err) {}
+                    try { ctx.imageSmoothingQuality = 'high'; } catch (err) { }
                     ctx.drawImage(img, dx, dy, dw, dh);
                 } catch (e2) {
                     throw e; // surface the original error
@@ -4975,7 +5040,7 @@
 
         function redrawAllMPRPlanes() {
             ['axial', 'sagittal', 'coronal'].forEach((p) => {
-                try { redrawMPRPlane(p); } catch (e) {}
+                try { redrawMPRPlane(p); } catch (e) { }
             });
         }
 
@@ -5008,7 +5073,7 @@
             // Smooth for any non-1:1 scaling; keep high quality.
             const s = Math.min(dw / Math.max(1, w), dh / Math.max(1, h));
             ctx.imageSmoothingEnabled = Math.abs(s - 1) > 0.01;
-            try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
+            try { ctx.imageSmoothingQuality = 'high'; } catch (e) { }
             ctx.save();
             ctx.drawImage(img, dx, dy, dw, dh);
 
@@ -5037,7 +5102,7 @@
             }
 
             // Saved measurements/ROI for this plane+slice (disappear automatically when slice changes)
-            try { drawMPRMeasurementsAndRois(plane, ctx); } catch (e) {}
+            try { drawMPRMeasurementsAndRois(plane, ctx); } catch (e) { }
             ctx.restore();
 
             // Crosshair overlay (linked MPR)
@@ -5176,7 +5241,7 @@
                     ctx.fillText(a.text || '', pt.x + 4, pt.y - 4);
                     ctx.restore();
                 });
-            } catch (e) {}
+            } catch (e) { }
 
             // Draft measurement (MPR)
             if (mprCurrentMeasurement && mprCurrentMeasurement.mode === 'mpr' && mprCurrentMeasurement.plane === plane && Number(mprCurrentMeasurement.slice ?? 0) === slice) {
@@ -5341,7 +5406,7 @@
             if (!currentSeries) throw new Error('No series loaded');
             if (!(plane === 'axial' || plane === 'sagittal' || plane === 'coronal')) throw new Error('Invalid plane');
             const idx = Math.max(0, Number(sliceIndex) || 0);
-            try { _mprPlaneAbort[plane]?.abort(); } catch (e) {}
+            try { _mprPlaneAbort[plane]?.abort(); } catch (e) { }
             const ac = new AbortController();
             _mprPlaneAbort[plane] = ac;
 
@@ -5396,9 +5461,9 @@
             // looks blurry (most noticeable in sagittal/coronal).
             try {
                 requestAnimationFrame(() => {
-                    try { resizeCanvas(); } catch (e) {}
+                    try { resizeCanvas(); } catch (e) { }
                 });
-            } catch (e) {}
+            } catch (e) { }
         }
 
         function _mprCanvasToSlicePx(plane, canvasX, canvasY) {
@@ -5530,7 +5595,7 @@
                     _renderMPRDataUrl('sagittal', sa.image),
                     _renderMPRDataUrl('coronal', co.image),
                 ]);
-            }).catch(() => {});
+            }).catch(() => { });
         }
 
         function _scheduleMPRSyncFetch() {
@@ -5556,7 +5621,7 @@
             if (_mprHUTimer) return;
             _mprHUTimer = setTimeout(async () => {
                 _mprHUTimer = null;
-                try { _mprHUAbort?.abort(); } catch (e) {}
+                try { _mprHUAbort?.abort(); } catch (e) { }
                 const ac = new AbortController();
                 _mprHUAbort = ac;
                 const slice = mprState.index[plane] || 0;
@@ -5602,15 +5667,15 @@
                 setMPRMaximizedPlane(plane);
             }
             // Resize after layout change to keep crisp rendering
-            try { resizeCanvas(); } catch (e) {}
+            try { resizeCanvas(); } catch (e) { }
             if (plane === 'bone3d') {
                 try {
                     if (bone3D && bone3D.renderer && bone3D.scene && bone3D.camera) {
                         renderBoneFrame();
                     } else if (currentSeries) {
-                        generateBoneReconstruction().catch(() => {});
+                        generateBoneReconstruction().catch(() => { });
                     }
-                } catch (e) {}
+                } catch (e) { }
                 return;
             }
             // Re-fetch slices so each canvas gets fresh scaling/meta after resize.
@@ -5740,8 +5805,8 @@
 
                 // Capture mousemove/mouseup on window so ROI finalizes even if user releases outside pane.
                 if (_mprRoiCapture) {
-                    try { window.removeEventListener('mousemove', _mprRoiCapture.onMove); } catch (e) {}
-                    try { window.removeEventListener('mouseup', _mprRoiCapture.onUp); } catch (e) {}
+                    try { window.removeEventListener('mousemove', _mprRoiCapture.onMove); } catch (e) { }
+                    try { window.removeEventListener('mouseup', _mprRoiCapture.onUp); } catch (e) { }
                     _mprRoiCapture = null;
                 }
                 const onMove = (ev) => {
@@ -5755,9 +5820,9 @@
                     redrawMPRPlane(plane);
                 };
                 const onUp = async () => {
-                    try { await handleMPRMouseUp({}, plane); } catch (e) {}
-                    try { window.removeEventListener('mousemove', onMove); } catch (e) {}
-                    try { window.removeEventListener('mouseup', onUp); } catch (e) {}
+                    try { await handleMPRMouseUp({}, plane); } catch (e) { }
+                    try { window.removeEventListener('mousemove', onMove); } catch (e) { }
+                    try { window.removeEventListener('mouseup', onUp); } catch (e) { }
                     _mprRoiCapture = null;
                 };
                 _mprRoiCapture = { plane, onMove, onUp };
@@ -5844,7 +5909,7 @@
                 const hover = _hitTestMPRCrosshairRotateHandle(plane, x, y);
                 if (hover !== _mprCrosshairRotateHover) {
                     _mprCrosshairRotateHover = hover;
-                    try { c.style.cursor = hover ? 'grab' : 'crosshair'; } catch (_) {}
+                    try { c.style.cursor = hover ? 'grab' : 'crosshair'; } catch (_) { }
                 }
             }
             if (activeTool === 'roi' && roiDraft && roiDraft.mode === 'mpr' && roiDraft.plane === plane) {
@@ -5941,7 +6006,7 @@
             if (_mprDragState.down && _mprDragState.plane === plane && _mprDragState.tool === 'crosshair') {
                 try {
                     _setMPRCrosshairFromCanvasPoint(plane, _mprDragState.lastX, _mprDragState.lastY, true);
-                } catch (e) {}
+                } catch (e) { }
                 _mprDragState.down = false;
                 _mprDragState.plane = null;
                 _mprDragState.tool = null;
@@ -5976,7 +6041,7 @@
                         finalized.value = a.mm2 != null ? a.mm2 : a.px2;
                         finalized.unit = a.mm2 != null ? 'mm2' : 'px2';
                     }
-                } catch (e) {}
+                } catch (e) { }
                 measurements.push(finalized);
                 mprCurrentMeasurement = null;
                 updateMeasurementsList();
@@ -6027,7 +6092,7 @@
                 const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
                 fetchMPRPlaneSlice(plane, mprState.index[plane] || 0, qsBase)
                     .then((r) => _renderMPRDataUrl(plane, r.image))
-                    .catch(() => {});
+                    .catch(() => { });
             }
         }
 
@@ -6038,12 +6103,12 @@
 
         async function generateBoneReconstruction() {
             if (!currentSeries) return;
-            
+
             try {
                 showLoading(true);
 
                 // Ensure MPR is visible and canvas has real size
-                try { resizeCanvas(); } catch (e) {}
+                try { resizeCanvas(); } catch (e) { }
 
                 const threshold = Number.isFinite(Number(boneThreshold)) ? Number(boneThreshold) : 300;
                 const wantMesh = true;
@@ -6077,7 +6142,7 @@
                             `&roi_pad=${encodeURIComponent(pad)}` +
                             `&roi_thickness=${encodeURIComponent(thickness)}`;
                     }
-                } catch (e) {}
+                } catch (e) { }
 
                 const url =
                     `/dicom-viewer/api/series/${currentSeries.id}/bone/` +
@@ -6143,7 +6208,7 @@
             const dx = Math.round((canvas.width - dw) / 2);
             const dy = Math.round((canvas.height - dh) / 2);
             ctx.imageSmoothingEnabled = scale < 1;
-            try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
+            try { ctx.imageSmoothingQuality = 'high'; } catch (e) { }
             ctx.drawImage(img, dx, dy, dw, dh);
         }
 
@@ -6165,11 +6230,11 @@
             bone3D._lastW = 0;
             bone3D._lastH = 0;
             bone3D.renderer.setSize(c.width || 1, c.height || 1, false);
-            try { bone3D.renderer.outputEncoding = THREE.sRGBEncoding; } catch (e) {}
-            try { bone3D.renderer.toneMapping = THREE.ACESFilmicToneMapping; } catch (e) {}
+            try { bone3D.renderer.outputEncoding = THREE.sRGBEncoding; } catch (e) { }
+            try { bone3D.renderer.toneMapping = THREE.ACESFilmicToneMapping; } catch (e) { }
             // Slightly higher exposure for a clearer "bone" look.
-            try { bone3D.renderer.toneMappingExposure = 1.28; } catch (e) {}
-            try { bone3D.renderer.physicallyCorrectLights = true; } catch (e) {}
+            try { bone3D.renderer.toneMappingExposure = 1.28; } catch (e) { }
+            try { bone3D.renderer.physicallyCorrectLights = true; } catch (e) { }
             bone3D.renderer.setClearColor(0x000000, 1);
             bone3D.renderer.shadowMap.enabled = true;
             bone3D.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -6233,7 +6298,7 @@
 
             c.addEventListener('pointerdown', (e) => {
                 if (viewMode !== 'mpr') return;
-                try { c.setPointerCapture(e.pointerId); } catch (_) {}
+                try { c.setPointerCapture(e.pointerId); } catch (_) { }
                 bone3D._ptr.set(e.pointerId, { x: e.clientX, y: e.clientY });
                 bone3D.dragging = true;
                 bone3D.wasDragged = false;
@@ -6309,8 +6374,8 @@
             // Remove existing mesh
             if (bone3D.mesh) {
                 bone3D.scene.remove(bone3D.mesh);
-                try { bone3D.mesh.geometry?.dispose?.(); } catch (e) {}
-                try { bone3D.mesh.material?.dispose?.(); } catch (e) {}
+                try { bone3D.mesh.geometry?.dispose?.(); } catch (e) { }
+                try { bone3D.mesh.material?.dispose?.(); } catch (e) { }
                 bone3D.mesh = null;
             }
 
@@ -6469,17 +6534,17 @@
                 const step = 0.25; // radians per click (fast but controllable)
                 bone3D.targetRotX = Number(bone3D.targetRotX || 0) + (Number(dX || 0) * step);
                 bone3D.targetRotY = Number(bone3D.targetRotY || 0) + (Number(dY || 0) * step);
-            } catch (e) {}
+            } catch (e) { }
         }
         function boneZoomIn() {
             try {
                 bone3D.targetZoom = Math.max(0.25, Math.min(6.0, (Number(bone3D.targetZoom || 1.0)) * 1.2));
-            } catch (e) {}
+            } catch (e) { }
         }
         function boneZoomOut() {
             try {
                 bone3D.targetZoom = Math.max(0.25, Math.min(6.0, (Number(bone3D.targetZoom || 1.0)) * 0.85));
-            } catch (e) {}
+            } catch (e) { }
         }
         function boneCenter() {
             try {
@@ -6493,7 +6558,7 @@
                     bone3D.mesh.rotation.set(0, 0, 0);
                 }
                 renderBoneFrame();
-            } catch (e) {}
+            } catch (e) { }
         }
         function toggleBoneWireframe() {
             try {
@@ -6501,7 +6566,7 @@
                 bone3D.mesh.material.wireframe = !bone3D.mesh.material.wireframe;
                 bone3D.mesh.material.needsUpdate = true;
                 renderBoneFrame();
-            } catch (e) {}
+            } catch (e) { }
         }
 
         function stopBoneAnimationLoop() {
@@ -6515,33 +6580,33 @@
             // Clear canvas
             ctx.fillStyle = '#000';
             ctx.fillRect(0, 0, width, height);
-            
+
             // Draw a simple 3D-like bone structure placeholder
             ctx.strokeStyle = '#fff';
             ctx.lineWidth = 2;
             ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-            
+
             // Draw simple bone-like shapes
             const centerX = width / 2;
             const centerY = height / 2;
-            
+
             // Main bone shaft
             ctx.beginPath();
             ctx.ellipse(centerX, centerY, 60, 120, 0, 0, 2 * Math.PI);
             ctx.fill();
             ctx.stroke();
-            
+
             // Bone ends (epiphyses)
             ctx.beginPath();
             ctx.ellipse(centerX, centerY - 100, 40, 25, 0, 0, 2 * Math.PI);
             ctx.fill();
             ctx.stroke();
-            
+
             ctx.beginPath();
             ctx.ellipse(centerX, centerY + 100, 40, 25, 0, 0, 2 * Math.PI);
             ctx.fill();
             ctx.stroke();
-            
+
             // Add text overlay
             ctx.fillStyle = 'var(--accent-color)';
             ctx.font = '14px Arial';
@@ -6555,7 +6620,7 @@
 
         async function generateMIP() {
             if (!currentSeries) return;
-            
+
             try {
                 showLoading(true);
                 if (viewMode === 'single') {
@@ -6570,7 +6635,7 @@
                     setMPRMaximizedPlane(null);
                     setActiveMPRPlane('axial');
                 }
-                try { resizeCanvas(); } catch (e) {}
+                try { resizeCanvas(); } catch (e) { }
                 const qs = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
                 const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mip/?${qs}`, { credentials: 'same-origin' });
                 const data = await response.json();
@@ -6829,8 +6894,8 @@
             printWindow.document.close();
             printWindow.focus();
             setTimeout(() => {
-                try { printWindow.print(); } catch (e) {}
-                try { printWindow.close(); } catch (e) {}
+                try { printWindow.print(); } catch (e) { }
+                try { printWindow.close(); } catch (e) { }
             }, 250);
         }
 
@@ -6902,7 +6967,7 @@
                     try {
                         const j = await resp.json();
                         if (j && j.error) msg = j.error;
-                    } catch (e) {}
+                    } catch (e) { }
                     showToast(msg, 'error');
                     return;
                 }
@@ -6963,7 +7028,7 @@
             // Draw AI bounding boxes / findings on the canvas if _aiOverlayData is set
             if (!window._aiOverlaysActive || !window._aiOverlayData || !ctx) return;
             const findings = window._aiOverlayData.findings || [];
-            findings.forEach(function(f) {
+            findings.forEach(function (f) {
                 if (!f.bbox) return;
                 const [x, y, w, h] = f.bbox;
                 ctx.save();
@@ -6990,23 +7055,23 @@
         function showToast(message, type = 'info', duration = 3000) {
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
-            
-            const icon = type === 'success' ? 'check' : 
-                        type === 'error' ? 'exclamation-triangle' : 
-                        type === 'warning' ? 'exclamation-circle' : 'info-circle';
-            
+
+            const icon = type === 'success' ? 'check' :
+                type === 'error' ? 'exclamation-triangle' :
+                    type === 'warning' ? 'exclamation-circle' : 'info-circle';
+
             toast.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <i class="fas fa-${icon}"></i>
                     <span>${message}</span>
                 </div>
             `;
-            
+
             document.body.appendChild(toast);
-            
+
             // Show toast
             setTimeout(() => toast.classList.add('show'), 10);
-            
+
             // Hide and remove toast
             setTimeout(() => {
                 toast.classList.remove('show');
@@ -7034,7 +7099,7 @@
         }
 
         // Auto-save session state periodically
-        setInterval(async function() {
+        setInterval(async function () {
             if (currentStudy) {
                 try {
                     await fetch('/dicom-viewer/session/save/', {
@@ -7087,7 +7152,7 @@
             try {
                 showLoading(true);
                 hideDirectoryLoader();
-                
+
                 const formData = new FormData();
                 formData.append('directory_path', directoryPath);
 
@@ -7100,7 +7165,7 @@
                 });
 
                 const result = await response.json();
-                
+
                 if (result.success) {
                     showToast(`Successfully loaded ${result.processed_files} DICOM files`, 'success');
                     // Refresh the studies list
@@ -7108,7 +7173,7 @@
                 } else {
                     showToast(`Failed to load directory: ${result.error}`, 'error');
                 }
-                
+
             } catch (error) {
                 console.error('Error loading directory:', error);
                 showToast('Failed to load directory', 'error');
@@ -7120,22 +7185,22 @@
         // Add keyboard shortcut for directory loader
         // Use capture + stopImmediatePropagation so browser/system shortcuts (e.g. Ctrl+O)
         // don't win over our in-app shortcut.
-        document.addEventListener('keydown', function(e) {
+        document.addEventListener('keydown', function (e) {
             const ctrlOrMeta = !!(e.ctrlKey || e.metaKey);
             if (ctrlOrMeta && (e.key === 'o' || e.key === 'O')) {
                 e.preventDefault();
-                try { e.stopPropagation(); } catch (_) {}
-                try { e.stopImmediatePropagation(); } catch (_) {}
+                try { e.stopPropagation(); } catch (_) { }
+                try { e.stopImmediatePropagation(); } catch (_) { }
                 showDirectoryLoader();
             }
             if (e.key === 'Escape') {
                 hideDirectoryLoader();
-                try { _closeModal('printExportModal'); } catch (e) {}
+                try { _closeModal('printExportModal'); } catch (e) { }
             }
         }, true);
 
         // HIPAA: idle timeout warning at 25 minutes, lock at 30 minutes
-        (function() {
+        (function () {
             var idleTimer, warningShown = false;
             var WARNING_MS = 25 * 60 * 1000; // 25 min
             var LOCK_MS = 30 * 60 * 1000;    // 30 min
@@ -7160,8 +7225,8 @@
                 window.location.href = '/logout/?next=' + encodeURIComponent(window.location.href);
             }
 
-            ['mousemove','mousedown','keydown','scroll','touchstart'].forEach(function(evt) {
-                document.addEventListener(evt, resetIdleTimer, {passive: true});
+            ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'].forEach(function (evt) {
+                document.addEventListener(evt, resetIdleTimer, { passive: true });
             });
 
             resetIdleTimer();
@@ -7169,30 +7234,36 @@
     </script>
 
     <!-- Directory Loader Modal -->
-    <div id="directoryModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); z-index: 10000; justify-content: center; align-items: center;">
-        <div style="background: var(--card-bg); padding: 30px; border-radius: 12px; border: 1px solid var(--border-color); max-width: 500px; width: 90%;">
+    <div id="directoryModal"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); z-index: 10000; justify-content: center; align-items: center;">
+        <div
+            style="background: var(--card-bg); padding: 30px; border-radius: 12px; border: 1px solid var(--border-color); max-width: 500px; width: 90%;">
             <h3 style="color: var(--text-primary); margin-bottom: 20px; text-align: center;">
                 <i class="fas fa-folder-open"></i> Load DICOM Directory
             </h3>
             <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 14px;">
-                Enter the full path to a directory containing DICOM files. The system will recursively scan for DICOM files.
+                Enter the full path to a directory containing DICOM files. The system will recursively scan for DICOM
+                files.
             </p>
             <div style="margin-bottom: 20px;">
-                <label style="display: block; color: var(--text-secondary); margin-bottom: 8px; font-size: 14px;">Directory Path:</label>
-                <input type="text" id="directoryPath" placeholder="/path/to/dicom/directory" 
-                       style="width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--secondary-bg); color: var(--text-primary); font-family: monospace;">
+                <label
+                    style="display: block; color: var(--text-secondary); margin-bottom: 8px; font-size: 14px;">Directory
+                    Path:</label>
+                <input type="text" id="directoryPath" placeholder="/path/to/dicom/directory"
+                    style="width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--secondary-bg); color: var(--text-primary); font-family: monospace;">
             </div>
             <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button onclick="hideDirectoryLoader()" 
-                        style="padding: 10px 20px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--secondary-bg); color: var(--text-secondary); cursor: pointer;">
+                <button onclick="hideDirectoryLoader()"
+                    style="padding: 10px 20px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--secondary-bg); color: var(--text-secondary); cursor: pointer;">
                     Cancel
                 </button>
-                <button onclick="loadFromDirectory()" 
-                        style="padding: 10px 20px; border: none; border-radius: 6px; background: var(--accent-color); color: white; cursor: pointer;">
+                <button onclick="loadFromDirectory()"
+                    style="padding: 10px 20px; border: none; border-radius: 6px; background: var(--accent-color); color: white; cursor: pointer;">
                     <i class="fas fa-folder-open"></i> Load Directory
                 </button>
             </div>
-            <div style="margin-top: 15px; padding: 10px; background: var(--secondary-bg); border-radius: 6px; font-size: 12px; color: var(--text-muted);">
+            <div
+                style="margin-top: 15px; padding: 10px; background: var(--secondary-bg); border-radius: 6px; font-size: 12px; color: var(--text-muted);">
                 <strong>Examples:</strong><br>
                 • /media/usb/dicom_studies/<br>
                 • /mnt/cdrom/DICOM/<br>
@@ -7204,22 +7275,30 @@
     </div>
 
     <!-- Print / Export Modal -->
-    <div id="printExportModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); z-index: 10001; justify-content: center; align-items: center;">
-        <div style="background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color); max-width: 760px; width: 92%; max-height: 88vh; overflow: auto;">
-            <div style="display:flex; align-items:center; justify-content: space-between; gap: 12px; margin-bottom: 10px;">
+    <div id="printExportModal"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); z-index: 10001; justify-content: center; align-items: center;">
+        <div
+            style="background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color); max-width: 760px; width: 92%; max-height: 88vh; overflow: auto;">
+            <div
+                style="display:flex; align-items:center; justify-content: space-between; gap: 12px; margin-bottom: 10px;">
                 <h3 style="color: var(--text-primary); margin: 0;">
                     <i class="fas fa-print"></i> Print / Export
                 </h3>
-                <button onclick="_closeModal('printExportModal')" style="border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-secondary); padding: 8px 10px; border-radius: 8px; cursor: pointer;">
+                <button onclick="_closeModal('printExportModal')"
+                    style="border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-secondary); padding: 8px 10px; border-radius: 8px; cursor: pointer;">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
 
             <div style="display:flex; gap: 10px; margin-bottom: 14px;">
-                <button id="pe_tab_print" onclick="document.getElementById('pe_print_panel').style.display='block'; document.getElementById('pe_export_panel').style.display='none';" style="flex:1; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
+                <button id="pe_tab_print"
+                    onclick="document.getElementById('pe_print_panel').style.display='block'; document.getElementById('pe_export_panel').style.display='none';"
+                    style="flex:1; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
                     <i class="fas fa-print"></i> Print
                 </button>
-                <button id="pe_tab_export" onclick="document.getElementById('pe_print_panel').style.display='none'; document.getElementById('pe_export_panel').style.display='block';" style="flex:1; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
+                <button id="pe_tab_export"
+                    onclick="document.getElementById('pe_print_panel').style.display='none'; document.getElementById('pe_export_panel').style.display='block';"
+                    style="flex:1; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
                     <i class="fas fa-download"></i> Export
                 </button>
             </div>
@@ -7228,8 +7307,11 @@
             <div id="pe_print_panel" style="display:block;">
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                     <div>
-                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Printer (optional)</label>
-                        <select id="pe_printer_name" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        <label
+                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Printer
+                            (optional)</label>
+                        <select id="pe_printer_name"
+                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                             <option value="">Loading printers…</option>
                         </select>
                         <div style="color: var(--text-muted); font-size: 11px; margin-top: 6px;">
@@ -7237,16 +7319,21 @@
                         </div>
                     </div>
                     <div>
-                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Layout</label>
-                        <select id="pe_layout_type" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        <label
+                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Layout</label>
+                        <select id="pe_layout_type"
+                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                             <option value="single">Single Image</option>
                             <option value="grid">Grid (custom)</option>
                         </select>
                     </div>
 
                     <div>
-                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Paper / Film size</label>
-                        <select id="pe_paper_size" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        <label
+                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Paper
+                            / Film size</label>
+                        <select id="pe_paper_size"
+                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                             <option value="A4">A4</option>
                             <option value="Letter">Letter</option>
                             <option value="FILM_14X17">Film 14×17</option>
@@ -7257,16 +7344,21 @@
                     </div>
 
                     <div>
-                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Medium</label>
-                        <select id="pe_print_medium" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        <label
+                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Medium</label>
+                        <select id="pe_print_medium"
+                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                             <option value="paper">Paper</option>
                             <option value="film">Film</option>
                         </select>
                     </div>
 
                     <div>
-                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Paper type</label>
-                        <select id="pe_paper_type" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        <label
+                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Paper
+                            type</label>
+                        <select id="pe_paper_type"
+                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                             <option value="glossy">Glossy</option>
                             <option value="matte">Matte</option>
                             <option value="plain">Plain</option>
@@ -7274,8 +7366,10 @@
                     </div>
 
                     <div>
-                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Quality</label>
-                        <select id="pe_print_quality" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        <label
+                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Quality</label>
+                        <select id="pe_print_quality"
+                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                             <option value="high">High</option>
                             <option value="normal">Normal</option>
                             <option value="draft">Draft</option>
@@ -7283,52 +7377,72 @@
                     </div>
                 </div>
 
-                <div style="margin-top: 14px; padding: 12px; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(255,255,255,0.02);">
+                <div
+                    style="margin-top: 14px; padding: 12px; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(255,255,255,0.02);">
                     <div style="color: var(--text-primary); font-size: 12px; margin-bottom: 8px;">
                         Multi-slice (server-rendered grid from current series)
                     </div>
                     <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap: 10px;">
                         <div style="grid-column: span 2;">
-                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Series ID</label>
-                            <input id="pe_series_id" type="text" placeholder="(auto)" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary); font-family: monospace;">
+                            <label
+                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Series
+                                ID</label>
+                            <input id="pe_series_id" type="text" placeholder="(auto)"
+                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary); font-family: monospace;">
                         </div>
                         <div style="grid-column: span 1;">
-                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Rows</label>
-                            <input id="pe_grid_rows" type="number" min="1" max="8" value="4" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <label
+                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Rows</label>
+                            <input id="pe_grid_rows" type="number" min="1" max="8" value="4"
+                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                         </div>
                         <div style="grid-column: span 1;">
-                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Cols</label>
-                            <input id="pe_grid_cols" type="number" min="1" max="8" value="4" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <label
+                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Cols</label>
+                            <input id="pe_grid_cols" type="number" min="1" max="8" value="4"
+                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                         </div>
                         <div style="grid-column: span 1;">
-                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Start</label>
-                            <input id="pe_slice_start" type="number" min="0" value="0" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <label
+                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Start</label>
+                            <input id="pe_slice_start" type="number" min="0" value="0"
+                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                         </div>
                         <div style="grid-column: span 1;">
-                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Step</label>
-                            <input id="pe_slice_step" type="number" min="1" value="1" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <label
+                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Step</label>
+                            <input id="pe_slice_step" type="number" min="1" value="1"
+                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                         </div>
                         <div style="grid-column: span 2;">
-                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Count</label>
-                            <input id="pe_slice_count" type="number" min="1" max="96" value="16" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <label
+                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Count</label>
+                            <input id="pe_slice_count" type="number" min="1" max="96" value="16"
+                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                         </div>
                         <div style="grid-column: span 2;">
-                            <label style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Copies</label>
-                            <input id="pe_copies" type="number" min="1" max="20" value="1" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                            <label
+                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Copies</label>
+                            <input id="pe_copies" type="number" min="1" max="20" value="1"
+                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                         </div>
                     </div>
                     <input id="pe_modality" type="hidden" value="">
                 </div>
 
-                <div style="display:flex; gap: 10px; justify-content: space-between; flex-wrap: wrap; margin-top: 16px;">
-                    <button onclick="pe_browserPrintQuick()" style="padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
+                <div
+                    style="display:flex; gap: 10px; justify-content: space-between; flex-wrap: wrap; margin-top: 16px;">
+                    <button onclick="pe_browserPrintQuick()"
+                        style="padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
                         <i class="fas fa-window-maximize"></i> Browser Print (quick)
                     </button>
                     <div style="display:flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
-                        <button onclick="pe_downloadPrintPdf()" style="padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
+                        <button onclick="pe_downloadPrintPdf()"
+                            style="padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
                             <i class="fas fa-file-pdf"></i> Download PDF
                         </button>
-                        <button onclick="pe_sendToPrinter()" style="padding: 10px 14px; border-radius: 8px; border: none; background: var(--accent-color); color: white; cursor:pointer;">
+                        <button onclick="pe_sendToPrinter()"
+                            style="padding: 10px 14px; border-radius: 8px; border: none; background: var(--accent-color); color: white; cursor:pointer;">
                             <i class="fas fa-print"></i> Send to Printer
                         </button>
                     </div>
@@ -7339,15 +7453,18 @@
             <div id="pe_export_panel" style="display:none;">
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px;">
                     <div>
-                        <label style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Format</label>
-                        <select id="pe_export_format" style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        <label
+                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Format</label>
+                        <select id="pe_export_format"
+                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
                             <option value="png">PNG</option>
                             <option value="jpg">JPG</option>
                             <option value="tiff">TIFF</option>
                         </select>
                     </div>
                     <div style="display:flex; align-items:flex-end; gap: 10px;">
-                        <label style="display:flex; align-items:center; gap: 8px; color: var(--text-primary); font-size: 12px;">
+                        <label
+                            style="display:flex; align-items:center; gap: 8px; color: var(--text-primary); font-size: 12px;">
                             <input id="pe_burn_in" type="checkbox" checked>
                             Burn-in patient/study info
                         </label>
@@ -7357,7 +7474,8 @@
                     Export uses the server renderer (includes correct WW/WL and optional burn-in overlays).
                 </div>
                 <div style="display:flex; gap: 10px; justify-content: flex-end; margin-top: 14px;">
-                    <button onclick="pe_downloadExport()" style="padding: 10px 14px; border-radius: 8px; border: none; background: var(--accent-color); color: white; cursor:pointer;">
+                    <button onclick="pe_downloadExport()"
+                        style="padding: 10px 14px; border-radius: 8px; border: none; background: var(--accent-color); color: white; cursor:pointer;">
                         <i class="fas fa-download"></i> Download Export
                     </button>
                 </div>
@@ -7365,11 +7483,15 @@
         </div>
     </div>
 
-    <div id="idleWarning" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;align-items:center;justify-content:center;flex-direction:column;color:#fff;font-family:sans-serif;">
+    <div id="idleWarning"
+        style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;align-items:center;justify-content:center;flex-direction:column;color:#fff;font-family:sans-serif;">
         <i class="fas fa-lock" style="font-size:48px;color:#ffaa00;margin-bottom:16px;"></i>
         <h2>Session Idle</h2>
         <p style="color:#b3b3b3;">You will be logged out shortly due to inactivity.</p>
-        <button onclick="location.reload()" style="background:#00d4ff;color:#000;border:none;padding:10px 24px;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer;margin-top:12px;">I'm Still Here</button>
+        <button onclick="location.reload()"
+            style="background:#00d4ff;color:#000;border:none;padding:10px 24px;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer;margin-top:12px;">I'm
+            Still Here</button>
     </div>
 </body>
+
 </html>

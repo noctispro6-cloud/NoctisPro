@@ -10,3 +10,45 @@
 [ERROR] 2026-01-10 15:52:01,246 noctis_pro.upload views 5350 139804000403584 Upload blocked: database schema is out of date: no such column: accounts_facility.has_ai_subscription
 [ERROR] 2026-01-10 15:52:01,247 django.request log 5350 139804000403584 Service Unavailable: /worklist/upload/
 [ERROR] 2026-01-10 15:52:17,237 django.request log 5536 140155850944640 Internal Server Error: /worklist/api/study/5/
+[INFO] 2026-04-15 01:30:01,980 django.utils.autoreload autoreload 18960 25300 Watching for file changes with StatReloader
+[INFO] 2026-04-15 01:30:17,305 django.channels.server runserver 18960 9896 [32mHTTP GET / 302 [0.06, 127.0.0.1:54340][0m
+[INFO] 2026-04-15 01:30:17,390 django.channels.server runserver 18960 9896 [mHTTP GET /login/ 200 [0.08, 127.0.0.1:54340][0m
+[INFO] 2026-04-15 01:30:20,673 django.channels.server runserver 18960 9896 [32mHTTP POST /login/ 302 [1.28, 127.0.0.1:54340][0m
+[INFO] 2026-04-15 01:30:20,759 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/ 200 [0.08, 127.0.0.1:54340][0m
+[INFO] 2026-04-15 01:30:20,815 noctis_pro.api views 18960 6404 Professional studies API request from admin (Administrator)
+[ERROR] 2026-04-15 01:30:20,817 noctis_pro.api views 18960 6404 Professional studies API failed: Unsupported lookup 'dicomimage' for BigAutoField or join on the field not permitted. (after 1.8ms)
+[INFO] 2026-04-15 01:30:20,824 django.channels.server runserver 18960 9896 [mHTTP GET /notifications/api/unread-count/ 200 [0.02, 127.0.0.1:54349][0m
+[ERROR] 2026-04-15 01:30:20,831 django.request log 18960 9136 Internal Server Error: /worklist/api/studies/
+[ERROR] 2026-04-15 01:30:20,832 django.channels.server runserver 18960 9896 [35;1mHTTP GET /worklist/api/studies/ 500 [0.03, 127.0.0.1:54340][0m
+[INFO] 2026-04-15 01:30:21,749 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/sw-dicom-upload.js 200 [0.05, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:30:35,826 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:30:53,064 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.04, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:31:08,048 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:31:23,071 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.04, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:31:38,085 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.04, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:31:53,078 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:32:08,112 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.04, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:32:23,099 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:32:38,109 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:32:53,138 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.04, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:33:08,144 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.04, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:33:23,152 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.04, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:33:38,157 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.04, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:33:53,140 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:34:08,148 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:34:23,180 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.04, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:34:38,176 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:34:53,182 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.01, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:35:08,191 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:35:23,198 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:35:38,205 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:35:53,222 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:36:08,234 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:36:23,237 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:36:38,238 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:36:53,375 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:37:08,379 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:37:23,406 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.04, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:37:38,386 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:37:53,391 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m
+[INFO] 2026-04-15 01:38:08,391 django.channels.server runserver 18960 9896 [mHTTP GET /worklist/api/refresh-worklist/ 200 [0.02, 127.0.0.1:54349][0m

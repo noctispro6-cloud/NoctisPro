@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    
+
     {% load static %}
     {% load dicts %}
     <link rel="stylesheet" href="{% static 'css/noctis-dashboard-style.css' %}">
@@ -22,7 +23,6 @@
     <script src="{% static 'js/dicom-viewer-utils.js' %}" defer></script>
     <style>
         :root {
-            /* Unified dark theme palette */
             --primary-bg: #0a0a0a;
             --secondary-bg: #1a1a1a;
             --card-surface: #252525;
@@ -40,20 +40,15 @@
             --in-progress-color: #f5a623;
             --completed-color: #7ed321;
             --cancelled-color: #d0021b;
-            
-            /* Backward-compatible aliases used across templates */
+
             --dark-bg: var(--primary-bg);
             --card-bg: var(--card-surface);
             --gradient-primary: linear-gradient(135deg, var(--header-bg) 0%, var(--secondary-bg) 100%);
             --gradient-accent: linear-gradient(135deg, var(--accent-color) 0%, #00b8d4 100%);
-            /* Added aliases used by some templates */
             --secondary-color: var(--card-surface);
             --info-color: #00bcd4;
         }
 
-        /* Light-mode adaptation (auto, OS-controlled)
-         * Keeps the same component system but swaps tokens for a clean clinical light UI.
-         */
         @media (prefers-color-scheme: light) {
             :root {
                 --primary-bg: #f6f7fb;
@@ -85,11 +80,9 @@
         }
 
         body {
-            /* Use Inter everywhere to avoid OS font-metric differences (Windows vs Linux) */
             font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: var(--primary-bg);
             color: var(--text-primary);
-            /* Base size is overridden by responsive-ui-scaling.css */
             font-size: 12px;
             line-height: 1.6;
             overflow-x: hidden;
@@ -101,42 +94,51 @@
             flex-direction: column;
         }
 
-        /* Top Navigation */
+        /* ─── Top Navigation ─────────────────────────────────────────────── */
         .top-navbar {
             background: var(--header-bg);
             border-bottom: 1px solid var(--border-color);
-            padding: 8px 16px;
+            padding: 0 12px;
             display: flex;
             justify-content: space-between;
             align-items: center;
             height: 50px;
+            gap: 8px;
+            flex-wrap: nowrap;
+            overflow: hidden;
         }
 
         .nav-left {
             display: flex;
             align-items: center;
-            gap: 20px;
+            gap: 12px;
+            flex-shrink: 0;
+            min-width: 0;
         }
 
         .logo {
             color: var(--accent-color);
             font-weight: bold;
-            font-size: 16px;
+            font-size: 14px;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
         .nav-tabs {
             display: flex;
             gap: 2px;
+            flex-wrap: nowrap;
         }
 
         .nav-tab {
             background: var(--secondary-bg);
             border: 1px solid var(--border-color);
             color: var(--text-secondary);
-            padding: 6px 12px;
-            font-size: 11px;
+            padding: 6px 10px;
+            font-size: 10px;
             cursor: pointer;
             transition: all 0.2s ease;
+            white-space: nowrap;
         }
 
         .nav-tab.active {
@@ -150,11 +152,13 @@
             color: var(--text-primary);
         }
 
+        /* ─── Right side: user info ──────────────────────────────────────── */
         .nav-right {
             display: flex;
             align-items: center;
-            gap: 15px;
+            gap: 10px;
             font-size: 11px;
+            flex-shrink: 0;
         }
 
         .user-info {
@@ -174,12 +178,14 @@
             font-weight: bold;
             color: var(--primary-bg);
             font-size: 10px;
+            flex-shrink: 0;
         }
 
         .status-indicator {
             display: flex;
             align-items: center;
             gap: 4px;
+            white-space: nowrap;
         }
 
         .status-dot {
@@ -187,6 +193,7 @@
             height: 6px;
             border-radius: 50%;
             background: var(--success-color);
+            flex-shrink: 0;
         }
 
         .admin-btn {
@@ -201,6 +208,7 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
             font-weight: bold;
+            white-space: nowrap;
         }
 
         .admin-btn:hover {
@@ -208,7 +216,45 @@
             transform: scale(1.05);
         }
 
-        /* Controls Bar - Enhanced for medical excellence */
+        /* ─── Desktop action buttons ─────────────────────────────────────── */
+        .np-nav-actions-desktop {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: nowrap;
+            flex-shrink: 1;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        /* ─── Mobile dropdown (hidden on desktop) ────────────────────────── */
+        .np-nav-actions-mobile {
+            display: none;
+            flex-shrink: 0;
+        }
+
+        /* Breakpoint: collapse desktop buttons into hamburger menu */
+        @media (max-width: 1280px) {
+            .np-nav-actions-desktop {
+                display: none !important;
+            }
+
+            .np-nav-actions-mobile {
+                display: block !important;
+            }
+        }
+
+        @media (min-width: 1281px) {
+            .np-nav-actions-desktop {
+                display: inline-flex !important;
+            }
+
+            .np-nav-actions-mobile {
+                display: none !important;
+            }
+        }
+
+        /* ─── Controls Bar ───────────────────────────────────────────────── */
         .controls-bar {
             background: linear-gradient(135deg, var(--secondary-bg) 0%, #1f1f1f 50%, var(--secondary-bg) 100%);
             border-bottom: 2px solid var(--border-color);
@@ -218,7 +264,7 @@
             gap: 12px;
             height: 42px;
             flex-wrap: wrap;
-            box-shadow: 
+            box-shadow:
                 0 2px 8px rgba(0, 0, 0, 0.1),
                 inset 0 1px 0 rgba(255, 255, 255, 0.05);
         }
@@ -235,7 +281,8 @@
             font-weight: 500;
         }
 
-        .control-input, .control-select {
+        .control-input,
+        .control-select {
             background: linear-gradient(135deg, var(--primary-bg) 0%, #151515 100%);
             border: 1px solid var(--border-color);
             color: var(--text-primary);
@@ -247,10 +294,11 @@
             box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
         }
 
-        .control-input:focus, .control-select:focus {
+        .control-input:focus,
+        .control-select:focus {
             outline: none;
             border-color: var(--accent-color);
-            box-shadow: 
+            box-shadow:
                 0 0 0 3px rgba(0, 212, 255, 0.2),
                 inset 0 1px 2px rgba(0, 0, 0, 0.1),
                 0 2px 8px rgba(0, 212, 255, 0.1);
@@ -267,21 +315,22 @@
             background: linear-gradient(135deg, var(--card-bg) 0%, #2a2a2a 100%);
             border: 1px solid var(--border-color);
             color: var(--text-primary);
-            padding: 6px 14px;
-            font-size: 11px;
+            padding: 5px 10px;
+            font-size: 10px;
             cursor: pointer;
             border-radius: 6px;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             text-decoration: none;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
             font-weight: 500;
             position: relative;
             overflow: hidden;
-            box-shadow: 
+            box-shadow:
                 0 2px 4px rgba(0, 0, 0, 0.1),
                 inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            white-space: nowrap;
         }
 
         .btn-control::before {
@@ -303,8 +352,8 @@
             background: linear-gradient(135deg, var(--accent-color) 0%, #00b8d4 100%);
             color: var(--primary-bg);
             border-color: var(--accent-color);
-            transform: translateY(-2px) scale(1.02);
-            box-shadow: 
+            transform: translateY(-1px) scale(1.02);
+            box-shadow:
                 0 4px 12px rgba(0, 212, 255, 0.3),
                 inset 0 1px 0 rgba(255, 255, 255, 0.2);
         }
@@ -313,12 +362,12 @@
             background: linear-gradient(135deg, var(--accent-color) 0%, #00b8d4 100%);
             color: var(--primary-bg);
             border-color: var(--accent-color);
-            box-shadow: 
+            box-shadow:
                 0 0 10px rgba(0, 212, 255, 0.3),
                 inset 0 1px 0 rgba(255, 255, 255, 0.2);
         }
 
-        /* Main Content */
+        /* ─── Main Content ───────────────────────────────────────────────── */
         .main-content {
             flex: 1;
             display: flex;
@@ -326,7 +375,7 @@
             overflow: hidden;
         }
 
-        /* Data Table */
+        /* ─── Data Table ─────────────────────────────────────────────────── */
         .data-table-container {
             flex: 1;
             overflow: auto;
@@ -401,7 +450,7 @@
             background: rgba(0, 212, 255, 0.08);
         }
 
-        /* Cards and Forms */
+        /* ─── Cards ──────────────────────────────────────────────────────── */
         .card-medical {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
@@ -428,7 +477,8 @@
             padding: 16px;
         }
 
-        .form-control-medical, .form-control {
+        .form-control-medical,
+        .form-control {
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid var(--border-color);
             border-radius: 2px;
@@ -437,19 +487,21 @@
             transition: all 0.3s ease;
         }
 
-        .form-control-medical:focus, .form-control:focus {
+        .form-control-medical:focus,
+        .form-control:focus {
             background: rgba(255, 255, 255, 0.08);
             border-color: var(--accent-color);
             box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
             color: var(--text-primary);
         }
 
-        .form-control-medical::placeholder, .form-control::placeholder {
+        .form-control-medical::placeholder,
+        .form-control::placeholder {
             color: var(--text-muted);
             opacity: 0.8;
         }
 
-        /* Status Badges */
+        /* ─── Status Badges ──────────────────────────────────────────────── */
         .status-badge {
             padding: 2px 8px;
             border-radius: 12px;
@@ -500,27 +552,37 @@
         }
 
         @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.6;
+            }
         }
 
-        /* Priority Indicators */
-        .priority-urgent { 
-            color: var(--urgent-color); 
+        /* ─── Priority ───────────────────────────────────────────────────── */
+        .priority-urgent {
+            color: var(--urgent-color);
             font-weight: bold;
         }
-        .priority-high { 
-            color: var(--warning-color); 
+
+        .priority-high {
+            color: var(--warning-color);
             font-weight: bold;
         }
-        .priority-normal { 
+
+        .priority-normal {
             color: var(--success-color);
         }
-        .priority-low { 
+
+        .priority-low {
             color: var(--text-muted);
         }
 
-        /* Modality Badges */
+        /* ─── Modality Badges ────────────────────────────────────────────── */
         .modality-badge {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
@@ -531,13 +593,32 @@
             font-weight: bold;
         }
 
-        .modality-ct { border-color: #4a90e2; color: #4a90e2; }
-        .modality-mri { border-color: #7b68ee; color: #7b68ee; }
-        .modality-xr { border-color: #50c878; color: #50c878; }
-        .modality-us { border-color: #ffa500; color: #ffa500; }
-        .modality-nm { border-color: #ff6347; color: #ff6347; }
+        .modality-ct {
+            border-color: #4a90e2;
+            color: #4a90e2;
+        }
 
-        /* DICOM Viewer Buttons */
+        .modality-mri {
+            border-color: #7b68ee;
+            color: #7b68ee;
+        }
+
+        .modality-xr {
+            border-color: #50c878;
+            color: #50c878;
+        }
+
+        .modality-us {
+            border-color: #ffa500;
+            color: #ffa500;
+        }
+
+        .modality-nm {
+            border-color: #ff6347;
+            color: #ff6347;
+        }
+
+        /* ─── DICOM Viewer Buttons ───────────────────────────────────────── */
         .viewer-buttons {
             display: flex;
             gap: 4px;
@@ -573,7 +654,7 @@
             color: var(--primary-bg);
         }
 
-        /* Footer Status Bar */
+        /* ─── Footer Status Bar ──────────────────────────────────────────── */
         .footer-status {
             background: var(--secondary-bg);
             border-top: 1px solid var(--border-color);
@@ -610,12 +691,15 @@
             background: var(--success-color);
         }
 
-        /* General styling for consistency */
+        /* ─── General Buttons ────────────────────────────────────────────── */
         .container-fluid {
             padding: 16px;
         }
 
-        .btn, .btn-primary, .btn-secondary, .btn-outline-light {
+        .btn,
+        .btn-primary,
+        .btn-secondary,
+        .btn-outline-light {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
             color: var(--text-primary);
@@ -630,7 +714,10 @@
             gap: 4px;
         }
 
-        .btn:hover, .btn-primary:hover, .btn-secondary:hover, .btn-outline-light:hover {
+        .btn:hover,
+        .btn-primary:hover,
+        .btn-secondary:hover,
+        .btn-outline-light:hover {
             background: var(--accent-color);
             color: var(--primary-bg);
             border-color: var(--accent-color);
@@ -647,14 +734,41 @@
             border-color: #00b8d4;
         }
 
-        /* Responsive adjustments */
+        /* ─── Dropdown menu theming ──────────────────────────────────────── */
+        .np-dropdown-menu {
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            min-width: 200px;
+            padding: 4px 0;
+        }
+
+        .np-dropdown-menu .dropdown-item {
+            color: var(--text-secondary);
+            font-size: 12px;
+            padding: 8px 14px;
+            transition: all 0.15s ease;
+        }
+
+        .np-dropdown-menu .dropdown-item:hover {
+            background: rgba(0, 212, 255, 0.1);
+            color: var(--accent-color);
+        }
+
+        .np-dropdown-menu .dropdown-divider {
+            border-color: var(--border-color);
+            margin: 4px 0;
+        }
+
+        /* ─── Responsive ─────────────────────────────────────────────────── */
         @media (max-width: 1200px) {
+
             .data-table th,
             .data-table td {
                 padding: 4px 8px;
                 font-size: 10px;
             }
-            
+
             .controls-bar {
                 flex-wrap: wrap;
                 height: auto;
@@ -672,63 +786,89 @@
             }
         }
 
-        /* Small screens: reflow instead of horizontal scrolling */
+        /* Hide nav-tab labels on small screens, keep icons */
         @media (max-width: 900px) {
+            .nav-tab {
+                padding: 6px 8px;
+                font-size: 9px;
+            }
+
             .data-table-container {
-                /* Keep vertical scrolling, avoid sideways “hidden columns” */
                 overflow-x: hidden;
                 overflow-y: auto;
             }
+
             .data-table {
                 table-layout: fixed;
+            }
+
+            .logo {
+                font-size: 12px;
             }
         }
 
         @media (max-width: 600px) {
-            /* Controls bar: stack filters/inputs so they fit */
             .control-group {
                 flex: 1 1 100%;
                 flex-wrap: wrap;
             }
-            .control-input, .control-select {
+
+            .control-input,
+            .control-select {
                 width: 100%;
                 min-width: 0;
             }
 
-            /* Buttons/labels: allow wrapping */
-            .btn-viewer,
-            .btn-control,
-            .nav-tab {
-                white-space: normal;
+            .status-indicator {
+                display: none;
+            }
+
+            .nav-tabs {
+                display: none;
             }
         }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
+
 <body class="bg-medical">
-{% if not hide_navbar %}
+    {% if not hide_navbar %}
+
+    {# Resolve caps once at the top so every section below can use it #}
+    {% user_caps as caps %}
+
     <nav class="top-navbar" role="navigation" aria-label="Main Navigation">
+
+        {# ── Left: logo + nav tabs ── #}
         <div class="nav-left">
             <div class="logo"><i class="fas fa-hospital-symbol"></i> Noctis Pro PACS</div>
             <div class="nav-tabs">
                 {% with ns=request.resolver_match.namespace url=request.resolver_match.url_name %}
-                <div class="nav-tab{% if ns == 'worklist' and url == 'dashboard' %} active{% endif %}" onclick="window.location.href='{% url 'worklist:dashboard' %}'">WORKLIST</div>
-                <div class="nav-tab{% if ns == 'worklist' and url == 'study_list' %} active{% endif %}" onclick="window.location.href='{% url 'worklist:study_list' %}'">STUDIES</div>
-                <div class="nav-tab{% if ns == 'reports' %} active{% endif %}" onclick="window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
-                <div class="nav-tab{% if ns == 'dicom_viewer' %} active{% endif %}" onclick="window.location.href='{% url 'dicom_viewer:viewer' %}'"><i class="fas fa-eye"></i> DICOM VIEWER</div>
-                {% user_caps as caps %}
+                <div class="nav-tab{% if ns == 'worklist' and url == 'dashboard' %} active{% endif %}"
+                    onclick="window.location.href='{% url 'worklist:dashboard' %}'">WORKLIST</div>
+                <div class="nav-tab{% if ns == 'reports' %} active{% endif %}"
+                    onclick="window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
+                <div class="nav-tab{% if ns == 'dicom_viewer' %} active{% endif %}"
+                    onclick="window.location.href='{% url 'dicom_viewer:viewer' %}'">
+                    <i class="fas fa-eye"></i> VIEWER
+                </div>
                 {% if caps.ai_visible %}
-                <div class="nav-tab{% if ns == 'ai_analysis' %} active{% endif %}" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI</div>
+                <div class="nav-tab{% if ns == 'ai_analysis' %} active{% endif %}"
+                    onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'">
+                    <i class="fas fa-robot"></i> AI
+                </div>
                 {% endif %}
-                {% if user.is_authenticated %}
-                {% user_caps as caps %}
-                {% if user.role == 'admin' or caps.manage_users %}
-                <div class="nav-tab{% if ns == 'admin_panel' %} active{% endif %}" onclick="window.location.href='{% url 'admin_panel:user_management' %}'"><i class="fas fa-user-cog"></i> MANAGE USERS</div>
-                {% endif %}
+                {% if user.is_authenticated and user.role == 'admin' or caps.manage_users %}
+                <div class="nav-tab{% if ns == 'admin_panel' %} active{% endif %}"
+                    onclick="window.location.href='{% url 'admin_panel:user_management' %}'">
+                    <i class="fas fa-user-cog"></i> USERS
+                </div>
                 {% endif %}
                 {% endwith %}
             </div>
         </div>
+
+        {# ── Centre-right: user info + status ── #}
         <div class="nav-right">
             <div class="status-indicator">
                 <div class="status-dot"></div>
@@ -738,204 +878,258 @@
                 <div class="user-avatar">{{ user.get_full_name|default:user.username|slice:":2"|upper }}</div>
                 <div>
                     <div>{{ user.get_full_name|default:user.username }}</div>
-                    <div style="color: var(--text-muted); font-size: 10px;">{% if user.role == 'admin' %}Administrator{% elif user.role == 'radiologist' %}Radiologist{% else %}Facility User{% endif %}</div>
+                    <div style="color: var(--text-muted); font-size: 10px;">{% if user.role == 'admin' %}Administrator{%
+                        elif user.role == 'radiologist' %}Radiologist{% else %}Facility User{% endif %}</div>
                 </div>
             </div>
-
-            {# Desktop actions (full button row) #}
-            <div class="np-nav-actions-desktop" style="display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                {% if user.is_authenticated %}
-                <button type="button" class="btn-control" onclick="window.location.href='{% url 'accounts:profile' %}'" title="Profile">
-                    <i class="fas fa-user"></i> PROFILE
-                </button>
-                {% endif %}
-                {% if user.is_authenticated %}
-                {% user_caps as caps %}
-                {# Show Admin Panel entry if the user has any admin capability toggled on #}
-                {% if user.role == 'admin' or caps.manage_settings or caps.manage_permissions or caps.manage_users or caps.manage_facilities or caps.view_logs %}
-                <button type="button" class="admin-btn" onclick="window.location.href='{% url 'admin_panel:dashboard' %}'" title="Administrator Dashboard"><i class="fas fa-shield-alt"></i> ADMIN PANEL</button>
-                {% endif %}
-                {% if user.role == 'admin' or caps.manage_users %}
-                <button type="button" class="btn-control" onclick="window.location.href='{% url 'admin_panel:user_create' %}'" title="Create New User"><i class="fas fa-user-plus"></i> CREATE USER</button>
-                {% endif %}
-                {% if user.role == 'admin' or caps.manage_facilities %}
-                <button type="button" class="btn-control" onclick="window.location.href='{% url 'admin_panel:facility_create' %}'" title="Create New Facility"><i class="fas fa-hospital"></i> CREATE FACILITY</button>
-                {% endif %}
-                {% if user.role == 'admin' or caps.manage_users %}
-                <button type="button" class="btn-control" onclick="window.location.href='{% url 'admin_panel:user_management' %}'" title="Manage All Users"><i class="fas fa-users-cog"></i> MANAGE USERS</button>
-                {% endif %}
-                {% endif %}
-                <button type="button" class="btn-control" onclick="window.location.href='{% url 'notifications:notification_list' %}'" title="Notifications">
-                    <i class="fas fa-bell"></i> NOTIFS <span id="notifBadge" class="study-count" style="display:none">0</span>
-                </button>
-                <button type="button" class="btn-control" onclick="window.location.href='{% url 'chat:chat_rooms' %}'" title="Chats">
-                    <i class="fas fa-comments"></i> CHATS
-                </button>
-                {% if user.is_authenticated %}
-                <button type="button" class="btn-control" onclick="window.location.href='{% url 'accounts:logout' %}'" title="Logout">
-                    <i class="fas fa-sign-out-alt"></i> LOGOUT
-                </button>
-                {% endif %}
-            </div>
-
-            {# Mobile actions (single dropdown for better fit) #}
-            <div class="dropdown np-nav-actions-mobile">
-                <button type="button" class="btn-control dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" title="Menu">
-                    <i class="fas fa-bars"></i> MENU
-                </button>
-                <ul class="dropdown-menu dropdown-menu-end np-dropdown-menu">
-                    {% if user.is_authenticated %}
-                    <li><a class="dropdown-item" href="{% url 'accounts:profile' %}"><i class="fas fa-user me-2"></i>Profile</a></li>
-                    <li><hr class="dropdown-divider"></li>
-                    {% endif %}
-
-                    {% if user.is_authenticated %}
-                    {% user_caps as caps %}
-                    {% if user.role == 'admin' or caps.manage_settings or caps.manage_permissions or caps.manage_users or caps.manage_facilities or caps.view_logs %}
-                    <li><a class="dropdown-item" href="{% url 'admin_panel:dashboard' %}"><i class="fas fa-shield-alt me-2"></i>Admin Panel</a></li>
-                    {% endif %}
-                    {% if user.role == 'admin' or caps.manage_users %}
-                    <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}"><i class="fas fa-user-plus me-2"></i>Create User</a></li>
-                    <li><a class="dropdown-item" href="{% url 'admin_panel:user_management' %}"><i class="fas fa-users-cog me-2"></i>Manage Users</a></li>
-                    {% endif %}
-                    {% if user.role == 'admin' or caps.manage_facilities %}
-                    <li><a class="dropdown-item" href="{% url 'admin_panel:facility_create' %}"><i class="fas fa-hospital me-2"></i>Create Facility</a></li>
-                    {% endif %}
-                    <li><hr class="dropdown-divider"></li>
-                    {% endif %}
-
-                    <li><a class="dropdown-item" href="{% url 'notifications:notification_list' %}"><i class="fas fa-bell me-2"></i>Notifications</a></li>
-                    <li><a class="dropdown-item" href="{% url 'chat:chat_rooms' %}"><i class="fas fa-comments me-2"></i>Chats</a></li>
-
-                    {% if user.is_authenticated %}
-                    <li><hr class="dropdown-divider"></li>
-                    <li><a class="dropdown-item" href="{% url 'accounts:logout' %}"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
-                    {% endif %}
-                </ul>
-            </div>
         </div>
+
+        {# ── Desktop action buttons (hidden below 1280 px) ── #}
+        <div class="np-nav-actions-desktop">
+            {% if user.is_authenticated %}
+            <button type="button" class="btn-control" onclick="window.location.href='{% url 'accounts:profile' %}'"
+                title="Profile">
+                <i class="fas fa-user"></i> PROFILE
+            </button>
+            {% endif %}
+
+            {% if user.role == 'admin' or caps.manage_settings or caps.manage_permissions or caps.manage_users or
+            caps.manage_facilities or caps.view_logs %}
+            <button type="button" class="admin-btn" onclick="window.location.href='{% url 'admin_panel:dashboard' %}'"
+                title="Admin Dashboard">
+                <i class="fas fa-shield-alt"></i> ADMIN
+            </button>
+            {% endif %}
+
+            {% if user.role == 'admin' or caps.manage_users %}
+            <button type="button" class="btn-control"
+                onclick="window.location.href='{% url 'admin_panel:user_create' %}'" title="Create New User">
+                <i class="fas fa-user-plus"></i> NEW USER
+            </button>
+            {% endif %}
+
+            {% if user.role == 'admin' or caps.manage_facilities %}
+            <button type="button" class="btn-control"
+                onclick="window.location.href='{% url 'admin_panel:facility_create' %}'" title="Create New Facility">
+                <i class="fas fa-hospital"></i> FACILITY
+            </button>
+            {% endif %}
+
+            {% if user.role == 'admin' or caps.manage_users %}
+            <button type="button" class="btn-control"
+                onclick="window.location.href='{% url 'admin_panel:user_management' %}'" title="Manage Users">
+                <i class="fas fa-users-cog"></i> MANAGE
+            </button>
+            {% endif %}
+
+            <button type="button" class="btn-control"
+                onclick="window.location.href='{% url 'notifications:notification_list' %}'" title="Notifications">
+                <i class="fas fa-bell"></i>
+                <span id="notifBadge" class="study-count" style="display:none">0</span>
+            </button>
+
+            <button type="button" class="btn-control" onclick="window.location.href='{% url 'chat:chat_rooms' %}'"
+                title="Chats">
+                <i class="fas fa-comments"></i>
+            </button>
+
+            {% if user.is_authenticated %}
+            <button type="button" class="btn-control" onclick="window.location.href='{% url 'accounts:logout' %}'"
+                title="Logout">
+                <i class="fas fa-sign-out-alt"></i> LOGOUT
+            </button>
+            {% endif %}
+        </div>
+
+        {# ── Mobile hamburger menu (shown below 1280 px) ── #}
+        <div class="dropdown np-nav-actions-mobile">
+            <button type="button" class="btn-control dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"
+                title="Menu">
+                <i class="fas fa-bars"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end np-dropdown-menu">
+                {% if user.is_authenticated %}
+                <li>
+                    <a class="dropdown-item" href="{% url 'accounts:profile' %}">
+                        <i class="fas fa-user me-2"></i>Profile
+                    </a>
+                </li>
+                <li>
+                    <hr class="dropdown-divider">
+                </li>
+                {% endif %}
+
+                {% if user.role == 'admin' or caps.manage_settings or caps.manage_permissions or caps.manage_users or
+                caps.manage_facilities or caps.view_logs %}
+                <li>
+                    <a class="dropdown-item" href="{% url 'admin_panel:dashboard' %}">
+                        <i class="fas fa-shield-alt me-2"></i>Admin Panel
+                    </a>
+                </li>
+                {% endif %}
+
+                {% if user.role == 'admin' or caps.manage_users %}
+                <li>
+                    <a class="dropdown-item" href="{% url 'admin_panel:user_create' %}">
+                        <i class="fas fa-user-plus me-2"></i>Create User
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item" href="{% url 'admin_panel:user_management' %}">
+                        <i class="fas fa-users-cog me-2"></i>Manage Users
+                    </a>
+                </li>
+                {% endif %}
+
+                {% if user.role == 'admin' or caps.manage_facilities %}
+                <li>
+                    <a class="dropdown-item" href="{% url 'admin_panel:facility_create' %}">
+                        <i class="fas fa-hospital me-2"></i>Create Facility
+                    </a>
+                </li>
+                {% endif %}
+
+                <li>
+                    <hr class="dropdown-divider">
+                </li>
+
+                <li>
+                    <a class="dropdown-item" href="{% url 'notifications:notification_list' %}">
+                        <i class="fas fa-bell me-2"></i>Notifications
+                        <span id="notifCount" style="display:none; margin-left:4px;"></span>
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item" href="{% url 'chat:chat_rooms' %}">
+                        <i class="fas fa-comments me-2"></i>Chats
+                    </a>
+                </li>
+
+                {% if user.is_authenticated %}
+                <li>
+                    <hr class="dropdown-divider">
+                </li>
+                <li>
+                    <a class="dropdown-item" href="{% url 'accounts:logout' %}">
+                        <i class="fas fa-sign-out-alt me-2"></i>Logout
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+        </div>
+
     </nav>
-{% endif %}
+    {% endif %}
+
     {% block content %}{% endblock %}
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-    (function(){
-        // Enforce logout on idle after 30 minutes (client-side safety net)
-        try {
-            var IDLE_LIMIT_MS = 30 * 60 * 1000;
-            var idleTimer;
-            function resetIdleTimer(){
-                clearTimeout(idleTimer);
-                idleTimer = setTimeout(function(){
-                    // Only attempt logout if user is authenticated (heuristic: presence of logout button)
-                    var logoutBtn = document.querySelector(".btn-control[onclick*='accounts:logout']");
-                    if (logoutBtn) {
-                        window.location.href = '{% url "accounts:logout" %}';
-                    }
-                }, IDLE_LIMIT_MS);
-            }
-            ['load','mousemove','keydown','scroll','click','touchstart','visibilitychange'].forEach(function(evt){
-                window.addEventListener(evt, resetIdleTimer, { passive: true });
-            });
-            resetIdleTimer();
-        } catch(e) {}
-
-        // Ensure a fresh session when opening a brand-new window/tab
-        // If there is no page referrer and user appears authenticated, force a soft redirect to login
-        try {
-            var isNewEntry = document.referrer === '' && window.performance && performance.navigation && performance.navigation.type === performance.navigation.TYPE_NAVIGATE;
-            // Heuristic: if top navbar is present and logout button exists, user is logged in
-            var loggedInHeuristic = !!document.querySelector(".btn-control[onclick*='accounts:logout']");
-            if (isNewEntry && loggedInHeuristic && sessionStorage.getItem('noctis_fresh_window') !== 'ok'){
-                sessionStorage.setItem('noctis_fresh_window', 'ok');
-                // Redirect to login to avoid resuming prior session state
-                window.location.replace('{% url "accounts:logout" %}');
-            }
-        } catch(e) {}
-
-        async function updateUnread(){
+        (function () {
+            // Enforce logout on idle after 30 minutes (client-side safety net)
             try {
-                const res = await fetch('{% url "notifications:api_unread_count" %}', { credentials: 'same-origin' });
-                if (!res.ok) return;
-                const data = await res.json();
-                const count = (data && (data.unread || data.count || data.unread_count)) || 0;
-                ['notifCount', 'notifBadge'].forEach(function(id){
-                    const el = document.getElementById(id);
-                    if (!el) return;
-                    if (count > 0) {
-                        el.textContent = count;
-                        el.style.display = '';
-                    } else {
-                        el.style.display = 'none';
-                    }
+                var IDLE_LIMIT_MS = 30 * 60 * 1000;
+                var idleTimer;
+                function resetIdleTimer() {
+                    clearTimeout(idleTimer);
+                    idleTimer = setTimeout(function () {
+                        var logoutBtn = document.querySelector("a[href*='accounts/logout'], .btn-control[onclick*='accounts:logout']");
+                        if (logoutBtn) {
+                            window.location.href = '{% url "accounts:logout" %}';
+                        }
+                    }, IDLE_LIMIT_MS);
+                }
+                ['load', 'mousemove', 'keydown', 'scroll', 'click', 'touchstart', 'visibilitychange'].forEach(function (evt) {
+                    window.addEventListener(evt, resetIdleTimer, { passive: true });
                 });
-            } catch(e) { /* ignore */ }
-        }
+                resetIdleTimer();
+            } catch (e) { }
 
-        function showToast(message){
+            // Fresh window / new tab redirect
             try {
-                if (!message) return;
-                var toast = document.createElement('div');
-                toast.style.position = 'fixed';
-                toast.style.top = '14px';
-                toast.style.right = '14px';
-                toast.style.zIndex = '100000';
-                toast.style.maxWidth = '360px';
-                toast.style.padding = '10px 12px';
-                toast.style.borderRadius = '8px';
-                toast.style.border = '1px solid rgba(0, 212, 255, 0.35)';
-                toast.style.background = 'rgba(0, 0, 0, 0.85)';
-                toast.style.color = 'white';
-                toast.style.boxShadow = '0 8px 24px rgba(0,0,0,0.35)';
-                toast.style.fontSize = '12px';
-                toast.innerHTML = '<div style="display:flex;gap:8px;align-items:flex-start;">'
-                    + '<i class="fas fa-bell" style="color: var(--accent-color); margin-top:2px;"></i>'
-                    + '<div style="flex:1; min-width:0; line-height:1.35;">' + String(message) + '</div>'
-                    + '</div>';
-                document.body.appendChild(toast);
-                setTimeout(function(){ try { toast.remove(); } catch(e){} }, 4500);
-            } catch(e) {}
-        }
+                var isNewEntry = document.referrer === '' &&
+                    window.performance &&
+                    performance.navigation &&
+                    performance.navigation.type === performance.navigation.TYPE_NAVIGATE;
+                var loggedInHeuristic = !!document.querySelector("a[href*='accounts/logout']");
+                if (isNewEntry && loggedInHeuristic && sessionStorage.getItem('noctis_fresh_window') !== 'ok') {
+                    sessionStorage.setItem('noctis_fresh_window', 'ok');
+                    window.location.replace('{% url "accounts:logout" %}');
+                }
+            } catch (e) { }
 
-        // Realtime notifications (same Channels stack as chat).
-        // This makes the navbar badge update instantly (no 30s polling delay).
-        function connectNotificationSocket(){
-            try {
-                var userId = '{{ user.id|default:"" }}';
-                if (!userId) return;
-                var proto = (window.location.protocol === 'https:') ? 'wss' : 'ws';
-                var wsUrl = proto + '://' + window.location.host + '/ws/notifications/' + userId + '/';
-                var ws = new WebSocket(wsUrl);
-                ws.onmessage = function(ev){
-                    try {
-                        var data = JSON.parse(ev.data || '{}');
-                        if (data && data.message) showToast(data.message);
-                    } catch(e) {}
-                    updateUnread();
-                };
-                ws.onclose = function(){
-                    // Best-effort reconnect
-                    setTimeout(connectNotificationSocket, 5000);
-                };
-                ws.onerror = function(){
-                    try { ws.close(); } catch(e) {}
-                };
-            } catch(e) {
-                // Ignore; polling still works.
+            // Unread notification count
+            async function updateUnread() {
+                try {
+                    const res = await fetch('{% url "notifications:api_unread_count" %}', { credentials: 'same-origin' });
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    const count = (data && (data.unread || data.count || data.unread_count)) || 0;
+                    ['notifCount', 'notifBadge'].forEach(function (id) {
+                        const el = document.getElementById(id);
+                        if (!el) return;
+                        if (count > 0) {
+                            el.textContent = count;
+                            el.style.display = '';
+                        } else {
+                            el.style.display = 'none';
+                        }
+                    });
+                } catch (e) { }
             }
-        }
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', updateUnread);
-        } else { updateUnread(); }
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', connectNotificationSocket);
-        } else { connectNotificationSocket(); }
-        setInterval(updateUnread, 30000);
-    })();
+
+            // Toast notifications
+            function showToast(message) {
+                try {
+                    if (!message) return;
+                    var toast = document.createElement('div');
+                    toast.style.cssText = 'position:fixed;top:14px;right:14px;z-index:100000;max-width:360px;padding:10px 12px;border-radius:8px;border:1px solid rgba(0,212,255,0.35);background:rgba(0,0,0,0.85);color:white;box-shadow:0 8px 24px rgba(0,0,0,0.35);font-size:12px;';
+                    toast.innerHTML = '<div style="display:flex;gap:8px;align-items:flex-start;">'
+                        + '<i class="fas fa-bell" style="color:var(--accent-color);margin-top:2px;font-size:14px;"></i>'
+                        + '<div style="flex:1;min-width:0;line-height:1.35;">' + String(message) + '</div>'
+                        + '</div>';
+                    document.body.appendChild(toast);
+                    setTimeout(function () { try { toast.remove(); } catch (e) { } }, 4500);
+                } catch (e) { }
+            }
+
+            // Realtime notification WebSocket
+            function connectNotificationSocket() {
+                try {
+                    var userId = '{{ user.id|default:"" }}';
+                    if (!userId) return;
+                    var proto = (window.location.protocol === 'https:') ? 'wss' : 'ws';
+                    var wsUrl = proto + '://' + window.location.host + '/ws/notifications/' + userId + '/';
+                    var ws = new WebSocket(wsUrl);
+                    ws.onmessage = function (ev) {
+                        try {
+                            var data = JSON.parse(ev.data || '{}');
+                            if (data && data.message) showToast(data.message);
+                        } catch (e) { }
+                        updateUnread();
+                    };
+                    ws.onclose = function () {
+                        setTimeout(connectNotificationSocket, 5000);
+                    };
+                    ws.onerror = function () {
+                        try { ws.close(); } catch (e) { }
+                    };
+                } catch (e) { }
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', updateUnread);
+                document.addEventListener('DOMContentLoaded', connectNotificationSocket);
+            } else {
+                updateUnread();
+                connectNotificationSocket();
+            }
+            setInterval(updateUnread, 30000);
+        })();
     </script>
     {% block extra_js %}{% endblock %}
     <script src="{% static 'js/button-utils.js' %}"></script>
     <script src="{% static 'js/unified-button-handlers.js' %}"></script>
 </body>
+
 </html>

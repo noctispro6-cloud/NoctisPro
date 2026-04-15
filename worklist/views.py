@@ -1793,8 +1793,6 @@ def api_studies(request):
 			.annotate(
 				series_count_db=Count('series', distinct=True),
 				image_count_db=Count('series__images', distinct=True),
-				image_count_annotated=Count('series__dicomimage', distinct=True),
-				series_count_annotated=Count('series', distinct=True),
 			)
 			# IMPORTANT:
 			# Worklist UX expects the most recently *uploaded* studies first.

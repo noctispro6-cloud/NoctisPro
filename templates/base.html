@@ -966,7 +966,7 @@
                         <i class="fas fa-shield-alt me-2"></i>Admin Panel
                     </a>
                 </li>
-                {% endif %}
+
 
                 {% if user.role == 'admin' or caps.manage_users %}
                 <li>
@@ -1019,7 +1019,7 @@
         </div>
 
     </nav>
-    {% endif %}
+
 
     {% block content %}{% endblock %}
 

@@ -174,7 +174,7 @@ class DicomImage(models.Model):
     class Meta:
         ordering = ['instance_number']
         indexes = [
-            models.Index(fields=['study'], name='worklist_dicomimage_study_idx'),
+            models.Index(fields=['series'], name='worklist_dicomimage_series_idx'),
         ]
 
     def __str__(self):

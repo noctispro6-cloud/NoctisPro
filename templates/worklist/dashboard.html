@@ -926,8 +926,7 @@
                     <div class="user-avatar">{{ user.get_full_name|default:user.username|slice:":2"|upper }}</div>
                     <div>
                         <div>{{ user.get_full_name|default:user.username }}</div>
-                        <div style="color: var(--text-muted); font-size: 10px;">{% if user.is_admin %}Administrator{%
-                            elif user.is_radiologist %}Radiologist{% else %}Facility User{% endif %}</div>
+                        
                     </div>
                 </div>
                 {% if user.is_authenticated %}

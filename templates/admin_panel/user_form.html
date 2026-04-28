@@ -684,7 +684,6 @@
     }
 
     function validateCurrentStep() {
-      console.log('Validating step:', currentStep);
       const currentFormStep = document.querySelector(`.form-step[data-step="${currentStep}"]`);
       
       if (!currentFormStep) {
@@ -692,7 +691,6 @@
         // Try to find any visible form step as fallback
         const visibleStep = document.querySelector('.form-step.active, .form-step:not([style*="display: none"])');
         if (visibleStep) {
-          console.log('Using visible step as fallback');
           // Fix: assign to the variable, not redeclare it
           return validateStepFields(visibleStep);
         } else {
@@ -706,7 +704,6 @@
     function validateStepFields(currentFormStep) {
       
       const requiredFields = currentFormStep.querySelectorAll('[required]');
-      console.log('Required fields in step:', requiredFields.length);
       
       let isValid = true;
       let firstInvalidField = null;
@@ -722,7 +719,6 @@
         
         let fieldValue = field.value ? field.value.trim() : '';
         if (!fieldValue) {
-          console.log('Required field missing value:', field.name || field.id);
           
           // Show visual feedback
           field.style.borderColor = '#ff4444';
@@ -768,7 +764,6 @@
       // Additional validation for step 2 (passwords)
       if (currentStep === 2) {
         if (password && passwordConfirm && password.value !== passwordConfirm.value) {
-          console.log('Passwords do not match');
           passwordConfirm.style.borderColor = '#ff4444';
           passwordConfirm.focus();
           
@@ -785,7 +780,6 @@
         }
         
         if (roleSelect && facilitySelect && roleSelect.value === 'facility' && !facilitySelect.value) {
-          console.log('Facility required for facility user');
           facilitySelect.style.borderColor = '#ff4444';
           facilitySelect.focus();
           
@@ -802,7 +796,6 @@
         }
       }
       
-      console.log('Step validation passed');
       return true;
     }
 
@@ -842,7 +835,6 @@
 
     nextBtn.addEventListener('click', function(e) {
       e.preventDefault();
-      console.log('Next button clicked, current step:', currentStep);
       
       // Add visual feedback
       nextBtn.disabled = true;
@@ -852,7 +844,6 @@
       setTimeout(() => {
         try {
           if (validateCurrentStep()) {
-            console.log('Validation passed, moving to next step');
             currentStep++;
             showStep(currentStep);
             
@@ -865,7 +856,6 @@
               }, 2000);
             }
           } else {
-            console.log('Validation failed for step:', currentStep);
             
             // Show error feedback
             const currentStepElement = document.querySelector(`.form-step[data-step="${currentStep}"]`);
@@ -927,9 +917,7 @@
     }
     
     // Debug facility count for troubleshooting
-    console.log('Facility dropdown options:', facilitySelect.options.length);
     for (let i = 0; i < facilitySelect.options.length; i++) {
-      console.log(`  Option ${i}: value="${facilitySelect.options[i].value}", text="${facilitySelect.options[i].text}"`);
     }
   })
 </script>

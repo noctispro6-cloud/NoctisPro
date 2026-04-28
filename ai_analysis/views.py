@@ -367,15 +367,6 @@ def api_analyze_series(request, series_id):
             status=403,
         )
 
-    # Subscription Check for Quick AI
-    if user.facility:
-        has_sub = user.facility.has_ai_subscription
-        is_expired = user.facility.subscription_expires_at and user.facility.subscription_expires_at < timezone.now()
-        if not has_sub or is_expired:
-             # Only allow free models if any exists, but for "Quick AI" we typically want the best one.
-             # We will check the selected model later, but if they have NO subscription, we might block early or limit choices.
-             pass
-
     # Pick one suitable active model for this modality
     modality_code = getattr(study.modality, 'code', None)
     models_query = AIModel.objects.filter(is_active=True, modality__in=[modality_code, 'ALL'])
@@ -754,7 +745,7 @@ def generate_auto_report(request, study_id):
             generated_impression=report_data['impression'],
             generated_recommendations=report_data['recommendations'],
             overall_confidence=report_data['confidence'],
-            requires_review=report_data['confidence'] < template.confidence_threshold
+            requires_review=report_data['confidence'] < (template.confidence_threshold if template else 0.8)
         )
 
         # Return references + triage metadata from the primary analysis (if present)
@@ -924,11 +915,11 @@ def api_realtime_analyses(request):
     
     try:
         if last_update:
-            last_update_time = timezone.datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+            last_update_time = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
         else:
-            last_update_time = timezone.now() - timezone.timedelta(minutes=5)
-    except:
-        last_update_time = timezone.now() - timezone.timedelta(minutes=5)
+            last_update_time = timezone.now() - timedelta(minutes=5)
+    except Exception:
+        last_update_time = timezone.now() - timedelta(minutes=5)
     
     # Get analyses updated since last check.
     #

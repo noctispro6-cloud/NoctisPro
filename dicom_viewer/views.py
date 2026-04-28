@@ -17,6 +17,7 @@ import pydicom
 from io import BytesIO
 # import cv2  # Optional for advanced image processing
 from PIL import Image, ImageFilter
+from datetime import datetime, timedelta
 from django.utils import timezone
 import uuid
 
@@ -509,12 +510,14 @@ def _schedule_mpr_prewarm(series_id: int, quality: str = 'high') -> None:
         with _MPR_PREWARM_LOCK:
             _MPR_PREWARM_INFLIGHT.discard(key)
 
-def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=None):
+def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=None, zoom_z=None):
     """
     Build a stable cache key for an encoded MPR slice.
 
     Some call sites (or malformed requests) may provide None/NaN/empty strings for WW/WL.
     Never let that crash the request path (users otherwise see: "must be real number, not NoneType").
+    zoom_z encodes the residual aspect-ratio correction applied at render time so that
+    cached slices with and without correction are stored under different keys.
     """
     def _safe_round_int(v, fallback):
         try:
@@ -530,7 +533,12 @@ def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=None
     ww_i = _safe_round_int(ww, 400.0)
     wl_i = _safe_round_int(wl, 40.0)
     q = (quality or 'high').strip().lower()
-    return f"{series_id}|{q}|{plane}|{int(slice_index)}|{ww_i}|{wl_i}|{1 if inverted else 0}"
+    # Encode zoom_z to 2 decimal places so small floating-point jitter doesn't bust the cache
+    try:
+        zz = f"{float(zoom_z):.2f}" if zoom_z is not None else "1.00"
+    except Exception:
+        zz = "1.00"
+    return f"{series_id}|{q}|{plane}|{int(slice_index)}|{ww_i}|{wl_i}|{1 if inverted else 0}|{zz}"
 
 def _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=None):
     key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
@@ -1474,7 +1482,8 @@ def api_bone_reconstruction(request, series_id):
             quality = 'fast'
         smooth = (request.GET.get('smooth', 'false').strip().lower() in ('1', 'true', 'yes', 'on'))
         
-        # Fast path: reuse cached volume (isotropic for better quality)
+        # Fast path: reuse cached volume; keep spacing for mm-correct mesh scaling
+        _sp = (1.0, 1.0, 1.0)
         try:
             volume, _sp = _get_mpr_volume_and_spacing(series)
         except Exception:
@@ -1653,16 +1662,31 @@ def api_bone_reconstruction(request, series_id):
                 dsx = max(1, ds)
 
                 vol_ds = vol_for_mesh[::dsz, ::dsy, ::dsx]
-                verts, faces, normals, values = _measure.marching_cubes(vol_ds, level=0.5, step_size=step_size)
 
-                # Re-scale verts back to the (downsampled) voxel space.
-                # Frontend only needs a consistent shape; absolute mm scaling is not currently applied.
+                # Gaussian soft-field eliminates staircase: MC on a binary 0/1 array produces
+                # infinite-gradient boundaries that create stepped surfaces. Blurring first
+                # creates a smooth 0→1 transition; the isosurface at 0.5 stays at the correct
+                # boundary while the geometry is smooth.
                 try:
+                    from scipy import ndimage as _nd_mc
+                    soft_ds = _nd_mc.gaussian_filter(vol_ds.astype(np.float32), sigma=1.5)
+                except Exception:
+                    soft_ds = vol_ds.astype(np.float32)
+
+                verts, faces, normals, values = _measure.marching_cubes(soft_ds, level=0.5, step_size=step_size)
+
+                # Scale verts to physical mm space to eliminate anisotropy-induced elongation.
+                # _sp is (z_mm, y_mm, x_mm) from _get_mpr_volume_and_spacing (post-resample).
+                # dsz/dsy/dsx convert from downsampled-voxel coords back to full-voxel coords.
+                try:
+                    sz, sy, sx = float(_sp[0]), float(_sp[1]), float(_sp[2])
+                    verts[:, 0] *= float(dsz) * sz
+                    verts[:, 1] *= float(dsy) * sy
+                    verts[:, 2] *= float(dsx) * sx
+                except Exception:
                     verts[:, 0] *= float(dsz)
                     verts[:, 1] *= float(dsy)
                     verts[:, 2] *= float(dsx)
-                except Exception:
-                    pass
                 mesh_payload = {
                     'vertices': verts.tolist(),
                     'faces': faces.tolist(),
@@ -1709,11 +1733,11 @@ def api_realtime_studies(request):
         
         try:
             if last_update:
-                last_update_time = timezone.datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+                last_update_time = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
             else:
-                last_update_time = timezone.now() - timezone.timedelta(minutes=5)
-        except:
-            last_update_time = timezone.now() - timezone.timedelta(minutes=5)
+                last_update_time = timezone.now() - timedelta(minutes=5)
+        except Exception:
+            last_update_time = timezone.now() - timedelta(minutes=5)
         
         # Get studies updated since last check
         try:
@@ -4499,6 +4523,25 @@ def web_start_reconstruction(request):
         job_type = data.get('job_type')
         parameters = data.get('parameters', {})
         series = get_object_or_404(Series, id=series_id)
+
+        modality = (series.modality or '').upper().strip()
+        ct_modalities = {'CT'}
+        mr_modalities = {'MR', 'MRI'}
+
+        if job_type == 'bone_3d' and modality not in ct_modalities:
+            return JsonResponse({
+                'success': False,
+                'error': f'Bone 3D reconstruction requires a CT study (series modality is \'{modality}\')'
+            }, status=400)
+        if job_type == 'mri_3d' and modality not in mr_modalities:
+            if modality in ct_modalities:
+                job_type = 'bone_3d'
+            else:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'MRI 3D reconstruction requires an MR study (series modality is \'{modality}\')'
+                }, status=400)
+
         job = ReconstructionJob.objects.create(user=request.user, series=series, job_type=job_type, status='pending')
         job.set_parameters(parameters)
         job.save()
@@ -4510,7 +4553,7 @@ def web_start_reconstruction(request):
             process_bone_reconstruction(job.id)
         elif job_type == 'mri_3d':
             process_mri_reconstruction(job.id)
-        return JsonResponse({'success': True, 'job_id': job.id})
+        return JsonResponse({'success': True, 'job_id': job.id, 'job_type': job_type})
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
 

@@ -379,15 +379,15 @@
                             <i class="fas fa-download me-2"></i>Export
                         </button>
                         <ul class="dropdown-menu">
-                            <li><a class="dropdown-item" href="#" onclick="exportFacilities('csv')">
+                            <li><button type="button" class="dropdown-item" onclick="exportFacilities('csv')">
                                 <i class="fas fa-file-csv me-2"></i>Export CSV
-                            </a></li>
-                            <li><a class="dropdown-item" href="#" onclick="exportFacilities('excel')">
+                            </button></li>
+                            <li><button type="button" class="dropdown-item" onclick="exportFacilities('excel')">
                                 <i class="fas fa-file-excel me-2"></i>Export Excel
-                            </a></li>
-                            <li><a class="dropdown-item" href="#" onclick="exportFacilities('pdf')">
+                            </button></li>
+                            <li><button type="button" class="dropdown-item" onclick="exportFacilities('pdf')">
                                 <i class="fas fa-file-pdf me-2"></i>Export PDF
-                            </a></li>
+                            </button></li>
                         </ul>
                     </div>
                     <button type="button" class="btn-control" onclick="showAnalytics()"  >
@@ -481,7 +481,7 @@
             </div>
             <div class="col-md-2 d-flex align-items-end">
                 <div class="view-toggle w-100">
-                    <button type="button" class="active" onclick="toggleView('grid')" type="button"   id="gridView" aria-label="Th Large">
+                    <button type="button" class="active" onclick="toggleView('grid')" id="gridView" aria-label="Th Large">
                         <i class="fas fa-th-large"></i>
                     </button>
                     <button type="button" onclick="toggleView('list')" id="listView" aria-label="List">
@@ -532,16 +532,16 @@
                         </span>
                     </div>
                     <div class="dropdown">
-                        <button type="button" class="btn btn-outline-light btn-sm" type="button" data-bs-toggle="dropdown" aria-label="Ellipsis V">
+                        <button type="button" class="btn btn-outline-light btn-sm" data-bs-toggle="dropdown" aria-label="Ellipsis V">
                             <i class="fas fa-ellipsis-v"></i>
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
                             <li><a class="dropdown-item" href="{% url 'admin_panel:facility_edit' facility.id %}">
                                 <i class="fas fa-edit me-2"></i>Edit Details
                             </a></li>
-                            <li><a class="dropdown-item" href="#" onclick="viewFacilityAnalytics({{ facility.id }})">
+                            <li><button type="button" class="dropdown-item" onclick="viewFacilityAnalytics({{ facility.id }})">
                                 <i class="fas fa-chart-line me-2"></i>View Analytics
-                            </a></li>
+                            </button></li>
                             {% if user.role == 'admin' or caps.manage_users %}
                             <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?facility={{ facility.id }}">
                                 <i class="fas fa-user-plus me-2"></i>Add User
@@ -720,7 +720,7 @@
             <h4 class="text-white">
                 <i class="fas fa-chart-bar me-2"></i>Facility Analytics
             </h4>
-            <button type="button" class="btn-close btn-close-white" onclick="hideAnalytics()"  ></button>
+            <button type="button" class="btn-close btn-close-white" onclick="hideAnalytics()" aria-label="Close analytics panel"></button>
         </div>
         <div id="analyticsContent">
             <!-- Analytics content will be loaded here -->
@@ -976,59 +976,79 @@ function viewFacilityAnalytics(facilityId) {
 
 function loadSystemAnalytics() {
     const content = document.getElementById('analyticsContent');
-    content.innerHTML = `
-        <div class="row">
-            <div class="col-md-6">
-                <div class="stats-card">
-                    <div class="stats-number">${document.querySelectorAll('.facility-card').length}</div>
-                    <div class="stats-label">Total Facilities</div>
+    content.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
+    fetch('{% url "admin_panel:system_analytics_api" %}')
+        .then(r => r.json())
+        .then(d => {
+            content.innerHTML = `
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="stats-card">
+                            <div class="stats-number">${d.total_facilities}</div>
+                            <div class="stats-label">Total Facilities</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="stats-card">
+                            <div class="stats-number">${d.active_facilities}</div>
+                            <div class="stats-label">Active Facilities</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="stats-card">
+                            <div class="stats-number">${d.total_users}</div>
+                            <div class="stats-label">Total Users</div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-            <div class="col-md-6">
-                <div class="stats-card">
-                    <div class="stats-number">${document.querySelectorAll('.facility-status.active').length}</div>
-                    <div class="stats-label">Active Facilities</div>
-                </div>
-            </div>
-        </div>
-        <div class="mt-4">
-            <h6 class="text-white mb-3">Recent Activity</h6>
-            <div class="text-secondary">
-                <p><i class="fas fa-plus text-success me-2"></i>2 new facilities added this month</p>
-                <p><i class="fas fa-users text-info me-2"></i>15 new users registered this week</p>
-                <p><i class="fas fa-file-medical text-primary me-2"></i>127 studies uploaded today</p>
-            </div>
-        </div>
-    `;
+                <div class="mt-4">
+                    <h6 class="text-white mb-3">Recent Activity</h6>
+                    <div class="text-secondary">
+                        <p><i class="fas fa-plus text-success me-2"></i>${d.facilities_month} new facilities added this month</p>
+                        <p><i class="fas fa-users text-info me-2"></i>${d.new_users_week} new users registered this week</p>
+                        <p><i class="fas fa-file-medical text-primary me-2"></i>${d.studies_today} studies uploaded today</p>
+                    </div>
+                </div>`;
+        })
+        .catch(() => {
+            content.innerHTML = '<div class="text-danger p-3">Failed to load analytics. Please try again.</div>';
+        });
 }
 
 function loadFacilityAnalytics(facilityId) {
     const content = document.getElementById('analyticsContent');
-    content.innerHTML = `
-        <div class="text-center py-4">
-            <h5 class="text-white mb-4">Facility Analytics - ID: ${facilityId}</h5>
-            <div class="row">
-                <div class="col-md-4">
-                    <div class="stats-card">
-                        <div class="stats-number">12</div>
-                        <div class="stats-label">Active Users</div>
-                    </div>
+    content.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
+    fetch(`{% url "admin_panel:system_analytics_api" %}`.replace('/api/analytics/', `/api/analytics/${facilityId}/`))
+        .then(r => r.json())
+        .then(d => {
+            content.innerHTML = `
+                <div class="text-center py-2">
+                    <h5 class="text-white mb-4">${d.facility_name}</h5>
                 </div>
-                <div class="col-md-4">
-                    <div class="stats-card">
-                        <div class="stats-number">45</div>
-                        <div class="stats-label">Studies This Month</div>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="stats-card">
+                            <div class="stats-number">${d.active_users}</div>
+                            <div class="stats-label">Active Users</div>
+                        </div>
                     </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="stats-card">
-                        <div class="stats-number">98%</div>
-                        <div class="stats-label">Uptime</div>
+                    <div class="col-md-4">
+                        <div class="stats-card">
+                            <div class="stats-number">${d.studies_month}</div>
+                            <div class="stats-label">Studies This Month</div>
+                        </div>
                     </div>
-                </div>
-            </div>
-        </div>
-    `;
+                    <div class="col-md-4">
+                        <div class="stats-card">
+                            <div class="stats-number">${d.total_studies}</div>
+                            <div class="stats-label">Total Studies</div>
+                        </div>
+                    </div>
+                </div>`;
+        })
+        .catch(() => {
+            content.innerHTML = '<div class="text-danger p-3">Failed to load facility analytics. Please try again.</div>';
+        });
 }
 
 // Auto-submit form on filter changes

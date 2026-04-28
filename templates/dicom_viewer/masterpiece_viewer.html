@@ -982,11 +982,11 @@
                 </div>
 
                 {% if user.is_admin or user.is_radiologist %}
-                <a id="writeReportBtn" class="btn" href="#"
-                    onclick="if(window.currentStudyId){ window.location.href='/reports/write/'+window.currentStudyId+'/'; } else { alert('Please load a study first'); } return false;"
+                <button type="button" id="writeReportBtn" class="btn"
+                    onclick="if(window.currentStudyId){ window.location.href='/reports/write/'+window.currentStudyId+'/'; } else { alert('Please load a study first'); }"
                     title="Write Report for current study" style="display:none">
                     <i class="fas fa-file-signature"></i> Report
-                </a>
+                </button>
                 <script>
                     // Show write report button when a study is loaded
                     document.addEventListener('studyLoaded', function (e) {
@@ -4376,9 +4376,6 @@
                     })
                 });
 
-                if (response.ok) {
-                    console.log('Measurement saved successfully');
-                }
             } catch (error) {
                 console.error('Error saving measurement:', error);
             }
@@ -4422,9 +4419,6 @@
                     })
                 });
 
-                if (response.ok) {
-                    console.log('Annotation saved successfully');
-                }
             } catch (error) {
                 console.error('Error saving annotation:', error);
             }
@@ -6383,16 +6377,16 @@
             const pos = new Float32Array(vertices.length * 3);
             for (let i = 0; i < vertices.length; i++) {
                 // Backend marching cubes vertices are in (z, y, x) voxel space.
-                // Map to Three.js as:
-                // - X: x (columns)
-                // - Y: z (slices)   [so superior/inferior feels "up/down"]
-                // - Z: y (rows)
-                // Also flip Y so the initial orientation matches the viewer's "superior at top" convention.
+                // Volume is sorted inferior→superior (ascending slice position), so vz=0 is
+                // feet and vz=max is head. Map to Three.js Y-up as:
+                // - X: x (columns, left-right)
+                // - Y: z (slices, inferior→superior = bottom→top) — positive Y = head = UP ✓
+                // - Z: y (rows, anterior-posterior depth)
                 const vz = vertices[i][0];
                 const vy = vertices[i][1];
                 const vx = vertices[i][2];
                 pos[i * 3 + 0] = vx;
-                pos[i * 3 + 1] = -vz;
+                pos[i * 3 + 1] = vz;
                 pos[i * 3 + 2] = vy;
             }
             const idx = new Uint32Array(faces.length * 3);

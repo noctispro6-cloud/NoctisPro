@@ -193,15 +193,15 @@
                             <i class="fas fa-download me-2"></i>Export
                         </button>
                         <ul class="dropdown-menu">
-                            <li><a class="dropdown-item" href="#" onclick="exportUsers('csv')">
+                            <li><button type="button" class="dropdown-item" onclick="exportUsers('csv')">
                                 <i class="fas fa-file-csv me-2"></i>Export CSV
-                            </a></li>
-                            <li><a class="dropdown-item" href="#" onclick="exportUsers('excel')">
+                            </button></li>
+                            <li><button type="button" class="dropdown-item" onclick="exportUsers('excel')">
                                 <i class="fas fa-file-excel me-2"></i>Export Excel
-                            </a></li>
-                            <li><a class="dropdown-item" href="#" onclick="exportUsers('pdf')">
+                            </button></li>
+                            <li><button type="button" class="dropdown-item" onclick="exportUsers('pdf')">
                                 <i class="fas fa-file-pdf me-2"></i>Export PDF
-                            </a></li>
+                            </button></li>
                         </ul>
                     </div>
                     {% if user.role == 'admin' or caps.manage_facilities %}
@@ -215,14 +215,14 @@
                         </button>
                         <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="addUserDropdown">
                             {% if user.role == 'admin' %}
-                            <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?role=admin" onclick="console.log('Navigating to admin user creation')">
+                            <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?role=admin">
                                 <i class="fas fa-user-shield me-2"></i>Administrator
                             </a></li>
                             {% endif %}
-                            <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?role=radiologist" onclick="console.log('Navigating to radiologist user creation')">
+                            <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?role=radiologist">
                                 <i class="fas fa-user-md me-2"></i>Radiologist
                             </a></li>
-                            <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?role=facility" onclick="console.log('Navigating to facility user creation')">
+                            <li><a class="dropdown-item" href="{% url 'admin_panel:user_create' %}?role=facility">
                                 <i class="fas fa-user me-2"></i>Facility User
                             </a></li>
                         </ul>
@@ -538,8 +538,6 @@
             // Ensure dropdown works even if Bootstrap fails
             addUserDropdown.addEventListener('click', function(e) {
                 e.preventDefault();
-                console.log('Add User dropdown clicked');
-                
                 // Toggle dropdown visibility
                 const isOpen = dropdownMenu.classList.contains('show');
                 if (isOpen) {
@@ -566,8 +564,6 @@
                 item.addEventListener('click', function(e) {
                     const href = this.getAttribute('href');
                     if (href) {
-                        console.log('Navigating to:', href);
-                        // Small delay to ensure click is registered
                         setTimeout(() => {
                             window.location.href = href;
                         }, 100);
@@ -634,11 +630,12 @@ let searchTimeout;
 document.getElementById('search').addEventListener('input', function() {
     clearTimeout(searchTimeout);
     const query = this.value;
-    
     if (query.length > 2) {
         searchTimeout = setTimeout(() => {
-            // Implement search suggestions API call here
-            showSearchSuggestions([]);
+            fetch(`{% url "admin_panel:user_search_suggestions_api" %}?q=${encodeURIComponent(query)}`)
+                .then(r => r.json())
+                .then(d => showSearchSuggestions(d.suggestions || []))
+                .catch(() => showSearchSuggestions([]));
         }, 300);
     } else {
         hideSearchSuggestions();
@@ -648,10 +645,14 @@ document.getElementById('search').addEventListener('input', function() {
 function showSearchSuggestions(suggestions) {
     const container = document.getElementById('searchSuggestions');
     if (suggestions.length > 0) {
-        container.innerHTML = suggestions.map(s => 
-            `<div class="search-suggestion" onclick="selectSuggestion('${s}')">${s}</div>`
-        ).join('');
+        container.innerHTML = suggestions.map(s => {
+            const val = typeof s === 'object' ? s.value : s;
+            const lbl = typeof s === 'object' ? (s.label || s.value) : s;
+            return `<div class="search-suggestion" onclick="selectSuggestion('${val}')">${lbl}</div>`;
+        }).join('');
         container.style.display = 'block';
+    } else {
+        hideSearchSuggestions();
     }
 }
 

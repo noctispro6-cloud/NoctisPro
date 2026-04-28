@@ -55,28 +55,55 @@ def _build_prompt(
     abnormalities: list,
     triage_level: str,
     confidence: float,
+    measurements: dict = None,
 ) -> str:
     """
     Construct an instruction prompt for a radiology AI assistant.
     Designed to work with instruction-tuned models (Flan-T5, GPT, Llama, etc.).
     """
+    modality_hints = {
+        "CT":  "Use Hounsfield unit terminology. Note density, attenuation, and enhancement patterns.",
+        "MR":  "Use MRI signal terminology (T1/T2 signal, FLAIR, DWI). Note signal intensity and enhancement.",
+        "CR":  "Use plain film terminology. Note opacity, lucency, and bone/soft tissue detail.",
+        "DX":  "Use plain film terminology. Note opacity, lucency, cortical integrity, and alignment.",
+        "US":  "Use sonographic terminology. Note echogenicity, vascularity, and shadowing.",
+        "MG":  "Use mammographic terminology. Note density, mass margins, and calcification morphology.",
+        "PT":  "Use nuclear medicine terminology. Note SUV, metabolic activity, and distribution.",
+        "NM":  "Use nuclear medicine terminology. Note tracer uptake, distribution, and photopenic defects.",
+    }
+    hint = modality_hints.get(modality, "")
+
     parts = [
-        "You are an expert radiologist writing a preliminary AI-assisted radiology report.",
-        "Write a professional, concise, clinically accurate report based on the AI analysis below.",
-        "Use standard radiology report language. Do not hallucinate findings.",
-        "Keep findings to 3-5 sentences, impression to 2-3 sentences, recommendations to 2-3 bullet points.",
+        "You are an expert radiologist generating a preliminary AI-assisted radiology report.",
+        "Write a professional, clinically accurate, specific report based ONLY on the data provided.",
+        "Do not invent findings not listed below. Use precise anatomical and radiological language.",
+        hint,
         "",
         f"MODALITY: {modality or 'Unknown'}",
     ]
     if body_part:
-        parts.append(f"BODY PART: {body_part}")
+        parts.append(f"BODY PART / REGION: {body_part}")
     if clinical_info:
         parts.append(f"CLINICAL INDICATION: {clinical_info}")
     if findings_summary:
         parts.append(f"AI ANALYSIS SUMMARY: {findings_summary}")
     if abnormalities:
-        abn_text = "; ".join(abnormalities[:8])
-        parts.append(f"DETECTED ABNORMALITIES: {abn_text}")
+        parts.append("DETECTED ABNORMALITIES:")
+        for a in abnormalities[:10]:
+            parts.append(f"  - {a}")
+    # Include structured measurements if available
+    if measurements and isinstance(measurements, dict):
+        meas_lines = []
+        for k, v in measurements.items():
+            if k in ("overlays", "reference_suggestions", "online_references",
+                     "report", "triage_level", "triage_score", "triage_flagged"):
+                continue
+            if v is None or isinstance(v, (dict, list)):
+                continue
+            meas_lines.append(f"  - {str(k).replace('_', ' ').title()}: {v}")
+        if meas_lines:
+            parts.append("STRUCTURED MEASUREMENTS / AI OUTPUTS:")
+            parts.extend(meas_lines[:20])
     if triage_level:
         parts.append(f"AI TRIAGE LEVEL: {triage_level.upper()} (confidence: {confidence:.0%})")
     else:
@@ -84,14 +111,17 @@ def _build_prompt(
 
     parts += [
         "",
-        "Write the report in this exact format:",
-        "FINDINGS: [2-4 sentences describing the imaging findings]",
-        "IMPRESSION: [1-2 sentences with the primary conclusion]",
-        "RECOMMENDATIONS: [2-3 bullet points with next steps]",
+        "Write a complete structured radiology report in this EXACT format:",
+        "FINDINGS: [3-5 sentences. Describe specific imaging findings with location, size, and character. "
+        "State normal structures if no abnormality. Be precise and anatomically specific.]",
+        "IMPRESSION: [1-3 sentences. State the primary diagnosis or most likely interpretation. "
+        "Include differential if appropriate. Be direct and clinically actionable.]",
+        "RECOMMENDATIONS: [2-4 bullet points. Include urgency, follow-up imaging, clinical correlation, "
+        "or additional workup as appropriate for the findings.]",
         "",
         "Report:",
     ]
-    return "\n".join(parts)
+    return "\n".join(p for p in parts if p is not None)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -350,6 +380,7 @@ def _generate_deterministic(
     abnormalities: list,
     triage_level: str,
     confidence: float,
+    measurements: dict = None,
 ) -> Dict[str, str]:
     """
     Enhanced deterministic report — used as fallback when LLM is unavailable.
@@ -357,6 +388,17 @@ def _generate_deterministic(
     """
     body = body_part or "imaging"
     abn_text = "; ".join(abnormalities[:6]) if abnormalities else ""
+
+    # Build structured measurement addendum
+    meas_lines = []
+    if measurements and isinstance(measurements, dict):
+        for k, v in measurements.items():
+            if k in ("overlays", "reference_suggestions", "online_references",
+                     "report", "triage_level", "triage_score", "triage_flagged"):
+                continue
+            if v is None or isinstance(v, (dict, list)):
+                continue
+            meas_lines.append(f"  {str(k).replace('_', ' ').title()}: {v}")
 
     # Findings
     if abnormalities or abn_text:
@@ -367,12 +409,15 @@ def _generate_deterministic(
             findings=abn_text or findings_summary or "an incidental finding",
         )
         if findings_summary and findings_summary not in findings:
-            findings += f"\n\nAI analysis notes: {findings_summary}"
+            findings += f"\n\nAI analysis summary: {findings_summary}"
     else:
         template = _NORMAL_FINDINGS.get(modality, "{modality} {body} examination is unremarkable.")
         findings = template.format(modality=modality, body=body)
         if findings_summary:
-            findings += f"\n\nAI analysis notes: {findings_summary}"
+            findings += f"\n\nAI analysis summary: {findings_summary}"
+
+    if meas_lines:
+        findings += "\n\nAI-derived measurements:\n" + "\n".join(meas_lines[:15])
 
     if clinical_info:
         findings = f"Clinical indication: {clinical_info}\n\n" + findings
@@ -437,6 +482,7 @@ def generate_llm_report(
     abnormalities: Optional[list] = None,
     triage_level: str = "",
     confidence: float = 0.0,
+    measurements: Optional[dict] = None,
 ) -> Dict[str, str]:
     """
     Generate a preliminary radiology report using the best available backend.
@@ -455,6 +501,7 @@ def generate_llm_report(
         abnormalities=abnormalities,
         triage_level=triage_level,
         confidence=confidence,
+        measurements=measurements,
     )
 
     # Try backends in priority order
@@ -487,6 +534,7 @@ def generate_llm_report(
             abnormalities=abnormalities,
             triage_level=triage_level,
             confidence=confidence,
+            measurements=measurements,
         )
         llm_used = "deterministic"
 
@@ -516,11 +564,22 @@ def generate_llm_report_from_analysis(analysis) -> Dict[str, str]:
     if isinstance(raw_abn, list):
         for item in raw_abn:
             if isinstance(item, dict):
+                # Extract richer detail: label + location/size if available
+                label = ""
                 for key in ("label", "type", "name", "finding"):
                     val = item.get(key, "")
                     if val and isinstance(val, str):
-                        abnormalities.append(val.strip())
+                        label = val.strip()
                         break
+                if label:
+                    extra = []
+                    for detail_key in ("location", "size", "severity", "confidence"):
+                        dv = item.get(detail_key)
+                        if dv and str(dv).strip():
+                            extra.append(f"{detail_key}: {dv}")
+                    if extra:
+                        label = f"{label} ({', '.join(extra)})"
+                    abnormalities.append(label)
             elif isinstance(item, str) and item.strip():
                 abnormalities.append(item.strip())
 
@@ -535,4 +594,5 @@ def generate_llm_report_from_analysis(analysis) -> Dict[str, str]:
         abnormalities=abnormalities,
         triage_level=triage_level,
         confidence=confidence,
+        measurements=m,
     )

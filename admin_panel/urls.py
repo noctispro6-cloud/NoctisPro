@@ -13,6 +13,7 @@ urlpatterns = [
     path('users/edit/<int:user_id>/', views.user_edit, name='user_edit'),
     path('users/delete/<int:user_id>/', views.user_delete, name='user_delete'),
     path('users/bulk-action/', views.bulk_user_action, name='bulk_user_action'),
+    path('users/api/search-suggestions/', views.user_search_suggestions_api, name='user_search_suggestions_api'),
     
     # Facility management
     path('facilities/', views.facility_management, name='facility_management'),
@@ -20,6 +21,8 @@ urlpatterns = [
     path('facilities/edit/<int:facility_id>/', views.facility_edit, name='facility_edit'),
     path('facilities/delete/<int:facility_id>/', views.facility_delete, name='facility_delete'),
     path('facilities/bulk-action/', views.bulk_facility_action, name='bulk_facility_action'),
+    path('facilities/api/analytics/', views.system_analytics_api, name='system_analytics_api'),
+    path('facilities/api/analytics/<int:facility_id>/', views.facility_analytics_api, name='facility_analytics_api'),
 
     # Placeholder routes referenced by templates
     path('logs/', views.system_logs, name='system_logs'),

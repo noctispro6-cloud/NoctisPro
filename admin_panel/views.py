@@ -683,8 +683,54 @@ def user_delete(request, user_id):
 @user_passes_test(can_manage_facilities)
 def facility_management(request):
     """Enhanced facility management interface"""
+
+    if request.method == 'POST':
+        try:
+            bulk_action = (request.POST.get('bulk_action') or '').strip()
+            selected_ids = request.POST.getlist('selected_facilities')
+            if bulk_action and selected_ids:
+                ids = [int(x) for x in selected_ids if str(x).strip().isdigit()]
+                qs = Facility.objects.filter(id__in=ids)
+
+                if bulk_action == 'activate':
+                    updated = qs.update(is_active=True)
+                    messages.success(request, f'Activated {updated} facility/facilities.')
+                elif bulk_action == 'deactivate':
+                    updated = qs.update(is_active=False)
+                    messages.success(request, f'Deactivated {updated} facility/facilities.')
+                elif bulk_action == 'delete':
+                    count = qs.count()
+                    qs.delete()
+                    messages.success(request, f'Deleted {count} facility/facilities.')
+                elif bulk_action == 'export':
+                    export_facilities = qs
+                    fmt = request.POST.get('export_format', 'csv')
+                    return export_facilities_data(export_facilities, fmt)
+                else:
+                    messages.error(request, 'Invalid bulk action.')
+
+                AuditLog.objects.create(
+                    user=request.user,
+                    action='update' if bulk_action != 'delete' else 'delete',
+                    model_name='Facility',
+                    object_id='',
+                    object_repr='',
+                    description=f'Bulk facility action: {bulk_action} ({len(ids)} selected)',
+                    after_data={
+                        'action': bulk_action,
+                        'selected_facility_ids': ids,
+                        'performed_by': request.user.username,
+                        'timestamp': timezone.now().isoformat(),
+                    },
+                )
+            else:
+                messages.error(request, 'No facilities selected.')
+        except Exception as e:
+            messages.error(request, f'Bulk action failed: {e}')
+        return redirect('admin_panel:facility_management')
+
     facilities = Facility.objects.all()
-    
+
     # Search functionality
     search_query = request.GET.get('search', '')
     if search_query:
@@ -750,6 +796,83 @@ def facility_management(request):
     }
     
     return render(request, 'admin_panel/facility_management.html', context)
+
+@login_required
+@user_passes_test(is_admin)
+def user_search_suggestions_api(request):
+    """Return username/display suggestions for the user management search box."""
+    q = (request.GET.get('q') or '').strip()
+    if len(q) < 2:
+        return JsonResponse({'suggestions': []})
+    qs = User.objects.filter(
+        Q(username__icontains=q) |
+        Q(first_name__icontains=q) |
+        Q(last_name__icontains=q) |
+        Q(email__icontains=q)
+    ).values('username', 'first_name', 'last_name')[:10]
+    suggestions = [
+        {'value': u['username'],
+         'label': f"{u['first_name']} {u['last_name']}".strip() or u['username']}
+        for u in qs
+    ]
+    return JsonResponse({'suggestions': suggestions})
+
+
+@login_required
+@user_passes_test(is_admin)
+def facility_analytics_api(request, facility_id):
+    """Return real analytics data for a single facility."""
+    facility = get_object_or_404(Facility, id=facility_id)
+    from django.db.models import Count
+    from datetime import timedelta
+
+    now = timezone.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    week_ago = now - timedelta(days=7)
+
+    user_count   = User.objects.filter(facility=facility, is_active=True).count()
+    studies_month = Study.objects.filter(facility=facility, study_date__gte=month_start).count()
+    total_studies = Study.objects.filter(facility=facility).count()
+    recent_users  = User.objects.filter(facility=facility, date_joined__gte=week_ago).count()
+
+    return JsonResponse({
+        'facility_id':    facility.id,
+        'facility_name':  facility.name,
+        'active_users':   user_count,
+        'studies_month':  studies_month,
+        'total_studies':  total_studies,
+        'new_users_week': recent_users,
+        'is_active':      facility.is_active,
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def system_analytics_api(request):
+    """Return real system-wide analytics data."""
+    from datetime import timedelta
+
+    now = timezone.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    week_ago    = now - timedelta(days=7)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    total_facilities  = Facility.objects.count()
+    active_facilities = Facility.objects.filter(is_active=True).count()
+    facilities_month  = Facility.objects.filter(created_at__gte=month_start).count()
+    new_users_week    = User.objects.filter(date_joined__gte=week_ago).count()
+    studies_today     = Study.objects.filter(study_date__gte=today_start).count()
+    total_users       = User.objects.count()
+
+    return JsonResponse({
+        'total_facilities':  total_facilities,
+        'active_facilities': active_facilities,
+        'facilities_month':  facilities_month,
+        'new_users_week':    new_users_week,
+        'studies_today':     studies_today,
+        'total_users':       total_users,
+    })
+
 
 def export_users(users, format):
     """Export users data in various formats"""

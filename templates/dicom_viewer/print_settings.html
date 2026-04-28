@@ -362,7 +362,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const result = await response.json();
             
             if (result.success) {
-                console.log('✅ Test print sent successfully:', result.message);
                 showToast('Test print sent successfully', 'success');
             } else {
                 console.error('❌ Test print failed:', result.error);

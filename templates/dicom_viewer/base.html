@@ -3728,7 +3728,7 @@
                     
                     // Display contrast analysis if available
                     if (data.contrast_analysis) {
-                        console.log('MRI Contrast Analysis:', data.contrast_analysis);
+
                     }
                 } else {
                     hideLoading();
@@ -3775,7 +3775,7 @@
                     // Display hotspots if detected
                     if (data.hotspots && data.hotspots.length > 0) {
                         showToast(`Detected ${data.hotspots.length} PET hotspots`, 'info');
-                        console.log('PET Hotspots:', data.hotspots);
+
                     }
                 } else {
                     hideLoading();
@@ -3826,7 +3826,7 @@
                     // Display defects if detected
                     if (data.defects && data.defects.length > 0) {
                         showToast(`Detected ${data.defects.length} perfusion defects`, 'warning');
-                        console.log('SPECT Defects:', data.defects);
+
                     }
                 } else {
                     hideLoading();
@@ -4907,11 +4907,14 @@
         }
 
         // Handle study selection from dropdown
-        document.getElementById('studySelect').addEventListener('change', function() {
-            if (this.value) {
-                loadStudy(this.value);
-            }
-        });
+        const _studySelectEl = document.getElementById('studySelect');
+        if (_studySelectEl) {
+            _studySelectEl.addEventListener('change', function() {
+                if (this.value) {
+                    loadStudy(this.value);
+                }
+            });
+        }
 
         // Professional Control Popup Management
         let activePopup = null;

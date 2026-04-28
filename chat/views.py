@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
 from django.db.models import Q, Count, Max
+from datetime import timedelta
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from .models import ChatRoom, ChatParticipant, ChatMessage, ChatInvitation
@@ -334,7 +335,7 @@ def invite_user(request, room_id):
         return JsonResponse({'ok': False, 'error': 'You can only invite users to this room based on facility restrictions'}, status=403)
 
     # Create or refresh invitation
-    expires_at = timezone.now() + timezone.timedelta(days=7)
+    expires_at = timezone.now() + timedelta(days=7)
     invitation = ChatInvitation.objects.filter(room=room, invited_user=invited_user).first()
     if invitation:
         invitation.status = 'pending'

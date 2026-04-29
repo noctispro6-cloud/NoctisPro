@@ -215,8 +215,10 @@ def _load_local_model():
     global _local_pipeline, _local_pipeline_error
 
     with _model_lock:
-        if _local_pipeline is not None or _local_pipeline_error is not None:
+        if _local_pipeline is not None:
             return _local_pipeline
+        # Reset stale errors so retries are possible
+        _local_pipeline_error = None
 
         model_id = _setting("AI_LOCAL_MODEL", "google/flan-t5-base")
         logger.info("Loading local AI model: %s", model_id)
@@ -238,8 +240,7 @@ def _load_local_model():
                             task,
                             model=model_id,
                             device=device,
-                            torch_dtype=torch.float32,
-                            model_kwargs={"low_cpu_mem_usage": True},
+                            model_kwargs={"low_cpu_mem_usage": True, "torch_dtype": torch.float32},
                         )
                         break
                     except ValueError:
@@ -252,8 +253,7 @@ def _load_local_model():
                     task,
                     model=model_id,
                     device=device,
-                    torch_dtype=torch.float32,
-                    model_kwargs={"low_cpu_mem_usage": True},
+                    model_kwargs={"low_cpu_mem_usage": True, "torch_dtype": torch.float32},
                 )
             _local_pipeline = pipe
             logger.info("Local AI model loaded successfully: %s", model_id)

@@ -4724,7 +4724,7 @@
                     const sel = document.getElementById('aiModelSelect');
                     if (sel && sel.value) formData.append('model_id', sel.value);
                 } catch (_) {}
-                const response = await fetch(`/ai_analysis/api/series/${currentSeries.id}/analyze/`, {
+                const response = await fetch(`/ai/api/series/${currentSeries.id}/analyze/`, {
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': getCSRFToken(),
@@ -5090,7 +5090,7 @@
                     const sel = document.getElementById('aiModelSelect');
                     if (sel && sel.value) formData.append('model_id', sel.value);
                 } catch (_) {}
-                const response = await fetch(`/ai_analysis/api/series/${currentSeries.id}/analyze/`, {
+                const response = await fetch(`/ai/api/series/${currentSeries.id}/analyze/`, {
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': getCSRFToken(),

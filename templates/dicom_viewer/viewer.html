@@ -5535,7 +5535,7 @@
                 // Full-series analysis (representative sampling)
                 fd.append('max_slices', '24');
 
-                const response = await fetch(`/ai_analysis/api/series/${currentSeries.id}/analyze/`, {
+                const response = await fetch(`/ai/api/series/${currentSeries.id}/analyze/`, {
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': getCSRFToken(),

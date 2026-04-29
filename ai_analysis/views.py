@@ -241,22 +241,20 @@ def analyze_study(request, study_id):
     # GET request - show analysis form
     available_models = []
     if is_admin_or_radiologist(user):
-        # Filter models
-        available_models = AIModel.objects.filter(
-            is_active=True,
-            modality__in=[study.modality.code, 'ALL']
-        )
-        
-        # Enforce Subscription
-        # If user is admin/radiologist, check their facility subscription if applicable.
-        # If no facility linked (e.g. platform admin), allow access.
-        if user.facility and not user.facility.has_ai_subscription:
-             # Hide models that require subscription
-             available_models = available_models.filter(requires_subscription=False)
-        
-        # If subscription expired, treat as no subscription
-        if user.facility and user.facility.subscription_expires_at and user.facility.subscription_expires_at < timezone.now():
-             available_models = available_models.filter(requires_subscription=False)
+        # Admins and radiologists see all active models regardless of study modality.
+        # Modality info is shown as a badge on each card for reference.
+        available_models = AIModel.objects.filter(is_active=True).order_by('name')
+
+        # Enforce subscription only when the user has a facility without an active/valid subscription.
+        # Platform admins (facility=None) always have full access.
+        if user.facility:
+            has_sub = user.facility.has_ai_subscription
+            expired = (
+                user.facility.subscription_expires_at
+                and user.facility.subscription_expires_at < timezone.now()
+            )
+            if not has_sub or expired:
+                available_models = available_models.filter(requires_subscription=False)
 
     # Get existing analyses
     existing_analyses = AIAnalysis.objects.filter(
@@ -367,9 +365,9 @@ def api_analyze_series(request, series_id):
             status=403,
         )
 
-    # Pick one suitable active model for this modality
+    # Pick one suitable active model — prefer matching modality, fall back to any active model
     modality_code = getattr(study.modality, 'code', None)
-    models_query = AIModel.objects.filter(is_active=True, modality__in=[modality_code, 'ALL'])
+    models_query = AIModel.objects.filter(is_active=True)
     
     # Enforce subscription filter on model selection
     if user.facility and (not user.facility.has_ai_subscription or (user.facility.subscription_expires_at and user.facility.subscription_expires_at < timezone.now())):
@@ -385,8 +383,12 @@ def api_analyze_series(request, series_id):
             pass # Fallback to auto-selection if invalid/unauthorized
     
     if not ai_model:
-        ai_model = models_query.order_by('model_type', '-created_at').first()
-    
+        # Prefer a model whose modality matches; fall back to any active model
+        if modality_code:
+            ai_model = models_query.filter(modality__in=[modality_code, 'ALL']).order_by('model_type', '-created_at').first()
+        if not ai_model:
+            ai_model = models_query.order_by('model_type', '-created_at').first()
+
     if not ai_model:
         if user.facility and not user.facility.has_ai_subscription:
              return JsonResponse({'success': False, 'error': 'AI Subscription required for this analysis.'}, status=403)
@@ -545,9 +547,9 @@ def api_analyze_study(request, study_id):
             status=403,
         )
 
-    # Pick an active model for this modality (same selection rules as series endpoint)
+    # Pick an active model — prefer matching modality, fall back to any active model
     modality_code = getattr(study.modality, 'code', None)
-    models_query = AIModel.objects.filter(is_active=True, modality__in=[modality_code, 'ALL'])
+    models_query = AIModel.objects.filter(is_active=True)
     if user.facility and (not user.facility.has_ai_subscription or (user.facility.subscription_expires_at and user.facility.subscription_expires_at < timezone.now())):
         models_query = models_query.filter(requires_subscription=False)
 
@@ -559,7 +561,11 @@ def api_analyze_study(request, study_id):
         except AIModel.DoesNotExist:
             ai_model = None
     if not ai_model:
-        ai_model = models_query.order_by('model_type', '-created_at').first()
+        # Prefer modality match; fall back to any active model
+        if modality_code:
+            ai_model = models_query.filter(modality__in=[modality_code, 'ALL']).order_by('model_type', '-created_at').first()
+        if not ai_model:
+            ai_model = models_query.order_by('model_type', '-created_at').first()
     if not ai_model:
         return JsonResponse({'success': False, 'error': f'No active AI models available for modality {modality_code}'}, status=400)
 
@@ -903,6 +909,37 @@ def model_management(request):
     }
     
     return render(request, 'ai_analysis/model_management.html', context)
+
+@login_required
+@csrf_exempt
+def api_model_update(request, model_id):
+    """Update AI model fields inline (admin only)."""
+    if not request.user.is_admin():
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    try:
+        model = AIModel.objects.get(pk=model_id)
+        data = json.loads(request.body)
+        allowed = {'name', 'version', 'model_type', 'modality', 'body_part', 'description', 'is_active'}
+        for field in allowed:
+            if field in data:
+                if field == 'is_active':
+                    setattr(model, field, bool(data[field]))
+                else:
+                    setattr(model, field, str(data[field]).strip())
+        model.full_clean(exclude=['model_file_path'])
+        model.save()
+        return JsonResponse({'success': True, 'model': {
+            'id': model.id, 'name': model.name, 'version': model.version,
+            'model_type': model.model_type, 'modality': model.modality,
+            'body_part': model.body_part, 'description': model.description,
+            'is_active': model.is_active,
+        }})
+    except AIModel.DoesNotExist:
+        return JsonResponse({'error': 'Model not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
 
 @login_required
 @csrf_exempt

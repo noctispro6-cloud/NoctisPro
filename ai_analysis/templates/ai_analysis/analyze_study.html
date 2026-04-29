@@ -1,308 +1,395 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Analyze Study - AI Analysis</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    {% load static %}
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'css/responsive-ui-scaling.css' %}">
-    <style>
-        :root {
-            --primary-bg: #0a0a0a;
-            --secondary-bg: #1a1a1a;
-            --card-bg: #252525;
-            --border-color: #404040;
-            --accent-color: #00d4ff;
-            --text-primary: #ffffff;
-            --text-secondary: #b3b3b3;
-            --success-color: #00ff88;
-            --warning-color: #ffaa00;
-            --danger-color: #ff4444;
-        }
+{% extends "base.html" %}
+{% load static %}
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--primary-bg);
-            color: var(--text-primary);
-            line-height: 1.6;
-        }
-        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+{% block title %}Analyze Study — {{ study.accession_number }} — Noctis Pro{% endblock %}
 
-        .header {
-            background: var(--secondary-bg);
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            border: 1px solid var(--border-color);
-        }
-        .header h1 { color: var(--accent-color); font-size: 1.9rem; margin-bottom: 8px; }
-        .header p { color: var(--text-secondary); }
+{% block extra_css %}
+<style>
+    .as-wrap { max-width: 1200px; margin: 0 auto; padding: 20px 16px 40px; }
 
-        .grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-        }
-        @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    /* ── Page header ───────────────────────────────────────────────── */
+    .as-header {
+        background: var(--secondary-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 20px 22px;
+        margin-bottom: 18px;
+    }
+    .as-header-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+    }
+    .as-header h1 {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--accent-color);
+        margin: 0 0 4px;
+    }
+    .as-header-meta {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        font-size: 0.82rem;
+        color: var(--text-secondary);
+    }
+    .as-header-meta strong { color: var(--text-primary); }
 
-        .card {
-            background: var(--secondary-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            padding: 18px;
-        }
+    .as-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+        border: none;
+        white-space: nowrap;
+        transition: opacity 0.15s, transform 0.1s;
+    }
+    .as-btn:hover { opacity: 0.86; transform: translateY(-1px); }
+    .as-btn-primary { background: var(--accent-color); color: var(--primary-bg); }
+    .as-btn-ghost   { background: var(--secondary-bg); color: var(--text-primary); border: 1px solid var(--border-color); }
+    .as-btn-group   { display: flex; gap: 8px; flex-wrap: wrap; }
 
-        .card h2 {
-            color: var(--accent-color);
-            font-size: 1.2rem;
-            margin-bottom: 10px;
-        }
+    /* ── Two-col grid ──────────────────────────────────────────────── */
+    .as-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+    @media (max-width: 900px) { .as-grid { grid-template-columns: 1fr; } }
 
-        .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    /* ── Cards ─────────────────────────────────────────────────────── */
+    .as-card {
+        background: var(--secondary-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    .as-card-header {
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .as-card-header h2 {
+        font-size: 0.92rem;
+        font-weight: 700;
+        color: var(--accent-color);
+        margin: 0;
+    }
+    .as-card-body { padding: 18px; }
 
-        .btn {
-            background: var(--accent-color);
-            color: var(--primary-bg);
-            padding: 10px 16px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 0.95rem;
-            font-weight: 700;
-            text-decoration: none;
-            display: inline-block;
-        }
-        .btn.secondary {
-            background: var(--card-bg);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-        }
+    /* ── Priority + Start controls ─────────────────────────────────── */
+    .as-controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+    }
+    .as-controls label { font-size: 0.8rem; color: var(--text-secondary); font-weight: 600; }
+    .as-controls select {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        outline: none;
+    }
+    .as-controls select:focus { border-color: var(--accent-color); }
 
-        select {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            padding: 8px 10px;
-            border-radius: 8px;
-        }
+    /* ── Model list ────────────────────────────────────────────────── */
+    .as-model-list { display: flex; flex-direction: column; gap: 8px; }
+    .as-model-item {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 12px 14px;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        cursor: pointer;
+        transition: border-color 0.15s;
+    }
+    .as-model-item:hover { border-color: var(--accent-color); }
+    .as-model-item input[type="checkbox"] {
+        margin-top: 3px;
+        accent-color: var(--accent-color);
+        width: 15px;
+        height: 15px;
+        flex-shrink: 0;
+    }
+    .as-model-item input[type="checkbox"]:checked ~ .as-model-info { color: var(--text-primary); }
+    .as-model-info { flex: 1; }
+    .as-model-name { font-weight: 700; font-size: 0.88rem; color: var(--text-primary); }
+    .as-model-ver  { color: var(--text-secondary); font-size: 0.78rem; margin-left: 4px; }
+    .as-model-meta { color: var(--text-secondary); font-size: 0.78rem; margin-top: 3px; }
 
-        .model-list { margin-top: 10px; }
-        .model {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 10px 12px;
-            display: flex;
-            gap: 10px;
-            align-items: flex-start;
-            margin-bottom: 10px;
-        }
-        .model label { display: block; font-weight: 700; }
-        .model small { display: block; color: var(--text-secondary); margin-top: 2px; }
+    /* ── Status feedback ───────────────────────────────────────────── */
+    .as-status {
+        display: none;
+        margin-top: 14px;
+        padding: 12px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        background: rgba(255,255,255,0.02);
+    }
+    .as-status.success { border-color: rgba(0,255,136,0.4); color: var(--success-color); }
+    .as-status.error   { border-color: rgba(255,68,68,0.4); color: var(--danger-color); }
 
-        .status {
-            margin-top: 10px;
-            padding: 10px 12px;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-            background: rgba(255,255,255,0.03);
-            color: var(--text-secondary);
-        }
-        .status.success { border-color: rgba(0,255,136,0.4); color: var(--success-color); }
-        .status.error { border-color: rgba(255,68,68,0.4); color: var(--danger-color); }
+    /* ── Analyses list ─────────────────────────────────────────────── */
+    .as-analysis-item {
+        padding: 14px 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .as-analysis-item:last-child { border-bottom: none; }
+    .as-analysis-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .as-analysis-name { font-weight: 700; font-size: 0.88rem; color: var(--text-primary); }
+    .as-analysis-ver  { color: var(--text-secondary); font-size: 0.78rem; margin-left: 4px; }
+    .as-analysis-date { color: var(--text-secondary); font-size: 0.78rem; margin-top: 3px; }
 
-        .analysis-item {
-            border-bottom: 1px solid var(--border-color);
-            padding: 10px 0;
-        }
-        .analysis-item:last-child { border-bottom: none; }
-        .pill {
-            display: inline-block;
-            padding: 2px 10px;
-            border-radius: 999px;
-            font-size: 0.85rem;
-            border: 1px solid var(--border-color);
-            background: var(--card-bg);
-            color: var(--text-secondary);
-        }
-        .pill.completed { color: var(--success-color); border-color: rgba(0,255,136,0.4); }
-        .pill.processing { color: var(--warning-color); border-color: rgba(255,170,0,0.4); }
-        .pill.failed { color: var(--danger-color); border-color: rgba(255,68,68,0.4); }
+    /* ── Status pills ──────────────────────────────────────────────── */
+    .as-pill {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+    }
+    .as-pill.pending    { color: var(--text-secondary);  border-color: var(--border-color); }
+    .as-pill.processing { color: var(--warning-color);   border-color: rgba(255,170,0,0.4); background: rgba(255,170,0,0.08); }
+    .as-pill.completed  { color: var(--success-color);   border-color: rgba(0,255,136,0.4); background: rgba(0,255,136,0.08); }
+    .as-pill.failed     { color: var(--danger-color);    border-color: rgba(255,68,68,0.4);  background: rgba(255,68,68,0.08); }
 
-        pre {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 10px;
-            overflow: auto;
-            white-space: pre-wrap;
-            color: var(--text-primary);
-            margin-top: 6px;
-        }
+    /* ── Report / details block ────────────────────────────────────── */
+    .as-report {
+        margin-top: 8px;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 10px 12px;
+        white-space: pre-wrap;
+        font-size: 0.8rem;
+        color: var(--text-primary);
+        overflow: auto;
+        max-height: 280px;
+        line-height: 1.5;
+    }
+    .as-progress { color: var(--text-secondary); font-size: 0.8rem; margin-top: 6px; }
 
-        .muted { color: var(--text-secondary); }
-    </style>
-</head>
-<body>
-<div class="container">
-    <div class="header">
-        <h1><i class="fas fa-microscope"></i> Analyze Study</h1>
-        <p>
-            <strong>Accession:</strong> {{ study.accession_number }} &nbsp;|
-            <strong>Patient:</strong> {{ study.patient.full_name|default:'Unknown' }} &nbsp;|
-            <strong>Modality:</strong> {{ study.modality.code|default:study.modality.name|default:'-' }}
-        </p>
-        <div class="row" style="margin-top: 12px;">
-            <a class="btn secondary" href="{% url 'ai_analysis:study_picker' %}"><i class="fas fa-arrow-left"></i> Back to Studies</a>
-            <a class="btn secondary" href="{% url 'ai_analysis:ai_dashboard' %}"><i class="fas fa-chart-line"></i> AI Dashboard</a>
+    /* ── Empty states ──────────────────────────────────────────────── */
+    .as-empty { color: var(--text-secondary); font-size: 0.85rem; }
+    .as-no-models {
+        background: rgba(255,68,68,0.07);
+        border: 1px solid rgba(255,68,68,0.3);
+        border-radius: 8px;
+        padding: 14px;
+        color: var(--danger-color);
+        font-size: 0.85rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="as-wrap">
+
+    <!-- Header -->
+    <div class="as-header">
+        <div class="as-header-top">
+            <div>
+                <h1><i class="fas fa-microscope me-2"></i>Analyze Study</h1>
+                <div class="as-header-meta">
+                    <span><strong>Accession:</strong> {{ study.accession_number }}</span>
+                    <span><strong>Patient:</strong> {{ study.patient.full_name|default:"Unknown" }}</span>
+                    <span><strong>Modality:</strong> {{ study.modality.code|default:study.modality.name|default:"-" }}</span>
+                </div>
+            </div>
+            <div class="as-btn-group">
+                <a class="as-btn as-btn-ghost" href="{% url 'ai_analysis:study_picker' %}">
+                    <i class="fas fa-arrow-left"></i> Studies
+                </a>
+                <a class="as-btn as-btn-ghost" href="{% url 'ai_analysis:ai_dashboard' %}">
+                    <i class="fas fa-chart-line"></i> Dashboard
+                </a>
+            </div>
         </div>
     </div>
 
-    <div class="grid">
-        <div class="card">
-            <h2><i class="fas fa-play"></i> Start AI Analysis</h2>
+    <div class="as-grid">
 
-            {% if available_models %}
-                <div class="row" style="margin-bottom: 10px;">
-                    <label class="muted" for="priority">Priority</label>
-                    <select id="priority" name="priority">
-                        <option value="low">Low</option>
-                        <option value="normal" selected>Normal</option>
-                        <option value="high">High</option>
-                        <option value="urgent">Urgent</option>
-                    </select>
-                    <button id="startBtn" class="btn" type="button"><i class="fas fa-rocket"></i> Start</button>
-                </div>
+        <!-- LEFT: Start Analysis -->
+        <div class="as-card">
+            <div class="as-card-header">
+                <i class="fas fa-play-circle" style="color:var(--accent-color);"></i>
+                <h2>Start AI Analysis</h2>
+            </div>
+            <div class="as-card-body">
+                {% if available_models %}
+                    <div class="as-controls">
+                        <label for="priority">Priority</label>
+                        <select id="priority" name="priority">
+                            <option value="low">Low</option>
+                            <option value="normal" selected>Normal</option>
+                            <option value="high">High</option>
+                            <option value="urgent">Urgent</option>
+                        </select>
+                        <button id="startBtn" class="as-btn as-btn-primary" type="button">
+                            <i class="fas fa-rocket"></i> Start Analysis
+                        </button>
+                    </div>
 
-                <div class="model-list" id="modelList">
-                    {% for m in available_models %}
-                        <div class="model">
-                            <input type="checkbox" id="model_{{ m.id }}" value="{{ m.id }}" />
-                            <div>
-                                <label for="model_{{ m.id }}">{{ m.name }} <span class="muted">v{{ m.version }}</span></label>
-                                <small>{{ m.get_model_type_display }} | Modality: {{ m.modality }}{% if m.body_part %} | {{ m.body_part }}{% endif %}</small>
-                            </div>
-                        </div>
-                    {% endfor %}
-                </div>
-
-                <div id="status" class="status" style="display:none;"></div>
-
-            {% else %}
-                <div class="status error">
-                    No AI models are available for this study, or you don’t have permission to start analyses.
-                </div>
-            {% endif %}
-        </div>
-
-        <div class="card">
-            <h2><i class="fas fa-history"></i> Existing Analyses</h2>
-            {% if existing_analyses %}
-                <div id="existingAnalyses">
-                    {% for a in existing_analyses %}
-                        <div class="analysis-item" data-analysis-id="{{ a.id }}">
-                            <div class="row" style="justify-content: space-between;">
-                                <div>
-                                    <strong>{{ a.ai_model.name }}</strong>
-                                    <span class="muted">v{{ a.ai_model.version }}</span>
+                    <div class="as-model-list" id="modelList">
+                        {% for m in available_models %}
+                            <label class="as-model-item">
+                                <input type="checkbox" value="{{ m.id }}" />
+                                <div class="as-model-info">
+                                    <span class="as-model-name">{{ m.name }}</span>
+                                    <span class="as-model-ver">v{{ m.version }}</span>
+                                    <div class="as-model-meta">{{ m.get_model_type_display }} &bull; {{ m.modality }}{% if m.body_part %} &bull; {{ m.body_part }}{% endif %}</div>
                                 </div>
-                                <span class="pill {{ a.status }}" id="pill_{{ a.id }}">{{ a.status|capfirst }}</span>
-                            </div>
-                            <div class="muted">Requested: {{ a.requested_at|date:"Y-m-d H:i" }}</div>
-                            <div id="details_{{ a.id }}" style="margin-top: 6px;"></div>
-                        </div>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="muted">No analyses yet for this study.</div>
-            {% endif %}
+                            </label>
+                        {% endfor %}
+                    </div>
+
+                    <div id="statusMsg" class="as-status"></div>
+
+                {% else %}
+                    <div class="as-no-models">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        No AI models are available for this study, or you don't have permission to start analyses.
+                    </div>
+                {% endif %}
+            </div>
         </div>
+
+        <!-- RIGHT: Existing Analyses -->
+        <div class="as-card">
+            <div class="as-card-header">
+                <i class="fas fa-history" style="color:var(--accent-color);"></i>
+                <h2>Existing Analyses</h2>
+            </div>
+            <div class="as-card-body">
+                {% if existing_analyses %}
+                    <div id="existingAnalyses">
+                        {% for a in existing_analyses %}
+                            <div class="as-analysis-item" data-analysis-id="{{ a.id }}">
+                                <div class="as-analysis-row">
+                                    <div>
+                                        <span class="as-analysis-name">{{ a.ai_model.name }}</span>
+                                        <span class="as-analysis-ver">v{{ a.ai_model.version }}</span>
+                                        <div class="as-analysis-date">
+                                            <i class="fas fa-clock me-1"></i>{{ a.requested_at|date:"Y-m-d H:i" }}
+                                        </div>
+                                    </div>
+                                    <span class="as-pill {{ a.status }}" id="pill_{{ a.id }}">
+                                        {{ a.status|capfirst }}
+                                    </span>
+                                </div>
+                                <div id="details_{{ a.id }}"></div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="as-empty">
+                        <i class="fas fa-inbox me-2" style="opacity:0.4;"></i>
+                        No analyses yet for this study.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
     </div>
 </div>
+{% endblock %}
 
+{% block extra_js %}
 <script>
-(function() {
+(function () {
     const startBtn = document.getElementById('startBtn');
-    const statusEl = document.getElementById('status');
+    const statusEl = document.getElementById('statusMsg');
 
     function showStatus(msg, kind) {
         if (!statusEl) return;
         statusEl.style.display = 'block';
-        statusEl.className = 'status' + (kind ? (' ' + kind) : '');
+        statusEl.className = 'as-status' + (kind ? ' ' + kind : '');
         statusEl.textContent = msg;
     }
 
     function getSelectedModelIds() {
-        const inputs = document.querySelectorAll('#modelList input[type="checkbox"]');
-        const ids = [];
-        inputs.forEach(i => { if (i.checked) ids.push(i.value); });
-        return ids;
+        return Array.from(
+            document.querySelectorAll('#modelList input[type="checkbox"]:checked')
+        ).map(i => i.value);
     }
 
-    async function fetchStatus(analysisId) {
-        const resp = await fetch(`{% url 'ai_analysis:api_analysis_status' 0 %}`.replace('/0/', `/${analysisId}/`), {
-            credentials: 'same-origin'
-        });
-        if (!resp.ok) return null;
-        return await resp.json();
+    async function fetchStatus(id) {
+        const resp = await fetch(
+            `{% url 'ai_analysis:api_analysis_status' 0 %}`.replace('/0/', `/${id}/`),
+            { credentials: 'same-origin' }
+        );
+        return resp.ok ? resp.json() : null;
     }
 
-    function renderDetails(analysisId, data) {
-        const pill = document.getElementById(`pill_${analysisId}`);
+    function renderDetails(id, data) {
+        const pill = document.getElementById(`pill_${id}`);
         if (pill && data && data.status) {
             pill.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
-            pill.className = `pill ${data.status}`;
+            pill.className = `as-pill ${data.status}`;
         }
-
-        const details = document.getElementById(`details_${analysisId}`);
+        const details = document.getElementById(`details_${id}`);
         if (!details || !data) return;
 
         if (data.status === 'completed') {
             const reportText = data.report_text || (data.report && data.report.text) || '';
-            const findings = data.findings || '';
-            const conf = (data.confidence_score !== null && data.confidence_score !== undefined) ? data.confidence_score : '';
+            const findings   = data.findings || '';
+            const conf = (data.confidence_score !== null && data.confidence_score !== undefined)
+                ? data.confidence_score : '';
             details.innerHTML = '';
-            if (conf !== '') {
-                details.innerHTML += `<div class="muted">Confidence: <strong>${conf}</strong></div>`;
-            }
-            if (reportText) {
-                details.innerHTML += `<pre>${reportText}</pre>`;
-            } else if (findings) {
-                details.innerHTML += `<pre>${findings}</pre>`;
-            }
+            if (conf !== '')
+                details.innerHTML += `<div class="as-progress">Confidence: <strong>${conf}</strong></div>`;
+            if (reportText)
+                details.innerHTML += `<pre class="as-report">${reportText}</pre>`;
+            else if (findings)
+                details.innerHTML += `<pre class="as-report">${findings}</pre>`;
         } else if (data.status === 'failed') {
-            const err = data.error_message || 'Unknown error';
-            details.innerHTML = `<div class="status error">${err}</div>`;
+            details.innerHTML = `<div class="as-status error" style="display:block;margin-top:8px;">${data.error_message || 'Unknown error'}</div>`;
         } else {
             const pct = data.progress_percentage || 0;
-            details.innerHTML = `<div class="muted">Progress: ${pct}%</div>`;
+            details.innerHTML = `<div class="as-progress"><i class="fas fa-spinner fa-spin me-1"></i>Progress: ${pct}%</div>`;
         }
     }
 
-    async function poll(analysisIds) {
-        const pending = new Set(analysisIds.map(String));
-        const maxRounds = 90; // ~3 min at 2s interval
-        for (let round = 0; round < maxRounds && pending.size > 0; round++) {
+    async function poll(ids) {
+        const pending = new Set(ids.map(String));
+        for (let round = 0; round < 90 && pending.size; round++) {
             for (const id of Array.from(pending)) {
                 try {
                     const data = await fetchStatus(id);
                     if (!data) continue;
                     renderDetails(id, data);
-                    if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+                    if (['completed', 'failed', 'cancelled'].includes(data.status))
                         pending.delete(id);
-                    }
-                } catch (e) {
-                    // ignore transient polling errors
-                }
+                } catch (_) {}
             }
-            if (pending.size > 0) {
-                await new Promise(r => setTimeout(r, 2000));
-            }
+            if (pending.size) await new Promise(r => setTimeout(r, 2000));
         }
     }
 
@@ -310,10 +397,7 @@
         startBtn.addEventListener('click', async () => {
             const ids = getSelectedModelIds();
             const priority = (document.getElementById('priority') || {}).value || 'normal';
-            if (!ids.length) {
-                showStatus('Please select at least one AI model.', 'error');
-                return;
-            }
+            if (!ids.length) { showStatus('Please select at least one AI model.', 'error'); return; }
 
             showStatus('Starting AI analysis…', '');
             startBtn.disabled = true;
@@ -331,30 +415,19 @@
                     return;
                 }
                 showStatus(data.message || 'AI analysis started.', 'success');
-
-                // Poll the started analyses and refresh page after a short delay
-                if (data.analysis_ids && data.analysis_ids.length) {
-                    await poll(data.analysis_ids);
-                }
-
-                // Refresh to show new analyses in the list
-                setTimeout(() => { window.location.reload(); }, 800);
-
-            } catch (e) {
-                showStatus('Failed to start AI analysis (network/server error).', 'error');
+                if (data.analysis_ids && data.analysis_ids.length) await poll(data.analysis_ids);
+                setTimeout(() => location.reload(), 800);
+            } catch (_) {
+                showStatus('Network or server error — please try again.', 'error');
                 startBtn.disabled = false;
             }
         });
     }
 
-    // Auto-poll any pending/processing analyses already on the page
+    // Poll any pending analyses already on the page
     const existing = Array.from(document.querySelectorAll('[data-analysis-id]'))
-        .map(el => el.getAttribute('data-analysis-id'))
-        .filter(Boolean);
-    if (existing.length) {
-        poll(existing);
-    }
+        .map(el => el.getAttribute('data-analysis-id')).filter(Boolean);
+    if (existing.length) poll(existing);
 })();
 </script>
-</body>
-</html>
+{% endblock %}

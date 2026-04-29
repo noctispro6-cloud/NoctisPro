@@ -1344,7 +1344,7 @@
                     (new Date() - new Date(study.upload_date)) < 600000; // 10 minutes
 
                 return `
-                    <tr onclick="selectStudy(this)" data-study-id="${study.id}" ${isRecentUpload ? 'class="recent-upload"' : ''}>
+                    <tr onclick="selectStudy(this)" ondblclick="openStudyRow(this)" data-study-id="${study.id}" ${isRecentUpload ? 'class="recent-upload"' : ''} title="Click to select • Double-click to open in viewer">
                         <td onclick="event.stopPropagation()"><input type="checkbox" class="study-checkbox" data-id="${study.id}" onchange="updateBulkActions()" onclick="event.stopPropagation()"></td>
                         <td class="timestamp">${studyTime}</td>
                         <td class="patient-id">${study.patient_id}</td>
@@ -1727,15 +1727,16 @@
         }
 
         function selectStudy(row) {
-            // Remove previous selection
+            // Single click: highlight only — do NOT open viewer
             document.querySelectorAll('.data-table tbody tr').forEach(r => {
                 r.style.background = '';
             });
-
-            // Highlight selected row
             row.style.background = 'rgba(0, 212, 255, 0.15)';
+        }
 
-            // Open the study in viewer when row is clicked
+        function openStudyRow(row) {
+            // Double-click: select then open viewer
+            selectStudy(row);
             const studyId = row.getAttribute('data-study-id');
             if (studyId) {
                 openStudyInViewer(studyId);

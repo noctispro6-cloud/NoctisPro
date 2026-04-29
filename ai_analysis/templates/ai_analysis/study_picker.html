@@ -1,193 +1,286 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Select Study - AI Analysis</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    {% load static %}
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'css/responsive-ui-scaling.css' %}">
-    <style>
-        :root {
-            --primary-bg: #0a0a0a;
-            --secondary-bg: #1a1a1a;
-            --card-bg: #252525;
-            --border-color: #404040;
-            --accent-color: #00d4ff;
-            --text-primary: #ffffff;
-            --text-secondary: #b3b3b3;
-            --success-color: #00ff88;
-            --warning-color: #ffaa00;
-            --danger-color: #ff4444;
-        }
+{% extends "base.html" %}
+{% load static %}
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--primary-bg);
-            color: var(--text-primary);
-            line-height: 1.6;
-        }
-        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
-        .header {
-            background: var(--secondary-bg);
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            border: 1px solid var(--border-color);
-        }
-        .header h1 { color: var(--accent-color); font-size: 2rem; margin-bottom: 8px; }
-        .header p { color: var(--text-secondary); }
+{% block title %}Select Study for AI Analysis — Noctis Pro{% endblock %}
 
-        .toolbar {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 16px;
-        }
+{% block extra_css %}
+<style>
+    .sp-wrap { max-width: 1400px; margin: 0 auto; padding: 20px 16px 40px; }
 
-        .search {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            flex: 1;
-            min-width: 320px;
-        }
+    /* ── Page header ───────────────────────────────────────────────── */
+    .sp-header {
+        background: var(--secondary-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 20px 22px;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+    .sp-header h1 {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--accent-color);
+        margin: 0 0 3px;
+    }
+    .sp-header p { color: var(--text-secondary); font-size: 0.82rem; margin: 0; }
 
-        .search input {
-            width: 100%;
-            background: var(--secondary-bg);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            padding: 10px 12px;
-            border-radius: 8px;
-            outline: none;
-        }
+    /* ── Toolbar ───────────────────────────────────────────────────── */
+    .sp-toolbar {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+    }
+    .sp-search {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex: 1;
+        min-width: 280px;
+    }
+    .sp-search input {
+        flex: 1;
+        background: var(--secondary-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 9px 12px;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        outline: none;
+        min-width: 0;
+        transition: border-color 0.15s;
+    }
+    .sp-search input:focus { border-color: var(--accent-color); }
+    .sp-search input::placeholder { color: var(--text-secondary); }
 
-        .btn {
-            background: var(--accent-color);
-            color: var(--primary-bg);
-            padding: 10px 16px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 0.95rem;
-            font-weight: 600;
-            text-decoration: none;
-            display: inline-block;
-        }
-        .btn.secondary {
-            background: var(--secondary-bg);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-        }
+    .sp-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+        border: none;
+        white-space: nowrap;
+        transition: opacity 0.15s, transform 0.1s;
+    }
+    .sp-btn:hover { opacity: 0.86; transform: translateY(-1px); }
+    .sp-btn-primary { background: var(--accent-color); color: var(--primary-bg); }
+    .sp-btn-ghost   { background: var(--secondary-bg); color: var(--text-primary); border: 1px solid var(--border-color); }
 
-        .table-wrap {
-            background: var(--secondary-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            overflow: hidden;
-        }
+    /* ── Table ─────────────────────────────────────────────────────── */
+    .sp-table-wrap {
+        background: var(--secondary-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    .sp-table { width: 100%; border-collapse: collapse; }
+    .sp-table th {
+        background: var(--card-bg);
+        color: var(--text-secondary);
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 10px 14px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .sp-table td {
+        padding: 13px 14px;
+        border-bottom: 1px solid var(--border-color);
+        color: var(--text-primary);
+        font-size: 0.85rem;
+    }
+    .sp-table tbody tr:last-child td { border-bottom: none; }
+    .sp-table tbody tr:hover td { background: rgba(0,212,255,0.03); }
 
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px 14px; border-bottom: 1px solid var(--border-color); }
-        th { text-align: left; color: var(--text-secondary); font-weight: 600; font-size: 0.9rem; }
-        td { color: var(--text-primary); }
-        tr:hover td { background: rgba(255,255,255,0.03); }
+    .sp-acc  { font-weight: 700; color: var(--text-primary); }
+    .sp-pid  { color: var(--text-secondary); font-size: 0.78rem; margin-top: 2px; }
+    .sp-mod  { font-weight: 600; }
+    .sp-date { color: var(--text-secondary); font-size: 0.82rem; }
 
-        .muted { color: var(--text-secondary); }
+    /* ── Modality badge ────────────────────────────────────────────── */
+    .sp-badge {
+        display: inline-block;
+        padding: 2px 9px;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        background: rgba(0,212,255,0.12);
+        color: var(--accent-color);
+        border: 1px solid rgba(0,212,255,0.25);
+    }
 
-        .pagination {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            align-items: center;
-            padding: 16px 0;
-        }
-        .pagination a {
-            color: var(--text-primary);
-            text-decoration: none;
-            padding: 8px 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: var(--card-bg);
-        }
-        .pagination span { color: var(--text-secondary); }
+    /* ── Analyze button ────────────────────────────────────────────── */
+    .sp-analyze-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 14px;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-decoration: none;
+        background: var(--accent-color);
+        color: var(--primary-bg);
+        white-space: nowrap;
+        transition: opacity 0.15s, transform 0.1s;
+    }
+    .sp-analyze-btn:hover { opacity: 0.86; transform: translateY(-1px); }
 
-        @media (max-width: 900px) {
-            th:nth-child(5), td:nth-child(5) { display: none; }
-        }
-    </style>
-</head>
-<body>
-<div class="container">
-    <div class="header">
-        <h1><i class="fas fa-play"></i> Select a Study for AI Analysis</h1>
-        <p>Search by accession number or patient details, then click Analyze.</p>
-    </div>
+    /* ── Empty row ─────────────────────────────────────────────────── */
+    .sp-empty { text-align: center; padding: 40px 20px; color: var(--text-secondary); }
+    .sp-empty i { font-size: 2rem; margin-bottom: 10px; display: block; opacity: 0.35; }
 
-    <div class="toolbar">
-        <form class="search" method="get" action="">
-            <input type="text" name="q" value="{{ query|default:'' }}" placeholder="Search accession / patient name / patient ID" />
-            <button class="btn" type="submit"><i class="fas fa-search"></i> Search</button>
-        </form>
+    /* ── Pagination ────────────────────────────────────────────────── */
+    .sp-pagination {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        align-items: center;
+        padding: 14px 0;
+    }
+    .sp-pagination a {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--text-primary);
+        text-decoration: none;
+        padding: 7px 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--card-bg);
+        font-size: 0.82rem;
+        transition: border-color 0.15s, color 0.15s;
+    }
+    .sp-pagination a:hover { border-color: var(--accent-color); color: var(--accent-color); }
+    .sp-pagination span { color: var(--text-secondary); font-size: 0.82rem; }
+
+    /* ── Responsive ────────────────────────────────────────────────── */
+    @media (max-width: 900px) {
+        .sp-col-facility { display: none; }
+    }
+    @media (max-width: 650px) {
+        .sp-col-date { display: none; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sp-wrap">
+
+    <!-- Header -->
+    <div class="sp-header">
         <div>
-            <a class="btn secondary" href="{% url 'ai_analysis:ai_dashboard' %}"><i class="fas fa-arrow-left"></i> Back</a>
+            <h1><i class="fas fa-search me-2"></i>Select a Study for AI Analysis</h1>
+            <p>Search by accession number or patient details, then click Analyze.</p>
         </div>
+        <a class="sp-btn sp-btn-ghost" href="{% url 'ai_analysis:ai_dashboard' %}">
+            <i class="fas fa-arrow-left"></i> Dashboard
+        </a>
     </div>
 
-    <div class="table-wrap">
-        <table>
+    <!-- Search toolbar -->
+    <div class="sp-toolbar">
+        <form class="sp-search" method="get" action="">
+            <input type="text" name="q"
+                   value="{{ query|default:'' }}"
+                   placeholder="Search accession / patient name / patient ID…" />
+            <button class="sp-btn sp-btn-primary" type="submit">
+                <i class="fas fa-search"></i> Search
+            </button>
+            {% if query %}
+                <a class="sp-btn sp-btn-ghost" href="{% url 'ai_analysis:study_picker' %}">
+                    <i class="fas fa-times"></i>
+                </a>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Table -->
+    <div class="sp-table-wrap">
+        <table class="sp-table">
             <thead>
                 <tr>
                     <th>Accession</th>
                     <th>Patient</th>
                     <th>Modality</th>
-                    <th>Uploaded</th>
-                    <th>Facility</th>
-                    <th></th>
+                    <th class="sp-col-date">Uploaded</th>
+                    <th class="sp-col-facility">Facility</th>
+                    <th style="text-align:right;"></th>
                 </tr>
             </thead>
             <tbody>
             {% for study in studies %}
                 <tr>
-                    <td><strong>{{ study.accession_number }}</strong></td>
+                    <td><span class="sp-acc">{{ study.accession_number }}</span></td>
                     <td>
-                        {{ study.patient.full_name|default:'Unknown' }}
-                        {% if study.patient.patient_id %}<div class="muted">ID: {{ study.patient.patient_id }}</div>{% endif %}
+                        <strong>{{ study.patient.full_name|default:"Unknown" }}</strong>
+                        {% if study.patient.patient_id %}
+                            <div class="sp-pid">ID: {{ study.patient.patient_id }}</div>
+                        {% endif %}
                     </td>
-                    <td>{{ study.modality.code|default:study.modality.name|default:'-' }}</td>
-                    <td>{{ study.upload_date|date:"Y-m-d H:i"|default:"-" }}</td>
-                    <td>{{ study.facility.name|default:"-" }}</td>
+                    <td>
+                        <span class="sp-badge">{{ study.modality.code|default:study.modality.name|default:"-" }}</span>
+                    </td>
+                    <td class="sp-col-date sp-date">
+                        {{ study.upload_date|date:"Y-m-d"|default:"-" }}
+                    </td>
+                    <td class="sp-col-facility sp-date">
+                        {{ study.facility.name|default:"-" }}
+                    </td>
                     <td style="text-align:right; white-space:nowrap;">
-                        <a class="btn" href="{% url 'ai_analysis:analyze_study' study.id %}"><i class="fas fa-microscope"></i> Analyze</a>
+                        <a class="sp-analyze-btn" href="{% url 'ai_analysis:analyze_study' study.id %}">
+                            <i class="fas fa-microscope"></i> Analyze
+                        </a>
                     </td>
                 </tr>
             {% empty %}
                 <tr>
-                    <td colspan="6" class="muted">No studies found.</td>
+                    <td colspan="6">
+                        <div class="sp-empty">
+                            <i class="fas fa-folder-open"></i>
+                            {% if query %}
+                                No studies found for "{{ query }}".
+                            {% else %}
+                                No studies available.
+                            {% endif %}
+                        </div>
+                    </td>
                 </tr>
             {% endfor %}
             </tbody>
         </table>
     </div>
 
+    <!-- Pagination -->
     {% if studies.paginator.num_pages > 1 %}
-    <div class="pagination">
+    <div class="sp-pagination">
         {% if studies.has_previous %}
-            <a href="?q={{ query|urlencode }}&page={{ studies.previous_page_number }}">Prev</a>
+            <a href="?q={{ query|urlencode }}&page={{ studies.previous_page_number }}">
+                <i class="fas fa-chevron-left"></i> Prev
+            </a>
         {% endif %}
         <span>Page {{ studies.number }} of {{ studies.paginator.num_pages }}</span>
         {% if studies.has_next %}
-            <a href="?q={{ query|urlencode }}&page={{ studies.next_page_number }}">Next</a>
+            <a href="?q={{ query|urlencode }}&page={{ studies.next_page_number }}">
+                Next <i class="fas fa-chevron-right"></i>
+            </a>
         {% endif %}
     </div>
     {% endif %}
+
 </div>
-</body>
-</html>
+{% endblock %}

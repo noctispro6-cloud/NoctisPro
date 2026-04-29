@@ -77,7 +77,7 @@ class DicomViewerEnhanced {
 
     async populateAIModels() {
         try {
-            const response = await fetch('/ai_analysis/api/models/');
+            const response = await fetch('/ai/api/models/');
             if (!response.ok) return; // Might not be authorized or available
             
             const data = await response.json();
@@ -692,7 +692,7 @@ class DicomViewerEnhanced {
                 (document.querySelector('[name=csrfmiddlewaretoken]') && document.querySelector('[name=csrfmiddlewaretoken]').value) ||
                 '';
 
-            const response = await fetch(`/ai_analysis/api/series/${seriesId}/analyze/`, {
+            const response = await fetch(`/ai/api/series/${seriesId}/analyze/`, {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': csrf,

@@ -540,8 +540,8 @@ def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=None
         zz = "1.00"
     return f"{series_id}|{q}|{plane}|{int(slice_index)}|{ww_i}|{wl_i}|{1 if inverted else 0}|{zz}"
 
-def _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=None):
-    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
+def _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=None, zoom_z=None):
+    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality, zoom_z=zoom_z)
     with _MPR_IMG_CACHE_LOCK:
         val = _MPR_IMG_CACHE.get(key)
         if val is not None:
@@ -552,8 +552,8 @@ def _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=None
             _MPR_IMG_CACHE_ORDER.append(key)
         return val
 
-def _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64, quality=None):
-    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
+def _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64, quality=None, zoom_z=None):
+    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality, zoom_z=zoom_z)
     with _MPR_IMG_CACHE_LOCK:
         if key not in _MPR_IMG_CACHE:
             while len(_MPR_IMG_CACHE_ORDER) >= _MAX_MPR_IMG_CACHE:
@@ -566,8 +566,8 @@ def _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64, qua
             pass
         _MPR_IMG_CACHE_ORDER.append(key)
 
-def _mpr_png_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=None):
-    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
+def _mpr_png_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=None, zoom_z=None):
+    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality, zoom_z=zoom_z)
     with _MPR_PNG_CACHE_LOCK:
         val = _MPR_PNG_CACHE.get(key)
         if val is not None:
@@ -578,8 +578,8 @@ def _mpr_png_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=
             _MPR_PNG_CACHE_ORDER.append(key)
         return val
 
-def _mpr_png_cache_set(series_id, plane, slice_index, ww, wl, inverted, png_bytes, quality=None):
-    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
+def _mpr_png_cache_set(series_id, plane, slice_index, ww, wl, inverted, png_bytes, quality=None, zoom_z=None):
+    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality, zoom_z=zoom_z)
     with _MPR_PNG_CACHE_LOCK:
         if key not in _MPR_PNG_CACHE:
             while len(_MPR_PNG_CACHE_ORDER) >= _MAX_MPR_PNG_CACHE:
@@ -592,66 +592,122 @@ def _mpr_png_cache_set(series_id, plane, slice_index, ww, wl, inverted, png_byte
             pass
         _MPR_PNG_CACHE_ORDER.append(key)
 
-def _get_png_mpr_slice_bytes(series_id, volume, plane, slice_index, ww, wl, inverted, quality=None):
-    """Return PNG bytes for a given MPR slice (used by `mpr_slice_api`)."""
-    cached = _mpr_png_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
+def _extract_mpr_slice(volume: np.ndarray, plane: str, slice_index: int) -> np.ndarray:
+    """Extract a raw 2-D slice from the MPR volume with correct orientation.
+
+    Sagittal and coronal slices are flipped vertically so that superior (high Z) is
+    displayed at the top of the image (standard radiological convention).
+    """
+    if plane == 'axial':
+        idx = min(max(0, int(slice_index)), volume.shape[0] - 1)
+        return volume[idx, :, :]
+    elif plane == 'sagittal':
+        idx = min(max(0, int(slice_index)), volume.shape[2] - 1)
+        return np.flipud(volume[:, :, idx])   # (z, y) flipped → superior at top
+    else:  # coronal
+        idx = min(max(0, int(slice_index)), volume.shape[1] - 1)
+        return np.flipud(volume[:, idx, :])   # (z, x) flipped → superior at top
+
+
+def _mpr_slice_zoom_z(plane: str, spacing) -> float:
+    """Return the residual Z-stretch correction factor for a given plane.
+
+    After _get_mpr_volume_and_spacing has applied up to _MAX_Z_RESAMPLE_FACTOR of Z
+    upsampling, there may still be residual anisotropy (e.g. original st/ps = 10x but
+    only 4x was applied due to the cap).  This factor is used both to correct the
+    rendered image and to key the slice cache.
+    """
+    if plane == 'axial' or spacing is None:
+        return 1.0
+    try:
+        sz = float(spacing[0])
+        if plane == 'sagittal':
+            sy = float(spacing[1])
+            return sz / sy if sy > 0 else 1.0
+        else:  # coronal
+            sx = float(spacing[2])
+            return sz / sx if sx > 0 else 1.0
+    except Exception:
+        return 1.0
+
+
+_MPR_OUTPUT_SIZE = 512  # fixed output dimension for consistent display quality
+
+
+def _correct_mpr_slice_aspect(slice_array: np.ndarray, plane: str, spacing) -> np.ndarray:
+    """Apply residual aspect-ratio correction and resize to a fixed square output.
+
+    For sagittal/coronal reformats, the Z axis of the resampled volume may still be
+    coarser than the in-plane axes (the Z-resample is capped to avoid OOM).  Zooming
+    the extracted slice to correct the remaining stretch + resizing to 512×512 gives
+    crisp, geometrically correct images regardless of native DICOM matrix size.
+    """
+    zoom_z = _mpr_slice_zoom_z(plane, spacing)
+
+    arr = slice_array.astype(np.float32, copy=False)
+
+    # Apply residual anisotropy correction on the row (Z) axis for off-axial planes.
+    if plane != 'axial' and abs(zoom_z - 1.0) > 0.05:
+        try:
+            arr = ndimage.zoom(arr, [zoom_z, 1.0], order=3, prefilter=True)
+        except Exception:
+            pass  # fall through with uncorrected slice
+
+    # Resize to fixed output square with high-quality interpolation.
+    try:
+        th, tw = arr.shape
+        if th != _MPR_OUTPUT_SIZE or tw != _MPR_OUTPUT_SIZE:
+            zy = _MPR_OUTPUT_SIZE / max(th, 1)
+            zx = _MPR_OUTPUT_SIZE / max(tw, 1)
+            arr = ndimage.zoom(arr, [zy, zx], order=3, prefilter=True)
+    except Exception:
+        pass
+
+    return arr
+
+
+def _get_png_mpr_slice_bytes(series_id, volume, plane, slice_index, ww, wl, inverted, quality=None, spacing=None):
+    """Return PNG bytes for a given MPR slice (used by `mpr_slice_api`).
+
+    *spacing* is the (z_mm, y_mm, x_mm) tuple from _get_mpr_volume_and_spacing.  When
+    provided, sagittal/coronal slices are zoom-corrected for residual anisotropy and
+    resized to 512×512 so they appear in correct anatomical proportions at full quality.
+    """
+    zoom_z = _mpr_slice_zoom_z(plane, spacing)
+    cached = _mpr_png_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=quality, zoom_z=zoom_z)
     if cached is not None:
         return cached
 
-    # Extract the displayed slice array (mirrors `_get_encoded_mpr_slice`)
-    if plane == 'axial':
-        slice_index = min(max(0, int(slice_index)), int(volume.shape[0]) - 1)
-        slice_array = volume[slice_index, :, :]
-    elif plane == 'sagittal':
-        slice_index = min(max(0, int(slice_index)), int(volume.shape[2]) - 1)
-        slice_array = np.flipud(volume[:, :, slice_index])
-    else:  # coronal
-        slice_index = min(max(0, int(slice_index)), int(volume.shape[1]) - 1)
-        slice_array = np.flipud(volume[:, slice_index, :])
+    slice_array = _extract_mpr_slice(volume, plane, slice_index)
+    slice_array = _correct_mpr_slice_aspect(slice_array, plane, spacing)
 
     q = (quality or 'high').strip().lower()
-    # PERF: skip sharpening in fast mode (major win for large stacks while browsing).
     sharpen = (q != 'fast')
     png_bytes = _array_to_png_bytes(slice_array, ww, wl, inverted, sharpen=sharpen)
     if png_bytes:
-        _mpr_png_cache_set(series_id, plane, slice_index, ww, wl, inverted, png_bytes, quality=quality)
+        _mpr_png_cache_set(series_id, plane, slice_index, ww, wl, inverted, png_bytes, quality=quality, zoom_z=zoom_z)
     return png_bytes
 
-def _get_encoded_mpr_slice(series_id, volume, plane, slice_index, ww, wl, inverted, quality=None):
+def _get_encoded_mpr_slice(series_id, volume, plane, slice_index, ww, wl, inverted, quality=None, spacing=None):
     """Get encoded base64 PNG for given MPR slice, using cache if possible.
-    volume is a numpy array (depth,height,width).
+
+    *spacing* is the (z_mm, y_mm, x_mm) tuple from _get_mpr_volume_and_spacing.  When
+    provided, sagittal/coronal slices are zoom-corrected for residual anisotropy and
+    resized to 512×512 so they appear in correct anatomical proportions at full quality.
+    volume is a numpy array (depth, height, width).
     """
-    cached = _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=quality)
+    zoom_z = _mpr_slice_zoom_z(plane, spacing)
+    cached = _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=quality, zoom_z=zoom_z)
     if cached is not None:
         return cached
-    
-    # Validate slice index
-    if plane == 'axial':
-        if slice_index < 0 or slice_index >= volume.shape[0]:
-            logger.warning(f"Invalid axial slice index {slice_index} for volume shape {volume.shape}")
-            slice_index = min(max(0, slice_index), volume.shape[0] - 1)
-        slice_array = volume[slice_index, :, :]
-    elif plane == 'sagittal':
-        if slice_index < 0 or slice_index >= volume.shape[2]:
-            logger.warning(f"Invalid sagittal slice index {slice_index} for volume shape {volume.shape}")
-            slice_index = min(max(0, slice_index), volume.shape[2] - 1)
-        # volume is (depth=z, height=y, width=x).
-        # Sagittal slice at fixed x: (z, y) -> rows=z, cols=y.
-        # Display convention: superior at top, so flip the z axis for display.
-        slice_array = np.flipud(volume[:, :, slice_index])
-    else:  # coronal
-        if slice_index < 0 or slice_index >= volume.shape[1]:
-            logger.warning(f"Invalid coronal slice index {slice_index} for volume shape {volume.shape}")
-            slice_index = min(max(0, slice_index), volume.shape[1] - 1)
-        # Coronal slice at fixed y: (z, x) -> rows=z, cols=x.
-        # Display convention: superior at top, so flip the z axis for display.
-        slice_array = np.flipud(volume[:, slice_index, :])
-    
+
+    slice_array = _extract_mpr_slice(volume, plane, slice_index)
+    slice_array = _correct_mpr_slice_aspect(slice_array, plane, spacing)
+
     q = (quality or 'high').strip().lower()
-    # PERF: skip sharpening in fast mode (major win for large stacks while browsing).
     img_b64 = _array_to_base64_image(slice_array, ww, wl, inverted, sharpen=(q != 'fast'))
     if img_b64:
-        _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64, quality=quality)
+        _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64, quality=quality, zoom_z=zoom_z)
     else:
         logger.error(f"Failed to generate base64 image for MPR slice: series={series_id}, plane={plane}, slice={slice_index}")
     return img_b64
@@ -1239,8 +1295,8 @@ def api_mpr_reconstruction(request, series_id):
         if quality == 'fast':
             _schedule_mpr_prewarm(series.id, quality='high')
 
-        # Load volume from cache or build once (quality-specific)
-        volume, _spacing = _get_mpr_volume_and_spacing(series, quality=quality)
+        # Load volume from cache or build once (quality-specific); keep spacing for aspect correction
+        volume, spacing = _get_mpr_volume_and_spacing(series, quality=quality)
         
         # Validate volume data
         if volume is None or volume.size == 0:
@@ -1317,8 +1373,8 @@ def api_mpr_reconstruction(request, series_id):
                 slice_index = counts[plane] // 2
             slice_index = max(0, min(counts[plane] - 1, slice_index))
 
-            # Get encoded slice via cache
-            img_b64 = _get_encoded_mpr_slice(series.id, volume, plane, slice_index, window_width, window_level, inverted, quality=quality)
+            # Get encoded slice via cache (pass spacing for aspect-ratio correction)
+            img_b64 = _get_encoded_mpr_slice(series.id, volume, plane, slice_index, window_width, window_level, inverted, quality=quality, spacing=spacing)
             return JsonResponse({
                 'plane': plane,
                 'index': slice_index,
@@ -1339,9 +1395,9 @@ def api_mpr_reconstruction(request, series_id):
         axial_idx = volume.shape[0] // 2
         sagittal_idx = volume.shape[2] // 2
         coronal_idx = volume.shape[1] // 2
-        mpr_views['axial'] = _get_encoded_mpr_slice(series.id, volume, 'axial', axial_idx, window_width, window_level, inverted, quality=quality)
-        mpr_views['sagittal'] = _get_encoded_mpr_slice(series.id, volume, 'sagittal', sagittal_idx, window_width, window_level, inverted, quality=quality)
-        mpr_views['coronal'] = _get_encoded_mpr_slice(series.id, volume, 'coronal', coronal_idx, window_width, window_level, inverted, quality=quality)
+        mpr_views['axial'] = _get_encoded_mpr_slice(series.id, volume, 'axial', axial_idx, window_width, window_level, inverted, quality=quality, spacing=spacing)
+        mpr_views['sagittal'] = _get_encoded_mpr_slice(series.id, volume, 'sagittal', sagittal_idx, window_width, window_level, inverted, quality=quality, spacing=spacing)
+        mpr_views['coronal'] = _get_encoded_mpr_slice(series.id, volume, 'coronal', coronal_idx, window_width, window_level, inverted, quality=quality, spacing=spacing)
 
         return JsonResponse({
             'mpr_views': mpr_views,
@@ -4747,7 +4803,7 @@ def api_hu_value(request):
             if user.is_facility_user() and getattr(user, 'facility', None) and series.study.facility != user.facility:
                 return JsonResponse({'error': 'Permission denied'}, status=403)
             # Reuse the same orientation-aware cached volume as the MPR renderer.
-            volume, _spacing = _get_mpr_volume_and_spacing(series, quality=quality)
+            volume, spacing = _get_mpr_volume_and_spacing(series, quality=quality)
             counts = {
                 'axial': int(volume.shape[0]),
                 'sagittal': int(volume.shape[2]),
@@ -4756,36 +4812,46 @@ def api_hu_value(request):
             if plane not in counts:
                 return JsonResponse({'error': 'Invalid plane'}, status=400)
             slice_index = max(0, min(counts[plane] - 1, slice_index))
-            # IMPORTANT: sagittal/coronal are displayed with a vertical flip (superior at top)
-            # to match the MPR renderer (`_get_encoded_mpr_slice`). Compute HU/ROI in the displayed
-            # slice coordinate system so x/y match what the user sees.
+            # Extract raw slice (with flip so orientation matches the rendered PNG).
             if plane == 'axial':
-                slice2d = volume[slice_index, :, :]  # (y, x)
+                slice2d = volume[slice_index, :, :]
             elif plane == 'sagittal':
-                slice2d = np.flipud(volume[:, :, slice_index])  # (z, y) flipped for display
+                slice2d = np.flipud(volume[:, :, slice_index])
             else:  # coronal
-                slice2d = np.flipud(volume[:, slice_index, :])  # (z, x) flipped for display
+                slice2d = np.flipud(volume[:, slice_index, :])
 
-            h, w = slice2d.shape[:2]
+            raw_h, raw_w = slice2d.shape[:2]
+
+            # The rendered PNG is always _MPR_OUTPUT_SIZE × _MPR_OUTPUT_SIZE (512×512).
+            # Coordinates from the viewer are in display space; map them back to raw-slice
+            # space proportionally so HU lookup is correct regardless of the intermediate
+            # aspect-ratio zoom that was applied during rendering.
+            disp_size = _MPR_OUTPUT_SIZE  # 512
+
+            def _disp_to_raw(xd, yd):
+                """Map a display-space (x, y) point to raw-slice (row, col) indices."""
+                xr = int(round(xd * raw_w / disp_size))
+                yr = int(round(yd * raw_h / disp_size))
+                return max(0, min(raw_w - 1, xr)), max(0, min(raw_h - 1, yr))
+
             shape = (request.GET.get('shape') or '').lower()
             if shape == 'ellipse':
-                # Ellipse ROI does not require x/y; default them to center if missing.
-                cx = _safe_int_query(request, 'cx', default=None)
-                cy = _safe_int_query(request, 'cy', default=None)
-                x = _safe_int_query(request, 'x', default=cx)
-                y = _safe_int_query(request, 'y', default=cy)
-                if cx is None:
-                    cx = x
-                if cy is None:
-                    cy = y
-                if cx is None or cy is None:
+                cx_d = _safe_int_query(request, 'cx', default=None)
+                cy_d = _safe_int_query(request, 'cy', default=None)
+                x_d  = _safe_int_query(request, 'x',  default=cx_d)
+                y_d  = _safe_int_query(request, 'y',  default=cy_d)
+                if cx_d is None: cx_d = x_d
+                if cy_d is None: cy_d = y_d
+                if cx_d is None or cy_d is None:
                     return JsonResponse({'error': 'ROI requires cx/cy (or x/y)'}, status=400)
-                rx = max(1, int(_safe_float(request.GET.get('rx', 1), 1.0)))
-                ry = max(1, int(_safe_float(request.GET.get('ry', 1), 1.0)))
-                # Clamp to slice bounds (defensive against odd UI coords)
-                cx = max(0, min(w - 1, int(cx)))
-                cy = max(0, min(h - 1, int(cy)))
-                yy, xx = np.ogrid[:h, :w]
+                rx_d = max(1, int(_safe_float(request.GET.get('rx', 1), 1.0)))
+                ry_d = max(1, int(_safe_float(request.GET.get('ry', 1), 1.0)))
+                # Convert ellipse centre and radii from display space to raw-slice space
+                cx, _ = _disp_to_raw(cx_d, 0)
+                _, cy = _disp_to_raw(0, cy_d)
+                rx = max(1, int(round(rx_d * raw_w / disp_size)))
+                ry = max(1, int(round(ry_d * raw_h / disp_size)))
+                yy, xx = np.ogrid[:raw_h, :raw_w]
                 mask = ((xx - cx) ** 2) / (rx ** 2) + ((yy - cy) ** 2) / (ry ** 2) <= 1.0
                 roi = slice2d[mask]
                 if roi.size == 0:
@@ -4799,14 +4865,13 @@ def api_hu_value(request):
                 }
                 return JsonResponse({'mode': 'mpr', 'series_id': series_id, 'plane': plane, 'slice': slice_index, 'stats': stats})
 
-            x = _safe_int_query(request, 'x', default=None)
-            y = _safe_int_query(request, 'y', default=None)
-            if x is None or y is None:
+            x_d = _safe_int_query(request, 'x', default=None)
+            y_d = _safe_int_query(request, 'y', default=None)
+            if x_d is None or y_d is None:
                 return JsonResponse({'error': 'x and y required'}, status=400)
-            if x < 0 or y < 0 or x >= w or y >= h:
-                return JsonResponse({'error': 'Out of bounds'}, status=400)
-            hu = float(slice2d[int(y), int(x)])
-            return JsonResponse({'mode': 'mpr', 'series_id': series_id, 'plane': plane, 'slice': slice_index, 'x': x, 'y': y, 'hu': round(hu, 2)})
+            x_r, y_r = _disp_to_raw(x_d, y_d)
+            hu = float(slice2d[y_r, x_r])
+            return JsonResponse({'mode': 'mpr', 'series_id': series_id, 'plane': plane, 'slice': slice_index, 'x': x_d, 'y': y_d, 'hu': round(hu, 2)})
 
         else:
             return JsonResponse({'error': 'Invalid mode'}, status=400)
@@ -6913,17 +6978,8 @@ def mpr_slice_api(request, series_id, plane, slice_index):
         if quality not in ('fast', 'high'):
             quality = 'high'
 
-        # Serve from PNG-bytes cache if present (fast path)
-        cached_png = _mpr_png_cache_get(series_id, plane, slice_index, window_width, window_level, inverted, quality=quality)
-        if cached_png:
-            resp = HttpResponse(cached_png, content_type='image/png')
-            # Window/level/invert are part of the URL query, and quality is part of the cache key,
-            # so it is safe to let the browser reuse slices for a while (helps reopen/refresh).
-            resp['Cache-Control'] = 'private, max-age=3600'
-            return resp
-
-        # Build/reuse volume (single-build guarded by per-series lock in _get_mpr_volume_and_spacing)
-        volume, _spacing = _get_mpr_volume_and_spacing(series, quality=quality)
+        # Build/reuse volume first so we have spacing for the cache key and aspect correction.
+        volume, spacing = _get_mpr_volume_and_spacing(series, quality=quality)
         if volume is None or volume.size == 0:
             from django.http import Http404
             raise Http404("MPR volume not available")
@@ -6936,7 +6992,15 @@ def mpr_slice_api(request, series_id, plane, slice_index):
         else:  # coronal
             slice_index = max(0, min(int(volume.shape[1]) - 1, slice_index))
 
-        png_bytes = _get_png_mpr_slice_bytes(series.id, volume, plane, slice_index, window_width, window_level, inverted, quality=quality)
+        # Serve from PNG-bytes cache if present (fast path, now keyed with zoom_z)
+        zoom_z = _mpr_slice_zoom_z(plane, spacing)
+        cached_png = _mpr_png_cache_get(series_id, plane, slice_index, window_width, window_level, inverted, quality=quality, zoom_z=zoom_z)
+        if cached_png:
+            resp = HttpResponse(cached_png, content_type='image/png')
+            resp['Cache-Control'] = 'private, max-age=3600'
+            return resp
+
+        png_bytes = _get_png_mpr_slice_bytes(series.id, volume, plane, slice_index, window_width, window_level, inverted, quality=quality, spacing=spacing)
         if not png_bytes:
             from django.http import Http404
             raise Http404("MPR slice not available")

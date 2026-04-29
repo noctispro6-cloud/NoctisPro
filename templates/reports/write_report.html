@@ -648,7 +648,7 @@ async function generateAIFindings() {
         _setAiAssistStatus('Running AI full-series analysis…');
         const fd = new FormData();
         fd.append('max_slices', '24');
-        const r1 = await fetch(`/ai_analysis/api/study/${studyId}/analyze/`, {
+        const r1 = await fetch(`/ai/api/study/${studyId}/analyze/`, {
             method: 'POST',
             headers: {
                 'X-CSRFToken': _getCookie('csrftoken'),
@@ -663,7 +663,7 @@ async function generateAIFindings() {
         }
 
         _setAiAssistStatus('Generating report draft…');
-        const r2 = await fetch(`/ai_analysis/api/study/${studyId}/generate-report/`, {
+        const r2 = await fetch(`/ai/api/study/${studyId}/generate-report/`, {
             method: 'POST',
             headers: {
                 'X-CSRFToken': _getCookie('csrftoken'),

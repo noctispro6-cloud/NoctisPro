@@ -1,420 +1,622 @@
 {% extends "base.html" %}
 
-{% block title %}AI Analysis Dashboard - Noctis Pro PACS{% endblock %}
+{% block title %}AI Analysis Dashboard — Noctis Pro{% endblock %}
 
 {% block extra_css %}
 <style>
-    .ai-header {
+    /* ── Layout ─────────────────────────────────────────────────────── */
+    .ai-wrap { max-width: 1400px; margin: 0 auto; padding: 20px 16px 40px; }
+
+    /* ── Hero header ────────────────────────────────────────────────── */
+    .ai-hero {
         background: var(--secondary-bg);
         border: 1px solid var(--border-color);
         border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 16px;
-    }
-
-    .ai-header h1 {
-        margin: 0 0 6px 0;
-        color: var(--accent-color);
-        font-size: 22px;
-        font-weight: 700;
-    }
-
-    .ai-header p {
-        margin: 0;
-        color: var(--text-secondary);
-        font-size: 12px;
-    }
-
-    .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        padding: 20px 22px;
+        margin-bottom: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
         gap: 12px;
-        margin-bottom: 16px;
+        flex-wrap: wrap;
     }
-
-    .stat-card {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 12px;
-        padding: 16px;
-        text-align: center;
-    }
-
-    .stat-card i {
-        font-size: 22px;
-        color: var(--accent-color);
-        margin-bottom: 10px;
-    }
-
-    .stat-card h3 {
-        font-size: 20px;
-        margin: 0 0 4px 0;
-        color: var(--text-primary);
+    .ai-hero-title {
+        font-size: 1.3rem;
         font-weight: 700;
+        color: var(--accent-color);
+        margin: 0 0 3px;
     }
+    .ai-hero-sub { color: var(--text-secondary); font-size: 0.82rem; margin: 0; }
+    .ai-hero-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-    .stat-card p {
-        color: var(--text-secondary);
-        font-size: 11px;
-        margin: 0;
+    /* ── Quick-action buttons ───────────────────────────────────────── */
+    .ai-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        text-decoration: none;
+        border: none;
+        cursor: pointer;
+        transition: opacity 0.15s, transform 0.1s;
+        white-space: nowrap;
     }
+    .ai-btn:hover { opacity: 0.86; transform: translateY(-1px); }
+    .ai-btn-primary { background: var(--accent-color); color: var(--primary-bg); }
+    .ai-btn-ghost   { background: var(--secondary-bg); color: var(--text-primary); border: 1px solid var(--border-color); }
 
-    .ai-features {
+    /* ── Stats grid ─────────────────────────────────────────────────── */
+    .ai-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+        margin-bottom: 18px;
+    }
+    .ai-stat {
         background: var(--secondary-bg);
         border: 1px solid var(--border-color);
         border-radius: 12px;
-        padding: 16px;
-        margin-bottom: 16px;
+        padding: 16px 18px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        position: relative;
+        overflow: hidden;
     }
-
-    .ai-features h2 {
-        color: var(--accent-color);
-        margin: 0 0 12px 0;
-        font-size: 14px;
-        font-weight: 700;
+    .ai-stat::before {
+        content: '';
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        width: 3px;
+        border-radius: 12px 0 0 12px;
+        background: var(--stat-accent, var(--accent-color));
     }
-
-    .features-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 12px;
-    }
-
-    .feature-item {
-        background: var(--card-bg);
-        padding: 14px;
+    .ai-stat-icon {
+        width: 40px;
+        height: 40px;
         border-radius: 10px;
-        border: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+        flex-shrink: 0;
+        background: var(--stat-icon-bg, rgba(0,212,255,0.1));
+        color: var(--stat-accent, var(--accent-color));
     }
-
-    .feature-item i {
-        color: var(--success-color);
-        font-size: 14px;
-        margin-bottom: 8px;
-    }
-
-    .feature-item h4 {
-        color: var(--text-primary);
-        margin: 0 0 6px 0;
-        font-size: 12px;
+    .ai-stat-body { flex: 1; min-width: 0; }
+    .ai-stat-value {
+        font-size: 1.6rem;
         font-weight: 700;
+        line-height: 1;
+        color: var(--text-primary);
+        margin-bottom: 3px;
     }
+    .ai-stat-label { color: var(--text-secondary); font-size: 0.78rem; }
 
-    .feature-item p {
+    /* per-stat accent colours */
+    .ai-stat-blue   { --stat-accent: var(--accent-color);   --stat-icon-bg: rgba(0,212,255,0.1); }
+    .ai-stat-green  { --stat-accent: var(--success-color);  --stat-icon-bg: rgba(0,255,136,0.1); }
+    .ai-stat-amber  { --stat-accent: var(--warning-color);  --stat-icon-bg: rgba(255,170,0,0.1); }
+    .ai-stat-purple { --stat-accent: #9b59b6;               --stat-icon-bg: rgba(155,89,182,0.1); }
+
+    /* ── Section card ───────────────────────────────────────────────── */
+    .ai-section {
+        background: var(--secondary-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        overflow: hidden;
+        margin-bottom: 16px;
+    }
+    .ai-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 13px 18px;
+        border-bottom: 1px solid var(--border-color);
+        gap: 10px;
+    }
+    .ai-section-header h2 {
+        font-size: 0.88rem;
+        font-weight: 700;
+        color: var(--accent-color);
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+    }
+    .ai-section-body { padding: 16px 18px; }
+
+    /* ── Analyses table ─────────────────────────────────────────────── */
+    .ai-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+    .ai-table th {
         color: var(--text-secondary);
-        font-size: 11px;
-        margin: 0 0 8px 0;
-        line-height: 1.4;
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 0 10px 8px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
     }
-
-    .status-indicator {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        margin-right: 6px;
+    .ai-table td {
+        padding: 10px;
+        border-bottom: 1px solid rgba(64,64,64,0.3);
+        vertical-align: middle;
     }
+    .ai-table tbody tr:last-child td { border-bottom: none; }
+    .ai-table tbody tr:hover td { background: rgba(0,212,255,0.03); }
+    .ai-table-acc  { font-weight: 700; color: var(--text-primary); }
+    .ai-table-patient { color: var(--text-secondary); font-size: 0.75rem; margin-top: 1px; }
+    .ai-table-date { color: var(--text-secondary); font-size: 0.78rem; white-space: nowrap; }
+    .ai-table-model { color: var(--text-secondary); }
 
-    .status-active { background: var(--success-color); }
-    .status-warning { background: var(--warning-color); }
+    /* ── Status pills ───────────────────────────────────────────────── */
+    .ai-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 9px;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        border: 1px solid transparent;
+    }
+    .ai-pill-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+    .ai-pill-pending    { color: var(--text-secondary); border-color: var(--border-color); }
+    .ai-pill-pending .ai-pill-dot { background: var(--text-secondary); }
+    .ai-pill-processing { color: var(--warning-color);  border-color: rgba(255,170,0,0.4); background: rgba(255,170,0,0.08); }
+    .ai-pill-processing .ai-pill-dot { background: var(--warning-color); }
+    .ai-pill-completed  { color: var(--success-color);  border-color: rgba(0,255,136,0.4); background: rgba(0,255,136,0.08); }
+    .ai-pill-completed .ai-pill-dot { background: var(--success-color); }
+    .ai-pill-failed     { color: var(--danger-color);   border-color: rgba(255,68,68,0.4);  background: rgba(255,68,68,0.08); }
+    .ai-pill-failed .ai-pill-dot { background: var(--danger-color); }
+    .ai-pill-cancelled  { color: var(--text-secondary); border-color: var(--border-color); }
+    .ai-pill-cancelled .ai-pill-dot { background: var(--text-secondary); }
+
+    /* priority pill */
+    .ai-prio { display: inline-block; padding: 2px 7px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; }
+    .ai-prio-low     { background: rgba(100,116,139,0.15); color: var(--text-secondary); }
+    .ai-prio-normal  { background: rgba(0,212,255,0.1);    color: var(--accent-color); }
+    .ai-prio-high    { background: rgba(255,170,0,0.12);   color: var(--warning-color); }
+    .ai-prio-urgent  { background: rgba(255,68,68,0.12);   color: var(--danger-color); }
+
+    /* ── Capabilities grid ──────────────────────────────────────────── */
+    .ai-caps-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 10px;
+    }
+    .ai-cap {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 14px;
+    }
+    .ai-cap-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 7px;
+    }
+    .ai-cap-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.8rem;
+        flex-shrink: 0;
+    }
+    .ai-cap h4 { font-size: 0.82rem; font-weight: 700; color: var(--text-primary); margin: 0; }
+    .ai-cap p  { font-size: 0.75rem; color: var(--text-secondary); margin: 0 0 8px; line-height: 1.45; }
+    .ai-cap-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 0.72rem;
+        color: var(--text-secondary);
+    }
+    .ai-cap-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+    /* ── LLM panel ──────────────────────────────────────────────────── */
+    .ai-llm-panel {
+        background: rgba(0,212,255,0.04);
+        border: 1px solid rgba(0,212,255,0.2);
+        border-radius: 12px;
+        padding: 14px 18px;
+        margin-bottom: 16px;
+    }
+    .ai-llm-title {
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: var(--accent-color);
+        margin: 0 0 6px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    #llmStatus { font-size: 0.82rem; color: var(--text-secondary); }
+
+    /* ── Empty / footer ─────────────────────────────────────────────── */
+    .ai-empty { color: var(--text-secondary); font-size: 0.82rem; text-align: center; padding: 20px 10px; }
+    .ai-live-note { color: var(--text-secondary); font-size: 0.75rem; margin-top: 8px; }
+
+    /* ── Responsive ─────────────────────────────────────────────────── */
+    @media (max-width: 800px) {
+        .ai-col-priority, .ai-col-conf { display: none; }
+    }
+    @media (max-width: 600px) {
+        .ai-col-model { display: none; }
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid py-4">
-    <div class="ai-header">
-        <h1><i class="fas fa-brain me-2"></i>AI Analysis</h1>
-        <p>Advanced medical imaging analysis & ML diagnostics</p>
-    </div>
+<div class="ai-wrap">
 
-    <div class="stats-grid">
-        <div class="stat-card">
-            <i class="fas fa-robot"></i>
-            <h3 id="aiTotalAnalyses">{{ total_analyses|default:"0" }}</h3>
-            <p>Total AI Analyses</p>
+    <!-- Hero -->
+    <div class="ai-hero">
+        <div>
+            <div class="ai-hero-title"><i class="fas fa-brain me-2"></i>AI Analysis</div>
+            <p class="ai-hero-sub">Advanced medical imaging analysis &amp; ML diagnostics</p>
         </div>
-        <div class="stat-card">
-            <i class="fas fa-chart-line"></i>
-            <h3 id="aiActiveModels">{{ active_models|default:"0" }}</h3>
-            <p>Active AI Models</p>
-        </div>
-        <div class="stat-card">
-            <i class="fas fa-clock"></i>
-            <h3 id="aiProcessingQueue">{{ processing_queue|default:"0" }}</h3>
-            <p>Processing Queue</p>
-        </div>
-        <div class="stat-card">
-            <i class="fas fa-check-circle"></i>
-            <h3 id="aiAccuracyRate">{{ accuracy_rate|default:"0" }}%</h3>
-            <p>Average Accuracy</p>
+        <div class="ai-hero-actions">
+            <a href="{% url 'ai_analysis:study_picker' %}" class="ai-btn ai-btn-primary">
+                <i class="fas fa-play"></i> Start Analysis
+            </a>
+            <a href="{% url 'ai_analysis:model_management' %}" class="ai-btn ai-btn-ghost">
+                <i class="fas fa-robot"></i> Models
+            </a>
+            <a href="{% url 'worklist:dashboard' %}" class="ai-btn ai-btn-ghost">
+                <i class="fas fa-home"></i> Home
+            </a>
         </div>
     </div>
 
-    <div class="ai-features" style="margin-top: 0;">
-        <h2><i class="fas fa-list me-2"></i>Recent Analyses</h2>
-        <div style="overflow:auto;">
-            <table style="width:100%; border-collapse: collapse; font-size: 12px;">
+    <!-- Stats -->
+    <div class="ai-stats">
+        <div class="ai-stat ai-stat-blue">
+            <div class="ai-stat-icon"><i class="fas fa-robot"></i></div>
+            <div class="ai-stat-body">
+                <div class="ai-stat-value" id="aiTotalAnalyses">{{ total_analyses|default:"0" }}</div>
+                <div class="ai-stat-label">Total Analyses</div>
+            </div>
+        </div>
+        <div class="ai-stat ai-stat-green">
+            <div class="ai-stat-icon"><i class="fas fa-check-circle"></i></div>
+            <div class="ai-stat-body">
+                <div class="ai-stat-value" id="aiActiveModels">{{ active_models|default:"0" }}</div>
+                <div class="ai-stat-label">Active Models</div>
+            </div>
+        </div>
+        <div class="ai-stat ai-stat-amber">
+            <div class="ai-stat-icon"><i class="fas fa-hourglass-half"></i></div>
+            <div class="ai-stat-body">
+                <div class="ai-stat-value" id="aiProcessingQueue">{{ processing_queue|default:"0" }}</div>
+                <div class="ai-stat-label">Processing Queue</div>
+            </div>
+        </div>
+        <div class="ai-stat ai-stat-purple">
+            <div class="ai-stat-icon"><i class="fas fa-chart-line"></i></div>
+            <div class="ai-stat-body">
+                <div class="ai-stat-value" id="aiAccuracyRate">{{ accuracy_rate|default:"0" }}%</div>
+                <div class="ai-stat-label">Avg Accuracy</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LLM Status -->
+    <div class="ai-llm-panel">
+        <div class="ai-llm-title"><i class="fas fa-microchip"></i> Report Generation Engine</div>
+        <div id="llmStatus">
+            <i class="fas fa-spinner fa-spin me-1"></i> Checking engine status…
+        </div>
+    </div>
+
+    <!-- Recent Analyses -->
+    <div class="ai-section">
+        <div class="ai-section-header">
+            <h2><i class="fas fa-history"></i> Recent Analyses</h2>
+            <a href="{% url 'ai_analysis:study_picker' %}" class="ai-btn ai-btn-primary" style="padding:5px 12px;font-size:0.78rem;">
+                <i class="fas fa-plus"></i> New
+            </a>
+        </div>
+        <div style="overflow-x:auto;">
+            <table class="ai-table">
                 <thead>
-                    <tr style="text-align:left; color: var(--text-secondary); font-size: 11px;">
-                        <th style="padding: 8px; border-bottom: 1px solid var(--border-color);">Requested</th>
-                        <th style="padding: 8px; border-bottom: 1px solid var(--border-color);">Study</th>
-                        <th style="padding: 8px; border-bottom: 1px solid var(--border-color);">Model</th>
-                        <th style="padding: 8px; border-bottom: 1px solid var(--border-color);">Status</th>
-                        <th style="padding: 8px; border-bottom: 1px solid var(--border-color);">Priority</th>
-                        <th style="padding: 8px; border-bottom: 1px solid var(--border-color); text-align:right;">{% if user.is_admin or user.is_radiologist %}Confidence{% else %}&nbsp;{% endif %}</th>
+                    <tr>
+                        <th>Requested</th>
+                        <th>Study</th>
+                        <th class="ai-col-model">Model</th>
+                        <th>Status</th>
+                        <th class="ai-col-priority">Priority</th>
+                        <th class="ai-col-conf" style="text-align:right;">
+                            {% if user.is_admin or user.is_radiologist %}Confidence{% endif %}
+                        </th>
                     </tr>
                 </thead>
                 <tbody id="aiRecentAnalyses">
-                    {% for a in recent_analyses %}
-                    <tr data-analysis-id="{{ a.id }}" style="border-bottom: 1px solid rgba(64,64,64,0.35);">
-                        <td style="padding: 8px; color: var(--text-secondary); white-space: nowrap;">{{ a.requested_at|date:"Y-m-d H:i:s" }}</td>
-                        <td style="padding: 8px;">
-                            <div style="color: var(--text-primary); font-weight: 600;">{{ a.study.accession_number }}</div>
-                            <div style="color: var(--text-secondary); font-size: 11px;">{{ a.study.patient.full_name }}</div>
+                {% for a in recent_analyses %}
+                    <tr data-analysis-id="{{ a.id }}">
+                        <td class="ai-table-date">{{ a.requested_at|date:"Y-m-d H:i" }}</td>
+                        <td>
+                            <div class="ai-table-acc">{{ a.study.accession_number }}</div>
+                            <div class="ai-table-patient">{{ a.study.patient.full_name }}</div>
                         </td>
-                        <td style="padding: 8px; color: var(--text-secondary);">{{ a.ai_model.name }}</td>
-                        <td style="padding: 8px;">
-                            <span style="display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid var(--border-color); color: var(--text-secondary);" class="ai-status-pill">
-                                {{ a.status|title }}
+                        <td class="ai-col-model ai-table-model">{{ a.ai_model.name }}</td>
+                        <td>
+                            <span class="ai-pill ai-pill-{{ a.status }}">
+                                <span class="ai-pill-dot"></span>{{ a.status|capfirst }}
                             </span>
                         </td>
-                        <td style="padding: 8px; color: var(--text-secondary);">{{ a.priority|title }}</td>
-                        <td style="padding: 8px; text-align:right; color: var(--text-secondary);">
+                        <td class="ai-col-priority">
+                            <span class="ai-prio ai-prio-{{ a.priority }}">{{ a.priority|capfirst }}</span>
+                        </td>
+                        <td class="ai-col-conf" style="text-align:right; color:var(--text-secondary); font-size:0.8rem;">
                             {% if user.is_admin or user.is_radiologist %}
-                                {% if a.confidence_score %}{{ a.confidence_score|floatformat:3 }}{% else %}-{% endif %}
-                            {% else %}
-                                &nbsp;
+                                {% if a.confidence_score %}{{ a.confidence_score|floatformat:3 }}{% else %}—{% endif %}
                             {% endif %}
                         </td>
                     </tr>
-                    {% empty %}
-                    <tr><td colspan="6" style="padding: 10px; color: var(--text-secondary);">No analyses yet.</td></tr>
-                    {% endfor %}
+                {% empty %}
+                    <tr>
+                        <td colspan="6">
+                            <div class="ai-empty">
+                                <i class="fas fa-inbox" style="opacity:0.3;font-size:1.6rem;display:block;margin-bottom:6px;"></i>
+                                No analyses yet. <a href="{% url 'ai_analysis:study_picker' %}" style="color:var(--accent-color);">Start one →</a>
+                            </div>
+                        </td>
+                    </tr>
+                {% endfor %}
                 </tbody>
             </table>
         </div>
-        <div style="margin-top: 10px; color: var(--text-muted); font-size: 11px;">
-            Live updates reflect background processing (pending → processing → completed/failed).
+        <div class="ai-live-note" style="padding:0 10px 10px;">
+            <i class="fas fa-circle" style="color:var(--success-color);font-size:6px;vertical-align:middle;margin-right:4px;"></i>
+            Live — updates every 5 s as jobs move through pending → processing → completed / failed
         </div>
     </div>
 
-    <div class="ai-features">
-        <h2><i class="fas fa-cogs me-2"></i>AI Capabilities</h2>
-        <div class="features-grid">
-            <div class="feature-item">
-                <i class="fas fa-eye"></i>
-                <h4>Image Classification</h4>
-                <p>Automated classification of medical images using deep learning models</p>
-                <span class="status-indicator status-active"></span><span class="text-secondary">Active</span>
-            </div>
-            <div class="feature-item">
-                <i class="fas fa-search"></i>
-                <h4>Anomaly Detection</h4>
-                <p>Real-time detection of abnormalities in DICOM images</p>
-                <span class="status-indicator status-active"></span><span class="text-secondary">Active</span>
-            </div>
-            <div class="feature-item">
-                <i class="fas fa-file-medical"></i>
-                <h4>Auto Reporting</h4>
-                <p>Automated generation of preliminary diagnostic reports</p>
-                <span class="status-indicator status-active"></span><span class="text-secondary">Active</span>
-            </div>
-            <div class="feature-item">
-                <i class="fas fa-brain"></i>
-                <h4>Deep Learning</h4>
-                <p>Advanced neural networks for complex pattern recognition</p>
-                <span class="status-indicator status-active"></span><span class="text-secondary">Active</span>
-            </div>
-            <div class="feature-item">
-                <i class="fas fa-chart-bar"></i>
-                <h4>Performance Analytics</h4>
-                <p>Real-time monitoring of AI model performance and accuracy</p>
-                <span class="status-indicator status-active"></span><span class="text-secondary">Active</span>
-            </div>
-            <div class="feature-item">
-                <i class="fas fa-graduation-cap"></i>
-                <h4>Continuous Learning</h4>
-                <p>Models that improve over time with new data and feedback</p>
-                <span class="status-indicator status-warning"></span><span class="text-secondary">Development</span>
+    <!-- AI Capabilities -->
+    <div class="ai-section">
+        <div class="ai-section-header">
+            <h2><i class="fas fa-cogs"></i> AI Capabilities</h2>
+        </div>
+        <div class="ai-section-body">
+            <div class="ai-caps-grid">
+                {% for cap in caps %}
+                    <div class="ai-cap">
+                        <div class="ai-cap-header">
+                            <div class="ai-cap-icon" style="background:{{ cap.icon_bg }};color:{{ cap.icon_color }};">
+                                <i class="{{ cap.icon }}"></i>
+                            </div>
+                            <h4>{{ cap.name }}</h4>
+                        </div>
+                        <p>{{ cap.desc }}</p>
+                        <div class="ai-cap-status">
+                            <span class="ai-cap-dot" style="background:{{ cap.dot }};"></span>
+                            {{ cap.status }}
+                        </div>
+                    </div>
+                {% empty %}
+                    <div class="ai-cap">
+                        <div class="ai-cap-header">
+                            <div class="ai-cap-icon" style="background:rgba(0,212,255,0.1);color:var(--accent-color);">
+                                <i class="fas fa-eye"></i>
+                            </div>
+                            <h4>Image Classification</h4>
+                        </div>
+                        <p>Deep-learning classification of DICOM studies across modalities and body parts.</p>
+                        <div class="ai-cap-status">
+                            <span class="ai-cap-dot" style="background:var(--success-color);"></span> Active
+                        </div>
+                    </div>
+                    <div class="ai-cap">
+                        <div class="ai-cap-header">
+                            <div class="ai-cap-icon" style="background:rgba(0,255,136,0.1);color:var(--success-color);">
+                                <i class="fas fa-search-plus"></i>
+                            </div>
+                            <h4>Anomaly Detection</h4>
+                        </div>
+                        <p>Real-time flagging of abnormalities and critical findings in imaging data.</p>
+                        <div class="ai-cap-status">
+                            <span class="ai-cap-dot" style="background:var(--success-color);"></span> Active
+                        </div>
+                    </div>
+                    <div class="ai-cap">
+                        <div class="ai-cap-header">
+                            <div class="ai-cap-icon" style="background:rgba(255,170,0,0.1);color:var(--warning-color);">
+                                <i class="fas fa-file-medical-alt"></i>
+                            </div>
+                            <h4>Auto Reporting</h4>
+                        </div>
+                        <p>Automated generation of preliminary radiology reports using LLM or templates.</p>
+                        <div class="ai-cap-status">
+                            <span class="ai-cap-dot" style="background:var(--success-color);"></span> Active
+                        </div>
+                    </div>
+                    <div class="ai-cap">
+                        <div class="ai-cap-header">
+                            <div class="ai-cap-icon" style="background:rgba(0,212,255,0.1);color:var(--accent-color);">
+                                <i class="fas fa-brain"></i>
+                            </div>
+                            <h4>Deep Learning</h4>
+                        </div>
+                        <p>Advanced neural network inference for complex pattern recognition tasks.</p>
+                        <div class="ai-cap-status">
+                            <span class="ai-cap-dot" style="background:var(--success-color);"></span> Active
+                        </div>
+                    </div>
+                    <div class="ai-cap">
+                        <div class="ai-cap-header">
+                            <div class="ai-cap-icon" style="background:rgba(155,89,182,0.1);color:#9b59b6;">
+                                <i class="fas fa-chart-bar"></i>
+                            </div>
+                            <h4>Performance Analytics</h4>
+                        </div>
+                        <p>Live monitoring of model accuracy, processing time, and confidence trends.</p>
+                        <div class="ai-cap-status">
+                            <span class="ai-cap-dot" style="background:var(--success-color);"></span> Active
+                        </div>
+                    </div>
+                    <div class="ai-cap">
+                        <div class="ai-cap-header">
+                            <div class="ai-cap-icon" style="background:rgba(255,170,0,0.1);color:var(--warning-color);">
+                                <i class="fas fa-graduation-cap"></i>
+                            </div>
+                            <h4>Continuous Learning</h4>
+                        </div>
+                        <p>Feedback-driven model improvement pipeline — refined from radiologist corrections.</p>
+                        <div class="ai-cap-status">
+                            <span class="ai-cap-dot" style="background:var(--warning-color);"></span> In Development
+                        </div>
+                    </div>
+                {% endfor %}
             </div>
         </div>
     </div>
 
-    <div class="d-flex flex-wrap gap-2 justify-content-center">
-        <a href="{% url 'worklist:dashboard' %}" class="btn-control">
-            <i class="fas fa-home me-1"></i>Home
-        </a>
-        <a href="{% url 'ai_analysis:study_picker' %}" class="btn-control reset">
-            <i class="fas fa-play me-1"></i>Start Analysis
-        </a>
-        <a href="{% url 'ai_analysis:model_management' %}" class="btn-control">
-            <i class="fas fa-cog me-1"></i>Manage Models
-        </a>
-    </div>
-
-    <!-- LLM Report Engine Status -->
-    <div class="mt-4 p-3 border rounded" style="background:rgba(0,212,255,0.05);border-color:rgba(0,212,255,0.3) !important;">
-        <h6 class="mb-2" style="color:var(--accent-color);"><i class="fas fa-brain me-2"></i>Report Generation Engine</h6>
-        <div id="llmStatus" class="small text-secondary">
-            <span class="spinner-border spinner-border-sm me-1" role="status"></span> Checking LLM status...
-        </div>
-    </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const statCards = document.querySelectorAll('.stat-card');
-        statCards.forEach((card, index) => {
-            setTimeout(() => {
-                card.style.opacity = '0';
-                card.style.transform = 'translateY(10px)';
-                card.style.transition = 'all 0.35s ease';
-                setTimeout(() => {
-                    card.style.opacity = '1';
-                    card.style.transform = 'translateY(0)';
-                }, 60);
-            }, index * 60);
-        });
+document.addEventListener('DOMContentLoaded', function () {
 
-        // LLM backend status
-        (async function() {
-            try {
-                const resp = await fetch('{% url "ai_analysis:api_llm_status" %}', {credentials: 'same-origin'});
-                const data = await resp.json();
-                const el = document.getElementById('llmStatus');
-                if (!el) return;
-                
-                let icon = '<i class="fas fa-check-circle text-success me-1"></i>';
-                let backend = data.active_backend || 'deterministic';
-                let desc = '';
-                
-                if (backend.startsWith('api:')) {
-                    desc = `<strong style="color:#00ff88;">External API</strong> — ${backend.replace('api:', '')}`;
-                } else if (backend.startsWith('local:')) {
-                    const modelName = backend.replace('local:', '').replace(' (not yet loaded)', '');
-                    const loaded = data.local_model_loaded;
-                    desc = `<strong style="color:#00d4ff;">Local Model</strong> — ${modelName}`;
-                    if (!loaded) {
-                        desc += ' <span class="badge bg-warning text-dark" style="font-size:9px;">Will download on first use</span>';
-                        icon = '<i class="fas fa-cloud-download-alt text-warning me-1"></i>';
-                    }
+    /* ── LLM status ──────────────────────────────────────────────── */
+    (async function () {
+        const el = document.getElementById('llmStatus');
+        try {
+            const resp = await fetch('{% url "ai_analysis:api_llm_status" %}', { credentials: 'same-origin' });
+            const data = await resp.json();
+            if (!el) return;
+            const backend = data.active_backend || 'deterministic';
+            let icon, desc, extra = '';
+
+            if (backend.startsWith('api:')) {
+                icon = '<i class="fas fa-check-circle" style="color:var(--success-color);margin-right:5px;"></i>';
+                desc = `<strong style="color:var(--success-color);">External API</strong> — ${backend.replace('api:', '')}`;
+            } else if (backend.startsWith('local:')) {
+                const name   = backend.replace('local:', '').replace(' (not yet loaded)', '');
+                const loaded = data.local_model_loaded;
+                icon = loaded
+                    ? '<i class="fas fa-check-circle" style="color:var(--success-color);margin-right:5px;"></i>'
+                    : '<i class="fas fa-cloud-download-alt" style="color:var(--warning-color);margin-right:5px;"></i>';
+                desc = `<strong style="color:var(--accent-color);">Local Model</strong> — ${name}`;
+                if (!loaded) {
+                    desc += ' <span style="background:var(--warning-color);color:#000;border-radius:4px;padding:1px 6px;font-size:0.7rem;font-weight:700;margin-left:4px;">Not Loaded</span>';
+                    extra = `<button onclick="warmupModel()" class="ai-btn ai-btn-ghost" style="margin-top:8px;padding:5px 12px;font-size:0.78rem;">
+                                <i class="fas fa-download"></i> Load Model Now
+                             </button>`;
+                }
+            } else {
+                icon = '<i class="fas fa-info-circle" style="color:var(--warning-color);margin-right:5px;"></i>';
+                desc = '<strong style="color:var(--warning-color);">Deterministic fallback</strong> — structured template (no LLM configured)';
+            }
+
+            const unconfigured = backend === 'deterministic';
+            el.innerHTML = icon + desc +
+                (unconfigured ? '<br><small style="color:var(--text-secondary);font-size:0.72rem;">Set AI_REPORT_API_URL + AI_REPORT_API_KEY for an external LLM, or AI_LOCAL_MODEL for local inference.</small>' : '') +
+                (extra ? '<br>' + extra : '');
+
+            if (data.local_model_error) {
+                el.innerHTML += `<br><small style="color:var(--danger-color);">Error: ${data.local_model_error}</small>`;
+            }
+        } catch (_) {
+            if (el) el.innerHTML = '<i class="fas fa-exclamation-circle" style="color:var(--warning-color);margin-right:5px;"></i>Could not fetch engine status.';
+        }
+    })();
+
+    window.warmupModel = async function () {
+        const el = document.getElementById('llmStatus');
+        try {
+            await fetch('{% url "ai_analysis:api_llm_warmup" %}', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+            });
+            if (el) el.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Downloading model — this may take a few minutes…';
+            let polls = 0;
+            const iv = setInterval(async () => {
+                polls++;
+                const sd = await (await fetch('{% url "ai_analysis:api_llm_status" %}', { credentials: 'same-origin' })).json();
+                if (sd.local_model_loaded || polls > 36) { clearInterval(iv); location.reload(); }
+            }, 5000);
+        } catch (_) { alert('Failed to start model download.'); }
+    };
+
+    /* ── Live polling ────────────────────────────────────────────── */
+    let lastUpdate = new Date().toISOString();
+    const tbody   = document.getElementById('aiRecentAnalyses');
+    const elQueue = document.getElementById('aiProcessingQueue');
+
+    function makePill(status) {
+        const s = (status || '').toLowerCase();
+        const label = s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Unknown';
+        return `<span class="ai-pill ai-pill-${s}"><span class="ai-pill-dot"></span>${label}</span>`;
+    }
+    function makePrio(p) {
+        const s = (p || 'normal').toLowerCase();
+        return `<span class="ai-prio ai-prio-${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</span>`;
+    }
+
+    async function poll() {
+        try {
+            const res  = await fetch(
+                `{% url "ai_analysis:api_realtime_analyses" %}?last_update=${encodeURIComponent(lastUpdate)}`,
+                { credentials: 'same-origin' }
+            );
+            if (!res.ok) return;
+            const data = await res.json();
+            lastUpdate = data.timestamp || lastUpdate;
+
+            if (data.stats && typeof data.stats.processing_queue === 'number' && elQueue)
+                elQueue.textContent = String(data.stats.processing_queue);
+
+            const items = data.analyses || [];
+            if (!tbody || !items.length) return;
+
+            items.forEach(a => {
+                if (!a || !a.id) return;
+                const id  = String(a.id);
+                const req = (a.requested_at || '').replace('T', ' ').substring(0, 16);
+                const acc = a.accession_number || '';
+                const pat = a.patient_name || '';
+                const mod = a.ai_model || '';
+                const sta = a.status || '';
+                const pri = a.priority || 'normal';
+                const conf = (typeof a.confidence_score === 'number') ? a.confidence_score.toFixed(3) : '—';
+                const isPriv = {% if user.is_admin or user.is_radiologist %}true{% else %}false{% endif %};
+
+                const html = `
+                    <td class="ai-table-date">${req}</td>
+                    <td>
+                        <div class="ai-table-acc">${acc}</div>
+                        <div class="ai-table-patient">${pat}</div>
+                    </td>
+                    <td class="ai-col-model ai-table-model">${mod}</td>
+                    <td>${makePill(sta)}</td>
+                    <td class="ai-col-priority">${makePrio(pri)}</td>
+                    <td class="ai-col-conf" style="text-align:right;color:var(--text-secondary);font-size:0.8rem;">${isPriv ? conf : ''}</td>
+                `;
+
+                const existing = tbody.querySelector(`tr[data-analysis-id="${id}"]`);
+                if (existing) {
+                    existing.innerHTML = html;
                 } else {
-                    desc = '<strong style="color:#ffa500;">Deterministic fallback</strong> — structured template (no LLM configured)';
-                    icon = '<i class="fas fa-info-circle text-warning me-1"></i>';
+                    const tr = document.createElement('tr');
+                    tr.setAttribute('data-analysis-id', id);
+                    tr.innerHTML = html;
+                    tbody.prepend(tr);
                 }
-                
-                let warmupBtn = '';
-                if (data.local_model_enabled && !data.local_model_loaded && !data.api_configured) {
-                    warmupBtn = ' <button onclick="warmupModel()" class="btn-sm btn-control ms-2" style="font-size:10px;padding:2px 8px;"><i class="fas fa-download me-1"></i>Load AI Model</button>';
-                }
-                el.innerHTML = icon + desc + warmupBtn +
-                    '<br><small class="text-muted mt-1 d-block">Configure AI_REPORT_API_URL + AI_REPORT_API_KEY for external LLM, or AI_LOCAL_MODEL for local inference.</small>';
-                
-                if (data.local_model_error) {
-                    el.innerHTML += `<br><small class="text-danger">Local model error: ${data.local_model_error}</small>`;
-                }
-            } catch(e) {
-                const el = document.getElementById('llmStatus');
-                if (el) el.innerHTML = '<i class="fas fa-exclamation-circle text-warning me-1"></i>Could not fetch LLM status';
-            }
-        })();
+            });
+        } catch (_) {}
+    }
 
-        async function warmupModel() {
-            try {
-                const resp = await fetch('{% url "ai_analysis:api_llm_warmup" %}', {
-                    method: 'POST', credentials: 'same-origin',
-                    headers: {'X-CSRFToken': '{{ csrf_token }}'}
-                });
-                const data = await resp.json();
-                const el = document.getElementById('llmStatus');
-                if (el) el.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Downloading AI model — this may take a few minutes on first run...';
-                // Poll status every 5 seconds
-                let polls = 0;
-                const poll = setInterval(async function() {
-                    polls++;
-                    const sr = await fetch('{% url "ai_analysis:api_llm_status" %}', {credentials: 'same-origin'});
-                    const sd = await sr.json();
-                    if (sd.local_model_loaded || polls > 36) { // timeout after 3 min
-                        clearInterval(poll);
-                        location.reload();
-                    }
-                }, 5000);
-            } catch(e) { alert('Failed to start model download'); }
-        }
-
-        // Live polling for background AI status updates
-        let lastUpdate = new Date().toISOString();
-        const tbody = document.getElementById('aiRecentAnalyses');
-        const elQueue = document.getElementById('aiProcessingQueue');
-
-        function statusPillText(status) {
-            const s = (status || '').toString();
-            return s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Unknown';
-        }
-
-        async function poll() {
-            try {
-                const url = `{% url "ai_analysis:api_realtime_analyses" %}?last_update=${encodeURIComponent(lastUpdate)}`;
-                const res = await fetch(url, { credentials: 'same-origin' });
-                if (!res.ok) return;
-                const data = await res.json();
-                lastUpdate = (data && data.timestamp) ? data.timestamp : lastUpdate;
-
-                // Update queue count if provided
-                if (data && data.stats && typeof data.stats.processing_queue === 'number' && elQueue) {
-                    elQueue.textContent = String(data.stats.processing_queue);
-                }
-
-                // Update table rows (best-effort)
-                const items = (data && data.analyses) ? data.analyses : [];
-                if (!tbody || !Array.isArray(items) || items.length === 0) return;
-
-                items.forEach((a) => {
-                    if (!a || !a.id) return;
-                    const id = String(a.id);
-                    const existing = tbody.querySelector(`tr[data-analysis-id="${id}"]`);
-                    const requested = (a.requested_at || '').replace('T', ' ').replace('Z', '');
-                    const patient = a.patient_name || '';
-                    const acc = a.accession_number || '';
-                    const model = a.ai_model || '';
-                    const status = a.status || '';
-                    const priority = a.priority || '';
-                    const conf = (typeof a.confidence_score === 'number') ? a.confidence_score.toFixed(3) : '-';
-
-                    const rowHtml = `
-                        <td style="padding: 8px; color: var(--text-secondary); white-space: nowrap;">${requested}</td>
-                        <td style="padding: 8px;">
-                            <div style="color: var(--text-primary); font-weight: 600;">${acc}</div>
-                            <div style="color: var(--text-secondary); font-size: 11px;">${patient}</div>
-                        </td>
-                        <td style="padding: 8px; color: var(--text-secondary);">${model}</td>
-                        <td style="padding: 8px;">
-                            <span style="display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid var(--border-color); color: var(--text-secondary);" class="ai-status-pill">
-                                ${statusPillText(status)}
-                            </span>
-                        </td>
-                        <td style="padding: 8px; color: var(--text-secondary);">${statusPillText(priority)}</td>
-                        <td style="padding: 8px; text-align:right; color: var(--text-secondary);">{% if user.is_admin or user.is_radiologist %}${conf}{% else %}&nbsp;{% endif %}</td>
-                    `;
-
-                    if (existing) {
-                        existing.innerHTML = rowHtml;
-                    } else {
-                        const tr = document.createElement('tr');
-                        tr.setAttribute('data-analysis-id', id);
-                        tr.style.borderBottom = '1px solid rgba(64,64,64,0.35)';
-                        tr.innerHTML = rowHtml;
-                        tbody.prepend(tr);
-                    }
-                });
-            } catch (_) {
-                // ignore transient polling failures
-            }
-        }
-
-        setInterval(poll, 5000);
-    });
+    setInterval(poll, 5000);
+});
 </script>
 {% endblock %}

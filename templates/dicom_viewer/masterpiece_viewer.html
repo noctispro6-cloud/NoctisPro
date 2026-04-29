@@ -1225,13 +1225,20 @@
                         <option value="24">24</option>
                     </select>
                 </div>
-                <input type="range" id="boneThresholdSlider" min="-1000" max="2000" value="200"
+                <select id="tissuePresetSelect" onchange="applyTissuePreset(this.value)" title="Tissue preset">
+                    <option value="">Tissue Preset</option>
+                    <option value="skin">Skin / Outer (−50 HU)</option>
+                    <option value="softtissue">Soft Tissue (100 HU)</option>
+                    <option value="bone" selected>Bone (300 HU)</option>
+                    <option value="cortical">Dense Bone (600 HU)</option>
+                </select>
+                <input type="range" id="boneThresholdSlider" min="-200" max="2000" value="100"
                     oninput="updateBoneThreshold(this.value)">
-                <span id="boneThresholdValue">200</span>
-                <input type="range" id="boneOpacitySlider" min="0.1" max="1.0" step="0.1" value="0.8"
+                <span id="boneThresholdValue">100</span>
+                <input type="range" id="boneOpacitySlider" min="0.1" max="1.0" step="0.05" value="0.85"
                     oninput="updateBoneOpacity(this.value)">
-                <span id="boneOpacityValue">0.8</span>
-                <input type="checkbox" id="smoothToggle" onchange="toggleSmoothing(this.checked)">
+                <span id="boneOpacityValue">0.85</span>
+                <input type="checkbox" id="smoothToggle" checked onchange="toggleSmoothing(this.checked)">
                 <select id="aiModelSelect">
                     <option value="">Select AI Model (Loading...)</option>
                 </select>
@@ -1470,8 +1477,8 @@
         const magnifierZoomFactor = 2.5;
 
         // 3D Bone Reconstruction variables
-        let boneThreshold = 200;
-        let boneOpacity = 0.8;
+        let boneThreshold = 100;
+        let boneOpacity = 0.85;
         let smoothSurface = true;
         let autoRotate = false;
 
@@ -3625,6 +3632,38 @@
             redrawCurrentImage();
         }
 
+        // Tissue preset configurations: [threshold_HU, color_hex, roughness, opacity]
+        const _TISSUE_PRESETS = {
+            skin:       { threshold: -50,  color: 0xf5c6a0, roughness: 0.55, opacity: 0.72, label: 'Skin / Outer' },
+            softtissue: { threshold: 100,  color: 0xd4927a, roughness: 0.45, opacity: 0.80, label: 'Soft Tissue'  },
+            bone:       { threshold: 300,  color: 0xf0d1a1, roughness: 0.30, opacity: 0.85, label: 'Bone'         },
+            cortical:   { threshold: 600,  color: 0xe8e0d0, roughness: 0.18, opacity: 0.92, label: 'Dense Bone'   },
+        };
+
+        function applyTissuePreset(preset) {
+            const cfg = _TISSUE_PRESETS[preset];
+            if (!cfg) return;
+            boneThreshold = cfg.threshold;
+            boneOpacity = cfg.opacity;
+            const ts = document.getElementById('boneThresholdSlider');
+            const tv = document.getElementById('boneThresholdValue');
+            const os = document.getElementById('boneOpacitySlider');
+            const ov = document.getElementById('boneOpacityValue');
+            if (ts) ts.value = String(boneThreshold);
+            if (tv) tv.textContent = String(boneThreshold);
+            if (os) os.value = String(boneOpacity);
+            if (ov) ov.textContent = String(boneOpacity);
+            // Update live material color/roughness if mesh already rendered
+            if (bone3D && bone3D.mesh && bone3D.mesh.material) {
+                bone3D.mesh.material.color.setHex(cfg.color);
+                bone3D.mesh.material.roughness = cfg.roughness;
+                bone3D.mesh.material.opacity = cfg.opacity;
+                bone3D.mesh.material.needsUpdate = true;
+                renderBoneFrame();
+            }
+            if (viewMode === 'mpr') generateBoneReconstruction();
+        }
+
         function updateBoneThreshold(value) {
             boneThreshold = parseInt(value);
             document.getElementById('boneThresholdValue').textContent = boneThreshold;
@@ -3760,7 +3799,7 @@
             try { setActiveMPRPlane('axial'); } catch (e) { }
 
             // Reset 3D defaults
-            boneThreshold = 200;
+            boneThreshold = 100;
             boneOpacity = 0.8;
             smoothSurface = true;
             autoRotate = false;
@@ -5266,23 +5305,28 @@
             const sx = dw / w;
             const sy = dh / h;
 
-            // Compute crosshair position in slice pixel coordinates for this plane.
-            // Backend display convention: sagittal/coronal have vertical flip in Z (np.flipud).
+            // Rendered images are always _MPR_OUTPUT_SIZE × _MPR_OUTPUT_SIZE (512×512).
+            // Voxel indices span [0, counts.plane_dim - 1], so we must scale them to
+            // image pixel space before applying the canvas scale factors.
+            const counts = (mprState && mprState.counts) || {};
+            const nX = Math.max(1, counts.sagittal || w);   // volume width (x dim)
+            const nY = Math.max(1, counts.coronal  || h);   // volume height (y dim)
+            const nZ = Math.max(1, counts.axial    || h);   // volume depth  (z dim)
+
             let px = 0, py = 0;
             if (plane === 'axial') {
-                px = mprCrosshairVoxel.x;
-                py = mprCrosshairVoxel.y;
+                px = mprCrosshairVoxel.x * (w / nX);
+                py = mprCrosshairVoxel.y * (h / nY);
             } else if (plane === 'sagittal') {
-                px = mprCrosshairVoxel.y;           // columns = y
-                py = (h - 1) - mprCrosshairVoxel.z; // rows = z (flipped)
+                px = mprCrosshairVoxel.y * (w / nY);               // columns = y
+                py = (h - 1) - mprCrosshairVoxel.z * (h / nZ);    // rows = z (flipped)
             } else if (plane === 'coronal') {
-                px = mprCrosshairVoxel.x;           // columns = x
-                py = (h - 1) - mprCrosshairVoxel.z; // rows = z (flipped)
+                px = mprCrosshairVoxel.x * (w / nX);               // columns = x
+                py = (h - 1) - mprCrosshairVoxel.z * (h / nZ);    // rows = z (flipped)
             } else {
                 return null;
             }
 
-            // Clamp to image bounds.
             px = Math.max(0, Math.min(w - 1, px));
             py = Math.max(0, Math.min(h - 1, py));
 
@@ -5492,17 +5536,22 @@
             const sx = dw / w;
             const sy = dh / h;
 
-            // Mirror drawMPRCrosshair() mapping.
+            // Same scaled mapping as _mprCrosshairCenterCanvasPoint.
+            const counts = (mprState && mprState.counts) || {};
+            const nX = Math.max(1, counts.sagittal || w);
+            const nY = Math.max(1, counts.coronal  || h);
+            const nZ = Math.max(1, counts.axial    || h);
+
             let px = 0, py = 0;
             if (plane === 'axial') {
-                px = mprCrosshairVoxel.x;
-                py = mprCrosshairVoxel.y;
+                px = mprCrosshairVoxel.x * (w / nX);
+                py = mprCrosshairVoxel.y * (h / nY);
             } else if (plane === 'sagittal') {
-                px = mprCrosshairVoxel.y;
-                py = (h - 1) - mprCrosshairVoxel.z;
+                px = mprCrosshairVoxel.y * (w / nY);
+                py = (h - 1) - mprCrosshairVoxel.z * (h / nZ);
             } else if (plane === 'coronal') {
-                px = mprCrosshairVoxel.x;
-                py = (h - 1) - mprCrosshairVoxel.z;
+                px = mprCrosshairVoxel.x * (w / nX);
+                py = (h - 1) - mprCrosshairVoxel.z * (h / nZ);
             } else {
                 return null;
             }
@@ -5534,26 +5583,29 @@
             const p = _mprCanvasToSlicePx(plane, canvasX, canvasY);
             if (!p) return;
             const counts = mprState.counts || { axial: 0, sagittal: 0, coronal: 0 };
-            const maxZ = Math.max(0, (counts.axial || 1) - 1);
+            const maxZ = Math.max(0, (counts.axial    || 1) - 1);
             const maxX = Math.max(0, (counts.sagittal || 1) - 1);
-            const maxY = Math.max(0, (counts.coronal || 1) - 1);
+            const maxY = Math.max(0, (counts.coronal  || 1) - 1);
+
+            // Rendered images are always 512×512 (p.w = p.h = _MPR_OUTPUT_SIZE).
+            // p.x / p.y are in [0, 512) — scale back to voxel index space using counts.
+            const nX = Math.max(1, counts.sagittal || p.w);
+            const nY = Math.max(1, counts.coronal  || p.h);
+            const nZ = Math.max(1, counts.axial    || p.h);
 
             let vx = 0, vy = 0, vz = 0;
             if (plane === 'axial') {
-                // Axial slice is (y,x)
-                vx = _clampInt(p.x, 0, maxX);
-                vy = _clampInt(p.y, 0, maxY);
+                vx = _clampInt(p.x * nX / p.w, 0, maxX);
+                vy = _clampInt(p.y * nY / p.h, 0, maxY);
                 vz = _clampInt(mprState.index.axial, 0, maxZ);
             } else if (plane === 'sagittal') {
-                // Sagittal slice is (z,y) with Z flipped vertically for display.
                 vx = _clampInt(mprState.index.sagittal, 0, maxX);
-                vy = _clampInt(p.x, 0, maxY);
-                vz = _clampInt((p.h - 1) - p.y, 0, maxZ);
+                vy = _clampInt(p.x * nY / p.w, 0, maxY);
+                vz = _clampInt(((p.h - 1) - p.y) * nZ / p.h, 0, maxZ);
             } else if (plane === 'coronal') {
-                // Coronal slice is (z,x) with Z flipped vertically for display.
-                vx = _clampInt(p.x, 0, maxX);
+                vx = _clampInt(p.x * nX / p.w, 0, maxX);
                 vy = _clampInt(mprState.index.coronal, 0, maxY);
-                vz = _clampInt((p.h - 1) - p.y, 0, maxZ);
+                vz = _clampInt(((p.h - 1) - p.y) * nZ / p.h, 0, maxZ);
             } else {
                 return;
             }
@@ -6350,8 +6402,9 @@
                     bone3D.panX += dx1;
                     bone3D.panY -= dy1;
                 } else {
-                    bone3D.targetRotY += dx1 * 0.01;
-                    bone3D.targetRotX += dy1 * 0.01;
+                    // Negate dx/dy so dragging right = CW rotation (matches physical intuition).
+                    bone3D.targetRotY -= dx1 * 0.01;
+                    bone3D.targetRotX -= dy1 * 0.01;
                 }
             });
             c.addEventListener('wheel', (e) => {
@@ -6400,17 +6453,22 @@
             geom.computeVertexNormals();
             geom.computeBoundingSphere();
 
+            // Pick material properties based on the active tissue preset, defaulting to bone.
+            const _activePreset = (() => {
+                const sel = document.getElementById('tissuePresetSelect');
+                return (sel && sel.value && _TISSUE_PRESETS[sel.value]) ? _TISSUE_PRESETS[sel.value] : _TISSUE_PRESETS.bone;
+            })();
             const mat = new THREE.MeshPhysicalMaterial({
-                // Warm, slightly amber bone tone (closer to the reference).
-                color: 0xf0d1a1,
-                emissive: 0x2a1400,
-                emissiveIntensity: 0.06,
+                color: _activePreset.color,
+                emissive: 0x1a0a00,
+                emissiveIntensity: 0.05,
                 transparent: true,
-                opacity: Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 0.8)),
-                roughness: 0.30, // crisper highlights to read surfaces
+                opacity: Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 0.85)),
+                roughness: _activePreset.roughness,
                 metalness: 0.02,
-                clearcoat: 0.22,
-                clearcoatRoughness: 0.35,
+                clearcoat: 0.18,
+                clearcoatRoughness: 0.40,
+                envMapIntensity: 0.6,
                 side: THREE.FrontSide,
             });
             const mesh = new THREE.Mesh(geom, mat);
@@ -6503,7 +6561,8 @@
                 }
 
                 if (autoRotate) {
-                    bone3D.targetRotY += 0.01;
+                    // Decrement for clockwise rotation as seen from the front (+Z camera).
+                    bone3D.targetRotY -= 0.01;
                 }
                 renderBoneFrame();
             };
@@ -6525,9 +6584,22 @@
         function boneRotate(dX, dY) {
             try {
                 if (!bone3D) return;
-                const step = 0.25; // radians per click (fast but controllable)
-                bone3D.targetRotX = Number(bone3D.targetRotX || 0) + (Number(dX || 0) * step);
-                bone3D.targetRotY = Number(bone3D.targetRotY || 0) + (Number(dY || 0) * step);
+                const step = Math.PI / 2; // 90° orthogonal snap per click
+                // Negate dY: positive dY from caller means "right/CW from front".
+                // In Three.js positive Y rotation is CCW from the front view, so negate.
+                const newRotX = Number(bone3D.rotX || 0) - (Number(dX || 0) * step);
+                const newRotY = Number(bone3D.rotY || 0) - (Number(dY || 0) * step);
+                // Snap both current and target so the button click is instant
+                // even when auto-rotate is running (avoids "invisible bump" on moving target).
+                bone3D.rotX = newRotX;
+                bone3D.rotY = newRotY;
+                bone3D.targetRotX = newRotX;
+                bone3D.targetRotY = newRotY;
+                if (bone3D.mesh) {
+                    bone3D.mesh.rotation.x = newRotX;
+                    bone3D.mesh.rotation.y = newRotY;
+                }
+                if (!bone3D.animRaf) renderBoneFrame();
             } catch (e) { }
         }
         function boneZoomIn() {

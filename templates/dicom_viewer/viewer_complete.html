@@ -4229,7 +4229,7 @@
                     if (modelSel && modelSel.value) fd.append('model_id', modelSel.value);
                 } catch (_) {}
 
-                const response = await fetch(`/ai_analysis/api/series/${currentSeries.id}/analyze/`, {
+                const response = await fetch(`/ai/api/series/${currentSeries.id}/analyze/`, {
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': getCSRFToken(),

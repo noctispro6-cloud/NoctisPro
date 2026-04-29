@@ -1,233 +1,621 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Model Management - Noctis Pro</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    {% load static %}
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'css/responsive-ui-scaling.css' %}">
-    <style>
-        :root {
-            --primary-bg: #0a0a0a;
-            --secondary-bg: #1a1a1a;
-            --card-bg: #252525;
-            --border-color: #404040;
-            --accent-color: #00d4ff;
-            --text-primary: #ffffff;
-            --text-secondary: #b3b3b3;
-            --success-color: #00ff88;
-            --warning-color: #ffaa00;
-            --danger-color: #ff4444;
-        }
+{% extends "base.html" %}
+{% load static %}
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--primary-bg);
-            color: var(--text-primary);
-            line-height: 1.6;
-        }
+{% block title %}AI Model Management — Noctis Pro{% endblock %}
 
-        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+{% block extra_css %}
+<style>
+    /* ── Page layout ───────────────────────────────────────────────── */
+    .mm-wrap { max-width: 1400px; margin: 0 auto; padding: 20px 16px 40px; }
 
-        .header {
-            background: var(--secondary-bg);
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 18px;
-            border: 1px solid var(--border-color);
-        }
+    /* ── Page header ───────────────────────────────────────────────── */
+    .mm-header {
+        background: var(--secondary-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 20px 22px;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+    .mm-header-left h1 {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: var(--accent-color);
+        margin: 0 0 3px;
+    }
+    .mm-header-left p { color: var(--text-secondary); font-size: 0.82rem; margin: 0; }
 
-        .header h1 { color: var(--accent-color); font-size: 2rem; margin-bottom: 6px; }
-        .header p { color: var(--text-secondary); }
+    /* ── Filter toolbar ────────────────────────────────────────────── */
+    .mm-toolbar {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+    }
+    .mm-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; flex: 1; }
+    .mm-filters input,
+    .mm-filters select {
+        background: var(--secondary-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        outline: none;
+        min-width: 0;
+    }
+    .mm-filters input { flex: 1; min-width: 180px; }
+    .mm-filters select { flex-shrink: 0; }
+    .mm-filters input:focus,
+    .mm-filters select:focus { border-color: var(--accent-color); }
 
-        .toolbar {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 14px;
-        }
+    /* ── Buttons ───────────────────────────────────────────────────── */
+    .mm-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        text-decoration: none;
+        transition: opacity 0.15s, transform 0.1s;
+        white-space: nowrap;
+    }
+    .mm-btn:hover { opacity: 0.88; transform: translateY(-1px); }
+    .mm-btn-primary { background: var(--accent-color); color: var(--primary-bg); }
+    .mm-btn-ghost  { background: var(--secondary-bg); color: var(--text-primary); border: 1px solid var(--border-color); }
+    .mm-btn-edit   { background: rgba(0,212,255,0.12); color: var(--accent-color); border: 1px solid rgba(0,212,255,0.3); }
+    .mm-btn-edit:hover { background: var(--accent-color); color: var(--primary-bg); opacity:1; }
+    .mm-btn-sm { padding: 5px 10px; font-size: 0.78rem; }
 
-        .filters {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            align-items: center;
-            flex: 1;
-            min-width: 320px;
-        }
+    /* ── Table ─────────────────────────────────────────────────────── */
+    .mm-table-wrap {
+        background: var(--secondary-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    .mm-table { width: 100%; border-collapse: collapse; }
+    .mm-table th {
+        background: var(--card-bg);
+        color: var(--text-secondary);
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 10px 14px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .mm-table td {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border-color);
+        color: var(--text-primary);
+        font-size: 0.85rem;
+        vertical-align: top;
+    }
+    .mm-table tbody tr:last-child td { border-bottom: none; }
+    .mm-table tbody tr:hover td { background: rgba(0,212,255,0.03); }
 
-        input, select {
-            background: var(--secondary-bg);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            padding: 10px 12px;
-            border-radius: 8px;
-            outline: none;
-        }
+    /* ── Pills ─────────────────────────────────────────────────────── */
+    .mm-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border: 1px solid transparent;
+        white-space: nowrap;
+    }
+    .mm-pill-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .mm-pill-active  { color: var(--success-color); border-color: rgba(0,255,136,0.35); background: rgba(0,255,136,0.08); }
+    .mm-pill-active .mm-pill-dot { background: var(--success-color); }
+    .mm-pill-inactive { color: var(--danger-color); border-color: rgba(255,68,68,0.35); background: rgba(255,68,68,0.08); }
+    .mm-pill-inactive .mm-pill-dot { background: var(--danger-color); }
+    .mm-pill-type { color: var(--text-secondary); border-color: var(--border-color); background: var(--card-bg); }
 
-        .btn {
-            background: var(--accent-color);
-            color: var(--primary-bg);
-            padding: 10px 16px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 0.95rem;
-            font-weight: 700;
-            text-decoration: none;
-            display: inline-block;
-        }
+    /* ── Model name cell ───────────────────────────────────────────── */
+    .mm-model-name { font-weight: 700; color: var(--text-primary); }
+    .mm-model-ver  { color: var(--text-secondary); font-size: 0.78rem; margin-left: 4px; }
+    .mm-model-desc { color: var(--text-secondary); font-size: 0.78rem; margin-top: 3px; line-height: 1.4; }
+    .mm-body-part  { color: var(--text-secondary); font-size: 0.78rem; margin-top: 2px; }
 
-        .btn.secondary {
-            background: var(--secondary-bg);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-        }
+    /* ── Usage cell ────────────────────────────────────────────────── */
+    .mm-usage-count { font-weight: 700; color: var(--text-primary); }
+    .mm-usage-time  { color: var(--text-secondary); font-size: 0.78rem; margin-top: 2px; }
 
-        .table-wrap {
-            background: var(--secondary-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            overflow: hidden;
-        }
+    /* ── File cell ─────────────────────────────────────────────────── */
+    .mm-file { color: var(--text-secondary); font-size: 0.78rem; word-break: break-all; }
 
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px 14px; border-bottom: 1px solid var(--border-color); }
-        th { text-align: left; color: var(--text-secondary); font-size: 0.9rem; }
-        td { color: var(--text-primary); vertical-align: top; }
-        tr:hover td { background: rgba(255,255,255,0.03); }
+    /* ── Empty row ─────────────────────────────────────────────────── */
+    .mm-empty { text-align: center; padding: 40px 20px; color: var(--text-secondary); }
+    .mm-empty i { font-size: 2rem; margin-bottom: 10px; display: block; opacity: 0.4; }
 
-        .pill {
-            display: inline-block;
-            padding: 2px 10px;
-            border-radius: 999px;
-            font-size: 0.85rem;
-            border: 1px solid var(--border-color);
-            background: var(--card-bg);
-            color: var(--text-secondary);
-        }
-        .pill.active { color: var(--success-color); border-color: rgba(0,255,136,0.4); }
-        .pill.inactive { color: var(--danger-color); border-color: rgba(255,68,68,0.4); }
+    /* ── Pagination ────────────────────────────────────────────────── */
+    .mm-pagination {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        align-items: center;
+        padding: 14px 0;
+    }
+    .mm-pagination a {
+        color: var(--text-primary);
+        text-decoration: none;
+        padding: 7px 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--card-bg);
+        font-size: 0.82rem;
+        transition: border-color 0.15s;
+    }
+    .mm-pagination a:hover { border-color: var(--accent-color); color: var(--accent-color); }
+    .mm-pagination span { color: var(--text-secondary); font-size: 0.82rem; }
 
-        .muted { color: var(--text-secondary); }
+    /* ── Responsive: hide file col on small screens ─────────────────── */
+    @media (max-width: 1000px) {
+        .mm-col-file { display: none; }
+    }
+    @media (max-width: 700px) {
+        .mm-col-usage { display: none; }
+    }
 
-        .pagination {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            align-items: center;
-            padding: 16px 0;
-        }
-        .pagination a {
-            color: var(--text-primary);
-            text-decoration: none;
-            padding: 8px 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: var(--card-bg);
-        }
-        .pagination span { color: var(--text-secondary); }
+    /* ── Edit Modal ────────────────────────────────────────────────── */
+    .mm-modal-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.6);
+        z-index: 9000;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+    .mm-modal-backdrop.open { display: flex; }
+    .mm-modal {
+        background: var(--secondary-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        width: 100%;
+        max-width: 560px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        overflow: hidden;
+    }
+    .mm-modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .mm-modal-header h3 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 700;
+        color: var(--accent-color);
+    }
+    .mm-modal-close {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        font-size: 1.2rem;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 6px;
+        transition: color 0.15s;
+    }
+    .mm-modal-close:hover { color: var(--text-primary); }
+    .mm-modal-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+    .mm-modal-footer {
+        padding: 14px 20px;
+        border-top: 1px solid var(--border-color);
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+    }
 
-        @media (max-width: 1000px) {
-            th:nth-child(6), td:nth-child(6) { display: none; }
-        }
-    </style>
-</head>
-<body>
-<div class="container">
-    <div class="header">
-        <h1><i class="fas fa-cog"></i> AI Model Management</h1>
-        <p>Browse and filter AI models. Editing can be done via Django Admin.</p>
+    .mm-field { display: flex; flex-direction: column; gap: 5px; }
+    .mm-field label { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; }
+    .mm-field input,
+    .mm-field select,
+    .mm-field textarea {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 9px 12px;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        outline: none;
+        font-family: inherit;
+        transition: border-color 0.15s;
+    }
+    .mm-field input:focus,
+    .mm-field select:focus,
+    .mm-field textarea:focus { border-color: var(--accent-color); }
+    .mm-field textarea { resize: vertical; min-height: 80px; }
+    .mm-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .mm-toggle-wrap {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .mm-toggle {
+        position: relative;
+        width: 38px;
+        height: 22px;
+        flex-shrink: 0;
+    }
+    .mm-toggle input { opacity: 0; width: 0; height: 0; }
+    .mm-toggle-slider {
+        position: absolute;
+        inset: 0;
+        background: var(--border-color);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+    .mm-toggle-slider::before {
+        content: '';
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        left: 3px;
+        top: 3px;
+        transition: transform 0.2s;
+    }
+    .mm-toggle input:checked + .mm-toggle-slider { background: var(--success-color); }
+    .mm-toggle input:checked + .mm-toggle-slider::before { transform: translateX(16px); }
+
+    .mm-save-feedback { font-size: 0.82rem; color: var(--success-color); display: none; }
+    .mm-save-feedback.error { color: var(--danger-color); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mm-wrap">
+
+    <!-- Header -->
+    <div class="mm-header">
+        <div class="mm-header-left">
+            <h1><i class="fas fa-robot me-2"></i>AI Model Management</h1>
+            <p>View and manage registered AI models. Admins can edit inline.</p>
+        </div>
+        <a class="mm-btn mm-btn-ghost" href="{% url 'ai_analysis:ai_dashboard' %}">
+            <i class="fas fa-arrow-left"></i> Dashboard
+        </a>
     </div>
 
-    <div class="toolbar">
-        <form class="filters" method="get" action="">
-            <input type="text" name="search" value="{{ search_query|default:'' }}" placeholder="Search name/description/modality" />
+    <!-- Toolbar -->
+    <div class="mm-toolbar">
+        <form class="mm-filters" method="get" action="">
+            <input type="text" name="search" value="{{ search_query|default:'' }}"
+                   placeholder="Search name, description, modality…" />
             <select name="model_type">
-                <option value="">All model types</option>
+                <option value="">All types</option>
                 {% for k,v in model_types %}
                     <option value="{{ k }}" {% if model_type_filter == k %}selected{% endif %}>{{ v }}</option>
                 {% endfor %}
             </select>
-            <button class="btn" type="submit"><i class="fas fa-filter"></i> Apply</button>
-            <a class="btn secondary" href="{% url 'ai_analysis:model_management' %}">Reset</a>
+            <button class="mm-btn mm-btn-primary" type="submit">
+                <i class="fas fa-filter"></i> Filter
+            </button>
+            <a class="mm-btn mm-btn-ghost" href="{% url 'ai_analysis:model_management' %}">
+                <i class="fas fa-times"></i> Reset
+            </a>
         </form>
-        <div>
-            <a class="btn secondary" href="{% url 'ai_analysis:ai_dashboard' %}"><i class="fas fa-arrow-left"></i> Back</a>
-        </div>
     </div>
 
-    <div class="table-wrap">
-        <table>
+    <!-- Table -->
+    <div class="mm-table-wrap">
+        <table class="mm-table">
             <thead>
                 <tr>
-                    <th>Name</th>
+                    <th>Model</th>
                     <th>Type</th>
                     <th>Modality</th>
                     <th>Status</th>
-                    <th>Usage</th>
-                    <th>File</th>
-                    <th></th>
+                    <th class="mm-col-usage">Usage</th>
+                    <th class="mm-col-file">File path</th>
+                    <th style="text-align:right;">Actions</th>
                 </tr>
             </thead>
             <tbody>
             {% for m in models %}
-                <tr>
+                <tr data-model-id="{{ m.id }}">
                     <td>
-                        <strong>{{ m.name }}</strong> <span class="muted">v{{ m.version }}</span>
-                        <div class="muted">{{ m.description|truncatechars:140 }}</div>
-                    </td>
-                    <td>{{ m.get_model_type_display }}</td>
-                    <td>{{ m.modality }}{% if m.body_part %}<div class="muted">{{ m.body_part }}</div>{% endif %}</td>
-                    <td>
-                        {% if m.is_active %}
-                            <span class="pill active">Active</span>
-                        {% else %}
-                            <span class="pill inactive">Inactive</span>
+                        <span class="mm-model-name">{{ m.name }}</span>
+                        <span class="mm-model-ver">v{{ m.version }}</span>
+                        {% if m.description %}
+                        <div class="mm-model-desc">{{ m.description|truncatechars:120 }}</div>
                         {% endif %}
                     </td>
                     <td>
-                        <div><strong>{{ m.total_analyses }}</strong> analyses</div>
-                        <div class="muted">Avg time: {{ m.avg_processing_time|default:0 }}s</div>
+                        <span class="mm-pill mm-pill-type">{{ m.get_model_type_display }}</span>
                     </td>
-                    <td class="muted">{{ m.model_file_path|truncatechars:60 }}</td>
+                    <td>
+                        <strong>{{ m.modality }}</strong>
+                        {% if m.body_part %}<div class="mm-body-part">{{ m.body_part }}</div>{% endif %}
+                    </td>
+                    <td>
+                        {% if m.is_active %}
+                            <span class="mm-pill mm-pill-active"><span class="mm-pill-dot"></span>Active</span>
+                        {% else %}
+                            <span class="mm-pill mm-pill-inactive"><span class="mm-pill-dot"></span>Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td class="mm-col-usage">
+                        <div class="mm-usage-count">{{ m.total_analyses }} analyses</div>
+                        <div class="mm-usage-time">Avg {{ m.avg_processing_time|default:0 }}s</div>
+                    </td>
+                    <td class="mm-col-file">
+                        <span class="mm-file">{{ m.model_file_path|truncatechars:55 }}</span>
+                    </td>
                     <td style="text-align:right; white-space:nowrap;">
                         {% if user.is_admin %}
-                            <a class="btn" href="/admin/ai_analysis/aimodel/{{ m.id }}/change/" target="_blank" rel="noopener noreferrer">
+                            <button class="mm-btn mm-btn-edit mm-btn-sm open-edit"
+                                    data-id="{{ m.id }}"
+                                    data-name="{{ m.name|escapejs }}"
+                                    data-version="{{ m.version|escapejs }}"
+                                    data-type="{{ m.model_type|escapejs }}"
+                                    data-modality="{{ m.modality|escapejs }}"
+                                    data-body-part="{{ m.body_part|escapejs }}"
+                                    data-description="{{ m.description|escapejs }}"
+                                    data-active="{{ m.is_active|lower }}">
                                 <i class="fas fa-pen"></i> Edit
-                            </a>
+                            </button>
                         {% else %}
-                            <span class="muted">View only</span>
+                            <span style="color: var(--text-secondary); font-size:0.78rem;">View only</span>
                         {% endif %}
                     </td>
                 </tr>
             {% empty %}
                 <tr>
-                    <td colspan="7" class="muted">No models found.</td>
+                    <td colspan="7">
+                        <div class="mm-empty">
+                            <i class="fas fa-robot"></i>
+                            No models found matching your filters.
+                        </div>
+                    </td>
                 </tr>
             {% endfor %}
             </tbody>
         </table>
     </div>
 
+    <!-- Pagination -->
     {% if models.paginator.num_pages > 1 %}
-    <div class="pagination">
+    <div class="mm-pagination">
         {% if models.has_previous %}
-            <a href="?search={{ search_query|urlencode }}&model_type={{ model_type_filter|urlencode }}&page={{ models.previous_page_number }}">Prev</a>
+            <a href="?search={{ search_query|urlencode }}&model_type={{ model_type_filter|urlencode }}&page={{ models.previous_page_number }}">
+                <i class="fas fa-chevron-left"></i> Prev
+            </a>
         {% endif %}
         <span>Page {{ models.number }} of {{ models.paginator.num_pages }}</span>
         {% if models.has_next %}
-            <a href="?search={{ search_query|urlencode }}&model_type={{ model_type_filter|urlencode }}&page={{ models.next_page_number }}">Next</a>
+            <a href="?search={{ search_query|urlencode }}&model_type={{ model_type_filter|urlencode }}&page={{ models.next_page_number }}">
+                Next <i class="fas fa-chevron-right"></i>
+            </a>
         {% endif %}
     </div>
     {% endif %}
+
 </div>
-</body>
-</html>
+
+<!-- Edit Modal (admins only) -->
+{% if user.is_admin %}
+<div class="mm-modal-backdrop" id="editModal">
+    <div class="mm-modal" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
+        <div class="mm-modal-header">
+            <h3 id="editModalTitle"><i class="fas fa-pen me-2"></i>Edit AI Model</h3>
+            <button class="mm-modal-close" id="closeEditModal" aria-label="Close">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="mm-modal-body">
+            <div class="mm-field-row">
+                <div class="mm-field">
+                    <label for="edit_name">Name</label>
+                    <input type="text" id="edit_name" maxlength="100" />
+                </div>
+                <div class="mm-field">
+                    <label for="edit_version">Version</label>
+                    <input type="text" id="edit_version" maxlength="20" />
+                </div>
+            </div>
+            <div class="mm-field-row">
+                <div class="mm-field">
+                    <label for="edit_type">Model Type</label>
+                    <select id="edit_type">
+                        {% for k,v in model_types %}
+                            <option value="{{ k }}">{{ v }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mm-field">
+                    <label for="edit_modality">Modality</label>
+                    <input type="text" id="edit_modality" maxlength="10" placeholder="CT, MR, XR…" />
+                </div>
+            </div>
+            <div class="mm-field">
+                <label for="edit_body_part">Body Part</label>
+                <input type="text" id="edit_body_part" maxlength="100" placeholder="e.g. Brain, Chest" />
+            </div>
+            <div class="mm-field">
+                <label for="edit_description">Description</label>
+                <textarea id="edit_description" rows="4"></textarea>
+            </div>
+            <div class="mm-field">
+                <label>Status</label>
+                <div class="mm-toggle-wrap">
+                    <label class="mm-toggle">
+                        <input type="checkbox" id="edit_active" />
+                        <span class="mm-toggle-slider"></span>
+                    </label>
+                    <span id="edit_active_label" style="font-size:0.85rem; color:var(--text-secondary);">Active</span>
+                </div>
+            </div>
+        </div>
+        <div class="mm-modal-footer">
+            <span class="mm-save-feedback" id="editFeedback"></span>
+            <button class="mm-btn mm-btn-ghost" id="cancelEdit">Cancel</button>
+            <button class="mm-btn mm-btn-primary" id="saveEdit">
+                <i class="fas fa-save"></i> Save Changes
+            </button>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+{% if user.is_admin %}
+(function () {
+    const modal   = document.getElementById('editModal');
+    const btnClose = document.getElementById('closeEditModal');
+    const btnCancel= document.getElementById('cancelEdit');
+    const btnSave  = document.getElementById('saveEdit');
+    const feedback = document.getElementById('editFeedback');
+
+    const fName  = document.getElementById('edit_name');
+    const fVer   = document.getElementById('edit_version');
+    const fType  = document.getElementById('edit_type');
+    const fMod   = document.getElementById('edit_modality');
+    const fBP    = document.getElementById('edit_body_part');
+    const fDesc  = document.getElementById('edit_description');
+    const fActive= document.getElementById('edit_active');
+    const fLabel = document.getElementById('edit_active_label');
+
+    let currentId = null;
+
+    function openModal(btn) {
+        currentId   = btn.dataset.id;
+        fName.value = btn.dataset.name;
+        fVer.value  = btn.dataset.version;
+        fType.value = btn.dataset.type;
+        fMod.value  = btn.dataset.modality;
+        fBP.value   = btn.dataset.bodyPart;
+        fDesc.value = btn.dataset.description;
+        fActive.checked = btn.dataset.active === 'true';
+        syncLabel();
+        feedback.style.display = 'none';
+        modal.classList.add('open');
+        fName.focus();
+    }
+
+    function closeModal() {
+        modal.classList.remove('open');
+        currentId = null;
+    }
+
+    function syncLabel() {
+        fLabel.textContent = fActive.checked ? 'Active' : 'Inactive';
+        fLabel.style.color = fActive.checked ? 'var(--success-color)' : 'var(--danger-color)';
+    }
+
+    fActive.addEventListener('change', syncLabel);
+
+    document.querySelectorAll('.open-edit').forEach(btn => {
+        btn.addEventListener('click', () => openModal(btn));
+    });
+
+    btnClose.addEventListener('click', closeModal);
+    btnCancel.addEventListener('click', closeModal);
+    modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+    function showFeedback(msg, isError) {
+        feedback.textContent = msg;
+        feedback.className = 'mm-save-feedback' + (isError ? ' error' : '');
+        feedback.style.display = 'inline';
+    }
+
+    btnSave.addEventListener('click', async () => {
+        if (!currentId) return;
+        btnSave.disabled = true;
+        btnSave.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+        feedback.style.display = 'none';
+
+        try {
+            const resp = await fetch(
+                `/ai/api/models/${currentId}/update/`,
+                {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}',
+                    },
+                    body: JSON.stringify({
+                        name:        fName.value.trim(),
+                        version:     fVer.value.trim(),
+                        model_type:  fType.value,
+                        modality:    fMod.value.trim(),
+                        body_part:   fBP.value.trim(),
+                        description: fDesc.value.trim(),
+                        is_active:   fActive.checked,
+                    }),
+                }
+            );
+            const data = await resp.json();
+            if (!resp.ok || data.error) {
+                showFeedback(data.error || 'Save failed.', true);
+            } else {
+                showFeedback('Saved!', false);
+                // Update the row in the table
+                const row = document.querySelector(`tr[data-model-id="${currentId}"]`);
+                if (row) {
+                    const nameCell = row.querySelector('td:first-child');
+                    if (nameCell) {
+                        nameCell.innerHTML =
+                            `<span class="mm-model-name">${data.model.name}</span>` +
+                            `<span class="mm-model-ver">v${data.model.version}</span>` +
+                            (data.model.description
+                                ? `<div class="mm-model-desc">${data.model.description.substring(0, 120)}</div>`
+                                : '');
+                    }
+                    const statusCell = row.querySelector('td:nth-child(4)');
+                    if (statusCell) {
+                        statusCell.innerHTML = data.model.is_active
+                            ? `<span class="mm-pill mm-pill-active"><span class="mm-pill-dot"></span>Active</span>`
+                            : `<span class="mm-pill mm-pill-inactive"><span class="mm-pill-dot"></span>Inactive</span>`;
+                    }
+                    // Update the edit button's data attributes
+                    const editBtn = row.querySelector('.open-edit');
+                    if (editBtn) {
+                        editBtn.dataset.name        = data.model.name;
+                        editBtn.dataset.version     = data.model.version;
+                        editBtn.dataset.type        = data.model.model_type;
+                        editBtn.dataset.modality    = data.model.modality;
+                        editBtn.dataset.bodyPart    = data.model.body_part;
+                        editBtn.dataset.description = data.model.description;
+                        editBtn.dataset.active      = String(data.model.is_active);
+                    }
+                }
+                setTimeout(closeModal, 900);
+            }
+        } catch (e) {
+            showFeedback('Network error — please try again.', true);
+        } finally {
+            btnSave.disabled = false;
+            btnSave.innerHTML = '<i class="fas fa-save"></i> Save Changes';
+        }
+    });
+})();
+{% endif %}
+</script>
+{% endblock %}

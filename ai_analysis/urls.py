@@ -17,6 +17,7 @@ urlpatterns = [
     path('api/analysis/<int:analysis_id>/feedback/', views.api_ai_feedback, name='api_ai_feedback'),
     path('api/realtime/analyses/', views.api_realtime_analyses, name='api_realtime_analyses'),
     path('api/models/', views.api_list_models, name='api_list_models'),
+    path('api/models/<int:model_id>/update/', views.api_model_update, name='api_model_update'),
     
     # Auto-report generation
     path('api/study/<int:study_id>/generate-report/', views.generate_auto_report, name='generate_auto_report'),

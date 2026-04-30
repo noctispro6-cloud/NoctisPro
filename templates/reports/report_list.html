@@ -312,9 +312,12 @@
                 {% if reports %}
                 {% for report in reports %}
                 <tr onclick="selectReport(this)"
+                    ondblclick="openReportRow(this)"
                     oncontextmenu="showCtxMenu(event, {{ report.id }}, '{{ report.status }}')"
                     data-report-id="{{ report.id }}"
-                    style="cursor:context-menu;">
+                    data-study-id="{{ report.study.id }}"
+                    title="Click to select • Double-click to edit report"
+                    style="cursor:pointer;">
                     <td>
                         <div class="patient-name">{{ report.study.patient.full_name }}</div>
                         <div class="patient-id">{{ report.study.patient.patient_id }}</div>
@@ -399,6 +402,11 @@
 function selectReport(row) {
     document.querySelectorAll('.data-table tbody tr').forEach(r => r.style.background = '');
     row.style.background = 'rgba(0, 212, 255, 0.15)';
+}
+
+function openReportRow(row) {
+    const studyId = row.getAttribute('data-study-id');
+    if (studyId) window.location.href = `/reports/write/${studyId}/`;
 }
 
 // ── Context menu ─────────────────────────────────────────────────────────

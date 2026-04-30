@@ -3971,11 +3971,14 @@
         }
 
         // Tissue preset configurations: [threshold_HU, color_hex, roughness, opacity]
+        // Colors tuned to match clinical CT bone workstation appearance.
+        // Bone uses warm tan-brown (#C09060 midtone) so that key-lit surfaces
+        // read as cream-beige and shadowed surfaces read as warm dark brown.
         const _TISSUE_PRESETS = {
-            skin:       { threshold: -50,  color: 0xf0c8a4, roughness: 0.65, opacity: 0.68, label: 'Skin / Outer'  },
-            softtissue: { threshold: 80,   color: 0xc8706a, roughness: 0.55, opacity: 0.78, label: 'Soft Tissue'   },
-            bone:       { threshold: 300,  color: 0xCDB07A, roughness: 0.42, opacity: 0.98, label: 'Bone'          },
-            cortical:   { threshold: 600,  color: 0xDDC898, roughness: 0.26, opacity: 1.00, label: 'Dense Bone'    },
+            skin:       { threshold: -50,  color: 0xDBA882, roughness: 0.72, opacity: 0.62, label: 'Skin / Outer'  },
+            softtissue: { threshold: 80,   color: 0xC07860, roughness: 0.68, opacity: 0.72, label: 'Soft Tissue'   },
+            bone:       { threshold: 300,  color: 0xBF9060, roughness: 0.52, opacity: 1.00, label: 'Bone'          },
+            cortical:   { threshold: 600,  color: 0xD0A870, roughness: 0.40, opacity: 1.00, label: 'Dense Bone'    },
         };
 
         function applyTissuePreset(preset) {
@@ -3991,12 +3994,15 @@
             if (tv) tv.textContent = String(boneThreshold);
             if (os) os.value = String(boneOpacity);
             if (ov) ov.textContent = String(boneOpacity);
-            // Update live material color/roughness if mesh already rendered
+            // Update live material if mesh already rendered
             if (bone3D && bone3D.mesh && bone3D.mesh.material) {
-                bone3D.mesh.material.color.setHex(cfg.color);
-                bone3D.mesh.material.roughness = cfg.roughness;
-                bone3D.mesh.material.opacity = cfg.opacity;
-                bone3D.mesh.material.needsUpdate = true;
+                const m = bone3D.mesh.material;
+                m.color.setHex(cfg.color);
+                m.roughness = cfg.roughness;
+                m.opacity   = cfg.opacity;
+                m.transparent = cfg.opacity < 0.99;
+                if ('clearcoat' in m) m.clearcoat = 0.10;
+                m.needsUpdate = true;
                 renderBoneFrame();
             }
             if (viewMode === 'mpr') generateBoneReconstruction();
@@ -6785,9 +6791,12 @@
             try { bone3D.renderer.outputColorSpace = THREE.SRGBColorSpace; } catch (e) {
                 try { bone3D.renderer.outputEncoding = THREE.sRGBEncoding; } catch (_) {}
             }
-            try { bone3D.renderer.toneMapping = THREE.ACESFilmicToneMapping; } catch (e) { }
-            try { bone3D.renderer.toneMappingExposure = 1.40; } catch (e) { }
-            try { bone3D.renderer.physicallyCorrectLights = true; } catch (e) { }
+            // Use ReinhardToneMapping at unity exposure for predictable, intuitive light control.
+            // physicallyCorrectLights is intentionally off so DirectionalLight intensity stays a
+            // simple 0-N multiplier rather than requiring SI lux values.
+            try { bone3D.renderer.toneMapping = THREE.ReinhardToneMapping; } catch (e) { }
+            try { bone3D.renderer.toneMappingExposure = 1.0; } catch (e) { }
+            try { bone3D.renderer.physicallyCorrectLights = false; } catch (e) { }
             bone3D.renderer.setClearColor(0x000000, 1);
             bone3D.renderer.shadowMap.enabled = true;
             bone3D.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -6799,28 +6808,28 @@
             bone3D.camera = new THREE.PerspectiveCamera(36, (c.width || 1) / (c.height || 1), 0.1, 10000);
             bone3D.camera.position.set(0, 0, 200);
 
-            // Lighting — studio portrait style: strong key, deep shadows, pure black BG
-            const ambient = new THREE.AmbientLight(0xffffff, 0.10);
-            const hemi = new THREE.HemisphereLight(0xc8d8ff, 0x080400, 0.18);
-            // Key: dominant warm light upper-front-right — main highlight, deep orbital shadows
-            const key = new THREE.DirectionalLight(0xfff8ec, 2.20);
-            key.position.set(1.4, 2.0, 2.2);
+            // Lighting tuned to reproduce clinical CT bone workstation appearance
+            // (ref: strong orbital shadows, bright frontal ridge highlights).
+            // Low ambient keeps shadows dark; strong key reveals surface contours.
+            const ambient = new THREE.AmbientLight(0xfff4e8, 0.18);
+            const hemi    = new THREE.HemisphereLight(0xfff0e0, 0x1a0800, 0.14);
+            // Key: upper-centre-right-front — reproduces the bright forehead / dark orbits look
+            const key = new THREE.DirectionalLight(0xfff8f0, 1.80);
+            key.position.set(0.8, 2.8, 2.5);
             key.castShadow = true;
-            key.shadow.mapSize.width = 4096;
-            key.shadow.mapSize.height = 4096;
+            key.shadow.mapSize.width = 2048;
+            key.shadow.mapSize.height = 2048;
             key.shadow.camera.near = 0.1;
             key.shadow.camera.far = 5000;
-            key.shadow.bias = -0.0005;
-            bone3D.keyLight = key;  // stored so renderBoneMesh can resize frustum to model
-            // Fill: subtle cool-left — lifts shadow detail, keeps orbital hollows dark
-            const fill = new THREE.DirectionalLight(0xa8c4f0, 0.32);
-            fill.position.set(-2.2, 0.4, 0.8);
-            // Back-top: catches parietal/superior surface, separates silhouette from black BG
-            const top = new THREE.DirectionalLight(0xffffff, 0.38);
-            top.position.set(0, 3.0, -1.0);
-            // Rim: cool back-left — thin silhouette glow against pure black background
-            const rim = new THREE.DirectionalLight(0xc8e0ff, 0.55);
-            rim.position.set(-1.0, 0.2, -2.8);
+            key.shadow.bias = -0.0004;
+            bone3D.keyLight = key;
+            // Fill: left — lifts orbital / mandible shadow from black to warm dark brown
+            const fill = new THREE.DirectionalLight(0xffddc0, 0.42);
+            fill.position.set(-2.2, 0.6, 1.5);
+            // Soft back-top: thin glow separating superior cranium from black background
+            const top = new THREE.DirectionalLight(0xffffff, 0.16);
+            top.position.set(0.0, 3.0, -1.8);
+            const rim = new THREE.DirectionalLight(0xffffff, 0.0); // disabled
 
             bone3D.scene.add(ambient);
             bone3D.scene.add(hemi);
@@ -6972,16 +6981,15 @@
                 return (sel && sel.value && _TISSUE_PRESETS[sel.value]) ? _TISSUE_PRESETS[sel.value] : _TISSUE_PRESETS.bone;
             })();
             const mat = new THREE.MeshPhysicalMaterial({
-                color: _activePreset.color,
-                transparent: _activePreset.opacity < 0.99,
-                opacity: Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 0.98)),
-                roughness: _activePreset.roughness ?? 0.42,
-                metalness: 0.0,
-                clearcoat: 0.18,          // thin specular layer — bone has a slight periosteal sheen
-                clearcoatRoughness: 0.40,
-                envMapIntensity: 0.0,
-                side: THREE.DoubleSide,
-                flatShading: false,
+                color:             _activePreset.color,
+                transparent:       _activePreset.opacity < 0.99,
+                opacity:           Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 1.0)),
+                roughness:         _activePreset.roughness ?? 0.52,
+                metalness:         0.0,
+                clearcoat:         0.10,      // subtle periosteal sheen — visible on ridges
+                clearcoatRoughness: 0.42,
+                side:              THREE.DoubleSide,
+                flatShading:       false,
             });
             // Optionally add a thicker inner-surface mesh for very porous geometry.
             const mesh = new THREE.Mesh(geom, mat);
@@ -6999,9 +7007,18 @@
             const center = new THREE.Vector3();
             bb.getCenter(center);
             mesh.position.sub(center);
-            // Use the LARGEST dimension so the model always fills the view well.
             const maxDim = Math.max(size.x, size.y, size.z) || 1;
-            const dist = maxDim * 1.25;
+            // Compute camera distance so the bounding sphere always fits fully inside
+            // the FOV. With FOV=36° and an oblique camera position (0.25, 0.15, 1)*dist
+            // the real camera-to-origin distance is dist*√1.085 ≈ dist*1.041, so the
+            // visible half-height at the origin plane is dist*1.041*tan(18°)=dist*0.338.
+            // Old formula (dist=maxDim*1.25) only showed ±maxDim*0.423 which clips
+            // bones whose bsRadius ≈ maxDim*0.87. New formula solves for the exact dist.
+            geom.computeBoundingSphere();
+            const bsRadius = (geom.boundingSphere && geom.boundingSphere.radius) || (maxDim * 0.87);
+            const _bsHalfFov = THREE.MathUtils.degToRad((bone3D.camera.fov || 36) / 2);
+            const _bsCamOffset = Math.sqrt(1 + 0.25 * 0.25 + 0.15 * 0.15); // ≈ 1.041
+            const dist = (bsRadius / (Math.tan(_bsHalfFov) * _bsCamOffset)) * 1.18;
 
             // Size the key-light shadow frustum to cover the actual model extent.
             // Default DirectionalLight shadow camera is ±5 world units — far too small
@@ -7355,10 +7372,17 @@
 
         function _getStudyDateForPrint() {
             try {
-                return (currentStudy && (currentStudy.study_date || currentStudy.date)) || '';
-            } catch (e) {
-                return '';
-            }
+                const raw = (currentStudy && (currentStudy.study_date || currentStudy.date)) || '';
+                if (!raw) return '';
+                // YYYYMMDD → readable
+                if (/^\d{8}$/.test(raw)) {
+                    const d = new Date(`${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6,8)}`);
+                    if (!isNaN(d)) return d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+                }
+                const d = new Date(raw);
+                if (!isNaN(d)) return d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+                return raw.replace('T', ' ').replace(/\+.*$/, '').slice(0, 16);
+            } catch (e) { return ''; }
         }
 
         function _openModal(id) {
@@ -7379,68 +7403,262 @@
             const seriesId = (currentSeries && currentSeries.id != null) ? String(currentSeries.id) : '';
             const total = Array.isArray(imageData) ? imageData.length : 0;
 
-            const seriesEl = document.getElementById('pe_series_id');
-            const modalityEl = document.getElementById('pe_modality');
+            const seriesEl    = document.getElementById('pe_series_id');
+            const modalityEl  = document.getElementById('pe_modality');
             const sliceStartEl = document.getElementById('pe_slice_start');
-            const sliceStepEl = document.getElementById('pe_slice_step');
+            const sliceStepEl  = document.getElementById('pe_slice_step');
             const sliceCountEl = document.getElementById('pe_slice_count');
 
-            if (seriesEl) seriesEl.value = seriesId;
-            if (modalityEl) modalityEl.value = modality;
-            if (sliceStartEl) sliceStartEl.value = String(Math.max(0, Math.floor(total / 2) - 8));
-            if (sliceStepEl) sliceStepEl.value = '1';
-            if (sliceCountEl) sliceCountEl.value = String(Math.min(16, Math.max(1, total)));
+            if (seriesEl)    seriesEl.value   = seriesId;
+            if (modalityEl)  modalityEl.value = modality;
+            if (sliceStartEl) sliceStartEl.value = '0';
+            if (sliceStepEl)  sliceStepEl.value  = '1';
+            if (sliceCountEl) sliceCountEl.value  = String(Math.min(24, Math.max(1, total)));
 
-            // Load printers (best-effort; can still download PDF if none)
+            // Build layout cards (idempotent — re-renders each modal open)
+            _renderLayoutCards();
+            // Auto-select best grid layout for this series size
+            const _gridMap = { 'single':[1,1], '2x2':[2,2], '2x3':[2,3], '3x4':[3,4], '4x5':[4,5], '4x6':[4,6] };
+            let bestLayout = 'single';
+            if (total >= 2  && total <= 4)  bestLayout = '2x2';
+            else if (total >= 5  && total <= 9)  bestLayout = '2x3';
+            else if (total >= 10 && total <= 20) bestLayout = '3x4';
+            else if (total >= 21 && total <= 30) bestLayout = '4x5';
+            else if (total > 30)                 bestLayout = '4x6';
+            const [_br, _bc] = _gridMap[bestLayout] || [3, 4];
+            pe_selectLayout(bestLayout, _br, _bc);
+
+            // Load printers (best-effort)
             try {
                 const resp = await fetch('/dicom-viewer/print/printers/', { credentials: 'same-origin' });
                 const data = await resp.json();
                 const sel = document.getElementById('pe_printer_name');
                 if (sel) {
                     sel.innerHTML = '';
-                    const opt0 = document.createElement('option');
-                    opt0.value = '';
-                    opt0.textContent = (data && data.success && Array.isArray(data.printers) && data.printers.length) ? 'Select a printer…' : 'No printers detected (download PDF instead)';
-                    sel.appendChild(opt0);
+                    const none = document.createElement('option');
+                    none.value = '';
+                    none.textContent = (data && data.success && Array.isArray(data.printers) && data.printers.length)
+                        ? 'Select a printer…' : 'No printers detected — use Download PDF';
+                    sel.appendChild(none);
                     if (data && data.success && Array.isArray(data.printers)) {
-                        data.printers.forEach((p) => {
+                        data.printers.forEach(p => {
                             const o = document.createElement('option');
                             o.value = p.name || '';
-                            o.textContent = `${p.name || 'Printer'}${p.description ? ' - ' + p.description : ''}`;
+                            o.textContent = `${p.name || 'Printer'}${p.description ? ' — ' + p.description : ''}`;
                             sel.appendChild(o);
                         });
                     }
                 }
-            } catch (e) {
-                // ignore
-            }
+            } catch (_) {}
+        }
 
-            // Load layouts for the current modality
-            try {
-                const resp = await fetch(`/dicom-viewer/print/layouts/?modality=${encodeURIComponent(modality)}`, { credentials: 'same-origin' });
-                const data = await resp.json();
-                const sel = document.getElementById('pe_layout_type');
-                if (sel) {
-                    sel.innerHTML = '';
-                    const layouts = (data && data.success && Array.isArray(data.layouts)) ? data.layouts : [];
-                    const fallback = [
-                        { id: 'single', name: 'Single Image' },
-                        { id: 'grid', name: 'Grid (custom rows/cols)' },
-                    ];
-                    const list = layouts.length ? layouts : fallback;
-                    list.forEach((l) => {
-                        const o = document.createElement('option');
-                        o.value = l.id || 'single';
-                        o.textContent = l.name || l.id || 'Layout';
-                        sel.appendChild(o);
-                    });
-                    // Prefer grid for stacks
-                    if (total > 1) {
-                        sel.value = (list.find((x) => x.id === 'grid') ? 'grid' : (list[0] && list[0].id) || 'single');
+        // ── Visual layout card selector ──────────────────────────────────────
+        const _PRINT_LAYOUTS = [
+            { id: 'single', rows: 1, cols: 1, label: 'Single',  sub: '1 image'  },
+            { id: '2x2',    rows: 2, cols: 2, label: '2 × 2',   sub: '4 images' },
+            { id: '2x3',    rows: 2, cols: 3, label: '2 × 3',   sub: '6 images' },
+            { id: '3x4',    rows: 3, cols: 4, label: '3 × 4',   sub: '12 images'},
+            { id: '4x5',    rows: 4, cols: 5, label: '4 × 5',   sub: '20 images'},
+            { id: '4x6',    rows: 4, cols: 6, label: '4 × 6',   sub: '24 images'},
+            { id: 'custom', rows: 3, cols: 4, label: 'Custom',   sub: 'you pick' },
+        ];
+
+        function _renderLayoutCards() {
+            const container = document.getElementById('pe_layout_cards');
+            if (!container) return;
+            container.innerHTML = '';
+            _PRINT_LAYOUTS.forEach(function(layout) {
+                const card = document.createElement('div');
+                card.id = 'pe_lc_' + layout.id;
+                card.onclick = function() { pe_selectLayout(layout.id, layout.rows, layout.cols); };
+                card.title = layout.label;
+                card.style.cssText = [
+                    'display:flex;flex-direction:column;align-items:center;',
+                    'padding:6px 5px 5px;border-radius:8px;cursor:pointer;',
+                    'border:2px solid transparent;background:var(--secondary-bg);',
+                    'transition:border-color .15s,background .15s;',
+                    'user-select:none;min-width:56px;',
+                ].join('');
+
+                const preview = document.createElement('div');
+                const PW = 54, PH = 38;
+                preview.style.cssText = [
+                    'width:' + PW + 'px;height:' + PH + 'px;',
+                    'background:#111827;border-radius:3px;overflow:hidden;',
+                    'box-sizing:border-box;padding:2px;display:grid;gap:1px;',
+                    'grid-template-columns:repeat(' + layout.cols + ',1fr);',
+                    'grid-template-rows:repeat(' + layout.rows + ',1fr);',
+                ].join('');
+
+                if (layout.id === 'custom') {
+                    const icon = document.createElement('div');
+                    icon.style.cssText = 'grid-column:1/-1;grid-row:1/-1;display:flex;align-items:center;justify-content:center;font-size:18px;color:#4a90d9;';
+                    icon.textContent = '⊞';
+                    preview.appendChild(icon);
+                } else {
+                    const total = layout.rows * layout.cols;
+                    for (let i = 0; i < total; i++) {
+                        const cell = document.createElement('div');
+                        cell.style.cssText = 'background:rgba(74,144,217,0.40);border-radius:1px;';
+                        preview.appendChild(cell);
                     }
                 }
-            } catch (e) {
-                // ignore
+                card.appendChild(preview);
+
+                const lbl = document.createElement('div');
+                lbl.style.cssText = 'margin-top:4px;font-size:10px;font-weight:700;color:var(--text-secondary);white-space:nowrap;letter-spacing:0.3px;';
+                lbl.textContent = layout.label;
+                card.appendChild(lbl);
+
+                const sub = document.createElement('div');
+                sub.style.cssText = 'font-size:9px;color:var(--text-muted);white-space:nowrap;';
+                sub.textContent = layout.sub;
+                card.appendChild(sub);
+
+                container.appendChild(card);
+            });
+            // Reflect whatever is already stored in the hidden input
+            const cur = (document.getElementById('pe_layout_type') || {}).value || '3x4';
+            _highlightLayoutCard(cur === 'grid' ? 'custom' : cur);
+        }
+
+        function _highlightLayoutCard(activeId) {
+            _PRINT_LAYOUTS.forEach(function(l) {
+                const card = document.getElementById('pe_lc_' + l.id);
+                if (!card) return;
+                const on = (l.id === activeId);
+                card.style.borderColor = on ? '#0078d4' : 'transparent';
+                card.style.background  = on ? 'rgba(0,120,212,0.18)' : 'var(--secondary-bg)';
+                card.querySelectorAll('div').forEach(function(c) {
+                    if (c.style.borderRadius === '1px') {
+                        c.style.background = on ? 'rgba(0,120,212,0.65)' : 'rgba(74,144,217,0.40)';
+                    }
+                });
+            });
+        }
+
+        function _buildHoverGrid(container, initRows, initCols) {
+            const MAX_R = 8, MAX_C = 10;
+            const CW = 20, CH = 15, GAP = 3; // cell width, height, gap in px
+
+            container.innerHTML = '';
+
+            const lbl = document.createElement('div');
+            lbl.id = 'pe_hg_label';
+            lbl.style.cssText = 'color:var(--text-secondary);font-size:11px;font-weight:600;margin-bottom:5px;';
+            lbl.textContent = 'Hover to pick size — click to confirm';
+            container.appendChild(lbl);
+
+            // Grid wrapper — single event target, no gaps to fall through
+            const grid = document.createElement('div');
+            const totalW = MAX_C * CW + (MAX_C - 1) * GAP;
+            const totalH = MAX_R * CH + (MAX_R - 1) * GAP;
+            grid.style.cssText = 'position:relative;width:' + totalW + 'px;height:' + totalH + 'px;cursor:crosshair;';
+
+            // Build cells with pointer-events:none so grid captures all mouse events
+            const _cells = [];
+            for (let r = 1; r <= MAX_R; r++) {
+                for (let c = 1; c <= MAX_C; c++) {
+                    const cell = document.createElement('div');
+                    cell.style.cssText = [
+                        'position:absolute;',
+                        'left:' + ((c - 1) * (CW + GAP)) + 'px;',
+                        'top:'  + ((r - 1) * (CH + GAP)) + 'px;',
+                        'width:' + CW + 'px;height:' + CH + 'px;',
+                        'background:rgba(74,144,217,0.22);border-radius:2px;',
+                        'pointer-events:none;',
+                    ].join('');
+                    cell._r = r; cell._c = c;
+                    _cells.push(cell);
+                    grid.appendChild(cell);
+                }
+            }
+
+            let _lastR = initRows, _lastC = initCols;
+
+            function _highlight(r, c) {
+                _lastR = r; _lastC = c;
+                for (var i = 0; i < _cells.length; i++) {
+                    var on = _cells[i]._r <= r && _cells[i]._c <= c;
+                    _cells[i].style.background = on ? 'rgba(0,120,212,0.80)' : 'rgba(74,144,217,0.22)';
+                }
+                var cnt = document.getElementById('pe_hg_count');
+                if (cnt) cnt.textContent = r + ' \xd7 ' + c + ' — ' + (r * c) + ' images';
+            }
+
+            // Single mousemove on the grid wrapper — fires even over gaps
+            grid.addEventListener('mousemove', function(e) {
+                var rect = grid.getBoundingClientRect();
+                var c = Math.max(1, Math.min(MAX_C, Math.floor((e.clientX - rect.left)  / (CW + GAP)) + 1));
+                var r = Math.max(1, Math.min(MAX_R, Math.floor((e.clientY - rect.top)   / (CH + GAP)) + 1));
+                if (r !== _lastR || c !== _lastC) _highlight(r, c);
+            });
+
+            grid.addEventListener('click', function() {
+                var hR = document.getElementById('pe_grid_rows');
+                var hC = document.getElementById('pe_grid_cols');
+                if (hR) hR.value = String(_lastR);
+                if (hC) hC.value = String(_lastC);
+                _updatePrintBtnLabel();
+                var l2 = document.getElementById('pe_hg_label');
+                if (l2) { l2.textContent = '✓ ' + _lastR + '\xd7' + _lastC + ' confirmed'; l2.style.color = '#4ade80'; }
+                setTimeout(function() {
+                    if (l2) { l2.textContent = 'Hover to pick size — click to confirm'; l2.style.color = ''; }
+                }, 1800);
+            });
+
+            container.appendChild(grid);
+
+            var countEl = document.createElement('div');
+            countEl.id = 'pe_hg_count';
+            countEl.style.cssText = 'color:var(--text-muted);font-size:11px;margin-top:5px;';
+            container.appendChild(countEl);
+
+            _highlight(initRows, initCols);
+        }
+
+        function pe_setOrientation(val) {
+            const inp = document.getElementById('pe_orientation');
+            if (inp) inp.value = val;
+            ['landscape', 'portrait'].forEach(function(o) {
+                const btn = document.getElementById('pe_orient_' + o);
+                if (!btn) return;
+                const on = (o === val);
+                btn.style.borderColor = on ? '#0078d4' : 'transparent';
+                btn.style.background  = on ? 'rgba(0,120,212,0.18)' : 'var(--secondary-bg)';
+            });
+        }
+
+        function pe_selectLayout(id, rows, cols) {
+            const hidLayout = document.getElementById('pe_layout_type');
+            const hidRows   = document.getElementById('pe_grid_rows');
+            const hidCols   = document.getElementById('pe_grid_cols');
+            if (hidLayout) hidLayout.value = (id === 'custom') ? 'grid' : id;
+            if (hidRows)   hidRows.value   = String(rows);
+            if (hidCols)   hidCols.value   = String(cols);
+
+            _highlightLayoutCard(id);
+
+            const customDiv = document.getElementById('pe_custom_inputs');
+            if (customDiv) {
+                customDiv.style.display = (id === 'custom') ? 'flex' : 'none';
+                if (id === 'custom') _buildHoverGrid(customDiv, rows, cols);
+            }
+            _updatePrintBtnLabel();
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
+        function _updatePrintBtnLabel() {
+            const btn = document.getElementById('pe_quick_print_btn');
+            if (!btn) return;
+            const layout = (document.getElementById('pe_layout_type') || {}).value || 'single';
+            const total  = Array.isArray(imageData) ? imageData.length : 0;
+            if (layout === 'single' || !total) {
+                btn.innerHTML = '<i class="fas fa-print"></i> Print Current Image';
+            } else {
+                const rows = parseInt((document.getElementById('pe_grid_rows') || {}).value || '2', 10) || 2;
+                const cols = parseInt((document.getElementById('pe_grid_cols') || {}).value || '2', 10) || 2;
+                btn.innerHTML = `<i class="fas fa-th"></i> Print ${rows}\xd7${cols} Grid (${rows*cols} images)`;
             }
         }
 
@@ -7472,11 +7690,9 @@
         }
 
         function pe_browserPrintQuick() {
-            if (!canvas) {
-                showToast('No image to print', 'warning');
-                return;
-            }
-            const imgData  = canvas.toDataURL('image/png');
+            if (!canvas) { showToast('No image to print', 'warning'); return; }
+
+            const layoutType = (document.getElementById('pe_layout_type') || {}).value || 'single';
             const patient  = _getPatientNameForPrint() || '—';
             const studyDt  = _getStudyDateForPrint()   || '—';
             const modality = _getCurrentModality()      || '—';
@@ -7484,9 +7700,118 @@
             const serDesc  = (currentSeries && currentSeries.description) || (currentSeries && currentSeries.series_description) || '—';
             const ww       = Math.round(windowWidth);
             const wl       = Math.round(windowLevel);
-            const sliceTxt = (typeof currentSlice !== 'undefined' && Array.isArray(imageData) && imageData.length)
-                ? `${currentSlice + 1} / ${imageData.length}` : '';
-            const now = new Date().toLocaleString();
+            const now      = new Date().toLocaleString();
+
+            // --- GRID LAYOUT ---
+            // Images are pre-fetched as base64 data URLs in THIS (authenticated) window,
+            // then injected into the print popup as self-contained HTML. This eliminates
+            // all session/cookie/auth issues that plague popup windows loading image URLs.
+            const _orient = (document.getElementById('pe_orientation') || {}).value || 'landscape';
+            const _isGrid = layoutType === 'grid' || /^\d+x\d+$/.test(layoutType);
+            if (_isGrid && Array.isArray(imageData) && imageData.length > 0) {
+                const rows = Math.max(1, Math.min(10, parseInt((document.getElementById('pe_grid_rows') || {}).value || '2', 10) || 2));
+                const cols = Math.max(1, Math.min(10, parseInt((document.getElementById('pe_grid_cols') || {}).value || '2', 10) || 2));
+                const total = rows * cols;
+                const n = imageData.length;
+
+                // Evenly-spaced slice indices across the series
+                const _gridIndices = [];
+                for (let i = 0; i < total; i++) {
+                    _gridIndices.push(total === 1 ? Math.floor(n / 2) : Math.min(n - 1, Math.round(i * (n - 1) / (total - 1))));
+                }
+
+                showToast(`Preparing ${total}-image grid…`, 'info', 4000);
+
+                const _wpx = new URLSearchParams({ ww: String(ww), wl: String(wl), invert: inverted ? 'true' : 'false' });
+
+                async function _imgToDataUrl(idx) {
+                    const entry = imageData[idx];
+                    if (!entry || !entry.id) return null;
+                    try {
+                        const url = `/dicom-viewer/api/image/${parseInt(entry.id, 10)}/render.png?${_wpx.toString()}`;
+                        const r = await fetch(url, { credentials: 'same-origin' });
+                        if (!r.ok) return null;
+                        const blob = await r.blob();
+                        return await new Promise(res => {
+                            const fr = new FileReader();
+                            fr.onload  = () => res(fr.result);
+                            fr.onerror = () => res(null);
+                            fr.readAsDataURL(blob);
+                        });
+                    } catch (_) { return null; }
+                }
+
+                Promise.all(_gridIndices.map(_imgToDataUrl)).then(dataUrls => {
+                    const cells = dataUrls.map((du, i) => {
+                        const idx = _gridIndices[i];
+                        const lbl = `${idx + 1}/${n}`;
+                        if (!du) return `<div class="ce"><span class="cl">${lbl}</span></div>`;
+                        return `<div class="ce"><img src="${du}" alt="${lbl}"><span class="cl">${lbl}</span></div>`;
+                    }).join('');
+
+                    const _html = [
+                        '<!DOCTYPE html><html><head>',
+                        `<title>DICOM Print — ${patient}</title>`,
+                        '<meta charset="utf-8">',
+                        '<style>',
+                        `@page{margin:0.5cm;size:A4 ${_orient}}`,
+                        '@media print{.np{display:none!important}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}',
+                        '*{box-sizing:border-box;margin:0;padding:0}',
+                        'body{background:#000;color:#ccc;font-family:"Courier New",monospace;font-size:7.5pt;height:100vh;display:flex;flex-direction:column}',
+                        // Header
+                        '.hdr{display:flex;justify-content:space-between;align-items:flex-start;padding:4px 6px;border-bottom:1px solid #2a2a2a;flex-shrink:0;gap:8px;flex-wrap:wrap}',
+                        '.hc{display:flex;flex-direction:column;gap:1px;min-width:0}',
+                        '.hr{display:flex;gap:3px;white-space:nowrap;overflow:hidden}',
+                        '.hl{color:#555;min-width:56px}.hv{color:#ddd;font-weight:700;overflow:hidden;text-overflow:ellipsis}',
+                        // Grid
+                        `.gr{flex:1;display:grid;grid-template-columns:repeat(${cols},1fr);grid-template-rows:repeat(${rows},1fr);gap:1px;background:#1a1a1a;min-height:0;overflow:hidden}`,
+                        '.ce{position:relative;background:#000;overflow:hidden;display:flex;align-items:center;justify-content:center}',
+                        '.ce img{width:100%;height:100%;object-fit:contain;display:block}',
+                        '.cl{position:absolute;bottom:2px;left:3px;font-size:5.5pt;color:#aaa;background:rgba(0,0,0,.75);padding:1px 3px;border-radius:1px;pointer-events:none}',
+                        // Footer
+                        '.ftr{display:flex;justify-content:space-between;padding:3px 6px;border-top:1px solid #2a2a2a;flex-shrink:0;font-size:6.5pt;color:#444}',
+                        // Print button
+                        '.pb{position:fixed;bottom:16px;right:16px;padding:10px 22px;background:#0078d4;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.5)}',
+                        '</style></head><body>',
+                        '<div class="hdr">',
+                        `<div class="hc"><div class="hr"><span class="hl">Patient</span><span class="hv">${patient}</span></div><div class="hr"><span class="hl">Accession</span><span class="hv">${acc}</span></div></div>`,
+                        `<div class="hc"><div class="hr"><span class="hl">Date</span><span class="hv">${studyDt}</span></div><div class="hr"><span class="hl">Modality</span><span class="hv">${modality}</span></div></div>`,
+                        `<div class="hc"><div class="hr"><span class="hl">Series</span><span class="hv">${serDesc}</span></div><div class="hr"><span class="hl">WW/WL</span><span class="hv">${ww} / ${wl}</span></div></div>`,
+                        `<div class="hc"><div class="hr"><span class="hl">Layout</span><span class="hv">${rows}×${cols} (${n} images)</span></div><div class="hr"><span class="hl">Printed</span><span class="hv">${now}</span></div></div>`,
+                        '</div>',
+                        `<div class="gr">${cells}</div>`,
+                        `<div class="ftr"><span>Noctis Pro PACS</span><span>${modality} — WW:${ww} WL:${wl} — ${patient}</span></div>`,
+                        '<button class="pb np" onclick="window.print();setTimeout(function(){window.close();},800);">\u{1F5A8} Print</button>',
+                        '</body></html>'
+                    ].join('');
+
+                    const _blob = new Blob([_html], { type: 'text/html;charset=utf-8' });
+                    const _burl = URL.createObjectURL(_blob);
+                    const pw = window.open(_burl, '_blank');
+                    if (!pw) {
+                        URL.revokeObjectURL(_burl);
+                        showToast('Pop-up blocked — allow pop-ups and retry', 'warning');
+                        return;
+                    }
+                    // Revoke after 5 min (plenty of time to print)
+                    setTimeout(() => URL.revokeObjectURL(_burl), 300000);
+                    pw.focus();
+                    // Auto-print after page loads (blob URLs load instantly)
+                    pw.addEventListener('load', () => {
+                        setTimeout(() => { try { pw.print(); } catch (_) {} }, 300);
+                    });
+                    // Fallback timer in case load event doesn't fire
+                    setTimeout(() => { try { pw.print(); } catch (_) {} }, 1200);
+                }).catch(err => {
+                    showToast('Grid print failed: ' + (err && err.message ? err.message : String(err)), 'error');
+                });
+                return;
+            }
+
+            // --- SINGLE IMAGE ---
+            const imgData  = canvas.toDataURL('image/png');
+            const sliceTxt = (Array.isArray(imageData) && imageData.length)
+                ? `${currentImageIndex + 1} / ${imageData.length}` : '';
 
             const pw = window.open('', '_blank');
             if (!pw) { showToast('Pop-up blocked — allow pop-ups and retry', 'warning'); return; }
@@ -7494,7 +7819,7 @@
 <html><head>
 <title>DICOM Print — ${patient}</title>
 <style>
-@page { margin: 0.8cm; size: A4 landscape; }
+@page { margin: 0.8cm; size: A4 ${_orient}; }
 @media print { .noprint { display:none !important; } }
 * { box-sizing: border-box; margin:0; padding:0; }
 body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-size:8.5pt; }
@@ -8254,147 +8579,96 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
 
             <!-- PRINT PANEL -->
             <div id="pe_print_panel" style="display:block;">
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+
+                <!-- ── Layout selector — visual grid cards ── -->
+                <div style="background:rgba(0,120,212,0.08);border:1px solid rgba(0,120,212,0.3);border-radius:10px;padding:12px;margin-bottom:12px;">
+                    <div style="color:var(--text-primary);font-size:12px;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                        <i class="fas fa-th" style="color:#0078d4;"></i> Print Layout
+                    </div>
+                    <!-- Cards injected by _renderLayoutCards() -->
+                    <div id="pe_layout_cards" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+                    <!-- Hover-grid picker — shown only when Custom card is selected -->
+                    <div id="pe_custom_inputs" style="display:none;margin-top:10px;flex-direction:column;gap:6px;"></div>
+                    <!-- Hidden state consumed by print logic -->
+                    <input type="hidden" id="pe_layout_type" value="3x4">
+                    <input type="hidden" id="pe_grid_rows"   value="3">
+                    <input type="hidden" id="pe_grid_cols"   value="4">
+                </div>
+
+                <!-- ── Orientation toggle ── -->
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                    <span style="color:var(--text-secondary);font-size:12px;font-weight:600;">Orientation:</span>
+                    <button id="pe_orient_landscape" onclick="pe_setOrientation('landscape')"
+                        style="display:flex;align-items:center;gap:5px;padding:6px 12px;border-radius:7px;border:2px solid #0078d4;background:rgba(0,120,212,0.18);color:var(--text-primary);cursor:pointer;font-size:12px;font-weight:600;">
+                        <svg width="20" height="14" viewBox="0 0 20 14" fill="none"><rect x="0.75" y="0.75" width="18.5" height="12.5" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="rgba(0,120,212,0.25)"/></svg>
+                        Landscape
+                    </button>
+                    <button id="pe_orient_portrait" onclick="pe_setOrientation('portrait')"
+                        style="display:flex;align-items:center;gap:5px;padding:6px 12px;border-radius:7px;border:2px solid transparent;background:var(--secondary-bg);color:var(--text-primary);cursor:pointer;font-size:12px;font-weight:600;">
+                        <svg width="14" height="18" viewBox="0 0 14 18" fill="none"><rect x="0.75" y="0.75" width="12.5" height="16.5" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="rgba(74,144,217,0.2)"/></svg>
+                        Portrait
+                    </button>
+                    <input type="hidden" id="pe_orientation" value="landscape">
+                </div>
+
+                <!-- Secondary options -->
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top:10px;">
                     <div>
-                        <label
-                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Printer
-                            (optional)</label>
-                        <select id="pe_printer_name"
-                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        <label style="display:block;color:var(--text-secondary);font-size:12px;margin-bottom:5px;">Printer (optional)</label>
+                        <select id="pe_printer_name" style="width:100%;padding:9px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);">
                             <option value="">Loading printers…</option>
                         </select>
-                        <div style="color: var(--text-muted); font-size: 11px; margin-top: 6px;">
-                            If no printers are available, use <strong>Download PDF</strong>.
-                        </div>
                     </div>
                     <div>
-                        <label
-                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Layout</label>
-                        <select id="pe_layout_type"
-                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
-                            <option value="single">Single Image</option>
-                            <option value="grid">Grid (custom)</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label
-                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Paper
-                            / Film size</label>
-                        <select id="pe_paper_size"
-                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        <label style="display:block;color:var(--text-secondary);font-size:12px;margin-bottom:5px;">Paper / Film</label>
+                        <select id="pe_paper_size" style="width:100%;padding:9px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);">
                             <option value="A4">A4</option>
                             <option value="Letter">Letter</option>
                             <option value="FILM_14X17">Film 14×17</option>
                             <option value="FILM_11X14">Film 11×14</option>
                             <option value="FILM_10X12">Film 10×12</option>
-                            <option value="FILM_8X10">Film 8×10</option>
                         </select>
                     </div>
-
                     <div>
-                        <label
-                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Medium</label>
-                        <select id="pe_print_medium"
-                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
-                            <option value="paper">Paper</option>
-                            <option value="film">Film</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label
-                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Paper
-                            type</label>
-                        <select id="pe_paper_type"
-                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
-                            <option value="glossy">Glossy</option>
-                            <option value="matte">Matte</option>
-                            <option value="plain">Plain</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label
-                            style="display:block; color: var(--text-secondary); font-size: 12px; margin-bottom: 6px;">Quality</label>
-                        <select id="pe_print_quality"
-                            style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
+                        <label style="display:block;color:var(--text-secondary);font-size:12px;margin-bottom:5px;">Quality</label>
+                        <select id="pe_print_quality" style="width:100%;padding:9px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);">
                             <option value="high">High</option>
                             <option value="normal">Normal</option>
                             <option value="draft">Draft</option>
                         </select>
                     </div>
+                    <div>
+                        <label style="display:block;color:var(--text-secondary);font-size:12px;margin-bottom:5px;">Medium</label>
+                        <select id="pe_print_medium" style="width:100%;padding:9px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);">
+                            <option value="paper">Paper</option>
+                            <option value="film">Film</option>
+                        </select>
+                    </div>
                 </div>
 
-                <div
-                    style="margin-top: 14px; padding: 12px; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(255,255,255,0.02);">
-                    <div style="color: var(--text-primary); font-size: 12px; margin-bottom: 8px;">
-                        Multi-slice (server-rendered grid from current series)
-                    </div>
-                    <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap: 10px;">
-                        <div style="grid-column: span 2;">
-                            <label
-                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Series
-                                ID</label>
-                            <input id="pe_series_id" type="text" placeholder="(auto)"
-                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary); font-family: monospace;">
-                        </div>
-                        <div style="grid-column: span 1;">
-                            <label
-                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Rows</label>
-                            <input id="pe_grid_rows" type="number" min="1" max="8" value="4"
-                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
-                        </div>
-                        <div style="grid-column: span 1;">
-                            <label
-                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Cols</label>
-                            <input id="pe_grid_cols" type="number" min="1" max="8" value="4"
-                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
-                        </div>
-                        <div style="grid-column: span 1;">
-                            <label
-                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Start</label>
-                            <input id="pe_slice_start" type="number" min="0" value="0"
-                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
-                        </div>
-                        <div style="grid-column: span 1;">
-                            <label
-                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Step</label>
-                            <input id="pe_slice_step" type="number" min="1" value="1"
-                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
-                        </div>
-                        <div style="grid-column: span 2;">
-                            <label
-                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Count</label>
-                            <input id="pe_slice_count" type="number" min="1" max="96" value="16"
-                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
-                        </div>
-                        <div style="grid-column: span 2;">
-                            <label
-                                style="display:block; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px;">Copies</label>
-                            <input id="pe_copies" type="number" min="1" max="20" value="1"
-                                style="width:100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--secondary-bg); color: var(--text-primary);">
-                        </div>
-                    </div>
-                    <input id="pe_modality" type="hidden" value="">
-                </div>
+                <!-- Hidden fields consumed by server-side PDF endpoint -->
+                <input id="pe_paper_type"   type="hidden" value="glossy">
+                <input id="pe_series_id"    type="hidden" value="">
+                <input id="pe_slice_start"  type="hidden" value="0">
+                <input id="pe_slice_step"   type="hidden" value="1">
+                <input id="pe_slice_count"  type="hidden" value="16">
+                <input id="pe_copies"       type="hidden" value="1">
+                <input id="pe_modality"     type="hidden" value="">
 
-                <div
-                    style="display:flex; gap: 10px; justify-content: space-between; flex-wrap: wrap; margin-top: 16px;">
-                    <button onclick="pe_browserPrintQuick()"
-                        style="padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
-                        <i class="fas fa-window-maximize"></i> Browser Print (quick)
+                <!-- Action buttons -->
+                <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;">
+                    <button id="pe_quick_print_btn" onclick="pe_browserPrintQuick()"
+                        style="flex:1;padding:11px 14px;border-radius:8px;border:none;background:#0078d4;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">
+                        <i class="fas fa-th"></i> Print Grid
                     </button>
-                    <div style="display:flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
-                        <button onclick="pe_downloadPrintPdf()"
-                            style="padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--secondary-bg); color: var(--text-primary); cursor:pointer;">
-                            <i class="fas fa-file-pdf"></i> Download PDF
-                        </button>
-                        <button onclick="pe_sendToPrinter()"
-                            style="padding: 10px 14px; border-radius: 8px; border: none; background: var(--accent-color); color: white; cursor:pointer;">
-                            <i class="fas fa-print"></i> Send to Printer
-                        </button>
-                    </div>
+                    <button onclick="pe_downloadPrintPdf()"
+                        style="padding:11px 14px;border-radius:8px;border:1px solid var(--border-color);background:var(--secondary-bg);color:var(--text-primary);cursor:pointer;font-size:13px;">
+                        <i class="fas fa-file-pdf"></i> Download PDF
+                    </button>
+                    <button onclick="pe_sendToPrinter()"
+                        style="padding:11px 14px;border-radius:8px;border:none;background:var(--accent-color);color:#fff;cursor:pointer;font-size:13px;">
+                        <i class="fas fa-print"></i> Send to Printer
+                    </button>
                 </div>
             </div>
 

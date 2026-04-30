@@ -1846,40 +1846,26 @@ def api_bone_reconstruction(request, series_id):
                 dsy = max(1, ds)
                 dsx = max(1, ds)
 
-                # ── Fill holes: per-slice 2D (axial + sagittal + coronal) then 3D + closing ──
-                # Per-slice fill is highly effective for shell-like bones (skull, vertebrae,
-                # ribs) because each ring/loop in a single slice is a closed 2D boundary
-                # even when the 3D shell has openings (orbits, foramina, etc.).
+                # ── Minimal morphological cleanup ──
+                # Only axial (Z-plane) 2D fill to close small intra-slice gaps in
+                # cortical rings. Sagittal/coronal fill and 3D fill are intentionally
+                # omitted — they convert thin-shell bones (skull, ribs) into solid blobs
+                # by filling orbital cavities, foramina and the skull interior.
+                # Binary closing is kept to 1 small-radius iteration to bridge hairline
+                # cortex gaps without inflating the surface contour.
                 try:
                     from scipy.ndimage import (binary_fill_holes as _bfh,
                                                binary_closing as _bcl,
-                                               generate_binary_structure as _gbs,
-                                               iterate_structure as _its)
+                                               generate_binary_structure as _gbs)
                     _mask = vol_for_mesh > 0.5
 
-                    # 2D per-slice fill in all three orientations
-                    _ax = np.empty_like(_mask)
+                    # Axial-only 2D fill — closes rings in each axial slice
                     for _i in range(_mask.shape[0]):
-                        _ax[_i] = _bfh(_mask[_i])
-                    _sg = np.empty_like(_mask)
-                    for _i in range(_mask.shape[2]):
-                        _sg[:, :, _i] = _bfh(_mask[:, :, _i])
-                    _co = np.empty_like(_mask)
-                    for _i in range(_mask.shape[1]):
-                        _co[:, _i, :] = _bfh(_mask[:, _i, :])
-                    # Union: a voxel is filled if any orientation filled it
-                    _mask = _ax | _sg | _co
+                        _mask[_i] = _bfh(_mask[_i])
 
-                    # 3D fill to close any remaining enclosed voids
-                    _mask = _bfh(_mask)
-
-                    # Closing to bridge thin gaps and connect near-touching fragments.
-                    # Use larger ball-like structure (radius-2 dilation of 6-connected)
-                    # for better bridging without excessive inflation.
+                    # Tight closing (6-connected, 1 iteration) to bridge hairline gaps
                     _struct3 = _gbs(3, 1)
-                    _struct_ball = _its(_struct3, 2)  # radius-2 approximation
-                    _close_iter = 3 if quality == 'fast' else 5
-                    _mask = _bcl(_mask, structure=_struct_ball, iterations=_close_iter)
+                    _mask = _bcl(_mask, structure=_struct3, iterations=1)
 
                     vol_for_mesh = _mask.astype(np.float32)
                 except Exception:
@@ -1887,12 +1873,13 @@ def api_bone_reconstruction(request, series_id):
 
                 vol_ds = vol_for_mesh[::dsz, ::dsy, ::dsx]
 
-                # Gaussian soft-field: smooths the 0/1 boundary into a gradient so MC
-                # produces smooth surfaces. sigma=2.0 provides good smoothing without
-                # over-blurring fine trabecular structures.
+                # Gaussian soft-field: smooths the binary 0/1 boundary into a gradient
+                # so marching cubes produces sub-voxel-smooth surfaces without staircase
+                # artefacts. sigma=0.8 is enough to eliminate staircasing; larger values
+                # over-blur cortical ridges (orbital rims, nasal bones, etc.).
                 try:
                     from scipy import ndimage as _nd_mc
-                    _sigma = 1.8 if quality == 'fast' else 2.6
+                    _sigma = 0.7 if quality == 'fast' else 0.9
                     soft_ds = _nd_mc.gaussian_filter(vol_ds.astype(np.float32), sigma=_sigma)
                 except Exception:
                     soft_ds = vol_ds.astype(np.float32)
@@ -1912,12 +1899,11 @@ def api_bone_reconstruction(request, series_id):
                     verts[:, 1] *= float(dsy)
                     verts[:, 2] *= float(dsx)
 
-                # ── Laplacian mesh smoothing for diagnostic-quality surface ──
-                # Taubin smoothing (λ/μ pair): two Laplacian passes with opposite signs.
-                # This shrinks the surface less than pure Laplacian smoothing while still
-                # eliminating "staircase" artefacts from the voxel grid.
+                # ── Light Taubin mesh smoothing ──
+                # Just enough to remove remaining voxel-grid staircase without erasing
+                # fine anatomical features. 4 iterations for high quality, 2 for fast.
                 try:
-                    _smooth_iters = 24 if quality == 'high' else 8
+                    _smooth_iters = 4 if quality == 'high' else 2
                     _lam, _mu = 0.5, -0.53  # standard Taubin parameters
                     _verts = verts.copy()
                     _nv = len(_verts)

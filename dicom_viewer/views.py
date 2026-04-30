@@ -538,7 +538,7 @@ def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=None
         zz = f"{float(zoom_z):.2f}" if zoom_z is not None else "1.00"
     except Exception:
         zz = "1.00"
-    return f"{series_id}|{q}|{plane}|{int(slice_index)}|{ww_i}|{wl_i}|{1 if inverted else 0}|{zz}"
+    return f"v2|{series_id}|{q}|{plane}|{int(slice_index)}|{ww_i}|{wl_i}|{1 if inverted else 0}|{zz}"
 
 def _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=None, zoom_z=None):
     key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality, zoom_z=zoom_z)
@@ -720,7 +720,7 @@ def _correct_mpr_slice_aspect(slice_array: np.ndarray, plane: str, spacing) -> n
         except Exception:
             pass  # fall through with uncorrected slice
 
-    # Resize to fixed output square with high-quality interpolation.
+    # Resize to fixed 512×512 output — always square so the canvas fills correctly.
     try:
         th, tw = arr.shape
         if th != _MPR_OUTPUT_SIZE or tw != _MPR_OUTPUT_SIZE:
@@ -1856,31 +1856,44 @@ def api_bone_reconstruction(request, series_id):
                 try:
                     from scipy.ndimage import (binary_fill_holes as _bfh,
                                                binary_closing as _bcl,
-                                               generate_binary_structure as _gbs)
+                                               generate_binary_structure as _gbs,
+                                               iterate_structure as _its)
                     _mask = vol_for_mesh > 0.5
 
-                    # Axial-only 2D fill — closes rings in each axial slice
+                    # Axial 2D fill closes cortical rings in every axial slice.
                     for _i in range(_mask.shape[0]):
                         _mask[_i] = _bfh(_mask[_i])
 
-                    # Tight closing (6-connected, 1 iteration) to bridge hairline gaps
+                    # 3D closing with a ball-like structure, 3 iterations.
+                    # This bridges thin cortex gaps and connects near-touching
+                    # fragments that cause holes in the mesh surface.
                     _struct3 = _gbs(3, 1)
-                    _mask = _bcl(_mask, structure=_struct3, iterations=1)
+                    _ball = _its(_struct3, 2)   # radius-2 ball approximation
+                    _mask = _bcl(_mask, structure=_ball, iterations=3)
 
                     vol_for_mesh = _mask.astype(np.float32)
                 except Exception:
-                    pass  # continue with original mask if morphological ops fail
+                    pass
 
                 vol_ds = vol_for_mesh[::dsz, ::dsy, ::dsx]
 
-                # Gaussian soft-field: smooths the binary 0/1 boundary into a gradient
-                # so marching cubes produces sub-voxel-smooth surfaces without staircase
-                # artefacts. sigma=0.8 is enough to eliminate staircasing; larger values
-                # over-blur cortical ridges (orbital rims, nasal bones, etc.).
+                # Gaussian soft-field with PER-AXIS sigma calibrated to physical mm.
+                # A scalar sigma smooths equally in voxel space, but the downsampled
+                # voxels are anisotropic (e.g. Z=2.5 mm, XY=1.0 mm after ds=2).
+                # Using a scalar sigma leaves the thick Z direction under-smoothed
+                # → staircase artefacts persist along Z. Per-axis sigma fixes this.
                 try:
                     from scipy import ndimage as _nd_mc
-                    _sigma = 0.7 if quality == 'fast' else 0.9
-                    soft_ds = _nd_mc.gaussian_filter(vol_ds.astype(np.float32), sigma=_sigma)
+                    _phys_sigma = 1.5  # mm of smoothing in every direction
+                    _sz_mm = float(dsz) * float(_sp[0])
+                    _sy_mm = float(dsy) * float(_sp[1])
+                    _sx_mm = float(dsx) * float(_sp[2])
+                    _sig = [
+                        _phys_sigma / max(_sz_mm, 0.01),
+                        _phys_sigma / max(_sy_mm, 0.01),
+                        _phys_sigma / max(_sx_mm, 0.01),
+                    ]
+                    soft_ds = _nd_mc.gaussian_filter(vol_ds.astype(np.float32), sigma=_sig)
                 except Exception:
                     soft_ds = vol_ds.astype(np.float32)
 
@@ -7245,7 +7258,7 @@ def mpr_slice_api(request, series_id, plane, slice_index):
         cached_png = _mpr_png_cache_get(series_id, plane, slice_index, window_width, window_level, inverted, quality=quality, zoom_z=zoom_z)
         if cached_png:
             resp = HttpResponse(cached_png, content_type='image/png')
-            resp['Cache-Control'] = 'private, max-age=3600'
+            resp['Cache-Control'] = 'no-store'
             return resp
 
         png_bytes = _get_png_mpr_slice_bytes(series.id, volume, plane, slice_index, window_width, window_level, inverted, quality=quality, spacing=spacing)
@@ -7254,7 +7267,7 @@ def mpr_slice_api(request, series_id, plane, slice_index):
             raise Http404("MPR slice not available")
 
         resp = HttpResponse(png_bytes, content_type='image/png')
-        resp['Cache-Control'] = 'private, max-age=3600'
+        resp['Cache-Control'] = 'no-store'
         return resp
 
     except Exception as e:

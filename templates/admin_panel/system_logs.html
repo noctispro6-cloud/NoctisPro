@@ -1,9 +1,13 @@
-{% extends 'base.html' %}
+{% extends 'admin_panel/admin_base.html' %}
 {% load static %}
 
-{% block title %}System Logs - Admin Panel{% endblock %}
+{% block title %}System Logs — Admin{% endblock %}
 
-{% block content %}
+{% block adm_breadcrumb %}
+<span class="adm-breadcrumb-sep">/</span><span>System Logs</span>
+{% endblock %}
+
+{% block adm_content %}
 <div class="np-page">
     <div class="np-page-header">
         <div>

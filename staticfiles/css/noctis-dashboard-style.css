@@ -1,0 +1,359 @@
+/* Professional Noctis Pro PACS Dashboard Styles - Medical Imaging Excellence */
+/* Enhanced with artistic precision while preserving the original professional theme */
+
+:root {
+    /* Professional color palette - Enhanced with subtle gradients */
+    --primary-bg: #0a0a0a;
+    --secondary-bg: #1a1a1a;
+    --card-surface: #252525;
+    --header-bg: #333333;
+    --border-color: #404040;
+    --accent-color: #00d4ff;
+    --text-primary: #ffffff;
+    --text-secondary: #b3b3b3;
+    --text-muted: #666666;
+    --success-color: #00ff88;
+    --warning-color: #ffaa00;
+    --danger-color: #ff4444;
+    --urgent-color: #ff0066;
+    --scheduled-color: #4a90e2;
+    --in-progress-color: #f5a623;
+    --completed-color: #7ed321;
+    --cancelled-color: #d0021b;
+    
+    /* Enhanced gradients for artistic excellence */
+    --gradient-primary: linear-gradient(135deg, var(--header-bg) 0%, var(--secondary-bg) 50%, #2a2a2a 100%);
+    --gradient-accent: linear-gradient(135deg, var(--accent-color) 0%, #00b8d4 50%, #0099cc 100%);
+    --gradient-card: linear-gradient(145deg, var(--card-surface) 0%, #2a2a2a 50%, var(--card-surface) 100%);
+    --gradient-success: linear-gradient(135deg, var(--success-color) 0%, #00cc66 100%);
+    --gradient-warning: linear-gradient(135deg, var(--warning-color) 0%, #cc8800 100%);
+    --gradient-danger: linear-gradient(135deg, var(--danger-color) 0%, #cc3333 100%);
+    
+    /* Artistic shadow definitions */
+    --shadow-subtle: 0 2px 8px rgba(0, 0, 0, 0.15);
+    --shadow-medium: 0 4px 16px rgba(0, 0, 0, 0.2);
+    --shadow-strong: 0 8px 32px rgba(0, 0, 0, 0.3);
+    --shadow-glow: 0 0 20px rgba(0, 212, 255, 0.2);
+}
+
+/* Professional button styles - Enhanced for medical excellence */
+.btn-professional {
+    background: var(--gradient-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    position: relative;
+    overflow: hidden;
+    box-shadow: var(--shadow-subtle);
+    backdrop-filter: blur(1px);
+}
+
+.btn-professional::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+    transition: left 0.5s;
+}
+
+.btn-professional:hover::before {
+    left: 100%;
+}
+
+.btn-professional:hover {
+    background: var(--gradient-accent);
+    color: var(--primary-bg);
+    border-color: var(--accent-color);
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 
+        var(--shadow-glow),
+        var(--shadow-medium);
+}
+
+.btn-professional:active {
+    transform: translateY(0);
+}
+
+/* Professional form elements - Enhanced for medical precision */
+.form-control-professional {
+    background: var(--secondary-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    width: 100%;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.form-control-professional:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 
+        0 0 0 3px rgba(0, 212, 255, 0.2),
+        inset 0 1px 3px rgba(0, 0, 0, 0.1),
+        0 2px 8px rgba(0, 212, 255, 0.1);
+    background: var(--primary-bg);
+    transform: translateY(-1px);
+}
+
+/* Professional table styles - Enhanced for medical excellence */
+.table-professional {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--gradient-card);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 
+        var(--shadow-medium),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+}
+
+.table-professional th {
+    background: var(--gradient-primary);
+    color: var(--text-primary);
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    border-bottom: 2px solid var(--accent-color);
+    position: relative;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.table-professional td {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(64, 64, 64, 0.3);
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.table-professional tbody tr {
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.table-professional tbody tr:hover {
+    background: linear-gradient(90deg, 
+        rgba(0, 212, 255, 0.08) 0%, 
+        rgba(0, 212, 255, 0.12) 50%, 
+        rgba(0, 212, 255, 0.08) 100%);
+    transform: translateX(2px);
+    box-shadow: 
+        inset 3px 0 0 var(--accent-color),
+        var(--shadow-subtle);
+}
+
+/* Professional modal styles */
+.modal-professional {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-professional.active {
+    display: flex;
+}
+
+.modal-content-professional {
+    background: var(--gradient-card);
+    border: 2px solid var(--border-color);
+    border-radius: 16px;
+    padding: 24px;
+    max-width: 90%;
+    max-height: 90%;
+    overflow-y: auto;
+    box-shadow: 
+        var(--shadow-strong),
+        var(--shadow-glow),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    position: relative;
+}
+
+.modal-content-professional::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--gradient-accent);
+    border-radius: 16px 16px 0 0;
+}
+
+/* Professional animation classes */
+.fade-in {
+    animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.slide-in {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Professional loading states */
+.loading-spinner-professional {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(0, 212, 255, 0.3);
+    border-top: 3px solid var(--accent-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Professional status indicators - Enhanced with medical precision */
+.status-indicator-professional {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(2px);
+}
+
+.status-urgent {
+    background: linear-gradient(135deg, rgba(255, 0, 102, 0.25) 0%, rgba(255, 0, 102, 0.15) 100%);
+    color: var(--urgent-color);
+    border: 1px solid var(--urgent-color);
+    animation: urgentPulse 2s infinite;
+    box-shadow: 
+        0 0 10px rgba(255, 0, 102, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.status-in-progress {
+    background: linear-gradient(135deg, rgba(245, 166, 35, 0.25) 0%, rgba(245, 166, 35, 0.15) 100%);
+    color: var(--in-progress-color);
+    border: 1px solid var(--in-progress-color);
+    box-shadow: 
+        0 0 8px rgba(245, 166, 35, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.status-completed {
+    background: linear-gradient(135deg, rgba(126, 211, 33, 0.25) 0%, rgba(126, 211, 33, 0.15) 100%);
+    color: var(--completed-color);
+    border: 1px solid var(--completed-color);
+    box-shadow: 
+        0 0 8px rgba(126, 211, 33, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.status-scheduled {
+    background: linear-gradient(135deg, rgba(74, 144, 226, 0.25) 0%, rgba(74, 144, 226, 0.15) 100%);
+    color: var(--scheduled-color);
+    border: 1px solid var(--scheduled-color);
+    box-shadow: 
+        0 0 8px rgba(74, 144, 226, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+@keyframes urgentPulse {
+    0%, 100% { 
+        opacity: 1; 
+        box-shadow: 
+            0 0 10px rgba(255, 0, 102, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    }
+    50% { 
+        opacity: 0.8; 
+        box-shadow: 
+            0 0 20px rgba(255, 0, 102, 0.5),
+            0 0 30px rgba(255, 0, 102, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        transform: scale(1.02);
+    }
+}
+
+/* Professional responsive design */
+@media (max-width: 1200px) {
+    .btn-professional {
+        padding: 6px 12px;
+        font-size: 11px;
+    }
+    
+    .form-control-professional {
+        padding: 8px 10px;
+        font-size: 11px;
+    }
+    
+    .table-professional th,
+    .table-professional td {
+        padding: 8px 12px;
+        font-size: 11px;
+    }
+}
+
+@media (max-width: 768px) {
+    .modal-content-professional {
+        padding: 16px;
+        margin: 20px;
+    }
+    
+    .btn-professional {
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+}

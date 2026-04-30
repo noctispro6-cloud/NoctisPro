@@ -1,0 +1,159 @@
+{% extends 'admin_panel/admin_base.html' %}
+{% load dicts %}
+
+{% block title %}Backups — Admin{% endblock %}
+
+{% block adm_breadcrumb %}
+<span class="adm-breadcrumb-sep">/</span><span>Backups</span>
+{% endblock %}
+
+{% block adm_content %}
+<div class="adm-page-header">
+    <div>
+        <h1 class="adm-page-title"><i class="fas fa-database"></i>Database Backups</h1>
+        <div class="adm-page-subtitle">Create, download, and manage system backups</div>
+    </div>
+    <div class="adm-page-actions">
+        <form method="post" action="{% url 'admin_panel:backups' %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create">
+            <button type="submit" class="btn-control" id="createBackupBtn">
+                <i class="fas fa-plus me-1"></i>Create Backup Now
+            </button>
+        </form>
+    </div>
+</div>
+
+{% if messages %}
+<div style="margin-bottom:16px;">
+    {% for message in messages %}
+    <div style="padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:6px;
+        background:{% if 'success' in message.tags %}rgba(0,255,136,0.1){% elif 'error' in message.tags %}rgba(255,68,68,0.1){% else %}rgba(0,212,255,0.1){% endif %};
+        border:1px solid {% if 'success' in message.tags %}rgba(0,255,136,0.25){% elif 'error' in message.tags %}rgba(255,68,68,0.25){% else %}rgba(0,212,255,0.25){% endif %};
+        color:{% if 'success' in message.tags %}var(--success-color){% elif 'error' in message.tags %}var(--danger-color){% else %}var(--accent-color){% endif %};">
+        <i class="fas fa-{% if 'success' in message.tags %}check{% elif 'error' in message.tags %}exclamation-triangle{% else %}info-circle{% endif %} me-2"></i>{{ message }}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="row g-3">
+    <!-- Backup info -->
+    <div class="col-lg-4">
+        <div class="adm-card mb-3">
+            <div class="adm-card-header"><div><i class="fas fa-info-circle"></i>Backup Info</div></div>
+            <div class="adm-card-body">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div>
+                        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Database Engine</div>
+                        <div style="font-size:13px;font-weight:600;">{{ db_engine|default:"SQLite" }}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Total Backups</div>
+                        <div style="font-size:13px;font-weight:600;">{{ backups|length }}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Backup Directory</div>
+                        <div style="font-size:11px;color:var(--text-secondary);word-break:break-all;">{{ backup_dir }}</div>
+                    </div>
+                    {% if backups %}
+                    <div>
+                        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Last Backup</div>
+                        <div style="font-size:12px;color:var(--success-color);">
+                            <i class="fas fa-check-circle me-1"></i>{{ backups.0.created|date:"d M Y, H:i" }}
+                        </div>
+                    </div>
+                    {% else %}
+                    <div style="padding:16px;background:rgba(255,170,0,0.08);border:1px solid rgba(255,170,0,0.2);border-radius:6px;font-size:12px;color:var(--warning-color);">
+                        <i class="fas fa-exclamation-triangle me-2"></i>No backups found. Create one now.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="adm-card">
+            <div class="adm-card-header"><div><i class="fas fa-lightbulb"></i>Backup Tips</div></div>
+            <div class="adm-card-body">
+                <ul style="font-size:12px;color:var(--text-secondary);padding-left:16px;margin:0;line-height:1.8;">
+                    <li>Schedule daily backups before peak hours</li>
+                    <li>Store backups off-site or in cloud storage</li>
+                    <li>Test restores periodically</li>
+                    <li>Keep at least 7 days of backup history</li>
+                    <li>Encrypt backups containing patient data</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Backups list -->
+    <div class="col-lg-8">
+        <div class="adm-card">
+            <div class="adm-card-header">
+                <div><i class="fas fa-history"></i>Backup History</div>
+                {% if backups %}
+                <form method="post" action="{% url 'admin_panel:backups' %}" style="display:inline;"
+                      onsubmit="return confirm('Delete ALL backups? This cannot be undone.')">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="delete_all">
+                    <button type="submit" class="btn-control" style="font-size:11px;padding:4px 10px;color:var(--danger-color);">
+                        <i class="fas fa-trash me-1"></i>Delete All
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+            <div class="adm-table-wrap">
+                <table class="adm-table">
+                    <thead>
+                        <tr>
+                            <th>Filename</th>
+                            <th>Size</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for backup in backups %}
+                        <tr>
+                            <td>
+                                <div style="display:flex;align-items:center;gap:8px;">
+                                    <i class="fas fa-file-archive" style="color:var(--accent-color);"></i>
+                                    <span style="font-size:12px;font-weight:500;">{{ backup.filename }}</span>
+                                </div>
+                            </td>
+                            <td style="color:var(--text-secondary);font-size:12px;">{{ backup.size_human }}</td>
+                            <td style="color:var(--text-muted);font-size:11px;">{{ backup.created|date:"d M Y, H:i" }}</td>
+                            <td>
+                                <div style="display:flex;gap:6px;">
+                                    <a href="{% url 'admin_panel:backup_download' %}?file={{ backup.filename|urlencode }}"
+                                       class="btn-control" style="font-size:11px;padding:4px 10px;">
+                                        <i class="fas fa-download me-1"></i>Download
+                                    </a>
+                                    <form method="post" action="{% url 'admin_panel:backups' %}" style="display:inline;"
+                                          onsubmit="return confirm('Delete this backup?')">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="filename" value="{{ backup.filename }}">
+                                        <button type="submit" class="btn-control" style="font-size:11px;padding:4px 10px;color:var(--danger-color);">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="4" style="text-align:center;padding:48px;color:var(--text-muted);">
+                                <i class="fas fa-database fa-3x" style="display:block;margin-bottom:12px;opacity:0.3;"></i>
+                                <div style="font-size:13px;margin-bottom:8px;">No backups yet</div>
+                                <div style="font-size:11px;">Click "Create Backup Now" to create your first backup</div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -65,6 +65,9 @@ urlpatterns = [
     path('chat/', include('chat.urls')),
     path('notifications/', include('notifications.urls')),
     path('ai/', include('ai_analysis.urls')),
+    # Legacy alias: redirect /ai_analysis/* → /ai/* (old URL prefix)
+    path('ai_analysis/', RedirectView.as_view(url='/ai/', permanent=False, query_string=True)),
+    re_path(r'^ai_analysis/(?P<subpath>.+)$', lambda req, subpath: redirect(f'/ai/{subpath}{"?" + req.META.get("QUERY_STRING","") if req.META.get("QUERY_STRING") else ""}', permanent=False)),
     path('subscription-expired/', subscription_expired_view, name='subscription_expired'),
 ]
 

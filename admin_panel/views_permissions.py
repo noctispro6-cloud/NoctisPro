@@ -46,6 +46,7 @@ def permissions_dashboard(request):
         'users_table': table,
         'cap_keys': list(DEFAULT_CAPS.keys()),
         'role_toggles': get_role_toggles(),
+        'adm_active': 'permissions',
     })
 
 

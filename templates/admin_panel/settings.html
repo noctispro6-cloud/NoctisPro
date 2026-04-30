@@ -1,62 +1,199 @@
-{% extends 'base.html' %}
+{% extends 'admin_panel/admin_base.html' %}
 
-{% block title %}System Settings - Admin Panel{% endblock %}
+{% block title %}System Settings — Admin{% endblock %}
 
-{% block content %}
-<div class="container-fluid mt-3">
-  <div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <div><i class="fas fa-cog"></i> System Settings</div>
-      <div>
-        <a class="btn-control" href="{% url 'admin_panel:dashboard' %}">Back</a>
-      </div>
-    </div>
-    <div class="card-body">
-      <form method="post">
-        {% csrf_token %}
-
-        <div class="card" style="margin-bottom:12px;">
-          <div class="card-header">AI Automation</div>
-          <div class="card-body">
-            <label class="form-check" style="display:flex;align-items:center;gap:10px;">
-              <input type="checkbox" class="form-check-input" name="ai_auto_analysis_on_upload" {% if ai_auto_analysis_on_upload %}checked{% endif %}>
-              <span>Automatically run preliminary AI analysis after each new study upload</span>
-            </label>
-            <div class="text-secondary" style="font-size:11px;margin-top:6px;">
-              When enabled, uploads will kick off background AI triage and flag urgent/high studies for radiologist review.
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">Critical Alert Integration (Twilio)</div>
-          <div class="card-body">
-            <div class="row">
-              <div class="col-12 col-md-6 mb-3">
-                <label class="form-label" for="twilio_account_sid">Account SID</label>
-                <input class="form-control form-control-medical" id="twilio_account_sid" name="twilio_account_sid" value="{{ twilio_account_sid }}">
-              </div>
-              <div class="col-12 col-md-6 mb-3">
-                <label class="form-label" for="twilio_from_number">From number (E.164)</label>
-                <input class="form-control form-control-medical" id="twilio_from_number" name="twilio_from_number" placeholder="+15551234567" value="{{ twilio_from_number }}">
-              </div>
-              <div class="col-12 mb-3">
-                <label class="form-label" for="twilio_auth_token">Auth Token</label>
-                <input class="form-control form-control-medical" id="twilio_auth_token" name="twilio_auth_token" type="password" value="{{ twilio_auth_token }}">
-                <div class="text-secondary" style="font-size:11px;margin-top:6px;">
-                  Stored in the database as a sensitive value. For urgent AI triage, the system will attempt SMS/call based on each radiologist’s profile preference.
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="mt-3">
-          <button type="submit" class="btn-control"><i class="fas fa-save"></i> Save settings</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
+{% block adm_breadcrumb %}
+<span class="adm-breadcrumb-sep">/</span><span>Settings</span>
 {% endblock %}
 
+{% block adm_content %}
+<div class="adm-page-header">
+    <div>
+        <h1 class="adm-page-title"><i class="fas fa-cog"></i>System Settings</h1>
+        <div class="adm-page-subtitle">Configure integrations, automation, and system behaviour</div>
+    </div>
+</div>
+
+{% if messages %}
+<div style="margin-bottom:16px;">
+    {% for message in messages %}
+    <div style="padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:6px;
+        background:{% if 'success' in message.tags %}rgba(0,255,136,0.1){% elif 'error' in message.tags %}rgba(255,68,68,0.1){% else %}rgba(0,212,255,0.1){% endif %};
+        border:1px solid {% if 'success' in message.tags %}rgba(0,255,136,0.25){% elif 'error' in message.tags %}rgba(255,68,68,0.25){% else %}rgba(0,212,255,0.25){% endif %};
+        color:{% if 'success' in message.tags %}var(--success-color){% elif 'error' in message.tags %}var(--danger-color){% else %}var(--accent-color){% endif %};">
+        {{ message }}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<form method="post">
+    {% csrf_token %}
+    <div class="row g-3">
+
+        <!-- AI Automation -->
+        <div class="col-lg-6">
+            <div class="adm-card">
+                <div class="adm-card-header">
+                    <div><i class="fas fa-robot"></i>AI Automation</div>
+                </div>
+                <div class="adm-card-body">
+                    <label style="display:flex;align-items:center;gap:12px;cursor:pointer;padding:12px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid var(--border-color);">
+                        <div style="flex-shrink:0;">
+                            <input type="checkbox" class="form-check-input" name="ai_auto_analysis_on_upload"
+                                   {% if ai_auto_analysis_on_upload %}checked{% endif %}
+                                   style="width:18px;height:18px;">
+                        </div>
+                        <div>
+                            <div style="font-weight:600;font-size:13px;color:var(--text-primary);">Auto-analyse on upload</div>
+                            <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">
+                                Automatically run preliminary AI analysis after each new study upload. Urgent and high-priority studies will be flagged for radiologist review.
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- DICOM / PACS -->
+        <div class="col-lg-6">
+            <div class="adm-card">
+                <div class="adm-card-header">
+                    <div><i class="fas fa-network-wired"></i>PACS Configuration</div>
+                </div>
+                <div class="adm-card-body">
+                    <div style="display:flex;flex-direction:column;gap:12px;">
+                        <div>
+                            <label class="form-label" style="font-size:12px;color:var(--text-secondary);">Default AE Title</label>
+                            <input class="form-control form-control-medical" name="ae_title"
+                                   value="{{ ae_title|default:'NOCTISPRO' }}" placeholder="NOCTISPRO" style="font-size:12px;">
+                        </div>
+                        <div>
+                            <label class="form-label" style="font-size:12px;color:var(--text-secondary);">DICOM Port</label>
+                            <input class="form-control form-control-medical" name="dicom_port" type="number"
+                                   value="{{ dicom_port|default:11112 }}" placeholder="11112" style="font-size:12px;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Twilio Critical Alerts -->
+        <div class="col-12">
+            <div class="adm-card">
+                <div class="adm-card-header">
+                    <div><i class="fas fa-bell"></i>Critical Alert Integration (Twilio)</div>
+                    <span style="font-size:10px;color:var(--text-muted);">SMS / Voice calls for urgent studies</span>
+                </div>
+                <div class="adm-card-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label" style="font-size:12px;color:var(--text-secondary);">Account SID</label>
+                            <input class="form-control form-control-medical" id="twilio_account_sid"
+                                   name="twilio_account_sid" value="{{ twilio_account_sid }}"
+                                   placeholder="ACxxxxxxxxxxxxxxxx" style="font-size:12px;">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" style="font-size:12px;color:var(--text-secondary);">From Number (E.164)</label>
+                            <input class="form-control form-control-medical" id="twilio_from_number"
+                                   name="twilio_from_number" placeholder="+15551234567"
+                                   value="{{ twilio_from_number }}" style="font-size:12px;">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" style="font-size:12px;color:var(--text-secondary);">Auth Token</label>
+                            <div style="position:relative;">
+                                <input class="form-control form-control-medical" id="twilio_auth_token"
+                                       name="twilio_auth_token" type="password"
+                                       value="{{ twilio_auth_token }}" style="font-size:12px;padding-right:36px;">
+                                <button type="button" onclick="togglePw('twilio_auth_token',this)"
+                                    style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:12px;">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Email Notifications -->
+        <div class="col-lg-6">
+            <div class="adm-card">
+                <div class="adm-card-header">
+                    <div><i class="fas fa-envelope"></i>Email Notifications</div>
+                </div>
+                <div class="adm-card-body">
+                    <div style="display:flex;flex-direction:column;gap:10px;">
+                        <div>
+                            <label class="form-label" style="font-size:12px;color:var(--text-secondary);">SMTP Host</label>
+                            <input class="form-control form-control-medical" name="smtp_host"
+                                   value="{{ smtp_host|default:'' }}" placeholder="smtp.gmail.com" style="font-size:12px;">
+                        </div>
+                        <div>
+                            <label class="form-label" style="font-size:12px;color:var(--text-secondary);">SMTP Port</label>
+                            <input class="form-control form-control-medical" name="smtp_port" type="number"
+                                   value="{{ smtp_port|default:587 }}" style="font-size:12px;">
+                        </div>
+                        <div>
+                            <label class="form-label" style="font-size:12px;color:var(--text-secondary);">From Email</label>
+                            <input class="form-control form-control-medical" name="smtp_from"
+                                   value="{{ smtp_from|default:'' }}" placeholder="noreply@yourpacs.com" style="font-size:12px;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Retention -->
+        <div class="col-lg-6">
+            <div class="adm-card">
+                <div class="adm-card-header">
+                    <div><i class="fas fa-archive"></i>Data Retention</div>
+                </div>
+                <div class="adm-card-body">
+                    <div style="display:flex;flex-direction:column;gap:10px;">
+                        <div>
+                            <label class="form-label" style="font-size:12px;color:var(--text-secondary);">Audit Log Retention (days)</label>
+                            <input class="form-control form-control-medical" name="audit_log_days" type="number"
+                                   value="{{ audit_log_days|default:90 }}" min="7" max="3650" style="font-size:12px;">
+                        </div>
+                        <div>
+                            <label class="form-label" style="font-size:12px;color:var(--text-secondary);">Study Archive After (days)</label>
+                            <input class="form-control form-control-medical" name="study_archive_days" type="number"
+                                   value="{{ study_archive_days|default:365 }}" min="30" style="font-size:12px;">
+                        </div>
+                        <div>
+                            <label class="form-label" style="font-size:12px;color:var(--text-secondary);">Max Backups to Keep</label>
+                            <input class="form-control form-control-medical" name="max_backups" type="number"
+                                   value="{{ max_backups|default:10 }}" min="1" max="100" style="font-size:12px;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /row -->
+
+    <div style="margin-top:20px;display:flex;gap:10px;">
+        <button type="submit" class="btn-control">
+            <i class="fas fa-save me-1"></i>Save All Settings
+        </button>
+        <a href="{% url 'admin_panel:dashboard' %}" class="btn-control" style="color:var(--text-secondary);">
+            Cancel
+        </a>
+    </div>
+</form>
+
+<script>
+function togglePw(id, btn) {
+    const inp = document.getElementById(id);
+    if (inp.type === 'password') {
+        inp.type = 'text';
+        btn.querySelector('i').className = 'fas fa-eye-slash';
+    } else {
+        inp.type = 'password';
+        btn.querySelector('i').className = 'fas fa-eye';
+    }
+}
+</script>
+{% endblock %}

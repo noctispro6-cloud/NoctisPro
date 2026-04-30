@@ -1,0 +1,639 @@
+{na% extends 'base.html' %}
+{% load dicts %}
+
+{% block content %}
+<div class="adm-layout">
+    <!-- Sidebar -->
+    <aside class="adm-sidebar" id="admSidebar">
+        <div class="adm-sidebar-header">
+            <div class="adm-sidebar-logo">
+                <i class="fas fa-shield-alt"></i>
+                <span>Admin Panel</span>
+            </div>
+            <button class="adm-sidebar-close" id="admSidebarClose" aria-label="Close sidebar">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <nav class="adm-nav">
+            <div class="adm-nav-section-label">Overview</div>
+            <a href="{% url 'admin_panel:dashboard' %}" class="adm-nav-item {% if adm_active == 'dashboard' %}active{% endif %}">
+                <i class="fas fa-tachometer-alt"></i><span>Dashboard</span>
+            </a>
+
+            <div class="adm-nav-section-label">Management</div>
+            <a href="{% url 'admin_panel:user_management' %}" class="adm-nav-item {% if adm_active == 'users' %}active{% endif %}">
+                <i class="fas fa-users"></i><span>Users</span>
+            </a>
+            <a href="{% url 'admin_panel:facility_management' %}" class="adm-nav-item {% if adm_active == 'facilities' %}active{% endif %}">
+                <i class="fas fa-hospital"></i><span>Facilities</span>
+            </a>
+            <a href="{% url 'admin_panel:permissions_dashboard' %}" class="adm-nav-item {% if adm_active == 'permissions' %}active{% endif %}">
+                <i class="fas fa-user-shield"></i><span>Permissions</span>
+            </a>
+
+            <div class="adm-nav-section-label">AI &amp; Automation</div>
+            <a href="{% url 'admin_panel:ai_management' %}" class="adm-nav-item {% if adm_active == 'ai' %}active{% endif %}">
+                <i class="fas fa-robot"></i><span>AI Models</span>
+            </a>
+
+            <div class="adm-nav-section-label">System</div>
+            <a href="{% url 'admin_panel:backups' %}" class="adm-nav-item {% if adm_active == 'backups' %}active{% endif %}">
+                <i class="fas fa-database"></i><span>Backups</span>
+            </a>
+            <a href="{% url 'admin_panel:system_logs' %}" class="adm-nav-item {% if adm_active == 'logs' %}active{% endif %}">
+                <i class="fas fa-file-alt"></i><span>System Logs</span>
+            </a>
+            <a href="{% url 'admin_panel:settings' %}" class="adm-nav-item {% if adm_active == 'settings' %}active{% endif %}">
+                <i class="fas fa-cog"></i><span>Settings</span>
+            </a>
+        </nav>
+
+        <div class="adm-sidebar-footer">
+            <a href="{% url 'worklist:dashboard' %}" class="adm-nav-item">
+                <i class="fas fa-arrow-left"></i><span>Back to PACS</span>
+            </a>
+        </div>
+    </aside>
+
+    <!-- Overlay for mobile -->
+    <div class="adm-overlay" id="admOverlay"></div>
+
+    <!-- Main content -->
+    <div class="adm-main">
+        <!-- Top bar -->
+        <div class="adm-topbar">
+            <button class="adm-menu-btn" id="admMenuBtn" aria-label="Toggle sidebar">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="adm-breadcrumb">
+                <span class="adm-breadcrumb-root">Admin</span>
+                {% block adm_breadcrumb %}<span class="adm-breadcrumb-sep">/</span><span>Dashboard</span>{% endblock %}
+            </div>
+            <div class="adm-topbar-right">
+                <span class="adm-topbar-user">
+                    <i class="fas fa-user-circle"></i>
+                    {{ request.user.username }}
+                </span>
+            </div>
+        </div>
+
+        <!-- Page content -->
+        <div class="adm-content">
+            {% block adm_content %}{% endblock %}
+        </div>
+    </div>
+</div>
+
+<style>
+/* ── Admin Layout ─────────────────────────────────────────────────────────── */
+.adm-layout {
+    display: flex;
+    min-height: calc(100vh - 56px); /* subtract base navbar height */
+    background: var(--primary-bg);
+}
+
+/* Sidebar */
+.adm-sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    background: #0d0d0d;
+    border-right: 1px solid #1f1f1f;
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 56px;
+    height: calc(100vh - 56px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #333 transparent;
+    z-index: 200;
+    transition: transform 0.25s ease;
+}
+
+.adm-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 16px 14px;
+    border-bottom: 1px solid #1f1f1f;
+}
+
+.adm-sidebar-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--accent-color);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.adm-sidebar-logo i { font-size: 16px; }
+
+.adm-sidebar-close {
+    display: none;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 4px;
+}
+
+.adm-nav {
+    flex: 1;
+    padding: 12px 8px;
+}
+
+.adm-nav-section-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 10px 8px 4px;
+    margin-top: 4px;
+}
+
+.adm-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.15s, color 0.15s;
+    margin-bottom: 2px;
+    white-space: nowrap;
+}
+
+.adm-nav-item i {
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+    font-size: 13px;
+}
+
+.adm-nav-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.adm-nav-item.active {
+    background: rgba(0, 212, 255, 0.12);
+    color: var(--accent-color);
+    border-left: 3px solid var(--accent-color);
+    padding-left: 7px;
+}
+
+.adm-sidebar-footer {
+    padding: 8px 8px 16px;
+    border-top: 1px solid #1f1f1f;
+}
+
+/* Main */
+.adm-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.adm-topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    background: var(--secondary-bg);
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 56px;
+    z-index: 100;
+}
+
+.adm-menu-btn {
+    display: none;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.adm-menu-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+
+.adm-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex: 1;
+}
+
+.adm-breadcrumb-root { color: var(--accent-color); font-weight: 600; }
+.adm-breadcrumb-sep { color: var(--text-muted); }
+
+.adm-topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.adm-topbar-user {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.adm-topbar-user i { color: var(--accent-color); }
+
+.adm-content {
+    flex: 1;
+    padding: 24px;
+    overflow-y: auto;
+}
+
+/* Overlay */
+.adm-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.65);
+    z-index: 150;
+}
+
+/* ── Admin UI Components ──────────────────────────────────────────────────── */
+.adm-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.adm-page-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+}
+
+.adm-page-title i { color: var(--accent-color); font-size: 18px; }
+
+.adm-page-subtitle {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+.adm-page-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* Stats grid */
+.adm-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.adm-stat-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    transition: border-color 0.2s, transform 0.2s;
+}
+
+.adm-stat-card:hover {
+    border-color: var(--accent-color);
+    transform: translateY(-2px);
+}
+
+.adm-stat-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.adm-stat-icon.blue   { background: rgba(0, 212, 255, 0.12); color: #00d4ff; }
+.adm-stat-icon.green  { background: rgba(0, 255, 136, 0.12); color: #00ff88; }
+.adm-stat-icon.orange { background: rgba(255, 170, 0, 0.12); color: #ffaa00; }
+.adm-stat-icon.purple { background: rgba(139, 92, 246, 0.12); color: #8b5cf6; }
+.adm-stat-icon.red    { background: rgba(255, 68, 68, 0.12); color: #ff4444; }
+.adm-stat-icon.teal   { background: rgba(0, 188, 212, 0.12); color: #00bcd4; }
+
+.adm-stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1;
+}
+
+.adm-stat-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    font-weight: 500;
+}
+
+.adm-stat-delta {
+    font-size: 10px;
+    margin-top: 2px;
+    font-weight: 600;
+}
+
+.adm-stat-delta.up   { color: var(--success-color); }
+.adm-stat-delta.down { color: var(--danger-color); }
+
+/* Cards */
+.adm-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.adm-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-color);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-primary);
+    gap: 10px;
+}
+
+.adm-card-header i { color: var(--accent-color); }
+
+.adm-card-body {
+    padding: 18px;
+}
+
+/* Quick action cards */
+.adm-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.adm-action-card {
+    background: var(--secondary-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 20px 16px;
+    text-align: center;
+    text-decoration: none;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+}
+
+.adm-action-card:hover {
+    background: rgba(0, 212, 255, 0.08);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+    text-decoration: none;
+    transform: translateY(-2px);
+}
+
+.adm-action-card i {
+    font-size: 24px;
+    color: var(--accent-color);
+}
+
+.adm-action-card .adm-action-label {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Activity list */
+.adm-activity-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.adm-activity-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(64,64,64,0.3);
+}
+
+.adm-activity-item:last-child { border-bottom: none; }
+
+.adm-activity-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-color);
+    margin-top: 5px;
+    flex-shrink: 0;
+}
+
+.adm-activity-dot.green { background: var(--success-color); }
+.adm-activity-dot.orange { background: var(--warning-color); }
+.adm-activity-dot.red { background: var(--danger-color); }
+
+.adm-activity-text {
+    font-size: 12px;
+    color: var(--text-primary);
+    flex: 1;
+    min-width: 0;
+}
+
+.adm-activity-time {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Health indicators */
+.adm-health-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.adm-health-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.adm-health-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    width: 130px;
+    flex-shrink: 0;
+}
+
+.adm-health-bar-wrap {
+    flex: 1;
+    background: rgba(255,255,255,0.06);
+    border-radius: 4px;
+    height: 6px;
+    overflow: hidden;
+}
+
+.adm-health-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.8s ease;
+}
+
+.adm-health-bar.good { background: var(--success-color); }
+.adm-health-bar.warn { background: var(--warning-color); }
+.adm-health-bar.bad  { background: var(--danger-color); }
+
+.adm-health-val {
+    font-size: 11px;
+    color: var(--text-secondary);
+    width: 40px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.adm-health-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.adm-health-status.ok   { background: var(--success-color); box-shadow: 0 0 6px var(--success-color); }
+.adm-health-status.warn { background: var(--warning-color); box-shadow: 0 0 6px var(--warning-color); }
+.adm-health-status.err  { background: var(--danger-color);  box-shadow: 0 0 6px var(--danger-color); }
+
+/* Modality bar chart */
+.adm-modality-bars { display: flex; flex-direction: column; gap: 8px; }
+.adm-mod-row { display: flex; align-items: center; gap: 10px; }
+.adm-mod-name { font-size: 11px; color: var(--text-secondary); width: 50px; flex-shrink: 0; }
+.adm-mod-bar-wrap { flex: 1; background: rgba(255,255,255,0.06); border-radius: 4px; height: 8px; overflow: hidden; }
+.adm-mod-bar { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #00d4ff, #00b8d4); transition: width 0.8s ease; }
+.adm-mod-count { font-size: 11px; color: var(--text-muted); width: 36px; text-align: right; flex-shrink: 0; }
+
+/* Tables */
+.adm-table-wrap { overflow-x: auto; }
+.adm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.adm-table th {
+    background: var(--secondary-bg);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+    text-align: left;
+}
+.adm-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(64,64,64,0.3);
+    color: var(--text-primary);
+    vertical-align: middle;
+}
+.adm-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+.adm-table tbody tr:last-child td { border-bottom: none; }
+
+/* Status badge */
+.adm-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+}
+.adm-badge-success { background: rgba(0,255,136,0.12); color: var(--success-color); border: 1px solid rgba(0,255,136,0.25); }
+.adm-badge-warning { background: rgba(255,170,0,0.12); color: var(--warning-color); border: 1px solid rgba(255,170,0,0.25); }
+.adm-badge-danger  { background: rgba(255,68,68,0.12);  color: var(--danger-color);  border: 1px solid rgba(255,68,68,0.25); }
+.adm-badge-info    { background: rgba(0,212,255,0.12);  color: var(--accent-color);  border: 1px solid rgba(0,212,255,0.25); }
+.adm-badge-muted   { background: rgba(255,255,255,0.06); color: var(--text-muted); border: 1px solid rgba(255,255,255,0.1); }
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .adm-sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100vh;
+        transform: translateX(-100%);
+        z-index: 300;
+    }
+    .adm-sidebar.open {
+        transform: translateX(0);
+    }
+    .adm-sidebar-close { display: block; }
+    .adm-overlay.show { display: block; }
+    .adm-menu-btn { display: block; }
+    .adm-content { padding: 16px; }
+    .adm-topbar { padding: 10px 16px; }
+}
+</style>
+
+<script>
+(function() {
+    const sidebar = document.getElementById('admSidebar');
+    const menuBtn = document.getElementById('admMenuBtn');
+    const closeBtn = document.getElementById('admSidebarClose');
+    const overlay = document.getElementById('admOverlay');
+
+    function openSidebar() {
+        sidebar.classList.add('open');
+        overlay.classList.add('show');
+        document.body.style.overflow = 'hidden';
+    }
+    function closeSidebar() {
+        sidebar.classList.remove('open');
+        overlay.classList.remove('show');
+        document.body.style.overflow = '';
+    }
+
+    if (menuBtn) menuBtn.addEventListener('click', openSidebar);
+    if (closeBtn) closeBtn.addEventListener('click', closeSidebar);
+    if (overlay) overlay.addEventListener('click', closeSidebar);
+})();
+</script>
+{% endblock %}

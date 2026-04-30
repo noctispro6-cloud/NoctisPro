@@ -38,6 +38,62 @@
             --danger-color: #ff4444;
         }
 
+        /* ── Light mode (system preference) ── */
+        @media (prefers-color-scheme: light) {
+            :root {
+                --primary-bg: #e8eaed;
+                --secondary-bg: #f5f5f5;
+                --card-bg: #ffffff;
+                --header-bg: #dde1e7;
+                --border-color: #c0c4cc;
+                --accent-color: #0078d4;
+                --text-primary: #1a1a1a;
+                --text-secondary: #444444;
+                --text-muted: #777777;
+                --success-color: #107c10;
+                --warning-color: #b46a08;
+                --danger-color: #c42b1c;
+            }
+            .toolbar, .right-panel {
+                background: linear-gradient(135deg, #dde1e7, #e8eaed) !important;
+                border-color: #c0c4cc !important;
+            }
+            .tool-btn {
+                background: linear-gradient(135deg, #d0d3d8, #e0e2e7) !important;
+                color: #1a1a1a !important;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.15) !important;
+            }
+            .tool-btn:hover { background: linear-gradient(135deg, #b8bcc4, #cacdd5) !important; }
+            .tool-btn.active { background: linear-gradient(135deg, rgba(0,120,212,0.25), rgba(0,120,212,0.1)) !important; }
+            .top-bar { background: #dde1e7 !important; border-color: #c0c4cc !important; }
+            .series-item { background: rgba(0,0,0,0.04) !important; border-color: rgba(0,0,0,0.1) !important; }
+            .series-item:hover { background: rgba(0,0,0,0.08) !important; }
+            .series-item.active { background: linear-gradient(135deg,rgba(0,120,212,0.15),rgba(0,120,212,0.07)) !important; }
+            .series-thumb-wrap { background: #ccc !important; }
+            .series-thumb-placeholder { color: #999 !important; }
+            .panel-section { border-color: #c0c4cc !important; }
+            .series-title { color: #1a1a1a !important; }
+            .btn, .btn-sm, .btn-icon { background: #d0d3d8 !important; color: #1a1a1a !important; border-color: #b0b4bc !important; }
+            .modal-content { background: #f5f5f5 !important; color: #1a1a1a !important; border-color: #c0c4cc !important; }
+            .ai-analysis-section { border-color: #c0c4cc !important; }
+        }
+
+        /* ── Manual theme toggle ── */
+        [data-theme="light"] {
+            --primary-bg: #e8eaed;
+            --secondary-bg: #f5f5f5;
+            --card-bg: #ffffff;
+            --header-bg: #dde1e7;
+            --border-color: #c0c4cc;
+            --accent-color: #0078d4;
+            --text-primary: #1a1a1a;
+            --text-secondary: #444444;
+            --text-muted: #777777;
+            --success-color: #107c10;
+            --warning-color: #b46a08;
+            --danger-color: #c42b1c;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -451,7 +507,7 @@
         .series-item {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 6px;
-            padding: 10px;
+            padding: 8px;
             margin-bottom: 6px;
             cursor: pointer;
             transition: all 0.3s ease;
@@ -468,17 +524,70 @@
             border-color: var(--accent-color);
         }
 
+        .series-thumb-wrap {
+            width: 100%;
+            height: 64px;
+            background: #111;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        .series-thumb {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+        .series-thumb-placeholder {
+            color: #333;
+            font-size: 22px;
+            pointer-events: none;
+        }
+
         .series-title {
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 500;
             color: #e0e0e0;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .series-details {
-            font-size: 11px;
+            font-size: 10px;
             color: var(--text-muted);
         }
+
+        /* ── AI analysis panel inside right panel ── */
+        .ai-analysis-section {
+            padding: 10px;
+            border-top: 1px solid var(--border-color);
+        }
+        .ai-status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .ai-status-badge.pending   { background: #333; color: #aaa; }
+        .ai-status-badge.running   { background: rgba(0,212,255,0.15); color: var(--accent-color); }
+        .ai-status-badge.completed { background: rgba(0,255,136,0.15); color: var(--success-color); }
+        .ai-status-badge.failed    { background: rgba(255,68,68,0.15);  color: var(--danger-color); }
+        .ai-finding-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 11px;
+        }
+        .ai-finding-name { color: var(--text-secondary); }
+        .ai-finding-val  { color: var(--accent-color); font-weight: 600; }
 
         /* Preset Buttons */
         .preset-grid {
@@ -633,33 +742,52 @@
         }
 
         /* 3D Controls Overlay */
+        /* 3D pane: flex column so controls sit below the canvas, not over anatomy */
+        .mpr-view[data-plane="bone3d"] {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .bone3d-canvas-wrapper {
+            flex: 1 1 0;
+            position: relative;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        .bone3d-canvas-wrapper canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+
         .controls-3d {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.8);
-            border-radius: 8px;
-            padding: 10px;
-            backdrop-filter: blur(10px);
-            z-index: 100;
-            display: none;
+            flex-shrink: 0;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 3px;
+            padding: 5px 8px;
+            background: rgba(6, 11, 18, 0.96);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(6px);
         }
 
         .control-3d-btn {
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: white;
-            padding: 6px 10px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            color: #d0dae8;
+            padding: 4px 9px;
             border-radius: 4px;
-            margin: 2px;
             cursor: pointer;
             font-size: 11px;
-            transition: all 0.3s ease;
+            transition: background 0.15s, border-color 0.15s;
+            white-space: nowrap;
         }
 
         .control-3d-btn:hover {
-            background: rgba(0, 120, 212, 0.3);
+            background: rgba(0, 140, 255, 0.28);
             border-color: var(--accent-color);
+            color: #fff;
         }
 
         /* Toggle Switches */
@@ -864,6 +992,108 @@
             background: rgba(0, 212, 255, 0.12);
             color: var(--accent-color, #00d4ff);
         }
+
+        /* ── Windows / tablet / phone responsive improvements ── */
+
+        /* Top-bar: always wraps gracefully on narrow widths */
+        .top-bar {
+            flex-wrap: wrap;
+            row-gap: 4px;
+            min-height: 44px;
+            height: auto !important;
+        }
+        .top-bar .btn {
+            flex-shrink: 0;
+            white-space: nowrap;
+            font-size: clamp(10px, 1.1vw, 13px);
+            padding: clamp(4px, 0.5vw, 7px) clamp(6px, 0.8vw, 12px);
+        }
+        .patient-info {
+            flex: 1 1 140px;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: clamp(10px, 1.1vw, 12px);
+        }
+
+        /* Toolbar buttons: scale down on tablets */
+        .tool-btn {
+            width: clamp(44px, 5vw, 55px);
+            height: clamp(44px, 5vw, 55px);
+            font-size: clamp(10px, 1vw, 11px);
+        }
+        .tool-btn i {
+            font-size: clamp(14px, 1.6vw, 18px);
+        }
+
+        /* Right panel: reasonable max-height on short screens */
+        .right-panel {
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        /* Tablet: collapse right-panel labels to icon-only mode */
+        @media (max-width: 900px) {
+            .right-panel {
+                width: clamp(180px, 18vw, 240px);
+            }
+        }
+
+        /* Phone portrait: bottom toolbar, hide right panel */
+        @media (max-width: 640px) {
+            .top-bar {
+                font-size: 11px;
+                padding: 4px 6px !important;
+            }
+            .top-bar .logo { display: none; }
+            .right-panel { display: none; }
+            .toolbar {
+                width: 100%;
+                flex-direction: row !important;
+                flex-wrap: wrap;
+                height: auto !important;
+                border-right: none;
+                border-top: 1px solid var(--border-color);
+                padding: 4px;
+                justify-content: center;
+                gap: 4px;
+                overflow-y: visible;
+                overflow-x: hidden;
+                max-height: 30dvh;
+            }
+            .tool-btn {
+                width: 42px !important;
+                height: 42px !important;
+            }
+            .tool-btn span { display: none; }
+            .viewer-container {
+                flex-direction: column;
+            }
+        }
+
+        /* Short-height screens (landscape phone, small laptop) */
+        @media (max-height: 540px) {
+            .top-bar { padding: 3px 8px !important; min-height: 36px; }
+            .tool-btn { width: 40px !important; height: 40px !important; }
+            .series-thumb-wrap { height: 48px; }
+        }
+
+        /* Windows HiDPI: scrollbar width compensation */
+        @supports (scrollbar-gutter: stable) {
+            .right-panel { scrollbar-gutter: stable; }
+        }
+        .right-panel::-webkit-scrollbar { width: 5px; }
+        .right-panel::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+
+        /* Touch targets: minimum 44×44px for all interactive elements (WCAG 2.5.5) */
+        @media (pointer: coarse) {
+            .tool-btn { min-width: 44px !important; min-height: 44px !important; }
+            .series-nav-btn { min-height: 36px; padding: 6px 10px; }
+            .series-item { padding: 10px 8px; }
+            .btn { min-height: 36px; }
+            .nav-dropdown-item { padding: 10px 14px; }
+        }
     </style>
 </head>
 
@@ -1008,6 +1238,9 @@
                 <button class="btn" onclick="toggleUI()" title="Toggle UI Auto Hide">
                     <i class="fas fa-eye-slash"></i> UI
                 </button>
+                <button class="btn" id="themeToggleBtn" onclick="toggleViewerTheme()" title="Toggle light/dark mode">
+                    <i class="fas fa-circle-half-stroke"></i>
+                </button>
 
                 <!-- Navbar dropdowns -->
                 <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
@@ -1146,23 +1379,34 @@
                     </div>
                     <div class="mpr-view" data-plane="bone3d">
                         <div class="mpr-label">3D Bone Reconstruction</div>
-                        <canvas id="bone3DCanvas"></canvas>
+                        <div class="bone3d-canvas-wrapper">
+                            <canvas id="bone3DCanvas"></canvas>
+                        </div>
                         <div class="controls-3d" id="controls3D">
-                            <button class="control-3d-btn" onclick="reset3DView()" title="Reset view">Reset</button>
-                            <button class="control-3d-btn" onclick="toggle3DRotation()" title="Toggle auto-rotate">Auto
-                                Rotate</button>
-                            <button class="control-3d-btn" onclick="toggleBoneWireframe()"
-                                title="Toggle wireframe">Wire</button>
+                            <!-- Rotation / navigation -->
+                            <button class="control-3d-btn" onclick="boneRotate(-1,0)" title="Tilt up">&#8593;</button>
+                            <button class="control-3d-btn" onclick="boneRotate(1,0)" title="Tilt down">&#8595;</button>
+                            <button class="control-3d-btn" onclick="boneRotate(0,-1)" title="Rotate left">&#10226;</button>
+                            <button class="control-3d-btn" onclick="boneRotate(0,1)" title="Rotate right">&#10227;</button>
                             <button class="control-3d-btn" onclick="boneZoomIn()" title="Zoom in">+</button>
-                            <button class="control-3d-btn" onclick="boneZoomOut()" title="Zoom out">−</button>
-                            <button class="control-3d-btn" onclick="boneRotate(0,-1)" title="Rotate left">⟲</button>
-                            <button class="control-3d-btn" onclick="boneRotate(0,1)" title="Rotate right">⟳</button>
-                            <button class="control-3d-btn" onclick="boneRotate(-1,0)" title="Tilt up">↑</button>
-                            <button class="control-3d-btn" onclick="boneRotate(1,0)" title="Tilt down">↓</button>
-                            <button class="control-3d-btn" onclick="boneCenter()"
-                                title="Center/pan reset">Center</button>
-                            <button class="control-3d-btn" onclick="export3DModel()"
-                                title="Export 3D Model (OBJ)">Export OBJ</button>
+                            <button class="control-3d-btn" onclick="boneZoomOut()" title="Zoom out">&minus;</button>
+                            <!-- View options -->
+                            <button class="control-3d-btn" onclick="reset3DView()" title="Reset view">Reset</button>
+                            <button class="control-3d-btn" onclick="toggle3DRotation()" title="Toggle auto-rotate">Auto</button>
+                            <button class="control-3d-btn" onclick="toggleBoneWireframe()" title="Toggle wireframe">Wire</button>
+                            <button class="control-3d-btn" onclick="boneCenter()" title="Center/pan reset">Center</button>
+                            <!-- Tissue preset inline — directly reuses the global selector logic -->
+                            <select class="control-3d-btn" id="tissuePresetSelectPanel"
+                                    title="Tissue preset"
+                                    onchange="document.getElementById('tissuePresetSelect').value=this.value; applyTissuePreset(this.value);"
+                                    style="padding:4px 6px;cursor:pointer;">
+                                <option value="">Tissue</option>
+                                <option value="skin">Skin</option>
+                                <option value="softtissue">Soft Tissue</option>
+                                <option value="bone" selected>Bone</option>
+                                <option value="cortical">Dense Bone</option>
+                            </select>
+                            <button class="control-3d-btn" onclick="export3DModel()" title="Export 3D Model (OBJ)">OBJ</button>
                         </div>
                     </div>
                 </div>
@@ -1175,7 +1419,7 @@
         </div>
 
         <!-- Right Panel -->
-        <div class="right-panel">
+        <div class="right-panel" id="rightPanel">
             <!-- Series Selection -->
             <details class="panel-section" open>
                 <summary class="panel-title">
@@ -1201,6 +1445,33 @@
                     </div>
                 </div>
             </details>
+
+            <!-- AI Analysis Panel -->
+            <div class="ai-analysis-section" id="aiAnalysisSection" style="display:none;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <div style="font-size:12px;font-weight:600;color:var(--accent-color);"><i class="fas fa-robot me-1"></i>AI Analysis</div>
+                    <span id="aiStatusBadge" class="ai-status-badge pending">Idle</span>
+                </div>
+                <div id="aiModelRow" style="margin-bottom:8px;display:none;">
+                    <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;">Model</div>
+                    <div id="aiModelName" style="font-size:11px;color:var(--text-secondary);">—</div>
+                </div>
+                <button id="aiRunBtn" class="btn btn-sm" style="width:100%;margin-bottom:10px;font-size:11px;"
+                    onclick="_aiRunAnalysis()">
+                    <i class="fas fa-play me-1"></i>Run Analysis
+                </button>
+                <div id="aiProgressWrap" style="display:none;margin-bottom:8px;">
+                    <div style="height:3px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;">
+                        <div id="aiProgressBar" style="height:100%;background:var(--accent-color);width:0%;transition:width 0.4s;"></div>
+                    </div>
+                    <div id="aiProgressLabel" style="font-size:10px;color:var(--text-muted);margin-top:3px;text-align:center;">Initialising…</div>
+                </div>
+                <div id="aiFindingsPanel" style="display:none;">
+                    <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Findings</div>
+                    <div id="aiFindingsContent"></div>
+                </div>
+                <div id="aiErrorPanel" style="display:none;font-size:11px;color:var(--danger-color);padding:6px;background:rgba(255,68,68,0.08);border-radius:4px;"></div>
+            </div>
 
             <!-- Hidden elements needed by JS but not displayed in the right panel -->
             <!-- W/L sliders (hidden, controlled via navbar dropdowns) -->
@@ -1894,8 +2165,25 @@
             canvas.addEventListener('mousedown', handleMouseDown);
             canvas.addEventListener('mousemove', handleMouseMove);
             canvas.addEventListener('mouseup', handleMouseUp);
-            canvas.addEventListener('wheel', handleWheel);
-            canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // Prevent default right-click menu
+            canvas.addEventListener('wheel', handleWheel, { passive: false });
+            canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+            // Touch / pointer support for main canvas (tablets + phones)
+            _attachCanvasTouch(canvas, {
+                onDragStart: (x, y, btn) => handleMouseDown({ clientX: x, clientY: y, button: btn || 0, preventDefault: () => {} }),
+                onDragMove:  (x, y)      => handleMouseMove({ clientX: x, clientY: y, buttons: 1, preventDefault: () => {} }),
+                onDragEnd:   (x, y)      => handleMouseUp({ clientX: x, clientY: y, button: 0, preventDefault: () => {} }),
+                onPinchZoom: (delta, cx, cy) => {
+                    zoom = Math.max(0.1, Math.min(5.0, zoom * (1 + delta * 0.01)));
+                    updateZoomSlider();
+                    redrawCurrentImage();
+                },
+                onScroll: (dir) => {
+                    const step = dir > 0 ? 1 : -1;
+                    currentImageIndex = Math.max(0, Math.min(imageData.length - 1, currentImageIndex + step));
+                    updateSlice(currentImageIndex);
+                },
+            });
 
             // MPR canvases: click-to-activate/maximize, wheel-to-scroll slices, ROI/HU interactions
             ['axial', 'sagittal', 'coronal'].forEach((plane) => {
@@ -1908,6 +2196,17 @@
                 c.addEventListener('contextmenu', (e) => e.preventDefault());
                 c.addEventListener('click', (e) => handleMPRClick(e, plane));
                 c.addEventListener('dblclick', (e) => handleMPRDoubleClick(e, plane));
+                _attachCanvasTouch(c, {
+                    onDragStart: (x, y) => handleMPRMouseDown({ clientX: x, clientY: y, button: 0, preventDefault: () => {} }, plane),
+                    onDragMove:  (x, y) => handleMPRMouseMove({ clientX: x, clientY: y, buttons: 1, preventDefault: () => {} }, plane),
+                    onDragEnd:   (x, y) => handleMPRMouseUp({ clientX: x, clientY: y, button: 0, preventDefault: () => {} }, plane),
+                    onScroll: (dir)     => handleMPRWheel({ deltaY: dir > 0 ? 1 : -1, ctrlKey: false, preventDefault: () => {}, stopPropagation: () => {} }, plane),
+                    onPinchZoom: (delta) => {
+                        const t = mprViewTransform[plane] || (mprViewTransform[plane] = { zoom: 1.0, panX: 0, panY: 0 });
+                        t.zoom = Math.max(0.2, Math.min(10.0, (Number(t.zoom) || 1.0) * (1 + delta * 0.015)));
+                        redrawMPRPlane(plane);
+                    },
+                });
             });
 
             // Keyboard shortcuts
@@ -2095,7 +2394,7 @@
                 }
                 singleView.style.display = 'none';
                 mprView.classList.add('active');
-                if (controls3D) controls3D.style.display = 'block';
+                if (controls3D) controls3D.style.display = 'flex';
                 viewMode = 'mpr';
                 // Ensure canvases have non-zero size now that MPR is visible.
                 // Use rAF so layout has applied the new grid before reading client sizes.
@@ -2134,7 +2433,7 @@
                 }
                 if (singleView) singleView.style.display = 'none';
                 if (mprView) mprView.classList.add('active');
-                if (controls3D) controls3D.style.display = 'block';
+                if (controls3D) controls3D.style.display = 'flex';
                 viewMode = 'mpr';
                 // Make the 3D pane the focus for interaction.
                 setActiveMPRPlane('bone3d');
@@ -2286,11 +2585,20 @@
             series.forEach((s, index) => {
                 const item = document.createElement('div');
                 item.className = 'series-item';
+                item.dataset.seriesId = String(s.id);
                 if (index === 0) item.classList.add('active');
 
+                const midSlice = Math.max(0, Math.floor((Number(s.image_count) || 1) / 2));
+                const thumbUrl = `/dicom-viewer/api/mpr-slice/${encodeURIComponent(s.id)}/axial/${midSlice}/?window_width=400&window_level=40&inverted=0&quality=fast`;
+                const desc = String(s.description || '').replace(/</g, '&lt;') || '&mdash;';
                 item.innerHTML = `
-                    <div class="series-title">Series ${s.series_number}: ${s.description}</div>
-                    <div class="series-details">${s.modality} • ${s.image_count} images</div>
+                    <div class="series-thumb-wrap">
+                        <img class="series-thumb" alt="" data-thumb="${thumbUrl}"
+                             style="display:none;max-width:100%;max-height:100%;object-fit:contain;">
+                        <i class="fas fa-x-ray series-thumb-placeholder"></i>
+                    </div>
+                    <div class="series-title" title="${desc}">S${s.series_number}: ${desc}</div>
+                    <div class="series-details">${s.modality} &bull; ${s.image_count} img</div>
                 `;
 
                 item.addEventListener('click', () => {
@@ -2300,6 +2608,26 @@
                 });
 
                 container.appendChild(item);
+            });
+
+            _loadSeriesThumbnails();
+        }
+
+        function _loadSeriesThumbnails() {
+            const items = document.querySelectorAll('#seriesList .series-item');
+            items.forEach((item) => {
+                const img = item.querySelector('.series-thumb');
+                const placeholder = item.querySelector('.series-thumb-placeholder');
+                if (!img || !img.dataset.thumb) return;
+
+                const thumbImg = new Image();
+                thumbImg.onload = () => {
+                    img.src = thumbImg.src;
+                    img.style.display = 'block';
+                    if (placeholder) placeholder.style.display = 'none';
+                };
+                thumbImg.onerror = () => { /* keep placeholder icon */ };
+                thumbImg.src = img.dataset.thumb;
             });
         }
 
@@ -3002,14 +3330,19 @@
             // Determine final inversion: MONOCHROME1 is "inverted" by definition.
             const shouldInvert = (!!inverted) !== (!!mono1);
 
-            // Fit-to-viewport base scale (avoid default "too big" / clipped display).
-            const rot = ((rotation % 360) + 360) % 360;
-            const rotated = (rot === 90 || rot === 270);
-            const fitW = rotated ? imgH : imgW;
-            const fitH = rotated ? imgW : imgH;
-            // Do not upscale above 1.0 by default; downscale if needed to fit.
-            const baseScale = Math.min(1, Math.min(canvas.width / fitW, canvas.height / fitH));
-            _lastRenderMeta = { imgW, imgH, baseScale, rotDeg: rotation };
+            // Fit-to-viewport base scale accounting for arbitrary rotation angle.
+            // At intermediate angles (e.g. 45°) the rotated image's bounding box is larger
+            // than the original, so we scale down proportionally to avoid clipping.
+            {
+                const rotRad = (rotation * Math.PI) / 180;
+                const cosR = Math.abs(Math.cos(rotRad));
+                const sinR = Math.abs(Math.sin(rotRad));
+                const rotFitW = imgW * cosR + imgH * sinR;
+                const rotFitH = imgW * sinR + imgH * cosR;
+                const baseScale = Math.min(1, Math.min(canvas.width / rotFitW, canvas.height / rotFitH));
+                _lastRenderMeta = { imgW, imgH, baseScale, rotDeg: rotation };
+            }
+            const baseScale = _lastRenderMeta.baseScale;
 
             // Build / reuse offscreen grayscale frame for current ww/wl/invert state.
             const imgId = imageData.id != null ? String(imageData.id) : String(lastLoadedImageId || '');
@@ -3098,13 +3431,17 @@
             const imgH = img.naturalHeight || img.height || 0;
             if (!imgW || !imgH) return;
 
-            // Fit-to-viewport base scale (avoid default "too big" / clipped display).
-            const rot = ((rotation % 360) + 360) % 360;
-            const rotated = (rot === 90 || rot === 270);
-            const fitW = rotated ? imgH : imgW;
-            const fitH = rotated ? imgW : imgH;
-            const baseScale = Math.min(1, Math.min(canvas.width / fitW, canvas.height / fitH));
-            _lastRenderMeta = { imgW, imgH, baseScale, rotDeg: rotation };
+            // Fit-to-viewport base scale accounting for arbitrary rotation angle.
+            {
+                const rotRad = (rotation * Math.PI) / 180;
+                const cosR = Math.abs(Math.cos(rotRad));
+                const sinR = Math.abs(Math.sin(rotRad));
+                const rotFitW = imgW * cosR + imgH * sinR;
+                const rotFitH = imgW * sinR + imgH * cosR;
+                const baseScale = Math.min(1, Math.min(canvas.width / rotFitW, canvas.height / rotFitH));
+                _lastRenderMeta = { imgW, imgH, baseScale, rotDeg: rotation };
+            }
+            const baseScale = _lastRenderMeta.baseScale;
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.save();
@@ -3295,7 +3632,8 @@
                         windowWidth = _clamp(windowWidth, 1, currentImageStats.wwMax);
                         windowLevel = _clamp(windowLevel, currentImageStats.wlMin, currentImageStats.wlMax);
                     } else {
-                        windowWidth = Math.max(1, windowWidth);
+                        windowWidth = _clamp(windowWidth, 1, 8000);
+                        windowLevel = _clamp(windowLevel, -2000, 4000);
                     }
                     updateSliders();
                     redrawCurrentImage();
@@ -3634,10 +3972,10 @@
 
         // Tissue preset configurations: [threshold_HU, color_hex, roughness, opacity]
         const _TISSUE_PRESETS = {
-            skin:       { threshold: -50,  color: 0xf5c6a0, roughness: 0.55, opacity: 0.72, label: 'Skin / Outer' },
-            softtissue: { threshold: 100,  color: 0xd4927a, roughness: 0.45, opacity: 0.80, label: 'Soft Tissue'  },
-            bone:       { threshold: 300,  color: 0xf0d1a1, roughness: 0.30, opacity: 0.85, label: 'Bone'         },
-            cortical:   { threshold: 600,  color: 0xe8e0d0, roughness: 0.18, opacity: 0.92, label: 'Dense Bone'   },
+            skin:       { threshold: -50,  color: 0xf0c8a4, roughness: 0.65, opacity: 0.68, label: 'Skin / Outer'  },
+            softtissue: { threshold: 80,   color: 0xc8706a, roughness: 0.55, opacity: 0.78, label: 'Soft Tissue'   },
+            bone:       { threshold: 300,  color: 0xCDB07A, roughness: 0.42, opacity: 0.98, label: 'Bone'          },
+            cortical:   { threshold: 600,  color: 0xDDC898, roughness: 0.26, opacity: 1.00, label: 'Dense Bone'    },
         };
 
         function applyTissuePreset(preset) {
@@ -4191,7 +4529,7 @@
         function _crosshairRotateHandleCanvasPoint() {
             const c = _crosshairCenterCanvasPoint();
             const ax = _crosshairAxesForCanvas();
-            const handleDist = 26;
+            const handleDist = 42;
             return { x: c.x + handleDist * ax.xdx, y: c.y + handleDist * ax.xdy };
         }
 
@@ -4201,7 +4539,7 @@
             const h = _crosshairRotateHandleCanvasPoint();
             const dx = canvasX - h.x;
             const dy = canvasY - h.y;
-            return (dx * dx + dy * dy) <= (10 * 10);
+            return (dx * dx + dy * dy) <= (18 * 18);
         }
 
         function drawCrosshair() {
@@ -4250,32 +4588,65 @@
 
             ctx.setLineDash([]);
 
-            // Rotation handle (drag to rotate crosshair to any degree).
-            // Handle sits on the +X axis of the crosshair.
-            const handleDist = 26;
+            // Rotation handle (drag to rotate image to any degree).
+            // Handle sits on the +X axis of the crosshair at handleDist pixels from center.
+            const handleDist = 42;
             const hx = centerX + handleDist * xdx;
             const hy = centerY + handleDist * xdy;
 
-            // Optional rotate ring highlight
-            if (highlight) {
-                ctx.save();
-                ctx.strokeStyle = 'rgba(255,255,0,0.35)';
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.arc(centerX, centerY, handleDist, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.restore();
-            }
-
+            // Always show a dashed guide ring so users can find the handle.
             ctx.save();
-            ctx.fillStyle = highlight ? 'rgba(255,255,0,0.9)' : 'rgba(0, 212, 255, 0.9)';
-            ctx.strokeStyle = 'rgba(0,0,0,0.65)';
-            ctx.lineWidth = 2;
+            ctx.setLineDash([3, 4]);
+            ctx.strokeStyle = highlight ? 'rgba(255,255,0,0.55)' : 'rgba(0,212,255,0.22)';
+            ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.arc(hx, hy, 5, 0, Math.PI * 2);
+            ctx.arc(centerX, centerY, handleDist, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+
+            // Larger solid handle circle for easy grabbing.
+            ctx.save();
+            ctx.fillStyle = highlight ? 'rgba(255,255,0,0.92)' : 'rgba(0,212,255,0.88)';
+            ctx.strokeStyle = 'rgba(0,0,0,0.70)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(hx, hy, 8, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
+            // Draw a small rotation arrow glyph inside the handle.
+            ctx.strokeStyle = highlight ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.85)';
+            ctx.lineWidth = 1.5;
+            const gs = 4.5, ga = angle + Math.PI / 2;
+            ctx.beginPath();
+            ctx.arc(hx, hy, gs, ga - 1.2, ga + 1.2);
+            ctx.stroke();
+            // Arrowhead
+            const ahx = hx + gs * Math.cos(ga + 1.2);
+            const ahy = hy + gs * Math.sin(ga + 1.2);
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.beginPath();
+            ctx.moveTo(ahx, ahy);
+            ctx.lineTo(ahx - 3 * Math.cos(ga + 0.7), ahy - 3 * Math.sin(ga + 0.7));
+            ctx.lineTo(ahx - 3 * Math.cos(ga + 1.7), ahy - 3 * Math.sin(ga + 1.7));
+            ctx.closePath();
+            ctx.fill();
             ctx.restore();
+
+            // Show current rotation degree while actively rotating.
+            if (isRotateActive && (rot !== 0 || rot2 !== 0)) {
+                const deg = Math.round(((rot + rot2) % 360 + 360) % 360);
+                ctx.save();
+                ctx.fillStyle = 'rgba(0,0,0,0.55)';
+                const tw = 48, th = 18;
+                ctx.fillRect(hx + 12, hy - th / 2, tw, th);
+                ctx.fillStyle = 'rgba(255,255,0,0.95)';
+                ctx.font = 'bold 11px Inter,sans-serif';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`${deg}°`, hx + 16, hy);
+                ctx.restore();
+            }
 
             // Small center marker + rotation glyph when the view is rotated.
             ctx.save();
@@ -5339,8 +5710,8 @@
             const c = _mprCrosshairCenterCanvasPoint(plane);
             if (!c) return null;
             const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-            const off = 28 * dpr;
-            const r = 9 * dpr;
+            const off = 40 * dpr;
+            const r = 14 * dpr;
             const a = (_normalizeDeg(Number(crosshairRotation) || 0) * Math.PI) / 180;
             return { x: c.cx + Math.cos(a) * off, y: c.cy + Math.sin(a) * off, r };
         }
@@ -5367,77 +5738,184 @@
             const cx = center.cx;
             const cy = center.cy;
 
-            // Color coding (hospital-grade convention-ish):
-            // axial line = cyan, sagittal = red, coronal = green.
             const COL_AXIAL = 'rgba(0, 212, 255, 0.95)';
-            const COL_SAG = 'rgba(255, 77, 77, 0.95)';
-            const COL_COR = 'rgba(77, 255, 77, 0.95)';
+            const COL_SAG   = 'rgba(255, 77,  77,  0.95)';
+            const COL_COR   = 'rgba(77,  255, 77,  0.95)';
 
-            // Pick which line represents which plane in each view.
-            let vertCol = COL_SAG;
+            let vertCol  = COL_SAG;
             let horizCol = COL_COR;
-            if (plane === 'sagittal') {
-                vertCol = COL_COR;    // x-axis is y (coronal index)
-                horizCol = COL_AXIAL; // y-axis is z (axial index)
-            } else if (plane === 'coronal') {
-                vertCol = COL_SAG;    // x-axis is x (sagittal index)
-                horizCol = COL_AXIAL; // y-axis is z (axial index)
-            }
+            if (plane === 'sagittal') { vertCol = COL_COR;  horizCol = COL_AXIAL; }
+            else if (plane === 'coronal') { vertCol = COL_SAG; horizCol = COL_AXIAL; }
+
+            const degRaw  = _normalizeDeg(Number(crosshairRotation) || 0);
+            const a       = (degRaw * Math.PI) / 180;
+            const ca      = Math.cos(a);
+            const sa      = Math.sin(a);
+            const len     = Math.max(dw, dh) * 1.5;
+            const isActive = mprState && mprState.activePlane === plane;
+            const isRotating = !!(_mprCrosshairRotateDrag && _mprCrosshairRotateDrag.active);
+            const orbitR  = 40 * Math.max(1, Math.min(3, window.devicePixelRatio || 1));
 
             ctx.save();
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([]);
-
-            // Clip to the rendered image rect so lines don't spill into UI chrome.
             ctx.beginPath();
             ctx.rect(dx, dy, dw, dh);
             ctx.clip();
 
-            const a = (_normalizeDeg(Number(crosshairRotation) || 0) * Math.PI) / 180;
-            const ca = Math.cos(a);
-            const sa = Math.sin(a);
-            const len = Math.max(dw, dh) * 1.4;
+            // ── Crosshair lines (thicker, with subtle shadow for depth) ──────
+            ctx.shadowColor = 'rgba(0,0,0,0.55)';
+            ctx.shadowBlur  = 3;
+            ctx.lineWidth   = 2;
+            ctx.setLineDash([]);
 
-            // "Horizontal" axis rotated by crosshairRotation
             ctx.strokeStyle = horizCol;
             ctx.beginPath();
             ctx.moveTo(cx - ca * len, cy - sa * len);
             ctx.lineTo(cx + ca * len, cy + sa * len);
             ctx.stroke();
 
-            // "Vertical" axis rotated by crosshairRotation (perpendicular)
             ctx.strokeStyle = vertCol;
             ctx.beginPath();
             ctx.moveTo(cx + sa * len, cy - ca * len);
             ctx.lineTo(cx - sa * len, cy + ca * len);
             ctx.stroke();
 
-            // Center marker
             ctx.shadowBlur = 0;
-            ctx.fillStyle = 'rgba(0,0,0,0.7)';
-            ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
 
-            // Rotation handle (active pane only): drag to rotate 360°+
-            if (mprState && mprState.activePlane === plane) {
+            // ── Angle indicator (always visible on active pane) ───────────────
+            if (isActive) {
+                // Dashed orbit ring — shows the handle's travel path
+                ctx.save();
+                ctx.setLineDash([4, 5]);
+                ctx.strokeStyle = isRotating ? 'rgba(255,255,0,0.50)' : 'rgba(255,255,255,0.22)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.arc(cx, cy, orbitR, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.restore();
+
+                // Cardinal tick marks at 0 / 90 / 180 / 270 degrees
+                const cardinals = [
+                    { deg: 0,   label: '0°'   },
+                    { deg: 90,  label: '90°'  },
+                    { deg: 180, label: '180°' },
+                    { deg: 270, label: '270°' },
+                ];
+                ctx.save();
+                ctx.font = `bold ${Math.round(9 * (window.devicePixelRatio || 1))}px Inter,sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                cardinals.forEach(({ deg, label }) => {
+                    const ca2 = Math.cos((deg * Math.PI) / 180);
+                    const sa2 = Math.sin((deg * Math.PI) / 180);
+                    const inner = orbitR - 5, outer = orbitR + 5;
+                    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(cx + ca2 * inner, cy + sa2 * inner);
+                    ctx.lineTo(cx + ca2 * outer, cy + sa2 * outer);
+                    ctx.stroke();
+                    // Label just outside the tick
+                    const lx = cx + ca2 * (orbitR + 14);
+                    const ly = cy + sa2 * (orbitR + 14);
+                    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+                    ctx.fillText(label, lx + 1, ly + 1);
+                    ctx.fillStyle = 'rgba(255,255,255,0.65)';
+                    ctx.fillText(label, lx, ly);
+                });
+                ctx.restore();
+
+                // Angle-sweep arc from 0° → crosshairRotation (protractor style)
+                if (degRaw > 0.5) {
+                    ctx.save();
+                    const sweepColor = isRotating ? 'rgba(255,255,0,0.35)' : 'rgba(0,212,255,0.20)';
+                    ctx.fillStyle = sweepColor;
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cy);
+                    ctx.arc(cx, cy, orbitR - 2, 0, a, false);
+                    ctx.closePath();
+                    ctx.fill();
+                    // Arc border
+                    ctx.strokeStyle = isRotating ? 'rgba(255,255,0,0.70)' : 'rgba(0,212,255,0.55)';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, orbitR - 2, 0, a, false);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+
+                // Live angle badge — always visible, top-right of pane
+                const badgeX = dx + dw - 6;
+                const badgeY = dy + 6;
+                const badgeW = 60, badgeH = 22;
+                ctx.save();
+                ctx.fillStyle = 'rgba(0,0,0,0.60)';
+                _roundRect(ctx, badgeX - badgeW, badgeY, badgeW, badgeH, 4);
+                ctx.fill();
+                ctx.fillStyle = degRaw > 0.5 ? 'rgba(255,220,0,0.95)' : 'rgba(180,180,180,0.85)';
+                ctx.font = `bold ${Math.round(11 * (window.devicePixelRatio || 1))}px Inter,sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`∠ ${Math.round(degRaw)}°`, badgeX - badgeW / 2, badgeY + badgeH / 2);
+                ctx.restore();
+
+                // Rotation handle (drag to rotate)
                 const hpt = _mprCrosshairRotateHandleCanvasPoint(plane);
                 if (hpt) {
-                    const highlight = !!(_mprCrosshairRotateDrag && _mprCrosshairRotateDrag.active) || !!_mprCrosshairRotateHover;
-                    ctx.lineWidth = 1.5;
-                    ctx.fillStyle = highlight ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.65)';
-                    ctx.strokeStyle = highlight ? 'rgba(0,212,255,0.95)' : 'rgba(255,255,255,0.8)';
+                    const highlight = isRotating || !!_mprCrosshairRotateHover;
+                    ctx.save();
+                    ctx.lineWidth = 2;
+                    ctx.fillStyle   = highlight ? 'rgba(255,255,0,0.92)' : 'rgba(0,212,255,0.85)';
+                    ctx.strokeStyle = highlight ? 'rgba(0,0,0,0.70)' : 'rgba(0,0,0,0.50)';
                     ctx.beginPath();
-                    ctx.arc(hpt.x, hpt.y, hpt.r || 10, 0, Math.PI * 2);
+                    ctx.arc(hpt.x, hpt.y, hpt.r || 14, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.stroke();
+                    // Rotation arrow glyph inside handle
+                    const gs = (hpt.r || 14) * 0.5, ga = a + Math.PI / 2;
+                    ctx.strokeStyle = highlight ? 'rgba(0,0,0,0.80)' : 'rgba(255,255,255,0.90)';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.arc(hpt.x, hpt.y, gs, ga - 1.1, ga + 1.1);
+                    ctx.stroke();
+                    const ahx = hpt.x + gs * Math.cos(ga + 1.1);
+                    const ahy = hpt.y + gs * Math.sin(ga + 1.1);
+                    ctx.fillStyle = ctx.strokeStyle;
+                    ctx.beginPath();
+                    ctx.moveTo(ahx, ahy);
+                    ctx.lineTo(ahx - 4 * Math.cos(ga + 0.6), ahy - 4 * Math.sin(ga + 0.6));
+                    ctx.lineTo(ahx - 4 * Math.cos(ga + 1.6), ahy - 4 * Math.sin(ga + 1.6));
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.restore();
                 }
             }
 
+            // ── Center marker ─────────────────────────────────────────────────
+            ctx.fillStyle   = 'rgba(0,0,0,0.75)';
+            ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+            ctx.lineWidth   = 1.5;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
             ctx.restore();
+        }
+
+        // Helper: draw a rounded rectangle path (no fill/stroke — caller does that).
+        function _roundRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
         }
 
         async function fetchMPRPlaneSlice(plane, sliceIndex, qsBase) {
@@ -5448,6 +5926,16 @@
             const ac = new AbortController();
             _mprPlaneAbort[plane] = ac;
 
+            // Build oblique suffix when crosshair has been rotated
+            let obliqueSuffix = '';
+            const rotDeg = Number(crosshairRotation) || 0;
+            if (Math.abs(rotDeg) >= 0.5 && mprCrosshairVoxel) {
+                const cx = Number(mprCrosshairVoxel.x) || 0;
+                const cy = Number(mprCrosshairVoxel.y) || 0;
+                const cz = Number(mprCrosshairVoxel.z) || 0;
+                obliqueSuffix = `&rot_z=${encodeURIComponent(rotDeg.toFixed(3))}&cvx=${encodeURIComponent(cx.toFixed(1))}&cvy=${encodeURIComponent(cy.toFixed(1))}&cvz=${encodeURIComponent(cz.toFixed(1))}`;
+            }
+
             // Prefer the binary PNG slice endpoint (much smaller than JSON+base64).
             // If counts are known, we can avoid a metadata fetch entirely.
             const knownCount = Number(mprState?.counts?.[plane] || 0);
@@ -5455,7 +5943,7 @@
             if (knownCount > 0) {
                 const clamped = Math.max(0, Math.min(knownCount - 1, Math.round(idx)));
                 return {
-                    image: `/dicom-viewer/api/mpr-slice/${encodeURIComponent(currentSeries.id)}/${encodeURIComponent(plane)}/${encodeURIComponent(clamped)}/?${qsBase}&quality=${encodeURIComponent(q)}`,
+                    image: `/dicom-viewer/api/mpr-slice/${encodeURIComponent(currentSeries.id)}/${encodeURIComponent(plane)}/${encodeURIComponent(clamped)}/?${qsBase}&quality=${encodeURIComponent(q)}${obliqueSuffix}`,
                     index: clamped,
                     count: knownCount,
                 };
@@ -6001,7 +6489,8 @@
                     windowWidth = _clamp(windowWidth, 1, currentImageStats.wwMax);
                     windowLevel = _clamp(windowLevel, currentImageStats.wlMin, currentImageStats.wlMax);
                 } else {
-                    windowWidth = Math.max(1, windowWidth);
+                    windowWidth = _clamp(windowWidth, 1, 8000);
+                    windowLevel = _clamp(windowLevel, -2000, 4000);
                 }
                 updateSliders();
                 _scheduleMPRRefresh();
@@ -6035,7 +6524,7 @@
 
         async function handleMPRMouseUp(event, plane) {
             if (viewMode !== 'mpr') return;
-            // End crosshair rotation drag (MPR)
+            // End crosshair rotation drag (MPR) — refetch all planes with new oblique angle
             if (_mprDragState.down && _mprDragState.plane === plane && _mprDragState.tool === 'crosshair-rotate') {
                 _mprCrosshairRotateDrag.active = false;
                 _mprCrosshairRotateDrag.plane = null;
@@ -6043,9 +6532,25 @@
                 _mprDragState.plane = null;
                 _mprDragState.tool = null;
                 _mprDragState.wasDragged = false;
-                // Suppress the immediately following click event triggered by mouseup.
                 _mprSuppressNextClick = true;
                 setTimeout(() => { _mprSuppressNextClick = false; }, 0);
+                // Refetch all three planes with the new oblique angle applied
+                try {
+                    const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
+                    const [ax, sa, co] = await Promise.all([
+                        fetchMPRPlaneSlice('axial',    mprState.index.axial    || 0, qsBase),
+                        fetchMPRPlaneSlice('sagittal', mprState.index.sagittal || 0, qsBase),
+                        fetchMPRPlaneSlice('coronal',  mprState.index.coronal  || 0, qsBase),
+                    ]);
+                    await Promise.allSettled([
+                        _renderMPRDataUrl('axial',    ax.image),
+                        _renderMPRDataUrl('sagittal', sa.image),
+                        _renderMPRDataUrl('coronal',  co.image),
+                    ]);
+                    redrawAllMPRPlanes();
+                } catch (e) {
+                    console.warn('Oblique MPR refetch failed:', e);
+                }
                 return;
             }
             // Finalize crosshair drag (force a last sync at the last mouse position)
@@ -6276,10 +6781,12 @@
             bone3D._lastW = 0;
             bone3D._lastH = 0;
             bone3D.renderer.setSize(c.width || 1, c.height || 1, false);
-            try { bone3D.renderer.outputEncoding = THREE.sRGBEncoding; } catch (e) { }
+            // Support both old (r149) and new (r150+) Three.js color space API
+            try { bone3D.renderer.outputColorSpace = THREE.SRGBColorSpace; } catch (e) {
+                try { bone3D.renderer.outputEncoding = THREE.sRGBEncoding; } catch (_) {}
+            }
             try { bone3D.renderer.toneMapping = THREE.ACESFilmicToneMapping; } catch (e) { }
-            // Slightly higher exposure for a clearer "bone" look.
-            try { bone3D.renderer.toneMappingExposure = 1.28; } catch (e) { }
+            try { bone3D.renderer.toneMappingExposure = 1.40; } catch (e) { }
             try { bone3D.renderer.physicallyCorrectLights = true; } catch (e) { }
             bone3D.renderer.setClearColor(0x000000, 1);
             bone3D.renderer.shadowMap.enabled = true;
@@ -6287,34 +6794,35 @@
 
             bone3D.scene = new THREE.Scene();
             bone3D.scene.background = new THREE.Color(0x000000);
+            bone3D.scene.fog = null;
 
-            bone3D.camera = new THREE.PerspectiveCamera(45, (c.width || 1) / (c.height || 1), 0.1, 10000);
+            bone3D.camera = new THREE.PerspectiveCamera(42, (c.width || 1) / (c.height || 1), 0.1, 10000);
             bone3D.camera.position.set(0, 0, 200);
 
-            // Lighting tuned for clinical “bone” look (clear depth/edges, no harsh burn-in)
-            const ambient = new THREE.AmbientLight(0xffffff, 0.20);
-            const hemi = new THREE.HemisphereLight(0xffffff, 0x221a12, 0.28);
-            // Warm key light helps match the reference bone tone.
-            const key = new THREE.DirectionalLight(0xfff2dd, 1.25);
-            key.position.set(1.2, 1.0, 1.8);
+            // Lighting — studio portrait style: strong key, deep shadows, pure black BG
+            const ambient = new THREE.AmbientLight(0xffffff, 0.10);
+            const hemi = new THREE.HemisphereLight(0xc8d8ff, 0x080400, 0.18);
+            // Key: strong warm light upper-front-right — main illumination, deep shadow on opposite side
+            const key = new THREE.DirectionalLight(0xfff8ec, 2.60);
+            key.position.set(1.4, 2.0, 2.2);
             key.castShadow = true;
             key.shadow.mapSize.width = 2048;
             key.shadow.mapSize.height = 2048;
             key.shadow.camera.near = 0.1;
             key.shadow.camera.far = 2000;
             key.shadow.bias = -0.00005;
-
-            const fill = new THREE.DirectionalLight(0xffe6c7, 0.55);
-            fill.position.set(-1.5, 0.6, 0.8);
-
-            const rim = new THREE.DirectionalLight(0xffd2a3, 0.22);
-            rim.position.set(0.0, -1.0, -1.2);
+            // Fill: very subtle cool left — barely lifts shadow so orbital hollows stay dark
+            const fill = new THREE.DirectionalLight(0xa8c4f0, 0.28);
+            fill.position.set(-2.2, 0.4, 0.8);
+            // Back-top: catches superior skull surface, separates from black BG
+            const top = new THREE.DirectionalLight(0xffffff, 0.35);
+            top.position.set(0, 3.0, -1.0);
 
             bone3D.scene.add(ambient);
             bone3D.scene.add(hemi);
             bone3D.scene.add(key);
             bone3D.scene.add(fill);
-            bone3D.scene.add(rim);
+            bone3D.scene.add(top);
 
             // Shadow catcher (subtle)
             const shadowPlane = new THREE.Mesh(
@@ -6403,8 +6911,8 @@
                     bone3D.panY -= dy1;
                 } else {
                     // Negate dx/dy so dragging right = CW rotation (matches physical intuition).
-                    bone3D.targetRotY -= dx1 * 0.01;
-                    bone3D.targetRotX -= dy1 * 0.01;
+                    bone3D.targetRotY -= dx1 * 0.016;
+                    bone3D.targetRotX -= dy1 * 0.016;
                 }
             });
             c.addEventListener('wheel', (e) => {
@@ -6460,24 +6968,27 @@
             })();
             const mat = new THREE.MeshPhysicalMaterial({
                 color: _activePreset.color,
-                emissive: 0x1a0a00,
-                emissiveIntensity: 0.05,
-                transparent: true,
-                opacity: Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 0.85)),
-                roughness: _activePreset.roughness,
-                metalness: 0.02,
-                clearcoat: 0.18,
-                clearcoatRoughness: 0.40,
-                envMapIntensity: 0.6,
-                side: THREE.FrontSide,
+                emissive: new THREE.Color(_activePreset.color).multiplyScalar(0.015),
+                emissiveIntensity: 1.0,
+                transparent: _activePreset.opacity < 0.99,
+                opacity: Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 0.95)),
+                roughness: _activePreset.roughness ?? 0.52,
+                metalness: 0.0,
+                clearcoat: 0.06,
+                clearcoatRoughness: 0.70,
+                envMapIntensity: 0.3,
+                side: THREE.DoubleSide,
+                flatShading: false,
             });
+            // Optionally add a thicker inner-surface mesh for very porous geometry.
             const mesh = new THREE.Mesh(geom, mat);
             mesh.castShadow = true;
-            mesh.receiveShadow = false;
+            mesh.receiveShadow = true;
             bone3D.mesh = mesh;
             bone3D.scene.add(mesh);
 
-            // Fit camera
+            // Fit camera — normalize bounding box to always fill the viewport
+            // regardless of whether the anatomy is a full torso or a single bone.
             geom.computeBoundingBox();
             const bb = geom.boundingBox;
             const size = new THREE.Vector3();
@@ -6485,21 +6996,24 @@
             const center = new THREE.Vector3();
             bb.getCenter(center);
             mesh.position.sub(center);
+            // Use the LARGEST dimension so the model always fills the view well.
             const maxDim = Math.max(size.x, size.y, size.z) || 1;
-            const dist = maxDim * 1.35;
-            bone3D.camera.near = Math.max(0.01, dist / 100);
-            bone3D.camera.far = dist * 20;
-            bone3D.camera.position.set(dist * 0.15, dist * 0.12, dist);
+            const dist = maxDim * 1.25;
+            bone3D.camera.near = Math.max(0.01, dist / 120);
+            bone3D.camera.far = dist * 30;
+            // Oblique front-left-top position: shows anatomical depth well
+            bone3D.camera.position.set(dist * 0.25, dist * 0.15, dist);
             bone3D.camera.lookAt(0, 0, 0);
             bone3D.camera.zoom = bone3D.zoom = bone3D.targetZoom = 1.0;
             bone3D.camera.updateProjectionMatrix();
-            bone3D.rotX = 0;
-            bone3D.rotY = 0;
-            bone3D.targetRotX = 0;
-            bone3D.targetRotY = 0;
+            // Initial rotation: slight oblique so the 3D structure is immediately apparent
+            bone3D.rotX = -0.18;
+            bone3D.rotY = 0.32;
+            bone3D.targetRotX = -0.18;
+            bone3D.targetRotY = 0.32;
             bone3D.panX = 0;
             bone3D.panY = 0;
-            mesh.rotation.set(0, 0, 0);
+            mesh.rotation.set(-0.18, 0.32, 0);
             // Store fit for resets
             bone3D.fitDist = dist;
 
@@ -6537,8 +7051,8 @@
                 bone3D.animRaf = requestAnimationFrame(tick);
                 if (!bone3D.mesh) return;
 
-                // Apply damping for smooth interaction
-                const damp = 0.18;
+                // Damping: 0.25 gives a snappy but still smooth feel.
+                const damp = 0.25;
                 bone3D.rotX += (Number(bone3D.targetRotX || 0) - Number(bone3D.rotX || 0)) * damp;
                 bone3D.rotY += (Number(bone3D.targetRotY || 0) - Number(bone3D.rotY || 0)) * damp;
                 bone3D.zoom += (Number(bone3D.targetZoom || 1.0) - Number(bone3D.zoom || 1.0)) * damp;
@@ -6584,13 +7098,11 @@
         function boneRotate(dX, dY) {
             try {
                 if (!bone3D) return;
-                const step = Math.PI / 2; // 90° orthogonal snap per click
-                // Negate dY: positive dY from caller means "right/CW from front".
-                // In Three.js positive Y rotation is CCW from the front view, so negate.
+                // 30° step — coarse enough to feel distinct, fine enough for any viewing angle.
+                const step = Math.PI / 6;
                 const newRotX = Number(bone3D.rotX || 0) - (Number(dX || 0) * step);
                 const newRotY = Number(bone3D.rotY || 0) - (Number(dY || 0) * step);
-                // Snap both current and target so the button click is instant
-                // even when auto-rotate is running (avoids "invisible bump" on moving target).
+                // Snap both current and target so the click is instant even during auto-rotate.
                 bone3D.rotX = newRotX;
                 bone3D.rotY = newRotY;
                 bone3D.targetRotX = newRotX;
@@ -6696,7 +7208,7 @@
                     const controls3D = document.getElementById('controls3D');
                     if (singleView) singleView.style.display = 'none';
                     if (mprView) mprView.classList.add('active');
-                    if (controls3D) controls3D.style.display = 'block';
+                    if (controls3D) controls3D.style.display = 'flex';
                     viewMode = 'mpr';
                     setMPRMaximizedPlane(null);
                     setActiveMPRPlane('axial');
@@ -7111,11 +7623,242 @@
             });
         }
 
+        let _aiPollTimer = null;
+
         function toggleAIPanel() {
             const panel = document.getElementById('rightPanel');
-            if (panel) {
-                panel.style.display = (panel.style.display === 'none') ? '' : 'none';
+            const section = document.getElementById('aiAnalysisSection');
+            if (!panel || !section) return;
+
+            // Show right panel if hidden
+            panel.style.display = '';
+
+            const wasVisible = section.style.display !== 'none';
+            section.style.display = wasVisible ? 'none' : '';
+
+            if (!wasVisible) {
+                section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                // Auto-trigger analysis when opening if study loaded and not already running
+                const badge = document.getElementById('aiStatusBadge');
+                const isIdle = !badge || badge.classList.contains('pending') || badge.textContent === 'Idle';
+                if (isIdle && currentStudy && currentStudy.id) {
+                    _aiRunAnalysis();
+                }
             }
+        }
+
+        async function _aiRunAnalysis() {
+            if (!currentStudy || !currentStudy.id) {
+                showToast('Load a study first to run AI analysis', 'warning');
+                return;
+            }
+
+            const btn = document.getElementById('aiRunBtn');
+            const statusBadge = document.getElementById('aiStatusBadge');
+            const progressWrap = document.getElementById('aiProgressWrap');
+            const progressBar = document.getElementById('aiProgressBar');
+            const progressLabel = document.getElementById('aiProgressLabel');
+            const findingsPanel = document.getElementById('aiFindingsPanel');
+            const errorPanel = document.getElementById('aiErrorPanel');
+
+            // Reset UI
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Running…'; }
+            if (statusBadge) { statusBadge.className = 'ai-status-badge running'; statusBadge.textContent = 'Running'; }
+            if (progressWrap) progressWrap.style.display = '';
+            if (progressBar) progressBar.style.width = '10%';
+            if (progressLabel) progressLabel.textContent = 'Starting analysis…';
+            if (findingsPanel) findingsPanel.style.display = 'none';
+            if (errorPanel) { errorPanel.style.display = 'none'; errorPanel.textContent = ''; }
+            if (_aiPollTimer) { clearTimeout(_aiPollTimer); _aiPollTimer = null; }
+
+            try {
+                if (progressBar) progressBar.style.width = '30%';
+                if (progressLabel) progressLabel.textContent = 'Running inference…';
+
+                const resp = await fetch(`/ai/api/study/${encodeURIComponent(currentStudy.id)}/analyze/`, {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': getCookie('csrftoken'), 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({}),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    throw new Error(data.error || data.message || `HTTP ${resp.status}`);
+                }
+
+                if (progressBar) progressBar.style.width = '80%';
+                if (progressLabel) progressLabel.textContent = 'Generating report…';
+
+                // api_analyze_study is synchronous and returns the full result immediately.
+                // If report is present, show it now; otherwise poll via analysis_id.
+                const hasReport = data.report_text || (data.report && (data.report.text || data.report.findings || data.report.impression));
+                if (hasReport || data.success === true) {
+                    if (progressBar) progressBar.style.width = '100%';
+                    _aiShowFindings(data);
+                    return;
+                }
+
+                const analysisId = data.analysis_id || (data.analysis && data.analysis.id);
+                if (analysisId) {
+                    _aiPollStatus(analysisId, 0);
+                } else {
+                    _aiShowFindings(data);
+                }
+            } catch (err) {
+                _aiShowError(String(err.message || err));
+            }
+        }
+
+        function _aiPollStatus(analysisId, attempt) {
+            const progressBar = document.getElementById('aiProgressBar');
+            const progressLabel = document.getElementById('aiProgressLabel');
+
+            _aiPollTimer = setTimeout(async () => {
+                try {
+                    const resp = await fetch(`/ai/api/analysis/${encodeURIComponent(analysisId)}/status/`, {
+                        credentials: 'same-origin',
+                    });
+                    const data = await resp.json();
+                    const status = String(data.status || '');
+                    const serverPct = Number(data.progress_percentage) || 0;
+                    const pct = serverPct > 0 ? Math.min(95, serverPct) : Math.min(90, 30 + attempt * 8);
+                    if (progressBar) progressBar.style.width = pct + '%';
+                    if (progressLabel) progressLabel.textContent = 'Processing… (' + Math.round(pct) + '%)';
+
+                    if (status === 'completed') {
+                        if (progressBar) progressBar.style.width = '100%';
+                        _aiShowFindings(data);
+                    } else if (status === 'failed') {
+                        _aiShowError(data.error_message || data.message || 'Analysis failed');
+                    } else {
+                        _aiPollStatus(analysisId, attempt + 1);
+                    }
+                } catch (err) {
+                    if (attempt < 30) {
+                        _aiPollStatus(analysisId, attempt + 1);
+                    } else {
+                        _aiShowError('Status check timed out. Try re-running.');
+                    }
+                }
+            }, 2000);
+        }
+
+        function _aiEscapeHtml(str) {
+            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+        }
+
+        function _aiShowFindings(data) {
+            const btn = document.getElementById('aiRunBtn');
+            const statusBadge = document.getElementById('aiStatusBadge');
+            const progressWrap = document.getElementById('aiProgressWrap');
+            const findingsPanel = document.getElementById('aiFindingsPanel');
+            const findingsContent = document.getElementById('aiFindingsContent');
+            const modelRow = document.getElementById('aiModelRow');
+            const modelName = document.getElementById('aiModelName');
+
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-redo me-1"></i>Re-run'; }
+            if (statusBadge) { statusBadge.className = 'ai-status-badge completed'; statusBadge.textContent = 'Done'; }
+            if (progressWrap) progressWrap.style.display = 'none';
+            if (findingsPanel) findingsPanel.style.display = '';
+
+            // Show model name
+            const mname = (data.ai_model && data.ai_model.name) || data.model_name || '';
+            if (modelRow) { modelRow.style.display = mname ? '' : 'none'; }
+            if (modelName && mname) modelName.textContent = mname;
+
+            let html = '';
+
+            // ── Preliminary report (full text from reporting pipeline) ──
+            const report = data.report || (data.measurements && data.measurements.report) || {};
+            const reportText = data.report_text || report.text || '';
+            const reportFindings = report.findings || '';
+            const reportImpression = report.impression || '';
+            const reportRecommendations = report.recommendations || '';
+            const confidence = Number(data.confidence_score || report.confidence || 0);
+
+            if (reportText) {
+                html += `<div style="background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.15);border-radius:6px;padding:8px;margin-bottom:8px;">`;
+                html += `<div style="font-size:10px;font-weight:700;color:var(--accent-color);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Preliminary Report</div>`;
+                html += `<div style="font-size:11px;color:var(--text-secondary);line-height:1.6;white-space:pre-wrap;">${_aiEscapeHtml(reportText)}</div>`;
+                html += `</div>`;
+            } else {
+                // Fallback: show sections individually
+                if (reportFindings) {
+                    html += `<div style="margin-bottom:6px;"><div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">Findings</div>`;
+                    html += `<div style="font-size:11px;color:var(--text-secondary);line-height:1.5;white-space:pre-wrap;">${_aiEscapeHtml(reportFindings)}</div></div>`;
+                }
+                if (reportImpression) {
+                    html += `<div style="margin-bottom:6px;"><div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">Impression</div>`;
+                    html += `<div style="font-size:11px;color:var(--text-secondary);line-height:1.5;white-space:pre-wrap;">${_aiEscapeHtml(reportImpression)}</div></div>`;
+                }
+                if (reportRecommendations) {
+                    html += `<div style="margin-bottom:6px;"><div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">Recommendations</div>`;
+                    html += `<div style="font-size:11px;color:var(--text-secondary);line-height:1.5;white-space:pre-wrap;">${_aiEscapeHtml(reportRecommendations)}</div></div>`;
+                }
+            }
+
+            // ── Structured findings list (abnormalities_detected array) ──
+            const abnormals = data.abnormalities_detected || [];
+            if (Array.isArray(abnormals) && abnormals.length > 0) {
+                html += `<div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin:8px 0 4px;">Detected Abnormalities</div>`;
+                abnormals.slice(0, 10).forEach(f => {
+                    const name = typeof f === 'string' ? f : (f.label || f.name || f.finding || JSON.stringify(f));
+                    const conf2 = (typeof f === 'object' && f.confidence != null) ? ` <span style="color:var(--accent-color)">${(Number(f.confidence) * 100).toFixed(0)}%</span>` : '';
+                    const sev = (typeof f === 'object' && f.severity) ? ` <span style="color:var(--warning-color);font-size:9px;">[${f.severity}]</span>` : '';
+                    html += `<div class="ai-finding-row"><span class="ai-finding-name">${_aiEscapeHtml(name)}${sev}</span>${conf2}</div>`;
+                });
+            }
+
+            // ── Triage / priority ──
+            const triage = data.triage || {};
+            const priority = triage.triage_level || data.triage_priority || '';
+            if (priority) {
+                const pCol = (priority === 'critical' || priority === 'stat') ? 'var(--danger-color)' : priority === 'urgent' ? 'var(--warning-color)' : 'var(--success-color)';
+                html += `<div style="margin-top:8px;padding:5px 8px;background:rgba(255,255,255,0.04);border-radius:4px;display:flex;justify-content:space-between;align-items:center;">`;
+                html += `<span style="font-size:10px;color:var(--text-muted);">Triage</span>`;
+                html += `<span style="font-size:11px;font-weight:700;color:${pCol};">${priority.toUpperCase()}</span>`;
+                html += `</div>`;
+            }
+
+            // ── Confidence score ──
+            if (confidence > 0) {
+                const pct2 = Math.round(confidence * 100);
+                const cCol = pct2 >= 70 ? 'var(--success-color)' : pct2 >= 50 ? 'var(--warning-color)' : 'var(--danger-color)';
+                html += `<div style="margin-top:6px;padding:5px 8px;background:rgba(255,255,255,0.04);border-radius:4px;display:flex;justify-content:space-between;align-items:center;">`;
+                html += `<span style="font-size:10px;color:var(--text-muted);">Confidence</span>`;
+                html += `<span style="font-size:11px;font-weight:700;color:${cCol};">${pct2}%</span>`;
+                html += `</div>`;
+            }
+
+            // ── Disclaimer ──
+            const disclaimer = report.disclaimer || 'AI-generated preliminary report. For clinical decision support only. Requires radiologist review before clinical action.';
+            html += `<div style="margin-top:10px;font-size:9px;color:var(--text-muted);line-height:1.4;font-style:italic;">${_aiEscapeHtml(disclaimer)}</div>`;
+
+            if (!html.trim() || (!reportText && !reportFindings && abnormals.length === 0)) {
+                html = '<div style="font-size:11px;color:var(--text-muted);">Analysis complete — no significant findings.</div>';
+            }
+
+            if (findingsContent) findingsContent.innerHTML = html;
+        }
+
+        function _aiShowError(msg) {
+            const btn = document.getElementById('aiRunBtn');
+            const statusBadge = document.getElementById('aiStatusBadge');
+            const progressWrap = document.getElementById('aiProgressWrap');
+            const errorPanel = document.getElementById('aiErrorPanel');
+
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-play me-1"></i>Run Analysis'; }
+            if (statusBadge) { statusBadge.className = 'ai-status-badge failed'; statusBadge.textContent = 'Failed'; }
+            if (progressWrap) progressWrap.style.display = 'none';
+            if (errorPanel) { errorPanel.style.display = ''; errorPanel.textContent = msg; }
+        }
+
+        function toggleViewerTheme() {
+            const body = document.documentElement;
+            const isDark = body.dataset.theme !== 'light';
+            body.dataset.theme = isDark ? 'light' : '';
+            const btn = document.getElementById('themeToggleBtn');
+            if (btn) btn.title = isDark ? 'Switch to dark mode' : 'Switch to light mode';
         }
 
         function showToast(message, type = 'info', duration = 3000) {
@@ -7162,6 +7905,83 @@
                 }
             }
             return cookieValue;
+        }
+
+        /**
+         * Attach unified touch + pointer events to a canvas element.
+         * Supports: 1-finger drag, 2-finger pinch-zoom, 2-finger swipe-scroll.
+         * Callbacks mirror mouse event handlers so the caller doesn't need to branch on device.
+         */
+        function _attachCanvasTouch(el, { onDragStart, onDragMove, onDragEnd, onPinchZoom, onScroll }) {
+            let _ptrs = new Map();
+            let _pinchDist = null;
+            let _dragging = false;
+
+            function _dist2(a, b) {
+                return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+            }
+
+            el.addEventListener('pointerdown', (e) => {
+                if (e.button > 1) return; // ignore right-click / stylus buttons
+                try { el.setPointerCapture(e.pointerId); } catch (_) {}
+                _ptrs.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+
+                if (_ptrs.size === 1) {
+                    _dragging = true;
+                    _pinchDist = null;
+                    if (onDragStart) onDragStart(e.clientX, e.clientY, e.button);
+                } else if (_ptrs.size === 2) {
+                    // Second finger — switch to pinch mode; cancel active drag.
+                    _dragging = false;
+                    if (onDragEnd) onDragEnd(e.clientX, e.clientY);
+                    const pts = Array.from(_ptrs.values());
+                    _pinchDist = _dist2(pts[0], pts[1]);
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            el.addEventListener('pointermove', (e) => {
+                if (!_ptrs.has(e.pointerId)) return;
+                const prev = _ptrs.get(e.pointerId);
+                _ptrs.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+
+                if (_ptrs.size === 2) {
+                    // Pinch zoom
+                    const pts = Array.from(_ptrs.values());
+                    const newDist = _dist2(pts[0], pts[1]);
+                    if (_pinchDist !== null && onPinchZoom) {
+                        const delta = newDist - _pinchDist;
+                        if (Math.abs(delta) > 1) onPinchZoom(delta, (pts[0].clientX + pts[1].clientX) / 2, (pts[0].clientY + pts[1].clientY) / 2);
+                    }
+                    _pinchDist = newDist;
+                } else if (_ptrs.size === 1 && _dragging) {
+                    if (onDragMove) onDragMove(e.clientX, e.clientY);
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            el.addEventListener('pointerup', (e) => {
+                _ptrs.delete(e.pointerId);
+                if (_ptrs.size === 0) {
+                    if (_dragging && onDragEnd) onDragEnd(e.clientX, e.clientY);
+                    _dragging = false;
+                    _pinchDist = null;
+                } else {
+                    _pinchDist = null;
+                }
+            });
+
+            el.addEventListener('pointercancel', (e) => {
+                _ptrs.delete(e.pointerId);
+                if (_ptrs.size === 0) { _dragging = false; _pinchDist = null; }
+            });
+
+            // Touch scroll (2-finger swipe up/down) — maps to slice scroll
+            el.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 2 && onScroll) {
+                    e.preventDefault();
+                }
+            }, { passive: false });
         }
 
         // Auto-save session state periodically

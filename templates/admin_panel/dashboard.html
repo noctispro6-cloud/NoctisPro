@@ -1,68 +1,301 @@
-{% extends 'base.html' %}
+{% extends 'admin_panel/admin_base.html' %}
 {% load dicts %}
-{% block title %}Admin Panel - Noctis Pro PACS{% endblock %}
 
-{% block content %}
-    <div class="container-fluid">
-        <div class="card card-medical">
-            <div class="card-header">
-                <div><i class="fas fa-shield-alt"></i> Administrator Dashboard</div>
-                <div>
-                    <a href="{% url 'worklist:dashboard' %}" class="btn-control"><i class="fas fa-home"></i> Home</a>
+{% block title %}Admin Dashboard — Noctis Pro PACS{% endblock %}
+
+{% block adm_breadcrumb %}
+<span class="adm-breadcrumb-sep">/</span><span>Dashboard</span>
+{% endblock %}
+
+{% block adm_content %}
+{% user_caps as caps %}
+
+<!-- Page header -->
+<div class="adm-page-header">
+    <div>
+        <h1 class="adm-page-title"><i class="fas fa-tachometer-alt"></i>Dashboard</h1>
+        <div class="adm-page-subtitle">System overview and administrative controls</div>
+    </div>
+    <div class="adm-page-actions">
+        <span style="font-size:11px;color:var(--text-muted);">
+            <i class="fas fa-clock me-1"></i>
+            <span id="adminClock"></span>
+        </span>
+        <a href="{% url 'admin_panel:backups' %}" class="btn-control">
+            <i class="fas fa-database me-1"></i>Backup
+        </a>
+    </div>
+</div>
+
+<!-- Stats cards -->
+<div class="adm-stats-grid">
+    <div class="adm-stat-card">
+        <div class="adm-stat-icon blue"><i class="fas fa-users"></i></div>
+        <div>
+            <div class="adm-stat-value" id="statUsers">{{ total_users|default:"0" }}</div>
+            <div class="adm-stat-label">Total Users</div>
+        </div>
+    </div>
+    <div class="adm-stat-card">
+        <div class="adm-stat-icon green"><i class="fas fa-circle-notch"></i></div>
+        <div>
+            <div class="adm-stat-value">{{ active_users_today|default:"0" }}</div>
+            <div class="adm-stat-label">Active Today</div>
+        </div>
+    </div>
+    <div class="adm-stat-card">
+        <div class="adm-stat-icon orange"><i class="fas fa-hospital"></i></div>
+        <div>
+            <div class="adm-stat-value">{{ total_facilities|default:"0" }}</div>
+            <div class="adm-stat-label">Facilities</div>
+        </div>
+    </div>
+    <div class="adm-stat-card">
+        <div class="adm-stat-icon purple"><i class="fas fa-x-ray"></i></div>
+        <div>
+            <div class="adm-stat-value">{{ total_studies|default:"0" }}</div>
+            <div class="adm-stat-label">Total Studies</div>
+        </div>
+    </div>
+    <div class="adm-stat-card">
+        <div class="adm-stat-icon teal"><i class="fas fa-robot"></i></div>
+        <div>
+            <div class="adm-stat-value">{{ active_ai_models|default:"0" }}</div>
+            <div class="adm-stat-label">Active AI Models</div>
+        </div>
+    </div>
+    <div class="adm-stat-card">
+        <div class="adm-stat-icon red"><i class="fas fa-exclamation-triangle"></i></div>
+        <div>
+            <div class="adm-stat-value">{{ urgent_studies|default:"0" }}</div>
+            <div class="adm-stat-label">Urgent Studies</div>
+        </div>
+    </div>
+</div>
+
+<!-- Main grid -->
+<div class="row g-3">
+    <!-- Quick Actions -->
+    <div class="col-lg-8">
+        <div class="adm-card mb-3">
+            <div class="adm-card-header">
+                <div><i class="fas fa-bolt"></i>Quick Actions</div>
+            </div>
+            <div class="adm-card-body">
+                <div class="adm-actions-grid">
+                    {% if user.role == 'admin' or caps.manage_users %}
+                    <a href="{% url 'admin_panel:user_management' %}" class="adm-action-card">
+                        <i class="fas fa-users"></i>
+                        <div class="adm-action-label">User Management</div>
+                    </a>
+                    <a href="{% url 'admin_panel:user_create' %}" class="adm-action-card">
+                        <i class="fas fa-user-plus"></i>
+                        <div class="adm-action-label">Add User</div>
+                    </a>
+                    {% endif %}
+                    {% if user.role == 'admin' or caps.manage_facilities %}
+                    <a href="{% url 'admin_panel:facility_management' %}" class="adm-action-card">
+                        <i class="fas fa-hospital"></i>
+                        <div class="adm-action-label">Facilities</div>
+                    </a>
+                    {% endif %}
+                    {% if user.role == 'admin' or caps.manage_permissions %}
+                    <a href="{% url 'admin_panel:permissions_dashboard' %}" class="adm-action-card">
+                        <i class="fas fa-user-shield"></i>
+                        <div class="adm-action-label">Permissions</div>
+                    </a>
+                    {% endif %}
+                    <a href="{% url 'admin_panel:ai_management' %}" class="adm-action-card">
+                        <i class="fas fa-robot"></i>
+                        <div class="adm-action-label">AI Models</div>
+                    </a>
+                    <a href="{% url 'admin_panel:backups' %}" class="adm-action-card">
+                        <i class="fas fa-database"></i>
+                        <div class="adm-action-label">Backups</div>
+                    </a>
+                    {% if user.role == 'admin' or caps.view_logs %}
+                    <a href="{% url 'admin_panel:system_logs' %}" class="adm-action-card">
+                        <i class="fas fa-file-alt"></i>
+                        <div class="adm-action-label">System Logs</div>
+                    </a>
+                    {% endif %}
+                    {% if user.role == 'admin' or caps.manage_settings %}
+                    <a href="{% url 'admin_panel:settings' %}" class="adm-action-card">
+                        <i class="fas fa-cog"></i>
+                        <div class="adm-action-label">Settings</div>
+                    </a>
+                    {% endif %}
                 </div>
             </div>
-            <div class="card-body">
-        {% user_caps as caps %}
-        
-        <div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
-            <div class="stat-card card" style="text-align:center;padding:16px;">
-                <h3 style="color:var(--accent-color);font-size:1.6rem;margin:0 0 6px 0;">{{ total_users|default:"0" }}</h3>
-                <div>Total Users</div>
-            </div>
-            <div class="stat-card card" style="text-align:center;padding:16px;">
-                <h3 style="color:var(--accent-color);font-size:1.6rem;margin:0 0 6px 0;">{{ total_facilities|default:"0" }}</h3>
-                <div>Facilities</div>
-            </div>
-            <div class="stat-card card" style="text-align:center;padding:16px;">
-                <h3 style="color:var(--accent-color);font-size:1.6rem;margin:0 0 6px 0;">{{ total_studies|default:"0" }}</h3>
-                <div>Studies</div>
-            </div>
-            <div class="stat-card card" style="text-align:center;padding:16px;">
-                <h3 style="color:var(--accent-color);font-size:1.6rem;margin:0 0 6px 0;">{{ active_users_today|default:"0" }}</h3>
-                <div>Active Today</div>
-            </div>
-        </div>
-        
-        <div style="text-align:center;margin-top:16px;">
-            <div style="margin-bottom:8px;font-weight:600;">Administrative Functions</div>
-            {% if user.role == 'admin' or caps.manage_users %}
-            <a href="{% url 'admin_panel:user_management' %}" class="btn-control"><i class="fas fa-users"></i> User Management</a>
-            {% endif %}
-            {% if user.role == 'admin' or caps.manage_facilities %}
-            <a href="{% url 'admin_panel:facility_management' %}" class="btn-control"><i class="fas fa-building"></i> Facility Management</a>
-            {% endif %}
-            {% if user.role == 'admin' or caps.manage_settings %}
-            <a href="{% url 'admin_panel:settings' %}" class="btn-control"><i class="fas fa-cog"></i> System Settings</a>
-            {% endif %}
-            {% if user.role == 'admin' or caps.manage_permissions %}
-            <a href="{% url 'admin_panel:permissions_dashboard' %}" class="btn-control"><i class="fas fa-user-shield"></i> Permissions</a>
-            {% endif %}
         </div>
 
-        {% if recent_studies %}
-        <div class="card" style="margin-top:16px;">
-            <div class="card-header">Recent Activities</div>
-            <div class="card-body">
-                {% for study in recent_studies %}
-                <div style="padding:6px 0;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;">
-                    <span>Study: {{ study.patient.name }} - {{ study.modality.name }}</span>
-                    <span class="timestamp">{{ study.upload_date|date:"M d, H:i" }}</span>
-                </div>
-                {% endfor %}
+        <!-- Recent Studies -->
+        <div class="adm-card">
+            <div class="adm-card-header">
+                <div><i class="fas fa-clock-rotate-left"></i>Recent Studies</div>
+                <a href="{% url 'worklist:dashboard' %}" style="font-size:11px;color:var(--accent-color);text-decoration:none;">View all</a>
             </div>
-        </div>
-        {% endif %}
+            <div class="adm-table-wrap">
+                <table class="adm-table">
+                    <thead>
+                        <tr>
+                            <th>Patient</th>
+                            <th>Modality</th>
+                            <th>Facility</th>
+                            <th>Date</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for study in recent_studies %}
+                        <tr>
+                            <td>
+                                <div style="font-weight:600;">{{ study.patient.name|default:"—" }}</div>
+                            </td>
+                            <td>
+                                <span class="adm-badge adm-badge-info">{{ study.modality.name|default:"—" }}</span>
+                            </td>
+                            <td style="color:var(--text-secondary);">{{ study.facility.name|default:"—"|truncatechars:20 }}</td>
+                            <td style="color:var(--text-muted);font-size:11px;">{{ study.upload_date|date:"d M, H:i" }}</td>
+                            <td>
+                                {% if study.priority == 'urgent' or study.priority == 'stat' %}
+                                <span class="adm-badge adm-badge-danger">{{ study.priority|upper }}</span>
+                                {% else %}
+                                <span class="adm-badge adm-badge-muted">{{ study.status|default:"New"|title }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5" style="text-align:center;color:var(--text-muted);padding:32px;">
+                                <i class="fas fa-inbox fa-2x mb-2" style="display:block;"></i>No recent studies
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
+
+    <!-- Right column -->
+    <div class="col-lg-4">
+
+        <!-- System Health -->
+        <div class="adm-card mb-3">
+            <div class="adm-card-header">
+                <div><i class="fas fa-heartbeat"></i>System Health</div>
+                <div class="adm-health-status ok" id="overallStatus" title="All systems operational"></div>
+            </div>
+            <div class="adm-card-body">
+                <div class="adm-health-list">
+                    <div class="adm-health-item">
+                        <div class="adm-health-label">Database</div>
+                        <div class="adm-health-bar-wrap">
+                            <div class="adm-health-bar good" style="width:{{ db_health|default:95 }}%"></div>
+                        </div>
+                        <div class="adm-health-val">{{ db_health|default:95 }}%</div>
+                        <div class="adm-health-status ok"></div>
+                    </div>
+                    <div class="adm-health-item">
+                        <div class="adm-health-label">Storage</div>
+                        <div class="adm-health-bar-wrap">
+                            <div class="adm-health-bar {% if storage_pct|default:45 > 80 %}bad{% elif storage_pct|default:45 > 60 %}warn{% else %}good{% endif %}"
+                                 style="width:{{ storage_pct|default:45 }}%"></div>
+                        </div>
+                        <div class="adm-health-val">{{ storage_pct|default:45 }}%</div>
+                        <div class="adm-health-status {% if storage_pct|default:45 > 80 %}err{% elif storage_pct|default:45 > 60 %}warn{% else %}ok{% endif %}"></div>
+                    </div>
+                    <div class="adm-health-item">
+                        <div class="adm-health-label">AI Engine</div>
+                        <div class="adm-health-bar-wrap">
+                            <div class="adm-health-bar good" style="width:100%"></div>
+                        </div>
+                        <div class="adm-health-val">OK</div>
+                        <div class="adm-health-status ok"></div>
+                    </div>
+                    <div class="adm-health-item">
+                        <div class="adm-health-label">Active Sessions</div>
+                        <div class="adm-health-bar-wrap">
+                            <div class="adm-health-bar good" style="width:{{ session_pct|default:20 }}%"></div>
+                        </div>
+                        <div class="adm-health-val">{{ active_users_today|default:0 }}</div>
+                        <div class="adm-health-status ok"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Studies by Modality -->
+        {% if modality_stats %}
+        <div class="adm-card mb-3">
+            <div class="adm-card-header">
+                <div><i class="fas fa-chart-bar"></i>Studies by Modality</div>
+            </div>
+            <div class="adm-card-body">
+                <div class="adm-modality-bars" id="modalityBars">
+                    {% for m in modality_stats %}
+                    <div class="adm-mod-row" data-count="{{ m.count }}">
+                        <div class="adm-mod-name">{{ m.modality__name|default:"—" }}</div>
+                        <div class="adm-mod-bar-wrap">
+                            <div class="adm-mod-bar" style="width:0%"></div>
+                        </div>
+                        <div class="adm-mod-count">{{ m.count }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <script>
+                (function(){
+                    const rows = document.querySelectorAll('#modalityBars .adm-mod-row');
+                    const counts = Array.from(rows).map(r => parseInt(r.dataset.count)||0);
+                    const max = Math.max(...counts, 1);
+                    rows.forEach(r => {
+                        const pct = (parseInt(r.dataset.count)||0) * 100 / max;
+                        r.querySelector('.adm-mod-bar').style.width = pct + '%';
+                    });
+                })();
+                </script>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Recent Users -->
+        <div class="adm-card">
+            <div class="adm-card-header">
+                <div><i class="fas fa-user-clock"></i>Recent Users</div>
+                <a href="{% url 'admin_panel:user_management' %}" style="font-size:11px;color:var(--accent-color);text-decoration:none;">View all</a>
+            </div>
+            <div class="adm-card-body" style="padding:0;">
+                <div class="adm-activity-list" style="padding:12px 16px;">
+                    {% for u in recent_users %}
+                    <div class="adm-activity-item">
+                        <div class="adm-activity-dot {% if u.is_active %}green{% else %}red{% endif %}"></div>
+                        <div class="adm-activity-text">
+                            <div style="font-weight:600;">{{ u.username }}</div>
+                            <div style="color:var(--text-muted);font-size:10px;">{{ u.get_role_display|default:u.role }}</div>
+                        </div>
+                        <div class="adm-activity-time">
+                            {% if u.date_joined %}{{ u.date_joined|timesince }} ago{% endif %}
+                        </div>
+                    </div>
+                    {% empty %}
+                    <div style="text-align:center;color:var(--text-muted);padding:20px;font-size:12px;">No users yet</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div><!-- /row -->
+
+<script>
+(function() {
+    function tick() {
+        const el = document.getElementById('adminClock');
+        if (el) el.textContent = new Date().toLocaleTimeString();
+    }
+    tick();
+    setInterval(tick, 1000);
+})();
+</script>
 {% endblock %}

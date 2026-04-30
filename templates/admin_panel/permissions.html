@@ -1,7 +1,11 @@
-{% extends 'base.html' %}
+{% extends 'admin_panel/admin_base.html' %}
 {% load dicts %}
 
-{% block title %}Permissions - Admin Panel{% endblock %}
+{% block title %}Permissions — Admin{% endblock %}
+
+{% block adm_breadcrumb %}
+<span class="adm-breadcrumb-sep">/</span><span>Permissions</span>
+{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -153,8 +157,8 @@
 </style>
 {% endblock %}
 
-{% block content %}
-<div class="container-fluid mt-3 perm-page">
+{% block adm_content %}
+<div class="perm-page">
     <div class="card">
         <div class="card-header">
             <div>

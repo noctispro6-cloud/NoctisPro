@@ -205,14 +205,28 @@ def analyze_study(request, study_id):
             for model_id in model_ids:
                 ai_model = get_object_or_404(AIModel, id=model_id, is_active=True)
                 
-                # Check if analysis already exists
+                # Check if analysis already exists (skip completed; re-run stuck ones)
                 existing = AIAnalysis.objects.filter(
                     study=study,
                     ai_model=ai_model,
                     status__in=['pending', 'processing', 'completed']
                 ).first()
-                
+
                 if existing:
+                    if existing.status == 'completed':
+                        continue
+                    # Reset stale pending/processing analyses older than 3 minutes
+                    _stale_cutoff = timezone.now() - timezone.timedelta(minutes=3)
+                    _stale = (existing.started_at and existing.started_at < _stale_cutoff) or \
+                             (existing.status == 'pending' and existing.requested_at < _stale_cutoff)
+                    if not _stale:
+                        continue
+                    # Reset stale analysis for re-run
+                    existing.status = 'pending'
+                    existing.error_message = ''
+                    existing.started_at = None
+                    existing.save(update_fields=['status', 'error_message', 'started_at'])
+                    analyses.append(existing)
                     continue
                 
                 # Create new analysis
@@ -224,10 +238,32 @@ def analyze_study(request, study_id):
                 )
                 analyses.append(analysis)
             
-            # Start processing in background
+            # Start processing — try Celery first, fall back to a daemon thread so
+            # the analysis always completes even when no Celery worker is running.
             if analyses:
                 for analysis in analyses:
-                    run_ai_analysis.delay(analysis.id)
+                    _dispatched = False
+                    try:
+                        result = run_ai_analysis.apply_async(args=[analysis.id], expires=3600)
+                        # Quick connectivity check: if the broker is unreachable, Celery
+                        # raises an exception during routing (kombu transport error).
+                        _dispatched = True
+                    except Exception:
+                        _dispatched = False
+                    if not _dispatched:
+                        # No Celery broker — execute analysis in a daemon thread.
+                        # Use .apply() so Celery provides a bound task instance (self).
+                        import threading as _threading
+                        def _run_direct(aid=analysis.id):
+                            try:
+                                from django.db import close_old_connections
+                                close_old_connections()
+                                from ai_analysis.tasks import run_ai_analysis as _task
+                                _task.apply(args=[aid])
+                            except Exception as _te:
+                                logger.error('Direct analysis thread failed: %s', _te)
+                        _t = _threading.Thread(target=_run_direct, daemon=True)
+                        _t.start()
             
             return JsonResponse({
                 'success': True,
@@ -280,6 +316,19 @@ def api_analysis_status(request, analysis_id):
     if user.is_facility_user() and analysis.study.facility != user.facility:
         return JsonResponse({'error': 'Permission denied'}, status=403)
     
+    # Watchdog: if analysis has been 'processing' for > 3 minutes with no completion,
+    # mark it failed so the UI doesn't spin forever.
+    _ANALYSIS_TIMEOUT_SECONDS = 180
+    if analysis.status == 'processing' and analysis.started_at:
+        elapsed_total = (timezone.now() - analysis.started_at).total_seconds()
+        if elapsed_total > _ANALYSIS_TIMEOUT_SECONDS:
+            try:
+                analysis.status = 'failed'
+                analysis.error_message = 'Analysis timed out — no Celery worker available. Try again or contact admin.'
+                analysis.save(update_fields=['status', 'error_message'])
+            except Exception:
+                pass
+
     progress_percentage = 0
     if analysis.status == 'completed':
         progress_percentage = 100
@@ -840,6 +889,57 @@ def review_auto_report(request, report_id):
     
     return render(request, 'ai_analysis/review_auto_report.html', context)
 
+def _recalibrate_model_from_feedback(ai_model):
+    """Update model calibration metrics using accumulated radiologist feedback.
+
+    Reads all feedback linked to analyses that used this model, computes
+    empirical accuracy, and stores a calibration multiplier in accuracy_metrics
+    so the inference engine can scale confidence outputs accordingly.
+    Requires at least 10 rated feedback records to update (prevents noise from
+    small samples).
+    """
+    from .models import AIFeedback
+    feedbacks = AIFeedback.objects.filter(
+        ai_analysis__ai_model=ai_model,
+        rating__isnull=False,
+    ).values_list('rating', 'feedback_type')
+
+    if not feedbacks:
+        return
+
+    ratings = [r for r, _ in feedbacks]
+    total = len(ratings)
+    if total < 10:
+        return  # too few samples to calibrate
+
+    avg_rating = sum(ratings) / total  # 1-5 scale
+    # Map average rating to empirical accuracy: 5→1.0, 1→0.60
+    empirical_accuracy = 0.60 + (avg_rating - 1) * (0.40 / 4.0)
+    # Confidence calibration multiplier: scales model confidence outputs
+    # to match observed accuracy. Cap at [0.5, 1.0] to stay conservative.
+    calibration = max(0.5, min(1.0, empirical_accuracy))
+
+    correction_counts = {}
+    for _, ftype in feedbacks:
+        correction_counts[ftype] = correction_counts.get(ftype, 0) + 1
+    incorrect_pct = correction_counts.get('incorrect', 0) / total * 100
+    missed_pct = correction_counts.get('missed', 0) / total * 100
+
+    metrics = dict(ai_model.accuracy_metrics or {})
+    metrics['feedback_count'] = total
+    metrics['avg_radiologist_rating'] = round(avg_rating, 2)
+    metrics['empirical_accuracy'] = round(empirical_accuracy, 3)
+    metrics['confidence_calibration'] = round(calibration, 3)
+    metrics['incorrect_finding_pct'] = round(incorrect_pct, 1)
+    metrics['missed_finding_pct'] = round(missed_pct, 1)
+    metrics['last_calibrated'] = timezone.now().isoformat()
+
+    ai_model.accuracy_metrics = metrics
+    # Also update the model's overall success_rate from empirical data
+    ai_model.success_rate = round(empirical_accuracy * 100, 1)
+    ai_model.save(update_fields=['accuracy_metrics', 'success_rate'])
+
+
 @login_required
 @csrf_exempt
 def api_ai_feedback(request, analysis_id):
@@ -865,7 +965,13 @@ def api_ai_feedback(request, analysis_id):
                 missed_findings=data.get('missed_findings', []),
                 suggestions=data.get('suggestions', '')
             )
-            
+
+            # Continuous learning: recalibrate model accuracy metrics from accumulated feedback.
+            try:
+                _recalibrate_model_from_feedback(analysis.ai_model)
+            except Exception:
+                pass
+
             return JsonResponse({
                 'success': True,
                 'feedback_id': feedback.id,
@@ -940,6 +1046,34 @@ def api_model_update(request, model_id):
         return JsonResponse({'error': 'Model not found'}, status=404)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
+
+@login_required
+@csrf_exempt
+def api_model_recalibrate(request, model_id):
+    """Trigger continuous-learning recalibration for a model (admin only).
+
+    Aggregates all radiologist feedback on this model's analyses and updates
+    the stored confidence_calibration multiplier in accuracy_metrics.
+    """
+    if not request.user.is_admin():
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    try:
+        model = AIModel.objects.get(pk=model_id)
+        _recalibrate_model_from_feedback(model)
+        model.refresh_from_db()
+        return JsonResponse({
+            'success': True,
+            'model_id': model_id,
+            'accuracy_metrics': model.accuracy_metrics,
+            'success_rate': model.success_rate,
+        })
+    except AIModel.DoesNotExist:
+        return JsonResponse({'error': 'Model not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
 
 @login_required
 @csrf_exempt
@@ -1417,6 +1551,17 @@ def api_generate_llm_report(request, study_id):
             if not confidence:
                 confidence = float(getattr(latest, 'confidence_score', 0.0) or 0.0)
 
+    # Collect series descriptions from DB for richer study-type identification
+    series_descriptions = []
+    try:
+        for s in study.series_set.only('series_description', 'body_part').all()[:10]:
+            if s.series_description:
+                series_descriptions.append(s.series_description)
+            if s.body_part and s.body_part not in series_descriptions:
+                series_descriptions.append(s.body_part)
+    except Exception:
+        pass
+
     try:
         from ai_analysis.llm_reporting import generate_llm_report
         result = generate_llm_report(
@@ -1427,6 +1572,8 @@ def api_generate_llm_report(request, study_id):
             abnormalities=abnormalities,
             triage_level=triage_level,
             confidence=confidence,
+            study_description=study.study_description or '',
+            series_descriptions=series_descriptions,
         )
         return JsonResponse({
             'success': True,
@@ -1435,6 +1582,7 @@ def api_generate_llm_report(request, study_id):
             'recommendations': result.get('recommendations', ''),
             'disclaimer': result.get('disclaimer', ''),
             'llm_used': result.get('llm_used', 'deterministic'),
+            'study_type': result.get('study_type', ''),
         })
     except Exception as exc:
         import logging

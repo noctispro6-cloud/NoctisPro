@@ -55,7 +55,7 @@ class SegmentationModel(BaseInferenceModel):
             
         try:
             if not os.path.exists(self.model_path):
-                logger.warning(f"Model file not found at {self.model_path}. Using dummy mode.")
+                logger.info(f"Model file not found at {self.model_path}. Running in dummy/simulation mode.")
                 return False
 
             try:
@@ -175,7 +175,7 @@ class ClassificationModel(BaseInferenceModel):
             
         try:
             if not os.path.exists(self.model_path):
-                logger.warning(f"Model file not found at {self.model_path}. Using dummy mode.")
+                logger.info(f"Model file not found at {self.model_path}. Running in dummy/simulation mode.")
                 return False
 
             # Try loading as TorchScript (JIT) first

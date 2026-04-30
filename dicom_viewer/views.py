@@ -609,6 +609,73 @@ def _extract_mpr_slice(volume: np.ndarray, plane: str, slice_index: int) -> np.n
         return np.flipud(volume[:, idx, :])   # (z, x) flipped → superior at top
 
 
+def _extract_oblique_mpr_slice(volume: np.ndarray, plane: str, slice_index: int,
+                               angle_deg: float, center_xyz) -> np.ndarray:
+    """Extract a 2-D MPR slice from an oblique plane rotated angle_deg around the Z axis.
+
+    All three planes (axial, sagittal, coronal) rotate together around the shared Z axis
+    defined by the crosshair position (center_xyz = [cx, cy, cz] in voxel coordinates).
+    Uses scipy map_coordinates for accurate sub-voxel sampling.
+    Returns None when |angle_deg| < 0.5 (caller should use orthogonal path instead).
+    """
+    if abs(angle_deg) < 0.5:
+        return None
+
+    from scipy.ndimage import map_coordinates as _map_coords
+    nz, ny, nx = volume.shape
+    out = _MPR_OUTPUT_SIZE
+    rad = np.radians(angle_deg)
+    ca, sa = float(np.cos(rad)), float(np.sin(rad))
+    cx = float(center_xyz[0]) if center_xyz is not None else nx / 2.0
+    cy = float(center_xyz[1]) if center_xyz is not None else ny / 2.0
+    cz = float(center_xyz[2]) if center_xyz is not None else nz / 2.0
+
+    if plane == 'axial':
+        # Axial oblique: rotate the in-plane XY sampling grid by angle_deg around Z.
+        # Span the same physical extent as the orthogonal axial (full nx × ny volume),
+        # not a fixed out/2 range, so the anatomy does not appear smaller after rotation.
+        z_idx = min(max(0, slice_index), nz - 1)
+        cols = np.linspace(-nx / 2.0, nx / 2.0, out)   # span full volume X extent
+        rows = np.linspace(-ny / 2.0, ny / 2.0, out)   # span full volume Y extent
+        C, R = np.meshgrid(cols, rows)
+        # Map output (C, R) → volume (x_v, y_v) via inverse rotation
+        x_v = cx + C * ca + R * sa
+        y_v = cy - C * sa + R * ca
+        z_v = np.full_like(x_v, float(z_idx))
+
+    elif plane == 'sagittal':
+        # Sagittal oblique: plane perpendicular to X' = (cosθ, sinθ, 0).
+        # slice_index encodes position along X' relative to center.
+        p = float(slice_index) - nx / 2.0          # signed offset from vol centre
+        ox = cx + p * ca
+        oy = cy + p * sa
+        # In-plane axes: tangential Y'=(-sinθ, cosθ, 0) and vertical Z (flipped).
+        t_range = np.linspace(-ny / 2.0, ny / 2.0, out)
+        z_range = np.linspace(float(nz - 1), 0.0, out)   # flip: superior at top
+        T, Z = np.meshgrid(t_range, z_range)
+        x_v = ox + T * (-sa)
+        y_v = oy + T * ca
+        z_v = Z
+
+    else:  # coronal
+        # Coronal oblique: plane perpendicular to Y' = (-sinθ, cosθ, 0).
+        q = float(slice_index) - ny / 2.0
+        ox = cx - q * sa
+        oy = cy + q * ca
+        t_range = np.linspace(-nx / 2.0, nx / 2.0, out)
+        z_range = np.linspace(float(nz - 1), 0.0, out)   # flip: superior at top
+        T, Z = np.meshgrid(t_range, z_range)
+        x_v = ox + T * ca
+        y_v = oy + T * sa
+        z_v = Z
+
+    # scipy map_coordinates expects (z, y, x) coordinate arrays
+    coords = np.array([z_v.ravel(), y_v.ravel(), x_v.ravel()])
+    sampled = _map_coords(volume.astype(np.float32, copy=False), coords,
+                          order=1, mode='nearest').reshape(out, out)
+    return sampled.astype(np.float32)
+
+
 def _mpr_slice_zoom_z(plane: str, spacing) -> float:
     """Return the residual Z-stretch correction factor for a given plane.
 
@@ -687,6 +754,23 @@ def _get_png_mpr_slice_bytes(series_id, volume, plane, slice_index, ww, wl, inve
     if png_bytes:
         _mpr_png_cache_set(series_id, plane, slice_index, ww, wl, inverted, png_bytes, quality=quality, zoom_z=zoom_z)
     return png_bytes
+
+def _get_png_oblique_mpr_slice_bytes(volume, plane, slice_index, angle_deg, center_xyz,
+                                     ww, wl, inverted, spacing=None):
+    """Return PNG bytes for an oblique MPR slice (not cached — angles vary continuously)."""
+    slice_array = _extract_oblique_mpr_slice(volume, plane, slice_index, angle_deg, center_xyz)
+    if slice_array is None:
+        return None
+    # Apply residual Z-stretch correction for sagittal/coronal planes
+    if plane != 'axial' and spacing is not None:
+        zoom_z = _mpr_slice_zoom_z(plane, spacing)
+        if abs(zoom_z - 1.0) > 0.05:
+            try:
+                slice_array = ndimage.zoom(slice_array, [zoom_z, 1.0], order=1, prefilter=False)
+            except Exception:
+                pass
+    return _array_to_png_bytes(slice_array, ww, wl, inverted, sharpen=True)
+
 
 def _get_encoded_mpr_slice(series_id, volume, plane, slice_index, ww, wl, inverted, quality=None, spacing=None):
     """Get encoded base64 PNG for given MPR slice, using cache if possible.
@@ -1538,12 +1622,55 @@ def api_bone_reconstruction(request, series_id):
             quality = 'fast'
         smooth = (request.GET.get('smooth', 'false').strip().lower() in ('1', 'true', 'yes', 'on'))
         
-        # Fast path: reuse cached volume; keep spacing for mm-correct mesh scaling
-        _sp = (1.0, 1.0, 1.0)
+        # Derive physical voxel spacing directly from DICOM metadata for correct mm scaling.
+        # Reading from the series object avoids confusion with post-resample spacing from MPR cache.
+        def _get_raw_spacing(series_obj):
+            """Return (z_mm, y_mm, x_mm) from DICOM tags on the series, with safe fallbacks."""
+            try:
+                st = float(getattr(series_obj, 'slice_thickness', None) or 0)
+            except Exception:
+                st = 0.0
+            try:
+                ps_str = getattr(series_obj, 'pixel_spacing', None) or ''
+                parts = [p for p in str(ps_str).replace('\\', ',').split(',') if p.strip()]
+                py = float(parts[0]) if len(parts) >= 1 else 0.0
+                px = float(parts[1]) if len(parts) >= 2 else py
+            except Exception:
+                py = px = 0.0
+            # If slice_location data is available, compute real inter-slice distance.
+            if st <= 0:
+                try:
+                    locs = sorted([
+                        float(img.slice_location)
+                        for img in series_obj.images.order_by('slice_location')
+                        if img.slice_location is not None
+                    ])
+                    if len(locs) >= 2:
+                        diffs = [abs(locs[i+1] - locs[i]) for i in range(len(locs)-1) if abs(locs[i+1]-locs[i]) > 0.01]
+                        if diffs:
+                            st = float(np.median(diffs))
+                except Exception:
+                    pass
+            return (max(st, 0.1) if st > 0 else 1.0,
+                    max(py, 0.01) if py > 0 else 1.0,
+                    max(px, 0.01) if px > 0 else 1.0)
+
+        # Build volume — prefer cached MPR volume (already HU-corrected) for speed.
+        # Use the effective post-resample spacing when the MPR cache is available
+        # (Z may have been upsampled, so 1 cached-voxel ≠ 1 original slice).
+        # Fall back to raw DICOM spacing only when we build the volume ourselves.
+        _sp = _get_raw_spacing(series)  # default; overwritten below if MPR cache used
+        _volume_built = False
         try:
-            volume, _sp = _get_mpr_volume_and_spacing(series)
+            volume, _sp_mpr = _get_mpr_volume_and_spacing(series)
+            # Use effective spacing from the resampled volume, not raw DICOM values.
+            _sp = _sp_mpr
+            _volume_built = True
         except Exception:
-            # Fallback: construct volume
+            pass
+
+        if not _volume_built:
+            # Fallback: read raw DICOM slices
             images = series.images.all().order_by('slice_location', 'instance_number')
             if images.count() < 2:
                 return JsonResponse({'error': 'Need at least 2 images for bone reconstruction'}, status=400)
@@ -1651,9 +1778,11 @@ def api_bone_reconstruction(request, series_id):
             # Calculate optimal factor for bone reconstruction
             target_slices = max(32, volume.shape[0] * 3)
             factor = target_slices / volume.shape[0]
-            
+
             # Use high-quality interpolation for better bone surface detection
             volume = ndimage.zoom(volume, (factor, 1, 1), order=3, prefilter=True)
+            # Update Z spacing so mesh vertex scaling reflects the new voxel count.
+            _sp = (float(_sp[0]) / factor, float(_sp[1]), float(_sp[2]))
             logger.info(f"Bone enhanced interpolation: {volume.shape[0]} slices (factor: {factor:.2f})")
         
         # Threshold mask for isosurface extraction
@@ -1717,23 +1846,62 @@ def api_bone_reconstruction(request, series_id):
                 dsy = max(1, ds)
                 dsx = max(1, ds)
 
+                # ── Fill holes: per-slice 2D (axial + sagittal + coronal) then 3D + closing ──
+                # Per-slice fill is highly effective for shell-like bones (skull, vertebrae,
+                # ribs) because each ring/loop in a single slice is a closed 2D boundary
+                # even when the 3D shell has openings (orbits, foramina, etc.).
+                try:
+                    from scipy.ndimage import (binary_fill_holes as _bfh,
+                                               binary_closing as _bcl,
+                                               generate_binary_structure as _gbs,
+                                               iterate_structure as _its)
+                    _mask = vol_for_mesh > 0.5
+
+                    # 2D per-slice fill in all three orientations
+                    _ax = np.empty_like(_mask)
+                    for _i in range(_mask.shape[0]):
+                        _ax[_i] = _bfh(_mask[_i])
+                    _sg = np.empty_like(_mask)
+                    for _i in range(_mask.shape[2]):
+                        _sg[:, :, _i] = _bfh(_mask[:, :, _i])
+                    _co = np.empty_like(_mask)
+                    for _i in range(_mask.shape[1]):
+                        _co[:, _i, :] = _bfh(_mask[:, _i, :])
+                    # Union: a voxel is filled if any orientation filled it
+                    _mask = _ax | _sg | _co
+
+                    # 3D fill to close any remaining enclosed voids
+                    _mask = _bfh(_mask)
+
+                    # Closing to bridge thin gaps and connect near-touching fragments.
+                    # Use larger ball-like structure (radius-2 dilation of 6-connected)
+                    # for better bridging without excessive inflation.
+                    _struct3 = _gbs(3, 1)
+                    _struct_ball = _its(_struct3, 2)  # radius-2 approximation
+                    _close_iter = 3 if quality == 'fast' else 5
+                    _mask = _bcl(_mask, structure=_struct_ball, iterations=_close_iter)
+
+                    vol_for_mesh = _mask.astype(np.float32)
+                except Exception:
+                    pass  # continue with original mask if morphological ops fail
+
                 vol_ds = vol_for_mesh[::dsz, ::dsy, ::dsx]
 
-                # Gaussian soft-field eliminates staircase: MC on a binary 0/1 array produces
-                # infinite-gradient boundaries that create stepped surfaces. Blurring first
-                # creates a smooth 0→1 transition; the isosurface at 0.5 stays at the correct
-                # boundary while the geometry is smooth.
+                # Gaussian soft-field: smooths the 0/1 boundary into a gradient so MC
+                # produces smooth surfaces. sigma=2.0 provides good smoothing without
+                # over-blurring fine trabecular structures.
                 try:
                     from scipy import ndimage as _nd_mc
-                    soft_ds = _nd_mc.gaussian_filter(vol_ds.astype(np.float32), sigma=1.5)
+                    _sigma = 1.8 if quality == 'fast' else 2.6
+                    soft_ds = _nd_mc.gaussian_filter(vol_ds.astype(np.float32), sigma=_sigma)
                 except Exception:
                     soft_ds = vol_ds.astype(np.float32)
 
-                verts, faces, normals, values = _measure.marching_cubes(soft_ds, level=0.5, step_size=step_size)
+                verts, faces, normals, values = _measure.marching_cubes(
+                    soft_ds, level=0.5, step_size=step_size, allow_degenerate=False
+                )
 
-                # Scale verts to physical mm space to eliminate anisotropy-induced elongation.
-                # _sp is (z_mm, y_mm, x_mm) from _get_mpr_volume_and_spacing (post-resample).
-                # dsz/dsy/dsx convert from downsampled-voxel coords back to full-voxel coords.
+                # Scale vertices to physical mm space
                 try:
                     sz, sy, sx = float(_sp[0]), float(_sp[1]), float(_sp[2])
                     verts[:, 0] *= float(dsz) * sz
@@ -1743,6 +1911,63 @@ def api_bone_reconstruction(request, series_id):
                     verts[:, 0] *= float(dsz)
                     verts[:, 1] *= float(dsy)
                     verts[:, 2] *= float(dsx)
+
+                # ── Laplacian mesh smoothing for diagnostic-quality surface ──
+                # Taubin smoothing (λ/μ pair): two Laplacian passes with opposite signs.
+                # This shrinks the surface less than pure Laplacian smoothing while still
+                # eliminating "staircase" artefacts from the voxel grid.
+                try:
+                    _smooth_iters = 24 if quality == 'high' else 8
+                    _lam, _mu = 0.5, -0.53  # standard Taubin parameters
+                    _verts = verts.copy()
+                    _nv = len(_verts)
+                    # Build adjacency sum table (each vertex → sum of neighbours, count)
+                    from collections import defaultdict as _dd
+                    _nbr = _dd(set)
+                    for _f in faces:
+                        _a, _b, _c = int(_f[0]), int(_f[1]), int(_f[2])
+                        _nbr[_a].add(_b); _nbr[_a].add(_c)
+                        _nbr[_b].add(_a); _nbr[_b].add(_c)
+                        _nbr[_c].add(_a); _nbr[_c].add(_b)
+                    _nbr_arr = [list(v) for v in _nbr.values()]  # list of lists, indexed by vertex
+                    # Re-index: _nbr_arr is a dict, convert to list
+                    _nbr_list = [list(_nbr[i]) for i in range(_nv)]
+
+                    def _laplacian_step(v, factor, nbrs):
+                        nv2 = v.copy()
+                        for i in range(len(v)):
+                            ns = nbrs[i]
+                            if ns:
+                                nb_mean = v[ns].mean(axis=0)
+                                nv2[i] = v[i] + factor * (nb_mean - v[i])
+                        return nv2
+
+                    # Vectorised Laplacian using scipy sparse for speed
+                    try:
+                        from scipy.sparse import csr_matrix as _csr
+                        # Build adjacency
+                        _rows, _cols = [], []
+                        for _i, _ns in enumerate(_nbr_list):
+                            for _j in _ns:
+                                _rows.append(_i); _cols.append(_j)
+                        _data = [1.0] * len(_rows)
+                        _A = _csr((_data, (_rows, _cols)), shape=(_nv, _nv), dtype=np.float32)
+                        _deg = np.array(_A.sum(axis=1)).ravel()
+                        _deg[_deg == 0] = 1.0
+                        for _it in range(_smooth_iters):
+                            _delta = (_A.dot(_verts) / _deg[:, None]) - _verts
+                            _verts = _verts + _lam * _delta
+                            _delta = (_A.dot(_verts) / _deg[:, None]) - _verts
+                            _verts = _verts + _mu * _delta
+                    except Exception:
+                        # Fallback: slower Python loop (fewer iterations)
+                        for _it in range(min(4, _smooth_iters)):
+                            _verts = _laplacian_step(_verts, _lam, _nbr_list)
+                            _verts = _laplacian_step(_verts, _mu, _nbr_list)
+                    verts = _verts.astype(np.float32)
+                except Exception:
+                    pass  # Keep unsmoothed vertices if Laplacian fails
+
                 mesh_payload = {
                     'vertices': verts.tolist(),
                     'faces': faces.tolist(),
@@ -4920,8 +5145,8 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
                     return vol, tuple(sp)
 
         images_qs = series.images.all().order_by('instance_number')
-        if images_qs.count() < 2:
-            raise ValueError('Not enough images for MPR')
+        if images_qs.count() < 1:
+            raise ValueError('No images in series')
 
         # Gather slice positions first (lightweight), then stream pixel data in sorted order.
         # This avoids holding all slices in memory twice (list-of-arrays + stacked volume),
@@ -4993,8 +5218,8 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
             except Exception:
                 continue
 
-        if len(slices) < 2:
-            raise ValueError('Could not read enough images for MPR')
+        if len(slices) < 1:
+            raise ValueError('Could not read any images for MPR')
         if not rows or not cols:
             raise ValueError('Missing image dimensions for MPR')
 
@@ -5068,7 +5293,7 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
         # Never downsample Z so aggressively that we end up with a single axial slice.
         # If axial depth collapses to 1, the UI appears "stuck" because there is nothing to scroll.
         # When memory pressure exists, prefer downsampling X/Y further instead.
-        max_z_step = max(1, int(z) - 1)
+        max_z_step = max(1, int(z))
         while _bytes_for_steps(z_step, y_step, x_step) > target_bytes_budget and (z_step < z or y_step < y or x_step < x):
             if preserve_z_first:
                 # Keep Z detail; spend budget on XY instead.
@@ -6978,6 +7203,24 @@ def mpr_slice_api(request, series_id, plane, slice_index):
         if quality not in ('fast', 'high'):
             quality = 'high'
 
+        # Oblique rotation parameters (optional)
+        try:
+            rot_z = float(request.GET.get('rot_z') or 0)
+        except Exception:
+            rot_z = 0.0
+        try:
+            cvx = float(request.GET.get('cvx'))
+        except Exception:
+            cvx = None
+        try:
+            cvy = float(request.GET.get('cvy'))
+        except Exception:
+            cvy = None
+        try:
+            cvz = float(request.GET.get('cvz'))
+        except Exception:
+            cvz = None
+
         # Build/reuse volume first so we have spacing for the cache key and aspect correction.
         volume, spacing = _get_mpr_volume_and_spacing(series, quality=quality)
         if volume is None or volume.size == 0:
@@ -6992,7 +7235,26 @@ def mpr_slice_api(request, series_id, plane, slice_index):
         else:  # coronal
             slice_index = max(0, min(int(volume.shape[1]) - 1, slice_index))
 
-        # Serve from PNG-bytes cache if present (fast path, now keyed with zoom_z)
+        # Oblique path: bypass cache, use map_coordinates sampling
+        if abs(rot_z) >= 0.5:
+            nz, ny, nx = volume.shape
+            center_xyz = [
+                cvx if cvx is not None else nx / 2.0,
+                cvy if cvy is not None else ny / 2.0,
+                cvz if cvz is not None else nz / 2.0,
+            ]
+            png_bytes = _get_png_oblique_mpr_slice_bytes(
+                volume, plane, slice_index, rot_z, center_xyz,
+                window_width, window_level, inverted, spacing=spacing
+            )
+            if not png_bytes:
+                from django.http import Http404
+                raise Http404("Oblique MPR slice not available")
+            resp = HttpResponse(png_bytes, content_type='image/png')
+            resp['Cache-Control'] = 'no-store'
+            return resp
+
+        # Orthogonal path: serve from PNG-bytes cache if present (fast path, keyed with zoom_z)
         zoom_z = _mpr_slice_zoom_z(plane, spacing)
         cached_png = _mpr_png_cache_get(series_id, plane, slice_index, window_width, window_level, inverted, quality=quality, zoom_z=zoom_z)
         if cached_png:

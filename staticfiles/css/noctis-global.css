@@ -1,0 +1,221 @@
+/* NoctisPro Global Styles - Production Ready */
+:root {
+    /* Unified color palette */
+    --primary-bg: #0a0a0a;
+    --secondary-bg: #1a1a1a;
+    --card-surface: #252525;
+    --header-bg: #333333;
+    --border-color: #404040;
+    --accent-color: #00d4ff;
+    --text-primary: #ffffff;
+    --text-secondary: #b3b3b3;
+    --text-muted: #666666;
+    --success-color: #00ff88;
+    --warning-color: #ffaa00;
+    --danger-color: #ff4444;
+    
+    /* Component-specific colors */
+    --urgent-color: #ff0066;
+    --scheduled-color: #4a90e2;
+    --in-progress-color: #f5a623;
+    --completed-color: #7ed321;
+    --cancelled-color: #d0021b;
+}
+
+/* Global reset */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: var(--primary-bg);
+    color: var(--text-primary);
+    line-height: 1.6;
+    font-size: 12px;
+}
+
+/* Consistent button styles */
+.btn-medical {
+    background: linear-gradient(135deg, var(--accent-color) 0%, #00b8d4 100%);
+    border: none;
+    border-radius: 2px;
+    color: white;
+    font-weight: 500;
+    padding: 12px 24px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 12px;
+}
+
+.btn-medical:hover {
+    box-shadow: 0 6px 16px rgba(0, 212, 255, 0.25);
+    transform: translateY(-1px);
+    color: white;
+}
+
+.btn-control {
+    background: var(--card-surface);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 8px 16px;
+    border-radius: 2px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+.btn-control:hover {
+    background: var(--accent-color);
+    color: var(--primary-bg);
+    border-color: var(--accent-color);
+}
+
+.btn-viewer {
+    background: var(--accent-color);
+    border: none;
+    color: var(--primary-bg);
+    padding: 4px 8px;
+    border-radius: 2px;
+    font-size: 9px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.btn-viewer:hover {
+    background: #00b8d4;
+}
+
+.btn-upload {
+    background: var(--accent-color);
+    color: var(--primary-bg);
+    border: none;
+    padding: 12px 24px;
+    border-radius: 2px;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.btn-upload:hover {
+    background: #00b8d4;
+}
+
+/* Form controls */
+.form-control-medical {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    border-radius: 2px;
+    color: var(--text-primary);
+    padding: 12px 16px;
+    transition: all 0.3s ease;
+    font-size: 12px;
+}
+
+.form-control-medical:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.1);
+    outline: none;
+}
+
+/* Card styles */
+.card-medical {
+    background: var(--card-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    padding: 20px;
+}
+
+/* Navigation styles */
+.nav-tab {
+    padding: 8px 12px;
+    background: var(--secondary-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 2px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s ease;
+}
+
+.nav-tab.active,
+.nav-tab:hover {
+    background: var(--card-surface);
+    color: var(--text-primary);
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.1) inset;
+}
+
+/* Status indicators */
+.status-online { color: var(--success-color); }
+.status-offline { color: var(--danger-color); }
+.status-warning { color: var(--warning-color); }
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .btn-medical,
+    .btn-control,
+    .btn-upload {
+        padding: 8px 12px;
+        font-size: 11px;
+    }
+    
+    .card-medical {
+        padding: 15px;
+    }
+}
+
+/* Animation classes */
+.fade-in {
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.slide-in {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from { transform: translateX(-20px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+/* Loading states */
+.loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    margin: -10px 0 0 -10px;
+    border: 2px solid var(--accent-color);
+    border-radius: 50%;
+    border-top-color: transparent;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}

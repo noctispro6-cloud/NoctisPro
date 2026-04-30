@@ -1,7 +1,7 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib import messages
-from django.http import JsonResponse
+from django.http import JsonResponse, FileResponse, Http404
 from django.db import transaction
 from django.db.models import Q, Count
 from django.core.paginator import Paginator
@@ -12,6 +12,11 @@ from worklist.models import Study, Modality
 from .models import SystemConfiguration, AuditLog, SystemUsageStatistics
 import json
 import re
+import os
+import shutil
+import subprocess
+from pathlib import Path
+from datetime import datetime
 from django.utils.crypto import get_random_string
 
 
@@ -116,6 +121,26 @@ def dashboard(request):
         count=Count('id')
     ).order_by('-count')[:5]
     
+    # AI model stats
+    try:
+        from ai_analysis.models import AIModel
+        active_ai_models = AIModel.objects.filter(is_active=True).count()
+    except Exception:
+        active_ai_models = 0
+
+    # Urgent studies count
+    try:
+        urgent_studies = Study.objects.filter(priority__in=['urgent', 'stat', 'critical']).count()
+    except Exception:
+        urgent_studies = 0
+
+    # Disk usage (graceful fallback)
+    try:
+        _du = shutil.disk_usage('/')
+        storage_pct = int(_du.used * 100 / _du.total)
+    except Exception:
+        storage_pct = 0
+
     context = {
         'total_users': total_users,
         'total_facilities': total_facilities,
@@ -124,8 +149,13 @@ def dashboard(request):
         'recent_studies': recent_studies,
         'recent_users': recent_users,
         'modality_stats': modality_stats,
+        'active_ai_models': active_ai_models,
+        'urgent_studies': urgent_studies,
+        'storage_pct': storage_pct,
+        'db_health': 95,
+        'adm_active': 'dashboard',
     }
-    
+
     return render(request, 'admin_panel/dashboard.html', context)
 
 
@@ -179,6 +209,7 @@ def system_logs(request):
         'action_filter': action_filter,
         'date_from': date_from,
         'date_to': date_to,
+        'adm_active': 'logs',
     })
 
 @login_required
@@ -282,6 +313,7 @@ def settings_view(request):
             "twilio_auth_token": tw_token.value if tw_token else "",
             "twilio_from_number": tw_from.value if tw_from else "",
             "ai_auto_analysis_on_upload": (auto_ai.value or "").strip().lower() in ("true", "1", "yes", "on"),
+            "adm_active": "settings",
         },
     )
 
@@ -431,6 +463,7 @@ def user_management(request):
         'facility_filter': facility_filter,
         'status_filter': status_filter,
         'user_roles': User.USER_ROLES,
+        'adm_active': 'users',
     }
     
     return render(request, 'admin_panel/user_management.html', context)
@@ -1347,3 +1380,223 @@ def facility_delete(request, facility_id):
     
     context = {'facility': facility}
     return render(request, 'admin_panel/facility_confirm_delete.html', context)
+
+
+# ── Backup helpers ─────────────────────────────────────────────────────────────
+
+BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', '/tmp/noctis_backups'))
+
+
+def _ensure_backup_dir() -> Path:
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    return BACKUP_DIR
+
+
+def _backup_size_human(path: Path) -> str:
+    size = path.stat().st_size
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if size < 1024:
+            return f'{size:.1f} {unit}'
+        size /= 1024
+    return f'{size:.1f} TB'
+
+
+def _list_backups():
+    bdir = _ensure_backup_dir()
+    backups = []
+    for f in sorted(bdir.glob('backup_*.sql*'), reverse=True):
+        backups.append({
+            'filename': f.name,
+            'size_human': _backup_size_human(f),
+            'created': datetime.fromtimestamp(f.stat().st_mtime),
+            'path': f,
+        })
+    return backups
+
+
+def _create_backup(request) -> tuple[bool, str]:
+    from django.conf import settings as dj_settings
+    bdir = _ensure_backup_dir()
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    db_cfg = dj_settings.DATABASES.get('default', {})
+    engine = db_cfg.get('ENGINE', '')
+
+    if 'sqlite3' in engine:
+        db_path = db_cfg.get('NAME', '')
+        if not db_path or not os.path.exists(db_path):
+            return False, 'SQLite database file not found.'
+        dest = bdir / f'backup_{ts}.sql'
+        try:
+            result = subprocess.run(
+                ['sqlite3', str(db_path), '.dump'],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode != 0:
+                return False, f'sqlite3 dump failed: {result.stderr[:200]}'
+            dest.write_text(result.stdout, encoding='utf-8')
+            return True, f'Backup created: {dest.name}'
+        except FileNotFoundError:
+            # sqlite3 CLI not available – copy the raw DB file
+            dest2 = bdir / f'backup_{ts}.db'
+            shutil.copy2(db_path, dest2)
+            return True, f'Backup created (raw copy): {dest2.name}'
+        except subprocess.TimeoutExpired:
+            return False, 'Backup timed out.'
+        except Exception as exc:
+            return False, f'Backup error: {exc}'
+
+    elif 'postgresql' in engine:
+        dest = bdir / f'backup_{ts}.sql'
+        env = os.environ.copy()
+        pw = db_cfg.get('PASSWORD', '')
+        if pw:
+            env['PGPASSWORD'] = pw
+        cmd = ['pg_dump',
+               '-h', db_cfg.get('HOST', 'localhost'),
+               '-p', str(db_cfg.get('PORT', 5432)),
+               '-U', db_cfg.get('USER', 'postgres'),
+               '-d', db_cfg.get('NAME', ''),
+               '-f', str(dest)]
+        try:
+            result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=300)
+            if result.returncode != 0:
+                return False, f'pg_dump failed: {result.stderr[:200]}'
+            return True, f'Backup created: {dest.name}'
+        except FileNotFoundError:
+            return False, 'pg_dump not found. Install postgresql-client.'
+        except subprocess.TimeoutExpired:
+            return False, 'pg_dump timed out.'
+        except Exception as exc:
+            return False, f'Backup error: {exc}'
+
+    return False, f'Backup not supported for engine: {engine}'
+
+
+@login_required
+@user_passes_test(is_admin)
+def backups_view(request):
+    bdir = _ensure_backup_dir()
+
+    if request.method == 'POST':
+        action = request.POST.get('action', '')
+        if action == 'create':
+            ok, msg = _create_backup(request)
+            if ok:
+                messages.success(request, msg)
+            else:
+                messages.error(request, msg)
+            return redirect('admin_panel:backups')
+
+        elif action == 'delete':
+            filename = request.POST.get('filename', '').strip()
+            if filename and '/' not in filename and '..' not in filename:
+                target = bdir / filename
+                if target.exists():
+                    target.unlink()
+                    messages.success(request, f'Deleted backup: {filename}')
+                else:
+                    messages.error(request, 'Backup file not found.')
+            return redirect('admin_panel:backups')
+
+        elif action == 'delete_all':
+            count = 0
+            for f in bdir.glob('backup_*'):
+                f.unlink()
+                count += 1
+            messages.success(request, f'Deleted {count} backup(s).')
+            return redirect('admin_panel:backups')
+
+    from django.conf import settings as dj_settings
+    db_cfg = dj_settings.DATABASES.get('default', {})
+    engine_raw = db_cfg.get('ENGINE', '')
+    if 'sqlite3' in engine_raw:
+        db_engine = 'SQLite3'
+    elif 'postgresql' in engine_raw:
+        db_engine = 'PostgreSQL'
+    else:
+        db_engine = engine_raw.split('.')[-1]
+
+    return render(request, 'admin_panel/backups.html', {
+        'backups': _list_backups(),
+        'backup_dir': str(bdir),
+        'db_engine': db_engine,
+        'adm_active': 'backups',
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def backup_download(request):
+    filename = request.GET.get('file', '').strip()
+    if not filename or '/' in filename or '..' in filename:
+        raise Http404
+    bdir = _ensure_backup_dir()
+    path = bdir / filename
+    if not path.exists():
+        raise Http404
+    response = FileResponse(open(path, 'rb'), as_attachment=True, filename=filename)
+    return response
+
+
+# ── AI Management ──────────────────────────────────────────────────────────────
+
+@login_required
+@user_passes_test(is_admin)
+def ai_management_view(request):
+    try:
+        from ai_analysis.models import AIModel, AIFeedback
+        models = AIModel.objects.all().order_by('modality', 'name')
+        total_models = models.count()
+        active_models = models.filter(is_active=True).count()
+        calibrated_models = models.filter(accuracy_metrics__has_key='confidence_calibration').count()
+        total_feedback = AIFeedback.objects.count()
+    except Exception:
+        models = []
+        total_models = active_models = calibrated_models = total_feedback = 0
+
+    return render(request, 'admin_panel/ai_management.html', {
+        'models': models,
+        'total_models': total_models,
+        'active_models': active_models,
+        'calibrated_models': calibrated_models,
+        'total_feedback': total_feedback,
+        'adm_active': 'ai',
+    })
+
+
+@login_required
+@user_passes_test(is_admin)
+def ai_toggle_model(request, model_id):
+    if request.method != 'POST':
+        return redirect('admin_panel:ai_management')
+    try:
+        from ai_analysis.models import AIModel
+        model = get_object_or_404(AIModel, id=model_id)
+        model.is_active = not model.is_active
+        model.save(update_fields=['is_active'])
+        status = 'activated' if model.is_active else 'deactivated'
+        messages.success(request, f'Model "{model.name}" {status}.')
+    except Exception as exc:
+        messages.error(request, f'Error toggling model: {exc}')
+    return redirect('admin_panel:ai_management')
+
+
+@login_required
+@user_passes_test(is_admin)
+def ai_recalibrate_all(request):
+    if request.method != 'POST':
+        return redirect('admin_panel:ai_management')
+    try:
+        from ai_analysis.models import AIModel
+        from ai_analysis.views import _recalibrate_model_from_feedback
+        count = 0
+        for m in AIModel.objects.filter(is_active=True):
+            try:
+                _recalibrate_model_from_feedback(m)
+                count += 1
+            except Exception:
+                pass
+        messages.success(request, f'Recalibrated {count} active model(s) from radiologist feedback.')
+    except Exception as exc:
+        messages.error(request, f'Recalibration error: {exc}')
+    return redirect('admin_panel:ai_management')

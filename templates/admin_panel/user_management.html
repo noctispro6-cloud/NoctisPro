@@ -1,8 +1,12 @@
-{% extends 'base.html' %}
+{% extends 'admin_panel/admin_base.html' %}
 {% load static %}
 {% load dicts %}
 
-{% block title %}User Management - Admin Panel{% endblock %}
+{% block title %}User Management — Admin{% endblock %}
+
+{% block adm_breadcrumb %}
+<span class="adm-breadcrumb-sep">/</span><span>Users</span>
+{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -162,7 +166,7 @@
 </style>
 {% endblock %}
 
-{% block content %}
+{% block adm_content %}
 <div class="np-page">
     {% user_caps as caps %}
     {% if messages %}

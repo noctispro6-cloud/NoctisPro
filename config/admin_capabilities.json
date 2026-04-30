@@ -19,5 +19,15 @@
     "facility": {
       "ai_visible": false
     }
+  },
+  "FAC_0738d8": {
+    "manage_users": false,
+    "manage_facilities": false,
+    "view_logs": false,
+    "manage_settings": false,
+    "run_backup": false,
+    "manage_permissions": false,
+    "ai_visible": false,
+    "manage_ai": false
   }
 }

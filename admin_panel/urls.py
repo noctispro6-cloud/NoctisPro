@@ -33,6 +33,15 @@ urlpatterns = [
     path('permissions/', views_permissions.permissions_dashboard, name='permissions_dashboard'),
     path('permissions/user/<str:username>/', views_permissions.edit_user_permissions, name='edit_user_permissions'),
 
+    # Backups
+    path('backups/', views.backups_view, name='backups'),
+    path('backups/download/', views.backup_download, name='backup_download'),
+
+    # AI model management
+    path('ai/', views.ai_management_view, name='ai_management'),
+    path('ai/<int:model_id>/toggle/', views.ai_toggle_model, name='ai_toggle'),
+    path('ai/recalibrate-all/', views.ai_recalibrate_all, name='ai_recalibrate_all'),
+
     # QA / diagnostics
     path('qa/responsive/', views.responsive_qa, name='responsive_qa'),
 ]

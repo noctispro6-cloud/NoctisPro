@@ -1506,6 +1506,7 @@ def api_llm_warmup(request):
 
 
 @login_required
+@csrf_exempt
 def api_generate_llm_report(request, study_id):
     """
     Generate a preliminary radiology report for a study using the LLM pipeline.

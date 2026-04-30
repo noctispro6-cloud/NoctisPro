@@ -877,13 +877,13 @@
                 <li><hr class="dropdown-divider"></li>
                 {% endif %}
 
-                
+                {% if user.role == 'admin' or caps.manage_settings or caps.manage_permissions or caps.manage_users or caps.manage_facilities or caps.view_logs %}
                 <li>
                     <a class="dropdown-item" href="{% url 'admin_panel:dashboard' %}">
                         <i class="fas fa-shield-alt me-2"></i>Admin Panel
                     </a>
                 </li>
-
+                {% endif %}
 
                 {% if user.role == 'admin' or caps.manage_users %}
                 <li>

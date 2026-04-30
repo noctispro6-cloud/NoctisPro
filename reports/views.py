@@ -243,14 +243,29 @@ def write_report(request, study_id):
     if study.modality:
         report_templates = report_templates.filter(modality=study.modality.code)
 
+    # Embed letterhead for the paper header
+    letterhead_b64 = ''
+    try:
+        lh = getattr(study.facility, 'letterhead', None)
+        if lh and getattr(lh, 'name', ''):
+            import mimetypes, base64
+            ctype, _ = mimetypes.guess_type(lh.name)
+            ctype = ctype or 'image/png'
+            with lh.open('rb') as f:
+                letterhead_b64 = f"data:{ctype};base64," + base64.b64encode(f.read()).decode('ascii')
+    except Exception:
+        letterhead_b64 = ''
+
     context = {
         'study': study,
         'report': report,
         'is_new_report': is_new_report,
         'macros': macros,
         'report_templates': report_templates,
+        'facility': study.facility,
+        'letterhead_b64': letterhead_b64,
     }
-    
+
     return render(request, 'reports/write_report.html', context)
 
 
@@ -526,3 +541,73 @@ def export_report_docx(request, study_id):
     resp = HttpResponse(buf.getvalue(), content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
     resp['Content-Disposition'] = f'attachment; filename="report_{slugify(study.accession_number)}.docx"'
     return resp
+
+
+# ── Report management actions (admin + radiologist only) ───────────────────
+
+def _can_manage_report(user, report):
+    """Admin can always manage; radiologist can manage their own reports."""
+    if getattr(user, 'is_admin', lambda: False)():
+        return True
+    role = getattr(user, 'role', '')
+    if role == 'admin':
+        return True
+    if role == 'radiologist' and report.radiologist_id == user.id:
+        return True
+    return False
+
+
+@login_required
+def report_amend(request, report_id):
+    """Mark report as amended and re-open for editing."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    report = get_object_or_404(Report, id=report_id)
+    if not _can_manage_report(request.user, report):
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+    reason = request.POST.get('reason', '').strip()
+    report.status = 'amended'
+    report.last_modified = timezone.now()
+    report.save(update_fields=['status', 'last_modified'])
+    # Log amendment reason if provided
+    if reason:
+        try:
+            from .models import ReportAmendment
+            ReportAmendment.objects.create(
+                report=report,
+                radiologist=request.user,
+                amendment_reason=reason,
+                findings=report.findings,
+                impression=report.impression,
+            )
+        except Exception:
+            pass
+    return JsonResponse({'success': True, 'status': 'amended'})
+
+
+@login_required
+def report_cancel(request, report_id):
+    """Cancel (suspend) a report — marks as cancelled without deleting."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    report = get_object_or_404(Report, id=report_id)
+    if not _can_manage_report(request.user, report):
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+    report.status = 'cancelled'
+    report.last_modified = timezone.now()
+    report.save(update_fields=['status', 'last_modified'])
+    return JsonResponse({'success': True, 'status': 'cancelled'})
+
+
+@login_required
+def report_delete(request, report_id):
+    """Hard-delete a report (admin only)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    report = get_object_or_404(Report, id=report_id)
+    # Only admins may hard-delete
+    if not getattr(request.user, 'is_admin', lambda: False)() and getattr(request.user, 'role', '') != 'admin':
+        return JsonResponse({'error': 'Admin permission required'}, status=403)
+    study_id = report.study_id
+    report.delete()
+    return JsonResponse({'success': True, 'deleted': True, 'study_id': study_id})

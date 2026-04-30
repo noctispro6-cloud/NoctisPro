@@ -136,10 +136,62 @@
         text-decoration: none;
         white-space: nowrap;
     }
+    .sort-link:hover { color: var(--accent-color); }
 
-    .sort-link:hover {
-        color: var(--accent-color);
+    /* ── Context menu ── */
+    #reportCtxMenu {
+        display: none;
+        position: fixed;
+        z-index: 9999;
+        background: var(--card-bg, #252525);
+        border: 1px solid var(--border-color, #404040);
+        border-radius: 8px;
+        padding: 4px 0;
+        min-width: 188px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        user-select: none;
     }
+    .ctx-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 14px;
+        font-size: 12px;
+        color: var(--text-primary, #fff);
+        cursor: pointer;
+        transition: background 0.12s;
+    }
+    .ctx-item:hover { background: rgba(255,255,255,0.06); }
+    .ctx-item i { width: 14px; text-align: center; }
+    .ctx-item.danger { color: #ff5555; }
+    .ctx-item.danger:hover { background: rgba(255,85,85,0.1); }
+    .ctx-sep { height: 1px; background: var(--border-color,#333); margin: 3px 0; }
+
+    /* Amend reason modal */
+    #amendModal {
+        display: none;
+        position: fixed; inset: 0; z-index: 10000;
+        background: rgba(0,0,0,0.72);
+        align-items: center; justify-content: center;
+    }
+    #amendModal.open { display: flex; }
+    .amend-box {
+        background: var(--card-bg,#252525);
+        border: 1px solid var(--border-color,#404040);
+        border-radius: 10px;
+        padding: 20px 22px;
+        width: 400px;
+        max-width: 94vw;
+    }
+    .amend-box h4 { color: var(--text-primary,#fff); margin: 0 0 12px; font-size: 14px; }
+    .amend-box textarea {
+        width: 100%; min-height: 80px; resize: vertical;
+        background: var(--secondary-bg,#1a1a1a);
+        border: 1px solid var(--border-color,#404040);
+        border-radius: 6px; color: var(--text-primary,#fff);
+        padding: 8px 10px; font-size: 12px; font-family: inherit;
+    }
+    .amend-box-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 </style>
 {% endblock %}
 
@@ -259,7 +311,10 @@
             <tbody id="reportsTableBody">
                 {% if reports %}
                 {% for report in reports %}
-                <tr onclick="selectReport(this)" data-report-id="{{ report.id }}">
+                <tr onclick="selectReport(this)"
+                    oncontextmenu="showCtxMenu(event, {{ report.id }}, '{{ report.status }}')"
+                    data-report-id="{{ report.id }}"
+                    style="cursor:context-menu;">
                     <td>
                         <div class="patient-name">{{ report.study.patient.full_name }}</div>
                         <div class="patient-id">{{ report.study.patient.patient_id }}</div>
@@ -305,20 +360,182 @@
         </table>
     </div>
 </div>
+
+<!-- ── Right-click context menu ── -->
+<div id="reportCtxMenu">
+    <div class="ctx-item" id="ctxEdit"><i class="fas fa-edit"></i> Edit Report</div>
+    <div class="ctx-item" id="ctxPrint"><i class="fas fa-print"></i> Print / Letterhead</div>
+    <div class="ctx-item" id="ctxPdf"><i class="fas fa-file-pdf"></i> Download PDF</div>
+    <div class="ctx-sep"></div>
+    {% if user.role == 'admin' or user.role == 'radiologist' %}
+    <div class="ctx-item" id="ctxAmend"><i class="fas fa-pen-nib"></i> Amend Report</div>
+    <div class="ctx-item" id="ctxSuspend"><i class="fas fa-pause-circle"></i> Suspend / Cancel</div>
+    {% endif %}
+    {% if user.role == 'admin' %}
+    <div class="ctx-sep"></div>
+    <div class="ctx-item danger" id="ctxDelete"><i class="fas fa-trash"></i> Delete Report</div>
+    {% endif %}
+</div>
+
+<!-- ── Amend reason modal ── -->
+<div id="amendModal">
+    <div class="amend-box">
+        <h4><i class="fas fa-pen-nib" style="color:var(--accent-color);margin-right:6px;"></i>Amend Report</h4>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">
+            State the reason for amendment. The report will be re-opened for editing.
+        </p>
+        <textarea id="amendReasonTxt" placeholder="Amendment reason (required for audit trail)…"></textarea>
+        <div class="amend-box-actions">
+            <button class="btn-control" onclick="closeAmendModal()">Cancel</button>
+            <button class="btn-control reset" onclick="confirmAmend()"><i class="fas fa-check"></i> Amend</button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
 function selectReport(row) {
-    // Remove previous selection
-    document.querySelectorAll('.data-table tbody tr').forEach(r => {
-        r.style.background = '';
-    });
-    
-    // Highlight selected row
+    document.querySelectorAll('.data-table tbody tr').forEach(r => r.style.background = '');
     row.style.background = 'rgba(0, 212, 255, 0.15)';
-    
+}
 
+// ── Context menu ─────────────────────────────────────────────────────────
+let _ctxReportId  = null;
+let _ctxReportRow = null;
+
+function showCtxMenu(e, reportId, reportStatus) {
+    e.preventDefault();
+    e.stopPropagation();
+    _ctxReportId = reportId;
+    _ctxReportRow = e.currentTarget;
+
+    // Build URLs for this report
+    const editUrl  = `/reports/write/${_ctxReportRow.querySelector('[data-report-id]') ? '' : ''}`;  // resolved below
+    // Use data attributes on the row to resolve write/print URLs dynamically
+    const studyId  = parseInt(_ctxReportRow.querySelector('td a[href*="write"]')
+                    ? _ctxReportRow.querySelector('td a[href*="write"]').href.match(/write\/(\d+)/)?.[1] || 0
+                    : 0, 10);
+
+    const ctxEdit    = document.getElementById('ctxEdit');
+    const ctxPrint   = document.getElementById('ctxPrint');
+    const ctxPdf     = document.getElementById('ctxPdf');
+    if (ctxEdit)  ctxEdit.onclick  = () => { closeCtxMenu(); if (studyId) window.location.href = `/reports/write/${studyId}/`; };
+    if (ctxPrint) ctxPrint.onclick = () => { closeCtxMenu(); if (studyId) window.open(`/reports/print/${studyId}/`, '_blank'); };
+    if (ctxPdf)   ctxPdf.onclick   = () => { closeCtxMenu(); if (studyId) window.location.href = `/reports/export/pdf/${studyId}/`; };
+
+    const ctxAmend   = document.getElementById('ctxAmend');
+    const ctxSuspend = document.getElementById('ctxSuspend');
+    const ctxDelete  = document.getElementById('ctxDelete');
+
+    if (ctxAmend) {
+        // Disable amend if already amended
+        ctxAmend.style.opacity  = reportStatus === 'cancelled' ? '0.4' : '1';
+        ctxAmend.style.pointerEvents = reportStatus === 'cancelled' ? 'none' : '';
+        ctxAmend.onclick = () => { closeCtxMenu(); openAmendModal(reportId); };
+    }
+    if (ctxSuspend) {
+        const alreadyCancelled = reportStatus === 'cancelled';
+        ctxSuspend.style.opacity = alreadyCancelled ? '0.4' : '1';
+        ctxSuspend.style.pointerEvents = alreadyCancelled ? 'none' : '';
+        ctxSuspend.textContent = '';
+        ctxSuspend.innerHTML = '<i class="fas fa-pause-circle"></i> ' + (alreadyCancelled ? 'Already Suspended' : 'Suspend / Cancel');
+        ctxSuspend.onclick = () => { closeCtxMenu(); cancelReport(reportId); };
+    }
+    if (ctxDelete) {
+        ctxDelete.onclick = () => { closeCtxMenu(); deleteReport(reportId); };
+    }
+
+    // Position
+    const menu = document.getElementById('reportCtxMenu');
+    menu.style.display = 'block';
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    menu.style.left = (e.clientX + mw > vw ? e.clientX - mw : e.clientX) + 'px';
+    menu.style.top  = (e.clientY + mh > vh ? e.clientY - mh : e.clientY) + 'px';
+}
+
+function closeCtxMenu() {
+    const m = document.getElementById('reportCtxMenu');
+    if (m) m.style.display = 'none';
+}
+document.addEventListener('click',     closeCtxMenu);
+document.addEventListener('keydown',   e => { if (e.key === 'Escape') { closeCtxMenu(); closeAmendModal(); } });
+document.addEventListener('scroll',    closeCtxMenu, true);
+
+// ── Amend modal ───────────────────────────────────────────────────────────
+let _amendReportId = null;
+function openAmendModal(reportId) {
+    _amendReportId = reportId;
+    document.getElementById('amendReasonTxt').value = '';
+    document.getElementById('amendModal').classList.add('open');
+    setTimeout(() => document.getElementById('amendReasonTxt').focus(), 60);
+}
+function closeAmendModal() {
+    document.getElementById('amendModal').classList.remove('open');
+    _amendReportId = null;
+}
+async function confirmAmend() {
+    const reason = (document.getElementById('amendReasonTxt').value || '').trim();
+    await _reportAction(`/reports/action/${_amendReportId}/amend/`, { reason }, 'amended');
+    closeAmendModal();
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────
+async function cancelReport(reportId) {
+    if (!confirm('Suspend / cancel this report? It will be marked as Cancelled but not deleted.')) return;
+    await _reportAction(`/reports/action/${reportId}/cancel/`, {}, 'cancelled');
+}
+
+async function deleteReport(reportId) {
+    if (!confirm('Permanently DELETE this report? This cannot be undone.')) return;
+    const data = await _reportAction(`/reports/action/${reportId}/delete/`, {}, null);
+    if (data && data.deleted) {
+        // Remove row from table
+        const row = document.querySelector(`tr[data-report-id="${reportId}"]`);
+        if (row) row.remove();
+    }
+}
+
+async function _reportAction(url, extra, expectedStatus) {
+    try {
+        const fd = new FormData();
+        Object.entries(extra).forEach(([k,v]) => fd.append(k, v));
+        const resp = await fetch(url, {
+            method: 'POST',
+            body: fd,
+            headers: { 'X-CSRFToken': _getCsrf() },
+            credentials: 'same-origin',
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            alert('Action failed: ' + (data.error || `HTTP ${resp.status}`));
+            return null;
+        }
+        if (expectedStatus) {
+            // Update the status badge in the row without a full reload
+            const row = document.querySelector(`tr[data-report-id="${_ctxReportId || extra._id}"]`);
+            if (row) {
+                const badge = row.querySelector('.status-badge');
+                if (badge) {
+                    badge.className = `status-badge status-${expectedStatus}`;
+                    badge.textContent = expectedStatus.charAt(0).toUpperCase() + expectedStatus.slice(1);
+                }
+                // Update the oncontextmenu attribute so the next right-click sees the new status
+                row.setAttribute('oncontextmenu',
+                    row.getAttribute('oncontextmenu').replace(/'[^']*'(?=\))/, `'${expectedStatus}'`));
+            }
+        }
+        return data;
+    } catch (e) {
+        alert('Request failed: ' + (e.message || e));
+        return null;
+    }
+}
+
+function _getCsrf() {
+    try { const v = `; ${document.cookie}`; const p = v.split('; csrftoken='); if (p.length === 2) return p.pop().split(';').shift(); } catch(_) {} return '';
 }
 
 function applyFilters() {

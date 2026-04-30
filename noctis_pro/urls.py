@@ -25,7 +25,11 @@ from worklist import views as worklist_views  # ENABLED
 from django.views.generic.base import RedirectView
 from . import views
 from . import health as health_views
-from .views import subscription_expired as subscription_expired_view
+from .views import subscription_expired as subscription_expired_view, handler404 as _h404, handler500 as _h500, handler403 as _h403
+
+handler404 = _h404
+handler500 = _h500
+handler403 = _h403
 
 def home_redirect(request):
     """Redirect home page to login or dashboard based on authentication"""

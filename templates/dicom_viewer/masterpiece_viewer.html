@@ -6796,33 +6796,38 @@
             bone3D.scene.background = new THREE.Color(0x000000);
             bone3D.scene.fog = null;
 
-            bone3D.camera = new THREE.PerspectiveCamera(42, (c.width || 1) / (c.height || 1), 0.1, 10000);
+            bone3D.camera = new THREE.PerspectiveCamera(36, (c.width || 1) / (c.height || 1), 0.1, 10000);
             bone3D.camera.position.set(0, 0, 200);
 
             // Lighting — studio portrait style: strong key, deep shadows, pure black BG
             const ambient = new THREE.AmbientLight(0xffffff, 0.10);
             const hemi = new THREE.HemisphereLight(0xc8d8ff, 0x080400, 0.18);
-            // Key: strong warm light upper-front-right — main illumination, deep shadow on opposite side
-            const key = new THREE.DirectionalLight(0xfff8ec, 2.60);
+            // Key: dominant warm light upper-front-right — main highlight, deep orbital shadows
+            const key = new THREE.DirectionalLight(0xfff8ec, 2.20);
             key.position.set(1.4, 2.0, 2.2);
             key.castShadow = true;
-            key.shadow.mapSize.width = 2048;
-            key.shadow.mapSize.height = 2048;
+            key.shadow.mapSize.width = 4096;
+            key.shadow.mapSize.height = 4096;
             key.shadow.camera.near = 0.1;
-            key.shadow.camera.far = 2000;
-            key.shadow.bias = -0.00005;
-            // Fill: very subtle cool left — barely lifts shadow so orbital hollows stay dark
-            const fill = new THREE.DirectionalLight(0xa8c4f0, 0.28);
+            key.shadow.camera.far = 5000;
+            key.shadow.bias = -0.0005;
+            bone3D.keyLight = key;  // stored so renderBoneMesh can resize frustum to model
+            // Fill: subtle cool-left — lifts shadow detail, keeps orbital hollows dark
+            const fill = new THREE.DirectionalLight(0xa8c4f0, 0.32);
             fill.position.set(-2.2, 0.4, 0.8);
-            // Back-top: catches superior skull surface, separates from black BG
-            const top = new THREE.DirectionalLight(0xffffff, 0.35);
+            // Back-top: catches parietal/superior surface, separates silhouette from black BG
+            const top = new THREE.DirectionalLight(0xffffff, 0.38);
             top.position.set(0, 3.0, -1.0);
+            // Rim: cool back-left — thin silhouette glow against pure black background
+            const rim = new THREE.DirectionalLight(0xc8e0ff, 0.55);
+            rim.position.set(-1.0, 0.2, -2.8);
 
             bone3D.scene.add(ambient);
             bone3D.scene.add(hemi);
             bone3D.scene.add(key);
             bone3D.scene.add(fill);
             bone3D.scene.add(top);
+            bone3D.scene.add(rim);
 
             // Shadow catcher (subtle)
             const shadowPlane = new THREE.Mesh(
@@ -6968,15 +6973,13 @@
             })();
             const mat = new THREE.MeshPhysicalMaterial({
                 color: _activePreset.color,
-                emissive: new THREE.Color(_activePreset.color).multiplyScalar(0.015),
-                emissiveIntensity: 1.0,
                 transparent: _activePreset.opacity < 0.99,
-                opacity: Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 0.95)),
-                roughness: _activePreset.roughness ?? 0.52,
+                opacity: Math.max(0.05, Math.min(1.0, Number(boneOpacity) || 0.98)),
+                roughness: _activePreset.roughness ?? 0.42,
                 metalness: 0.0,
-                clearcoat: 0.06,
-                clearcoatRoughness: 0.70,
-                envMapIntensity: 0.3,
+                clearcoat: 0.18,          // thin specular layer — bone has a slight periosteal sheen
+                clearcoatRoughness: 0.40,
+                envMapIntensity: 0.0,
                 side: THREE.DoubleSide,
                 flatShading: false,
             });
@@ -6999,6 +7002,20 @@
             // Use the LARGEST dimension so the model always fills the view well.
             const maxDim = Math.max(size.x, size.y, size.z) || 1;
             const dist = maxDim * 1.25;
+
+            // Size the key-light shadow frustum to cover the actual model extent.
+            // Default DirectionalLight shadow camera is ±5 world units — far too small
+            // for CT volumes that are typically 200-400 mm across.
+            if (bone3D.keyLight && bone3D.keyLight.shadow) {
+                const s = maxDim * 0.8;
+                bone3D.keyLight.shadow.camera.left   = -s;
+                bone3D.keyLight.shadow.camera.right  =  s;
+                bone3D.keyLight.shadow.camera.top    =  s;
+                bone3D.keyLight.shadow.camera.bottom = -s;
+                bone3D.keyLight.shadow.camera.far    = maxDim * 12;
+                bone3D.keyLight.shadow.camera.updateProjectionMatrix();
+                bone3D.keyLight.shadow.needsUpdate   = true;
+            }
             bone3D.camera.near = Math.max(0.01, dist / 120);
             bone3D.camera.far = dist * 30;
             // Oblique front-left-top position: shows anatomical depth well
@@ -7459,22 +7476,68 @@
                 showToast('No image to print', 'warning');
                 return;
             }
-            const printWindow = window.open('', '_blank');
-            const imageDataUrl = canvas.toDataURL('image/png');
-            printWindow.document.write(`
-                <html>
-                    <head><title>DICOM Image Print</title></head>
-                    <body style="margin:0; display:flex; justify-content:center; align-items:center; min-height:100vh;">
-                        <img src="${imageDataUrl}" style="max-width:100%; max-height:100%;" />
-                    </body>
-                </html>
-            `);
-            printWindow.document.close();
-            printWindow.focus();
-            setTimeout(() => {
-                try { printWindow.print(); } catch (e) { }
-                try { printWindow.close(); } catch (e) { }
-            }, 250);
+            const imgData  = canvas.toDataURL('image/png');
+            const patient  = _getPatientNameForPrint() || '—';
+            const studyDt  = _getStudyDateForPrint()   || '—';
+            const modality = _getCurrentModality()      || '—';
+            const acc      = (currentStudy && (currentStudy.accession_number || currentStudy.accession)) || '—';
+            const serDesc  = (currentSeries && currentSeries.description) || (currentSeries && currentSeries.series_description) || '—';
+            const ww       = Math.round(windowWidth);
+            const wl       = Math.round(windowLevel);
+            const sliceTxt = (typeof currentSlice !== 'undefined' && Array.isArray(imageData) && imageData.length)
+                ? `${currentSlice + 1} / ${imageData.length}` : '';
+            const now = new Date().toLocaleString();
+
+            const pw = window.open('', '_blank');
+            if (!pw) { showToast('Pop-up blocked — allow pop-ups and retry', 'warning'); return; }
+            pw.document.write(`<!DOCTYPE html>
+<html><head>
+<title>DICOM Print — ${patient}</title>
+<style>
+@page { margin: 0.8cm; size: A4 landscape; }
+@media print { .noprint { display:none !important; } }
+* { box-sizing: border-box; margin:0; padding:0; }
+body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-size:8.5pt; }
+.sheet { display:flex; flex-direction:column; height:100vh; padding:7px; gap:5px; }
+.meta-top { display:flex; justify-content:space-between; border-bottom:1px solid #333; padding-bottom:5px; flex-wrap:wrap; gap:6px; }
+.mc { display:flex; flex-direction:column; gap:2px; }
+.mi { display:flex; gap:5px; }
+.ml { color:#666; min-width:68px; }
+.mv { color:#eee; font-weight:700; }
+.img-wrap { flex:1; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.img-wrap img { max-width:100%; max-height:100%; object-fit:contain; display:block; }
+.meta-bot { display:flex; justify-content:space-between; border-top:1px solid #333; padding-top:4px; font-size:7.5pt; color:#555; flex-wrap:wrap; gap:4px; }
+.print-btn { position:fixed; bottom:18px; right:18px; padding:10px 22px; background:#0078d4; color:#fff; border:none; border-radius:6px; font-size:12px; cursor:pointer; }
+</style>
+</head><body>
+<div class="sheet">
+  <div class="meta-top">
+    <div class="mc">
+      <div class="mi"><span class="ml">Patient</span><span class="mv">${patient}</span></div>
+      <div class="mi"><span class="ml">Accession</span><span class="mv">${acc}</span></div>
+      <div class="mi"><span class="ml">Study Date</span><span class="mv">${studyDt}</span></div>
+    </div>
+    <div class="mc">
+      <div class="mi"><span class="ml">Modality</span><span class="mv">${modality}</span></div>
+      <div class="mi"><span class="ml">Series</span><span class="mv">${serDesc}</span></div>
+      ${sliceTxt ? `<div class="mi"><span class="ml">Image</span><span class="mv">${sliceTxt}</span></div>` : ''}
+    </div>
+    <div class="mc">
+      <div class="mi"><span class="ml">WW / WL</span><span class="mv">${ww} / ${wl}</span></div>
+      <div class="mi"><span class="ml">Printed</span><span class="mv">${now}</span></div>
+    </div>
+  </div>
+  <div class="img-wrap"><img src="${imgData}" alt="DICOM image"></div>
+  <div class="meta-bot">
+    <span>Noctis Pro PACS</span>
+    <span>${modality} | WW:${ww} WL:${wl} | ${patient}</span>
+  </div>
+</div>
+<button class="print-btn noprint" onclick="window.print();setTimeout(()=>window.close(),500);">&#128438; Print</button>
+</body></html>`);
+            pw.document.close();
+            pw.focus();
+            setTimeout(() => { try { pw.print(); } catch(_) {} }, 650);
         }
 
         function _pe_buildPrintFormData({ downloadPdf }) {

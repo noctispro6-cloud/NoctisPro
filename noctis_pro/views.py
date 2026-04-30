@@ -70,6 +70,21 @@ def subscription_expired(request):
     return render(request, 'subscription_expired.html', {'facility': facility})
 
 
+def handler404(request, exception=None):
+    from django.shortcuts import render
+    return render(request, '404.html', status=404)
+
+
+def handler500(request):
+    from django.shortcuts import render
+    return render(request, '500.html', status=500)
+
+
+def handler403(request, exception=None):
+    from django.shortcuts import render
+    return render(request, '403.html', {'exception': exception}, status=403)
+
+
 @require_http_methods(["GET"])
 def connection_info(request):
     """

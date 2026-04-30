@@ -1,866 +1,608 @@
 {% extends 'base.html' %}
-
-{% block title %}Write Report - Noctis Pro PACS{% endblock %}
+{% block title %}Write Report — {{ study.accession_number|default:"Study" }}{% endblock %}
 
 {% block extra_css %}
 <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
 <style>
-        /* NOTE: no local :root overrides; inherit theme from base.html (dark/light) */
+/* ── Control bar ── */
+.rpt-bar {
+    position: sticky;
+    top: 56px;
+    z-index: 120;
+    background: var(--secondary-bg, #1a1a1a);
+    border-bottom: 1px solid var(--border-color, #333);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    flex-wrap: wrap;
+}
+.rpt-bar-sep { width: 1px; height: 24px; background: var(--border-color, #333); margin: 0 4px; flex-shrink: 0; }
+.rpt-status {
+    background: var(--card-bg, #252525);
+    border: 1px solid var(--border-color, #333);
+    border-radius: 6px;
+    color: var(--text-primary, #fff);
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.rpt-fmt-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text-secondary, #aaa);
+    padding: 4px 8px;
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 700;
+    transition: background 0.1s, color 0.1s;
+    line-height: 1;
+}
+.rpt-fmt-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-primary,#fff); }
+.rpt-fmt-btn.active { background: rgba(0,212,255,0.15); color: var(--accent-color,#00d4ff); border-color: rgba(0,212,255,0.3); }
+.rpt-action-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600;
+    cursor: pointer; border: 1px solid var(--border-color,#333);
+    background: var(--card-bg,#252525); color: var(--text-primary,#fff);
+    white-space: nowrap; transition: background 0.15s;
+}
+.rpt-action-btn:hover { background: rgba(255,255,255,0.08); text-decoration: none; color: var(--text-primary,#fff); }
+.rpt-action-btn.primary { background: var(--accent-color,#00d4ff); color: #000; border-color: transparent; }
+.rpt-action-btn.primary:hover { opacity: 0.88; }
+.rpt-action-btn.success { background: #00c853; color: #000; border-color: transparent; }
+.rpt-action-btn.success:hover { opacity: 0.88; }
+.rpt-action-btn.ai { background: linear-gradient(135deg,#6b46c1,#553c9a); color:#fff; border-color:transparent; }
+.rpt-ai-status { font-size: 11px; color: var(--text-muted,#666); margin-left: 4px; }
+.rpt-autosave { font-size: 10px; color: var(--text-muted,#666); }
 
-    .report-editor-container {
-        background: var(--dark-bg);
-        min-height: 100vh;
-        padding: 2rem 0;
-    }
+/* ── Paper wrap ── */
+.rpt-canvas {
+    background: #b0b0b0;
+    min-height: calc(100vh - 110px);
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px 60px;
+}
+/* A4 paper sheet */
+.rpt-paper {
+    background: #fff;
+    color: #111;
+    width: 210mm;
+    max-width: 100%;
+    min-height: 280mm;
+    padding: 18mm 22mm 20mm;
+    box-shadow: 0 4px 32px rgba(0,0,0,0.45);
+    font-family: 'Arial', 'Helvetica Neue', sans-serif;
+    font-size: 11pt;
+    line-height: 1.55;
+}
 
-    .study-info-panel {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 16px;
-        padding: 1.5rem;
-        margin-bottom: 2rem;
-    }
+/* ── Letterhead ── */
+.rpt-lh {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+    border-bottom: 3px solid #003d7a;
+    user-select: none;
+    pointer-events: none;
+}
+.rpt-lh-logo { max-height: 70px; max-width: 200px; object-fit: contain; }
+.rpt-lh-text { text-align: right; }
+.rpt-lh-text h2 { font-size: 15pt; font-weight: 700; color: #003d7a; margin: 0 0 3px; }
+.rpt-lh-text p { font-size: 8.5pt; color: #555; margin: 0; }
 
-    .patient-header {
-        display: flex;
-        align-items: center;
-        margin-bottom: 1rem;
-    }
+/* ── Report title ── */
+.rpt-title {
+    text-align: center; font-size: 12pt; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase; color: #003d7a;
+    margin: 8px 0 10px; user-select: none;
+}
 
-    .patient-avatar {
-        background: var(--gradient-accent);
-        border-radius: 50%;
-        width: 60px;
-        height: 60px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin-right: 1rem;
-        font-weight: 700;
-        font-size: 1.5rem;
-    }
+/* ── Patient bar ── */
+.rpt-patient {
+    background: #e8f0fb;
+    border-left: 4px solid #003d7a;
+    border-radius: 0 4px 4px 0;
+    padding: 8px 12px;
+    margin-bottom: 16px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px,1fr));
+    gap: 8px 16px;
+    user-select: none;
+    pointer-events: none;
+}
+.rpt-pf-label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.06em; color: #003d7a; font-weight: 700; display: block; margin-bottom: 1px; }
+.rpt-pf-value { font-size: 10pt; font-weight: 600; color: #111; }
 
-    .patient-details h3 {
-        color: var(--text-primary);
-        margin-bottom: 0.25rem;
-    }
+/* ── Quill editor lives inside the paper ── */
+#rptEditorWrap { margin-bottom: 12px; }
+.ql-toolbar.ql-snow { display: none !important; }   /* formatting done via bar */
+.ql-container.ql-snow { border: none !important; }
+.ql-editor {
+    padding: 0 !important;
+    font-family: 'Arial', 'Helvetica Neue', sans-serif !important;
+    font-size: 11pt !important;
+    color: #111 !important;
+    min-height: 160mm;
+    line-height: 1.55 !important;
+}
+.ql-editor:focus { outline: 2px dashed rgba(0,61,122,0.18) !important; outline-offset: 2px; }
+.ql-editor h2 { font-size: 10pt !important; font-weight: 700 !important; text-transform: uppercase; letter-spacing: 0.06em; color: #003d7a !important; border-bottom: 1px solid #b8cde8; padding-bottom: 2px; margin: 12px 0 4px !important; }
+.ql-editor p { margin: 0 0 4px !important; }
+.ql-editor ul, .ql-editor ol { padding-left: 18px !important; margin: 4px 0 !important; }
 
-    .patient-details p {
-        color: var(--text-secondary);
-        margin-bottom: 0;
-    }
+/* ── Signature ── */
+.rpt-sig {
+    margin-top: 16px;
+    padding: 10px 12px;
+    border: 1px solid #dde4ef;
+    border-radius: 4px;
+    background: #fafbfd;
+    user-select: none;
+}
+.rpt-sig-label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; color: #003d7a; margin-bottom: 4px; }
+.rpt-sig-name { font-size: 11pt; font-weight: 600; color: #111; }
+.rpt-sig-detail { font-size: 8.5pt; color: #555; }
+.rpt-sig-canvas-wrap { margin-top: 8px; }
+.rpt-sig-canvas { border: 1px solid #bbb; border-radius: 3px; background: #fff; cursor: crosshair; display: block; width: 100%; max-width: 360px; height: 72px; }
 
-    .study-metadata {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 1rem;
-        margin-top: 1rem;
-    }
-
-    .metadata-item {
-        background: rgba(255, 255, 255, 0.05);
-        padding: 1rem;
-        border-radius: 8px;
-    }
-
-    .metadata-label {
-        color: var(--text-secondary);
-        font-size: 0.85rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 0.5rem;
-    }
-
-    .metadata-value {
-        color: var(--text-primary);
-        font-weight: 500;
-    }
-
-    .report-form-container {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 16px;
-        overflow: hidden;
-    }
-
-    .form-header {
-        background: var(--gradient-primary);
-        padding: 1.5rem;
-    }
-
-    .form-body {
-        padding: 2rem;
-    }
-
-    .form-section {
-        margin-bottom: 2rem;
-    }
-
-    .form-section h5 {
-        color: var(--text-primary);
-        margin-bottom: 1rem;
-        font-weight: 600;
-        border-bottom: 1px solid var(--border-color);
-        padding-bottom: 0.5rem;
-    }
-
-    .form-textarea {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid var(--border-color);
-        border-radius: 8px;
-        color: var(--text-primary);
-        padding: 1rem;
-        min-height: 120px;
-        resize: vertical;
-        width: 100%;
-        font-family: 'Inter', sans-serif;
-        line-height: 1.6;
-    }
-
-    .form-textarea:focus {
-        border-color: var(--accent-color);
-        box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
-        outline: none;
-    }
-
-    .macro-buttons {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.5rem;
-        margin-bottom: 1rem;
-    }
-
-    .macro-btn {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
-        padding: 4px 12px;
-        font-size: 11px;
-        cursor: pointer;
-        border-radius: 2px;
-        transition: all 0.2s ease;
-    }
-
-    .macro-btn:hover {
-        background: var(--accent-color);
-        color: var(--primary-bg);
-    }
-
-    .ai-assist-panel {
-        background: linear-gradient(135deg, rgba(139, 69, 19, 0.1), rgba(160, 82, 45, 0.1));
-        border: 1px solid rgba(139, 69, 19, 0.3);
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin-bottom: 2rem;
-    }
-
-    .ai-assist-header {
-        display: flex;
-        align-items: center;
-        margin-bottom: 1rem;
-    }
-
-    .ai-icon {
-        background: linear-gradient(135deg, #8b4513, #a0522d);
-        border-radius: 50%;
-        width: 40px;
-        height: 40px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin-right: 1rem;
-        color: white;
-    }
-
-    .status-controls {
-        display: flex;
-        gap: 1rem;
-        align-items: center;
-        margin-bottom: 2rem;
-    }
-
-    .status-select {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid var(--border-color);
-        border-radius: 8px;
-        color: var(--text-primary);
-        padding: 0.75rem 1rem;
-    }
-
-    .action-buttons {
-        display: flex;
-        gap: 1rem;
-        justify-content: flex-end;
-        padding-top: 2rem;
-        border-top: 1px solid var(--border-color);
-    }
-
-    .btn-save {
-        background: var(--success-color);
-        border: none;
-        color: white;
-    }
-
-    .btn-save:hover {
-        background: #059669;
-        color: white;
-    }
-
-    .btn-preview {
-        background: var(--warning-color);
-        border: none;
-        color: white;
-    }
-
-    .btn-preview:hover {
-        background: #d97706;
-        color: white;
-    }
-
-    .image-viewer-panel {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 16px;
-        padding: 1.5rem;
-        margin-bottom: 2rem;
-        min-height: 400px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--text-secondary);
-    }
+@media (max-width: 700px) {
+    .rpt-paper { padding: 12mm 14mm 14mm; }
+    .rpt-canvas { padding: 16px 6px 40px; }
+}
+@media print {
+    .rpt-bar, .rpt-ai-panel { display: none !important; }
+    .rpt-canvas { background: #fff !important; padding: 0 !important; }
+    .rpt-paper { box-shadow: none !important; }
+}
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="report-editor-container">
-    <div class="container-fluid">
-        <!-- Navigation -->
-        <div class="mb-4">
-            <nav aria-label="breadcrumb">
-                <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="{% url 'worklist:dashboard' %}" class="text-accent">Dashboard</a></li>
-                    <li class="breadcrumb-item"><a href="{% url 'reports:report_list' %}" class="text-accent">Reports</a></li>
-                    <li class="breadcrumb-item active text-light">Write Report</li>
-                </ol>
-            </nav>
-        </div>
+<form id="reportForm" method="post">
+{% csrf_token %}
 
-        <div class="row">
-            <!-- Left Column - Study Info & Images -->
-            <div class="col-lg-4">
-                <!-- Study Information -->
-                <div class="study-info-panel">
-                    <div class="patient-header">
-                        <div class="patient-avatar">
-                            {{ study.patient.first_name|first }}{{ study.patient.last_name|first }}
-                        </div>
-                        <div class="patient-details">
-                            <h3>{{ study.patient.full_name|default:"Unknown Patient" }}</h3>
-                            <p>{{ study.patient.patient_id|default:"No ID" }} • {{ study.patient.date_of_birth|date:"M d, Y"|default:"DOB Unknown" }}</p>
-                        </div>
-                    </div>
-                    
-                    <div class="study-metadata">
-                        <div class="metadata-item">
-                            <div class="metadata-label">Accession Number</div>
-                            <div class="metadata-value">{{ study.accession_number|default:"N/A" }}</div>
-                        </div>
-                        <div class="metadata-item">
-                            <div class="metadata-label">Study Date</div>
-                            <div class="metadata-value">{{ study.study_date|date:"M d, Y"|default:"N/A" }}</div>
-                        </div>
-                        <div class="metadata-item">
-                            <div class="metadata-label">Modality</div>
-                            <div class="metadata-value">{{ study.modality.name|default:"Unknown" }}</div>
-                        </div>
-                        <div class="metadata-item">
-                            <div class="metadata-label">Body Part</div>
-                            <div class="metadata-value">{{ study.body_part_examined|default:"Not specified" }}</div>
-                        </div>
-                        <div class="metadata-item">
-                            <div class="metadata-label">Referring Physician</div>
-                            <div class="metadata-value">{{ study.referring_physician|default:"Not specified" }}</div>
-                        </div>
-                        <div class="metadata-item">
-                            <div class="metadata-label">Study Description</div>
-                            <div class="metadata-value">{{ study.study_description|default:"Not specified" }}</div>
-                        </div>
-                    </div>
-                </div>
+<!-- ── Control / toolbar bar ── -->
+<div class="rpt-bar">
+    <!-- Breadcrumb -->
+    <a href="{% url 'worklist:dashboard' %}" class="rpt-fmt-btn" style="font-size:11px;font-weight:500;"><i class="fas fa-chevron-left"></i></a>
+    <span style="font-size:12px;color:var(--text-secondary,#aaa);">{{ study.accession_number|default:"Report" }}</span>
+    <div class="rpt-bar-sep"></div>
 
-                <!-- Embedded DICOM viewer panel -->
-                <div class="card mb-3">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span><i class="fas fa-images"></i> DICOM Images</span>
-                        <a href="{% url 'dicom_viewer:viewer' %}?study={{ study.id }}" target="_blank" class="btn-sm btn-control">
-                            <i class="fas fa-expand"></i> Full Screen
-                        </a>
-                    </div>
-                    <div class="card-body p-0" style="height:350px;overflow:hidden;">
-                        <iframe
-                            src="{% url 'dicom_viewer:viewer' %}?study={{ study.id }}&embedded=1"
-                            style="width:100%;height:100%;border:none;"
-                            title="DICOM Viewer"
-                            loading="lazy"
-                            sandbox="allow-scripts allow-same-origin allow-forms">
-                        </iframe>
-                    </div>
-                </div>
-            </div>
+    <!-- Status -->
+    <select id="statusField" name="status" class="rpt-status" title="Report status">
+        <option value="draft" {% if not report or report.status == 'draft' %}selected{% endif %}>Draft</option>
+        <option value="preliminary" {% if report.status == 'preliminary' %}selected{% endif %}>Preliminary</option>
+        <option value="final" {% if report.status == 'final' %}selected{% endif %}>Final</option>
+        <option value="amended" {% if report and report.status == 'amended' %}selected{% endif %}>Amended</option>
+    </select>
+    <div class="rpt-bar-sep"></div>
 
-            <!-- Right Column - Report Form -->
-            <div class="col-lg-8">
-                <!-- AI Assistance Panel -->
-                <div class="ai-assist-panel">
-                    <div class="ai-assist-header">
-                        <div class="ai-icon">
-                            <i class="fas fa-brain"></i>
-                        </div>
-                        <div>
-                            <h5 class="text-light mb-0">AI Analysis Assistant</h5>
-                            <p class="text-muted mb-0">AI-powered preliminary findings and suggestions</p>
-                        </div>
-                    </div>
-                    <button type="button" class="btn btn-medical" onclick="generateAIFindings()"  >
-                        <i class="fas fa-magic me-2"></i>Generate AI Findings
-                    </button>
-                    <div id="aiAssistStatus" class="text-muted small mt-2"></div>
-                    <div id="aiAssistRefs" class="mt-2" style="display:none;">
-                        <div class="text-muted small" style="margin-bottom:6px;">References</div>
-                        <div id="aiAssistRefsList" class="text-secondary small" style="white-space:pre-wrap;"></div>
-                    </div>
-                </div>
+    <!-- Formatting buttons (wire to Quill) -->
+    <button type="button" id="fmtBold"   class="rpt-fmt-btn" title="Bold (Ctrl+B)"><b>B</b></button>
+    <button type="button" id="fmtItalic" class="rpt-fmt-btn" title="Italic (Ctrl+I)"><i>I</i></button>
+    <button type="button" id="fmtUnder"  class="rpt-fmt-btn" title="Underline (Ctrl+U)" style="text-decoration:underline;">U</button>
+    <div class="rpt-bar-sep"></div>
+    <button type="button" id="fmtH2"     class="rpt-fmt-btn" title="Section heading" style="font-size:11px;">H</button>
+    <button type="button" id="fmtOL"     class="rpt-fmt-btn" title="Numbered list"><i class="fas fa-list-ol" style="font-size:11px;"></i></button>
+    <button type="button" id="fmtUL"     class="rpt-fmt-btn" title="Bullet list"><i class="fas fa-list-ul" style="font-size:11px;"></i></button>
+    <button type="button" id="fmtClean"  class="rpt-fmt-btn" title="Clear formatting"><i class="fas fa-remove-format" style="font-size:11px;"></i></button>
+    <div class="rpt-bar-sep"></div>
 
-                <!-- Report Form -->
-                <div class="report-form-container">
-                    <div class="form-header">
-                        <h4 class="text-white mb-0">
-                            <i class="fas fa-file-medical me-2"></i>Radiology Report
-                        </h4>
-                        <div class="text-white-50 small mt-1">Status: {{ study.status|upper }}</div>
-                    </div>
-                    
-                    <div class="form-body">
-                        <form id="reportForm" method="post">
-                            {% csrf_token %}
+    <!-- AI -->
+    <button type="button" class="rpt-action-btn ai" onclick="generateAIFindings()" title="Generate AI preliminary findings">
+        <i class="fas fa-brain"></i> AI Draft
+    </button>
+    <span id="aiStatus" class="rpt-ai-status"></span>
+    <div class="rpt-bar-sep"></div>
 
-                            <!-- Report Template Selector -->
-                            {% if report_templates %}
-                            <div class="mb-3 p-3 border rounded" style="background:rgba(0,212,255,0.05);border-color:var(--accent-color) !important;">
-                                <label class="form-label fw-bold"><i class="fas fa-file-alt"></i> Load Report Template</label>
-                                <div class="d-flex gap-2 flex-wrap">
-                                    {% for tmpl in report_templates %}
-                                    <button type="button" class="btn-sm btn-outline-info" onclick="loadTemplate('{{ tmpl.id }}')">
-                                        {{ tmpl.name }}
-                                    </button>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                            <script>
-                            async function loadTemplate(templateId) {
-                                if (!confirm('Load this template? This will overwrite unsaved text.')) return;
-                                try {
-                                    const resp = await fetch('/reports/api/template/' + templateId + '/');
-                                    const data = await resp.json();
-                                    if (data.clinical_history) document.getElementById('id_clinical_history').value = data.clinical_history;
-                                    if (data.technique) document.getElementById('id_technique').value = data.technique;
-                                    if (data.findings) document.getElementById('id_findings').value = data.findings;
-                                    if (data.impression) document.getElementById('id_impression').value = data.impression;
-                                    if (data.recommendations) document.getElementById('id_recommendations').value = data.recommendations;
-                                } catch(e) { alert('Failed to load template'); }
-                            }
-                            </script>
-                            {% endif %}
-                            
-                            <!-- Status Control -->
-                            <div class="status-controls">
-                                <label for="reportStatus" class="form-label text-light">Report Status:</label>
-                                <select id="reportStatus" name="status" class="status-select">
-                                    <option value="draft" {% if report.status == 'draft' %}selected{% endif %}>Draft</option>
-                                    <option value="preliminary" {% if report.status == 'preliminary' %}selected{% endif %}>Preliminary</option>
-                                    <option value="final" {% if report.status == 'final' %}selected{% endif %}>Final</option>
-                                    <option value="amended" {% if report and report.status == 'amended' %}selected{% endif %}>Amended</option>
-                                    <option value="cancelled" {% if report and report.status == 'cancelled' %}selected{% endif %}>Cancelled</option>
-                                </select>
-                            </div>
-
-                            <!-- Clinical History -->
-                            <div class="form-section">
-                                <h5><i class="fas fa-history me-2"></i>Clinical History</h5>
-                                <div class="macro-buttons">
-                                    {% if macros %}
-                                        {% for macro in macros %}{% if macro.section == 'clinical_history' or macro.section == 'clinicalHistory' %}
-                                        <button type="button" class="macro-btn" onclick="insertMacro('id_clinical_history', '{{ macro.text|escapejs }}')" title="{{ macro.name }}">{{ macro.name }}</button>
-                                        {% endif %}{% endfor %}
-                                    {% endif %}
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_clinical_history', 'No significant clinical history.')">No History</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_clinical_history', 'Patient presents with...')">Presenting Complaint</button>
-                                </div>
-                                <textarea id="id_clinical_history" name="clinical_history" class="form-textarea" placeholder="Enter clinical history and indication for study...">{{ report.clinical_history|default:study.clinical_info }}</textarea>
-                            </div>
-
-                            <!-- Technique -->
-                            <div class="form-section">
-                                <h5><i class="fas fa-cogs me-2"></i>Technique</h5>
-                                <div class="macro-buttons">
-                                    {% if macros %}
-                                        {% for macro in macros %}{% if macro.section == 'technique' %}
-                                        <button type="button" class="macro-btn" onclick="insertMacro('id_technique', '{{ macro.text|escapejs }}')" title="{{ macro.name }}">{{ macro.name }}</button>
-                                        {% endif %}{% endfor %}
-                                    {% endif %}
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_technique', 'Standard protocol imaging performed.')">Standard Protocol</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_technique', 'Contrast-enhanced imaging performed.')">With Contrast</button>
-                                </div>
-                                <textarea id="id_technique" name="technique" class="form-textarea" placeholder="Describe imaging technique and protocols used...">{{ report.technique|default:"" }}</textarea>
-                            </div>
-
-                            <!-- Comparison -->
-                            <div class="form-section">
-                                <h5><i class="fas fa-exchange-alt me-2"></i>Comparison</h5>
-                                <div class="macro-buttons">
-                                    {% if macros %}
-                                        {% for macro in macros %}{% if macro.section == 'comparison' %}
-                                        <button type="button" class="macro-btn" onclick="insertMacro('id_comparison', '{{ macro.text|escapejs }}')" title="{{ macro.name }}">{{ macro.name }}</button>
-                                        {% endif %}{% endfor %}
-                                    {% endif %}
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_comparison', 'No prior studies available for comparison.')">No Priors</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_comparison', 'Compared to prior study dated...')">Prior Study</button>
-                                </div>
-                                <textarea id="id_comparison" name="comparison" class="form-textarea" placeholder="Comparison with prior studies...">{{ report.comparison|default:"" }}</textarea>
-                            </div>
-
-                            <!-- Findings -->
-                            <div class="form-section">
-                                <h5><i class="fas fa-search me-2"></i>Findings</h5>
-                                <div class="macro-buttons">
-                                    {% if macros %}
-                                        {% for macro in macros %}{% if macro.section == 'findings' %}
-                                        <button type="button" class="macro-btn" onclick="insertMacro('id_findings', '{{ macro.text|escapejs }}')" title="{{ macro.name }}">{{ macro.name }}</button>
-                                        {% endif %}{% endfor %}
-                                    {% endif %}
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_findings', 'Study is within normal limits.')">Normal Study</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_findings', 'No acute findings.')">No Acute Findings</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_findings', 'Findings consistent with...')">Abnormal Finding</button>
-                                </div>
-                                <textarea id="id_findings" name="findings" class="form-textarea" placeholder="Detailed description of findings..." rows="8">{{ report.findings|default:"" }}</textarea>
-                            </div>
-
-                            <!-- Impression -->
-                            <div class="form-section">
-                                <h5><i class="fas fa-bullseye me-2"></i>Impression</h5>
-                                <div class="macro-buttons">
-                                    {% if macros %}
-                                        {% for macro in macros %}{% if macro.section == 'impression' %}
-                                        <button type="button" class="macro-btn" onclick="insertMacro('id_impression', '{{ macro.text|escapejs }}')" title="{{ macro.name }}">{{ macro.name }}</button>
-                                        {% endif %}{% endfor %}
-                                    {% endif %}
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_impression', 'Normal study.')">Normal</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_impression', 'No significant abnormality.')">No Abnormality</button>
-                                </div>
-                                <textarea id="id_impression" name="impression" class="form-textarea" placeholder="Clinical impression and diagnosis...">{{ report.impression|default:"" }}</textarea>
-                            </div>
-
-                            <!-- Recommendations -->
-                            <div class="form-section">
-                                <h5><i class="fas fa-clipboard-list me-2"></i>Recommendations</h5>
-                                <div class="macro-buttons">
-                                    {% if macros %}
-                                        {% for macro in macros %}{% if macro.section == 'recommendations' %}
-                                        <button type="button" class="macro-btn" onclick="insertMacro('id_recommendations', '{{ macro.text|escapejs }}')" title="{{ macro.name }}">{{ macro.name }}</button>
-                                        {% endif %}{% endfor %}
-                                    {% endif %}
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_recommendations', 'No further imaging required.')">No Follow-up</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_recommendations', 'Follow-up imaging recommended.')">Follow-up</button>
-                                    <button type="button" class="macro-btn" onclick="insertMacro('id_recommendations', 'Clinical correlation recommended.')">Clinical Correlation</button>
-                                </div>
-                                <textarea id="id_recommendations" name="recommendations" class="form-textarea" placeholder="Recommendations for follow-up or additional studies...">{{ report.recommendations|default:"" }}</textarea>
-                            </div>
-
-                            <!-- Digital signature for final reports -->
-                            <div id="signatureSection" class="mb-3" style="display:none;">
-                                <label class="form-label fw-bold"><i class="fas fa-signature"></i> Electronic Signature</label>
-                                <canvas id="signatureCanvas" style="border:1px solid #404040;border-radius:4px;background:#fff;cursor:crosshair;display:block;width:100%;height:100px;"></canvas>
-                                <div class="mt-1 d-flex gap-2">
-                                    <button type="button" onclick="clearSignature()" class="btn-sm btn-control"><i class="fas fa-eraser"></i> Clear</button>
-                                    <button type="button" onclick="confirmSignature()" class="btn-sm btn-control reset"><i class="fas fa-check"></i> Apply Signature</button>
-                                </div>
-                                <input type="hidden" name="digital_signature" id="digitalSignatureInput">
-                            </div>
-
-                            <!-- Action Buttons -->
-                            <div class="action-buttons">
-                                <button type="button" class="btn-control" onclick="previewReport()">
-                                    <i class="fas fa-eye me-2"></i>Preview
-                                </button>
-                                <button type="button" class="btn-control" onclick="exportDicomSR()">
-                                    <i class="fas fa-file-medical me-2"></i>Export DICOM SR
-                                </button>
-                                <a class="btn-control" href="{% url 'reports:print_report' study.id %}" target="_blank">
-                                    <i class="fas fa-print me-2"></i>Print/Letterhead View
-                                </a>
-                                <button type="button" class="btn-control" onclick="exportPDF()">
-                                    <i class="fas fa-file-pdf me-2"></i>Export PDF
-                                </button>
-                                <button type="button" class="btn-control" onclick="exportDOCX()">
-                                    <i class="fas fa-file-word me-2"></i>Export Word
-                                </button>
-                                <button type="submit" name="action" value="save" class="btn btn-save">
-                                    <i class="fas fa-save me-2"></i>Save Draft
-                                </button>
-                                <span id="autoSaveStatus" style="font-size:11px;color:#666;margin-left:8px;"></span>
-                                <button type="submit" name="action" value="submit" onclick="document.getElementById('reportStatus').value='final'" class="btn btn-medical">
-                                    <i class="fas fa-paper-plane me-2"></i>Submit Final
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- Actions -->
+    <button type="button" class="rpt-action-btn" onclick="saveReport()" title="Save as draft">
+        <i class="fas fa-save"></i> Save
+    </button>
+    <span id="autoSaveStatus" class="rpt-autosave"></span>
+    <a href="{% url 'reports:print_report' study.id %}" target="_blank" class="rpt-action-btn" title="Open print/letterhead view">
+        <i class="fas fa-print"></i> Print
+    </a>
+    <button type="button" class="rpt-action-btn success" onclick="submitFinal()" title="Sign and submit final report">
+        <i class="fas fa-paper-plane"></i> Submit Final
+    </button>
 </div>
 
-<script>
-function insertMacro(fieldId, text) {
-    const textarea = document.getElementById(fieldId);
-    if (!textarea) return;
-    const currentText = textarea.value;
-    textarea.value = currentText + (currentText ? '\n\n' : '') + text;
-    textarea.focus();
-}
+<!-- ── Paper canvas ── -->
+<div class="rpt-canvas">
+  <div class="rpt-paper">
 
-// Digital signature pad
-document.addEventListener('DOMContentLoaded', function() {
-    const submitFinalBtn = document.querySelector('button[name="action"][value="submit"]');
-    if (submitFinalBtn) {
-        submitFinalBtn.addEventListener('click', function(e) {
-            const statusEl = document.getElementById('reportStatus');
-            if (statusEl && statusEl.value === 'final') {
-                e.preventDefault();
-                const sigSection = document.getElementById('signatureSection');
-                if (sigSection) {
-                    sigSection.style.display = 'block';
-                    sigSection.scrollIntoView({behavior: 'smooth'});
-                    initSignaturePad();
-                }
-            }
-        });
-    }
-});
+    <!-- Letterhead (read-only display) -->
+    <div class="rpt-lh">
+      <div>
+        {% if letterhead_b64 %}
+          <img class="rpt-lh-logo" src="{{ letterhead_b64 }}" alt="">
+        {% else %}
+          <div style="width:1px;"></div>
+        {% endif %}
+      </div>
+      <div class="rpt-lh-text">
+        <h2>{{ facility.name|default:"Medical Facility" }}</h2>
+        {% if facility.address %}<p>{{ facility.address }}</p>{% endif %}
+      </div>
+    </div>
 
-let sigCtx, sigDrawing = false;
-function initSignaturePad() {
-    const canvas = document.getElementById('signatureCanvas');
-    if (!canvas || canvas._initialized) return;
-    canvas._initialized = true;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width || 400;
-    canvas.height = 100;
-    sigCtx = canvas.getContext('2d');
-    sigCtx.strokeStyle = '#000';
-    sigCtx.lineWidth = 2;
-    sigCtx.lineCap = 'round';
-    canvas.addEventListener('mousedown', function(e) { sigDrawing = true; sigCtx.beginPath(); sigCtx.moveTo(e.offsetX, e.offsetY); });
-    canvas.addEventListener('mousemove', function(e) { if (!sigDrawing) return; sigCtx.lineTo(e.offsetX, e.offsetY); sigCtx.stroke(); });
-    canvas.addEventListener('mouseup', function() { sigDrawing = false; });
-    canvas.addEventListener('mouseleave', function() { sigDrawing = false; });
-}
-function clearSignature() {
-    const canvas = document.getElementById('signatureCanvas');
-    if (sigCtx) sigCtx.clearRect(0, 0, canvas.width, canvas.height);
-}
-function confirmSignature() {
-    const canvas = document.getElementById('signatureCanvas');
-    const data = canvas.toDataURL('image/png').split(',')[1];
-    document.getElementById('digitalSignatureInput').value = data;
-    const form = canvas.closest('form');
-    if (form) {
-        const action = document.createElement('input');
-        action.type = 'hidden'; action.name = 'action'; action.value = 'submit';
-        form.appendChild(action);
-        form.submit();
-    }
-}
+    <div class="rpt-title">Radiology Report</div>
 
-function _setAiAssistStatus(msg) {
-    const el = document.getElementById('aiAssistStatus');
-    if (el) el.textContent = msg || '';
-}
+    <!-- Patient bar (read-only) -->
+    <div class="rpt-patient">
+      <div>
+        <span class="rpt-pf-label">Patient</span>
+        <span class="rpt-pf-value">{{ study.patient.full_name|default:"—" }}</span>
+      </div>
+      <div>
+        <span class="rpt-pf-label">Patient ID</span>
+        <span class="rpt-pf-value">{{ study.patient.patient_id|default:"—" }}</span>
+      </div>
+      <div>
+        <span class="rpt-pf-label">DOB</span>
+        <span class="rpt-pf-value">{{ study.patient.date_of_birth|date:"d M Y"|default:"—" }}</span>
+      </div>
+      <div>
+        <span class="rpt-pf-label">Accession</span>
+        <span class="rpt-pf-value">{{ study.accession_number|default:"—" }}</span>
+      </div>
+      <div>
+        <span class="rpt-pf-label">Study Date</span>
+        <span class="rpt-pf-value">{{ study.study_date|date:"d M Y"|default:"—" }}</span>
+      </div>
+      <div>
+        <span class="rpt-pf-label">Modality / Exam</span>
+        <span class="rpt-pf-value">{{ study.modality.code|default:"—" }}{% if study.study_description %} — {{ study.study_description }}{% endif %}</span>
+      </div>
+      <div>
+        <span class="rpt-pf-label">Referring Physician</span>
+        <span class="rpt-pf-value">{{ study.referring_physician|default:"—" }}</span>
+      </div>
+    </div>
 
-function _renderAiRefs(payload) {
-    const wrap = document.getElementById('aiAssistRefs');
-    const el = document.getElementById('aiAssistRefsList');
-    if (!wrap || !el) return;
+    <!-- ── Editable document body ── -->
+    <div id="rptEditorWrap">
+      <div id="rptEditor"></div>
+    </div>
 
-    const refSuggestions = (payload && payload.reference_suggestions) || [];
-    const onlineRefs = (payload && payload.online_references) || [];
+    <!-- Signature block (prefilled) -->
+    <div class="rpt-sig">
+      <div class="rpt-sig-label">Reporting Radiologist</div>
+      <div class="rpt-sig-name">{{ request.user.get_full_name|default:request.user.username }}</div>
+      {% if request.user.license_number %}
+      <div class="rpt-sig-detail">License: {{ request.user.license_number }}</div>
+      {% endif %}
+      <div class="rpt-sig-detail" id="sigDateDisplay">
+        {% if report and report.signed_date %}Signed: {{ report.signed_date|date:"d M Y H:i" }}{% else %}Date: <span id="sigNow"></span>{% endif %}
+      </div>
+      {% if report and report.digital_signature %}
+        <div class="rpt-sig-canvas-wrap">
+          <img src="data:image/png;base64,{{ report.digital_signature }}" alt="Signature" style="max-height:60px;">
+        </div>
+      {% else %}
+        <div class="rpt-sig-canvas-wrap" id="sigPadWrap" style="display:none;">
+          <canvas id="sigCanvas" class="rpt-sig-canvas"></canvas>
+          <div style="margin-top:4px;display:flex;gap:8px;">
+            <button type="button" onclick="clearSig()" class="rpt-fmt-btn" style="font-size:11px;"><i class="fas fa-eraser"></i> Clear</button>
+            <button type="button" onclick="applySig()" class="rpt-fmt-btn" style="font-size:11px;color:#00c853;"><i class="fas fa-check"></i> Apply</button>
+          </div>
+        </div>
+      {% endif %}
+    </div>
 
-    const lines = [];
-    if (Array.isArray(refSuggestions) && refSuggestions.length) {
-        lines.push('Selected references:');
-        for (const r of refSuggestions.slice(0, 8)) {
-            if (r && typeof r === 'object') {
-                const t = (r.title || '').toString().trim();
-                const topic = (r.topic || '').toString().trim();
-                if (t && topic) lines.push(`- ${t} — ${topic}`);
-                else if (t) lines.push(`- ${t}`);
-            } else if (typeof r === 'string' && r.trim()) {
-                lines.push(`- ${r.trim()}`);
-            }
-        }
-        lines.push('');
-    }
-    if (Array.isArray(onlineRefs) && onlineRefs.length) {
-        lines.push('Online references:');
-        for (const r of onlineRefs.slice(0, 6)) {
-            if (r && typeof r === 'object') {
-                const t = (r.title || '').toString().trim();
-                const url = (r.url || '').toString().trim();
-                const src = (r.source || '').toString().trim();
-                if (t && url) lines.push(`- ${t}${src ? ` (${src})` : ''}: ${url}`);
-            }
-        }
-    }
+    <!-- Hidden fields consumed by the view -->
+    <input type="hidden" name="report_html" id="reportHtmlField">
+    <!-- Keep per-section names the view already handles, populated on submit -->
+    <textarea name="clinical_history" id="hf_clinical_history" style="display:none;"></textarea>
+    <textarea name="technique"        id="hf_technique"        style="display:none;"></textarea>
+    <textarea name="comparison"       id="hf_comparison"       style="display:none;"></textarea>
+    <textarea name="findings"         id="hf_findings"         style="display:none;"></textarea>
+    <textarea name="impression"       id="hf_impression"       style="display:none;"></textarea>
+    <textarea name="recommendations"  id="hf_recommendations"  style="display:none;"></textarea>
+    <input type="hidden" name="digital_signature" id="digitalSigField">
+    <input type="hidden" name="action" id="actionField" value="save">
 
-    if (!lines.length) {
-        wrap.style.display = 'none';
-        el.textContent = '';
-        return;
-    }
-    wrap.style.display = 'block';
-    el.textContent = lines.join('\n');
-}
-
-function _getCookie(name) {
-    try {
-        const v = `; ${document.cookie}`;
-        const parts = v.split(`; ${name}=`);
-        if (parts.length === 2) return parts.pop().split(';').shift();
-    } catch (_) {}
-    return '';
-}
-
-async function generateAIFindings() {
-    const studyId = {{ study.id }};
-    try {
-        _setAiAssistStatus('Running AI full-series analysis…');
-        const fd = new FormData();
-        fd.append('max_slices', '24');
-        const r1 = await fetch(`/ai/api/study/${studyId}/analyze/`, {
-            method: 'POST',
-            headers: {
-                'X-CSRFToken': _getCookie('csrftoken'),
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-            body: fd,
-            credentials: 'same-origin',
-        });
-        const j1 = await r1.json();
-        if (!r1.ok || !j1 || j1.success === false) {
-            throw new Error((j1 && j1.error) ? j1.error : `HTTP ${r1.status}`);
-        }
-
-        _setAiAssistStatus('Generating report draft…');
-        const r2 = await fetch(`/ai/api/study/${studyId}/generate-report/`, {
-            method: 'POST',
-            headers: {
-                'X-CSRFToken': _getCookie('csrftoken'),
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-            credentials: 'same-origin',
-        });
-        const j2 = await r2.json();
-        if (!r2.ok || !j2 || j2.success === false) {
-            throw new Error((j2 && j2.error) ? j2.error : `HTTP ${r2.status}`);
-        }
-
-        const fieldMap = {
-            'id_findings': j2.findings,
-            'id_impression': j2.impression,
-            'id_recommendations': j2.recommendations,
-        };
-        Object.entries(fieldMap).forEach(([id, value]) => {
-            if (!value) return;
-            const textarea = document.getElementById(id);
-            if (textarea) textarea.value = value;
-            const quill = window._quillInstances && window._quillInstances[id];
-            if (quill) quill.root.innerHTML = value;
-        });
-
-        _renderAiRefs(j2);
-        const tri = (j2 && j2.triage) || (j1 && j1.triage) || null;
-        if (tri && tri.triage_level) {
-            _setAiAssistStatus(`AI ready. Triage: ${String(tri.triage_level).toUpperCase()} (score ${tri.triage_score ?? 'N/A'})`);
-        } else {
-            _setAiAssistStatus('AI ready.');
-        }
-    } catch (e) {
-        console.error(e);
-        _setAiAssistStatus(`AI failed: ${(e && e.message) ? e.message : 'unknown error'}`);
-        alert('AI generation failed. ' + ((e && e.message) ? e.message : ''));
-    }
-}
-
-function previewReport() {
-    const form = document.querySelector('form');
-    if (form) {
-        Object.values(window._quillInstances || {}).forEach(function(quill) {
-            const container = quill.root.closest('.ql-container');
-            if (container) {
-                const prev = container.previousElementSibling;
-                if (prev && prev.tagName === 'DIV') {
-                    const textarea = prev.nextElementSibling;
-                    if (textarea && textarea.tagName === 'TEXTAREA') {
-                        textarea.value = quill.root.innerHTML;
-                    }
-                }
-            }
-        });
-        const fields = ['id_findings', 'id_impression', 'id_recommendations'];
-        fields.forEach(function(id) {
-            const ta = document.getElementById(id);
-            const qi = window._quillInstances && window._quillInstances[id];
-            if (ta && qi) ta.value = qi.root.innerHTML;
-        });
-    }
-    window.open('{% url "reports:print_report" study.id %}', '_blank');
-}
-
-async function exportDicomSR(){
-    try {
-        const studyId = {{ study.id }};
-        const r = await fetch(`/dicom-viewer/api/study/${studyId}/export-sr/`);
-        const j = await r.json();
-        if (j && j.success && j.download_url){
-            window.open(j.download_url, '_blank');
-        } else if (j && j.error){
-            alert('SR export failed: ' + j.error);
-        }
-    } catch(e){ alert('SR export failed'); }
-}
-
-function exportPDF(){ window.open(`/reports/export/pdf/{{ study.id }}/`, '_blank'); }
-function exportDOCX(){ window.open(`/reports/export/docx/{{ study.id }}/`, '_blank'); }
-
-// Track original content to detect real changes
-const _originalContent = {};
-document.querySelectorAll('textarea[name]').forEach(function(ta) {
-    _originalContent[ta.name] = ta.value;
-});
-
-// Live word count for report sections
-document.querySelectorAll('textarea[name]').forEach(function(ta) {
-    const counter = document.createElement('small');
-    counter.style.cssText = 'color:#666;font-size:10px;';
-    counter.textContent = '0 words';
-    ta.parentNode.insertBefore(counter, ta.nextSibling);
-    ta.addEventListener('input', function() {
-        const words = ta.value.trim() ? ta.value.trim().split(/\s+/).length : 0;
-        counter.textContent = words + ' word' + (words !== 1 ? 's' : '');
-    });
-    if (ta.value.trim()) {
-        const words = ta.value.trim().split(/\s+/).length;
-        counter.textContent = words + ' word' + (words !== 1 ? 's' : '');
-    }
-});
-
-// Auto-save functionality
-function startAutoSave() {
-    let _autoSaveTimer = setInterval(async function() {
-        const form = document.getElementById('reportForm') || document.querySelector('form[action]');
-        if (!form) return;
-        try {
-            const formData = new FormData(form);
-            formData.set('action', 'save');
-            const hasChanges = Array.from(document.querySelectorAll('textarea[name]')).some(
-                ta => _originalContent && ta.value !== _originalContent[ta.name]
-            );
-            if (!hasChanges) return;
-            const resp = await fetch(form.action, {
-                method: 'POST', body: formData, credentials: 'same-origin'
-            });
-            if (resp.ok) {
-                const savedEl = document.getElementById('autoSaveStatus');
-                if (savedEl) { savedEl.textContent = 'Draft saved ' + new Date().toLocaleTimeString(); }
-            }
-        } catch(e) { /* silent */ }
-    }, 30000);
-}
-
-// Start auto-save when page loads
-document.addEventListener('DOMContentLoaded', function() {
-    startAutoSave();
-});
-
-// Only warn on beforeunload when content has actually changed since page load
-window.addEventListener('beforeunload', function(e) {
-    const hasChanges = Array.from(document.querySelectorAll('textarea[name]')).some(
-        ta => ta.value !== _originalContent[ta.name]
-    );
-    if (hasChanges) {
-        e.preventDefault();
-        e.returnValue = '';
-    }
-});
-</script>
+  </div><!-- .rpt-paper -->
+</div><!-- .rpt-canvas -->
+</form>
 {% endblock %}
 
 {% block extra_js %}
 <script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
 <script>
-// Initialize Quill rich text editors for report sections
-window._quillInstances = {};
-(function() {
-    const quillFields = [
-        {id: 'id_clinical_history', label: 'Clinical History'},
-        {id: 'id_technique', label: 'Technique'},
-        {id: 'id_comparison', label: 'Comparison'},
-        {id: 'id_findings', label: 'Findings'},
-        {id: 'id_impression', label: 'Impression'},
-        {id: 'id_recommendations', label: 'Recommendations'},
+// ── Quill setup ────────────────────────────────────────────────────────────
+const quill = new Quill('#rptEditor', {
+    theme: 'snow',
+    modules: {
+        toolbar: false,   // custom toolbar in rpt-bar
+        keyboard: {
+            bindings: {
+                bold:      { key: 'B', shortKey: true, handler() { quill.format('bold',      !quill.getFormat().bold);      _syncFmt(); } },
+                italic:    { key: 'I', shortKey: true, handler() { quill.format('italic',    !quill.getFormat().italic);    _syncFmt(); } },
+                underline: { key: 'U', shortKey: true, handler() { quill.format('underline', !quill.getFormat().underline); _syncFmt(); } },
+            }
+        }
+    },
+    placeholder: 'Begin your report here…',
+});
+
+// Sync format button active states
+function _syncFmt() {
+    const fmt = quill.getFormat();
+    document.getElementById('fmtBold').classList.toggle('active',  !!fmt.bold);
+    document.getElementById('fmtItalic').classList.toggle('active', !!fmt.italic);
+    document.getElementById('fmtUnder').classList.toggle('active',  !!fmt.underline);
+    document.getElementById('fmtH2').classList.toggle('active',     fmt.header === 2);
+}
+quill.on('selection-change', _syncFmt);
+
+// Toolbar button wiring
+document.getElementById('fmtBold').addEventListener('click',   () => { quill.format('bold',      !quill.getFormat().bold);      _syncFmt(); });
+document.getElementById('fmtItalic').addEventListener('click', () => { quill.format('italic',    !quill.getFormat().italic);    _syncFmt(); });
+document.getElementById('fmtUnder').addEventListener('click',  () => { quill.format('underline', !quill.getFormat().underline); _syncFmt(); });
+document.getElementById('fmtH2').addEventListener('click',     () => {
+    const cur = quill.getFormat().header;
+    quill.format('header', cur === 2 ? false : 2);
+    _syncFmt();
+});
+document.getElementById('fmtOL').addEventListener('click',    () => { quill.format('list', quill.getFormat().list === 'ordered' ? false : 'ordered'); });
+document.getElementById('fmtUL').addEventListener('click',    () => { quill.format('list', quill.getFormat().list === 'bullet'  ? false : 'bullet');  });
+document.getElementById('fmtClean').addEventListener('click', () => {
+    const range = quill.getSelection();
+    if (range) quill.removeFormat(range.index, range.length);
+});
+
+// ── Pre-populate editor from existing report data ─────────────────────────
+(function populateEditor() {
+    // Data embedded safely by Django template
+    const sections = [
+        { label: 'Clinical Information', value: "{{ report.clinical_history|default:study.clinical_info|default:''|escapejs }}" },
+        { label: 'Technique',            value: "{{ report.technique|default:''|escapejs }}" },
+        { label: 'Comparison',           value: "{{ report.comparison|default:''|escapejs }}" },
+        { label: 'Findings',             value: "{{ report.findings|default:''|escapejs }}" },
+        { label: 'Impression',           value: "{{ report.impression|default:''|escapejs }}" },
+        { label: 'Recommendations',      value: "{{ report.recommendations|default:''|escapejs }}" },
     ];
 
-    quillFields.forEach(function(field) {
-        const textarea = document.getElementById(field.id);
-        if (!textarea) return;
+    let html = '';
+    sections.forEach(function(s) {
+        html += `<h2>${s.label}</h2>`;
+        if (s.value && s.value.trim()) {
+            // Preserve existing HTML or plain text
+            html += `<p>${s.value.replace(/\n/g, '</p><p>')}</p>`;
+        } else {
+            html += '<p><br></p>';
+        }
+    });
+    quill.root.innerHTML = html;
+})();
 
-        const container = document.createElement('div');
-        container.style.cssText = 'background:#1a1a1a;border:1px solid #404040;border-radius:4px;margin-bottom:4px;';
-        textarea.parentNode.insertBefore(container, textarea);
-        textarea.style.display = 'none';
+// ── Section extraction on submit ──────────────────────────────────────────
+const _SECTION_MAP = {
+    'clinical information': 'hf_clinical_history',
+    'technique':            'hf_technique',
+    'comparison':           'hf_comparison',
+    'findings':             'hf_findings',
+    'impression':           'hf_impression',
+    'recommendations':      'hf_recommendations',
+};
 
-        const quill = new Quill(container, {
-            theme: 'snow',
-            modules: {
-                toolbar: [
-                    ['bold', 'italic', 'underline'],
-                    [{'list': 'ordered'}, {'list': 'bullet'}],
-                    ['clean']
-                ]
+function _extractSections() {
+    // Walk child nodes of editor; bucket content between h2 headings
+    const children = Array.from(quill.root.children);
+    let currentKey = null;
+    const buckets = {};
+
+    children.forEach(function(node) {
+        if (node.tagName === 'H2') {
+            const text = (node.textContent || '').trim().toLowerCase();
+            currentKey = Object.keys(_SECTION_MAP).find(k => text.includes(k)) || null;
+        } else {
+            if (currentKey) {
+                buckets[currentKey] = (buckets[currentKey] || '') + (node.outerHTML || '');
+            }
+        }
+    });
+
+    Object.entries(_SECTION_MAP).forEach(function([key, fieldId]) {
+        const el = document.getElementById(fieldId);
+        if (el) el.value = buckets[key] || '';
+    });
+
+    // Also save full HTML
+    const htmlField = document.getElementById('reportHtmlField');
+    if (htmlField) htmlField.value = quill.root.innerHTML;
+}
+
+// ── Save / Submit ─────────────────────────────────────────────────────────
+function _getCookie(name) {
+    try { const v = `; ${document.cookie}`; const p = v.split(`; ${name}=`); if (p.length === 2) return p.pop().split(';').shift(); } catch (_) {} return '';
+}
+
+function saveReport() {
+    _extractSections();
+    document.getElementById('actionField').value = 'save';
+    document.getElementById('reportForm').submit();
+}
+
+function submitFinal() {
+    document.getElementById('statusField').value = 'final';
+    // Show signature pad if not already signed
+    const padWrap = document.getElementById('sigPadWrap');
+    if (padWrap && padWrap.style.display === 'none') {
+        padWrap.style.display = 'block';
+        _initSigPad();
+        padWrap.scrollIntoView({ behavior: 'smooth' });
+        return;
+    }
+    _extractSections();
+    document.getElementById('actionField').value = 'submit';
+    document.getElementById('reportForm').submit();
+}
+
+// ── Signature pad ─────────────────────────────────────────────────────────
+let _sigCtx = null, _sigDrawing = false;
+function _initSigPad() {
+    const canvas = document.getElementById('sigCanvas');
+    if (!canvas || canvas._init) return;
+    canvas._init = true;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width || 360;
+    canvas.height = 72;
+    _sigCtx = canvas.getContext('2d');
+    _sigCtx.strokeStyle = '#111';
+    _sigCtx.lineWidth = 1.8;
+    _sigCtx.lineCap = 'round';
+    canvas.addEventListener('mousedown',  e => { _sigDrawing = true; _sigCtx.beginPath(); _sigCtx.moveTo(e.offsetX, e.offsetY); });
+    canvas.addEventListener('mousemove',  e => { if (!_sigDrawing) return; _sigCtx.lineTo(e.offsetX, e.offsetY); _sigCtx.stroke(); });
+    canvas.addEventListener('mouseup',    () => { _sigDrawing = false; });
+    canvas.addEventListener('mouseleave', () => { _sigDrawing = false; });
+}
+function clearSig() {
+    const c = document.getElementById('sigCanvas');
+    if (_sigCtx) _sigCtx.clearRect(0, 0, c.width, c.height);
+}
+function applySig() {
+    const c = document.getElementById('sigCanvas');
+    document.getElementById('digitalSigField').value = c.toDataURL('image/png').split(',')[1];
+    _extractSections();
+    document.getElementById('actionField').value = 'submit';
+    document.getElementById('reportForm').submit();
+}
+
+// Current date display
+(function() {
+    const el = document.getElementById('sigNow');
+    if (el) el.textContent = new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+})();
+
+// ── Auto-save every 40 s ──────────────────────────────────────────────────
+let _origHtml = quill.root.innerHTML;
+setInterval(async function() {
+    const html = quill.root.innerHTML;
+    if (html === _origHtml) return;
+    _extractSections();
+    const form = document.getElementById('reportForm');
+    try {
+        const fd = new FormData(form);
+        fd.set('action', 'save');
+        const resp = await fetch(form.action || window.location.href, {
+            method: 'POST', body: fd, credentials: 'same-origin',
+        });
+        if (resp.ok) {
+            const el = document.getElementById('autoSaveStatus');
+            if (el) el.textContent = 'Saved ' + new Date().toLocaleTimeString();
+            _origHtml = html;
+        }
+    } catch (_) {}
+}, 40000);
+
+// Warn on close if changed
+window.addEventListener('beforeunload', function(e) {
+    if (quill.root.innerHTML !== _origHtml) { e.preventDefault(); e.returnValue = ''; }
+});
+
+// ── AI findings generation ────────────────────────────────────────────────
+function _setAiStatus(msg, color) {
+    const el = document.getElementById('aiStatus');
+    if (el) { el.textContent = msg || ''; el.style.color = color || ''; }
+}
+
+async function _safeJson(resp) {
+    const text = await resp.text();
+    if (!text || !text.trim()) throw new Error(`Empty response (HTTP ${resp.status}) — check server logs`);
+    try { return JSON.parse(text); }
+    catch(_) { throw new Error(`Server returned non-JSON (HTTP ${resp.status}): ${text.slice(0, 120)}`); }
+}
+
+async function generateAIFindings() {
+    const studyId = {{ study.id }};
+    try {
+        _setAiStatus('Analysing…', '#00d4ff');
+        const r1 = await fetch(`/ai/api/study/${studyId}/analyze/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': _getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
+            body: new FormData(),
+            credentials: 'same-origin',
+        });
+        const j1 = await _safeJson(r1);
+        if (!r1.ok || j1.success === false) throw new Error(j1.error || `HTTP ${r1.status}`);
+
+        _setAiStatus('Generating draft…', '#00d4ff');
+        // Use the LLM report endpoint — returns JSON always, no redirect on permission check.
+        // Pass analysis metadata from step 1 so the LLM has context even if no stored analysis exists.
+        const r2 = await fetch(`/ai/api/study/${studyId}/llm-report/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': _getCookie('csrftoken'),
+                'X-Requested-With': 'XMLHttpRequest',
             },
-            placeholder: 'Enter ' + field.label + '...',
+            body: JSON.stringify({
+                findings_summary: (j1.report_text || ''),
+                abnormalities: (j1.measurements && j1.measurements.abnormalities) || [],
+                triage_level: (j1.triage && j1.triage.triage_level) || '',
+                confidence: (j1.measurements && j1.measurements.confidence) || 0,
+            }),
+            credentials: 'same-origin',
+        });
+        const j2 = await _safeJson(r2);
+        if (!r2.ok || j2.success === false) throw new Error(j2.error || `HTTP ${r2.status}`);
+
+        // Inject AI content into corresponding sections
+        const aiMap = {
+            'findings':        j2.findings,
+            'impression':      j2.impression,
+            'recommendations': j2.recommendations,
+        };
+        // Walk editor children, find section headings, replace content after each
+        const children = Array.from(quill.root.children);
+        let activeSec = null;
+        children.forEach(function(node) {
+            if (node.tagName === 'H2') {
+                const txt = (node.textContent || '').trim().toLowerCase();
+                activeSec = Object.keys(aiMap).find(k => txt.includes(k)) || null;
+            } else if (activeSec && aiMap[activeSec]) {
+                node.innerHTML = aiMap[activeSec].replace(/\n/g, '<br>');
+                aiMap[activeSec] = null; // only fill first paragraph block
+            }
         });
 
-        window._quillInstances[field.id] = quill;
+        const tri = (j2 && j2.triage) || (j1 && j1.triage);
+        _setAiStatus(tri && tri.triage_level ? `AI ready · Triage: ${String(tri.triage_level).toUpperCase()}` : 'AI ready', '#00c853');
+    } catch (e) {
+        _setAiStatus('AI failed: ' + (e.message || 'unknown error'), '#ff4444');
+    }
+}
 
-        if (textarea.value) {
-            quill.root.innerHTML = textarea.value;
-        }
-
-        const form = textarea.closest('form');
-        if (form) {
-            form.addEventListener('submit', function() {
-                textarea.value = quill.root.innerHTML;
-            }, {capture: true});
-        }
-
-        const toolbar = container.querySelector('.ql-toolbar');
-        const qlContainer = container.querySelector('.ql-container');
-        if (toolbar) toolbar.style.cssText = 'border-color:#404040;background:#252525;';
-        if (qlContainer) qlContainer.style.cssText = 'border-color:#404040;color:#fff;font-size:13px;min-height:80px;';
-    });
-})();
+// Template loader support (optional, if backend sends report_templates)
+{% if report_templates %}
+async function loadTemplate(templateId) {
+    if (!confirm('Load this template? Unsaved changes will be lost.')) return;
+    try {
+        const resp = await fetch('/reports/api/template/' + templateId + '/');
+        const data = await resp.json();
+        // Merge into editor sections
+        const fieldMap = { findings: data.findings, impression: data.impression, recommendations: data.recommendations };
+        const children = Array.from(quill.root.children);
+        let activeSec = null;
+        children.forEach(function(node) {
+            if (node.tagName === 'H2') {
+                const txt = (node.textContent || '').trim().toLowerCase();
+                activeSec = Object.keys(fieldMap).find(k => txt.includes(k)) || null;
+            } else if (activeSec && fieldMap[activeSec]) {
+                node.innerHTML = fieldMap[activeSec].replace(/\n/g, '<br>');
+                fieldMap[activeSec] = null;
+            }
+        });
+    } catch(e) { alert('Failed to load template'); }
+}
+{% endif %}
 </script>
 {% endblock %}

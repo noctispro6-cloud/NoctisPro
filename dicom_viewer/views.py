@@ -5369,8 +5369,8 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
             except Exception:
                 continue
 
-        # If we couldn't decode enough slices, fail fast (prevents "blank" MPR views).
-        if out_i < 2:
+        # Require at least 1 decoded slice; single-image series will render as axial-only.
+        if out_i < 1:
             raise ValueError('Could not decode enough images for MPR')
         # If some slices failed to decode, trim unused tail so counts match what we can render.
         if out_i != dz:

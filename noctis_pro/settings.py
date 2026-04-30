@@ -247,10 +247,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    # SubscriptionRequiredMiddleware is defined in noctis_pro/middleware.py but NOT activated here.
-    # To enable subscription enforcement for facility users, add the line below after
-    # AuthenticationMiddleware and verify /subscription-expired/ URL + template are in place:
-    # 'noctis_pro.middleware.SubscriptionRequiredMiddleware',
+    'noctis_pro.middleware.SubscriptionRequiredMiddleware',
 ]
 
 ROOT_URLCONF = 'noctis_pro.urls'

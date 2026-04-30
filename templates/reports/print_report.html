@@ -147,11 +147,14 @@
         .section-body {
             font-size: 10.5pt;
             color: #222;
-            white-space: pre-wrap;
             font-family: inherit;
             margin: 0;
             padding: 0;
+            line-height: 1.5;
         }
+        .section-body p { margin: 0 0 4pt; }
+        .section-body ul, .section-body ol { padding-left: 16pt; margin: 2pt 0 4pt; }
+        .section-body h2 { font-size: 10pt; font-weight: 700; text-transform: uppercase; color: #003d7a; margin: 8pt 0 3pt; }
 
         /* ── Signature ── */
         .signature-block {
@@ -326,38 +329,40 @@
     {% if report.clinical_history or study.clinical_info %}
     <div class="section">
         <div class="section-heading">Clinical Information</div>
-        <pre class="section-body">{{ report.clinical_history|default:study.clinical_info|default:"—" }}</pre>
+        <div class="section-body">{{ report.clinical_history|default:study.clinical_info|safe }}</div>
     </div>
     {% endif %}
 
     {% if report.technique %}
     <div class="section">
         <div class="section-heading">Technique</div>
-        <pre class="section-body">{{ report.technique|default:"—" }}</pre>
+        <div class="section-body">{{ report.technique|safe }}</div>
     </div>
     {% endif %}
 
     {% if report.comparison %}
     <div class="section">
         <div class="section-heading">Comparison</div>
-        <pre class="section-body">{{ report.comparison|default:"—" }}</pre>
+        <div class="section-body">{{ report.comparison|safe }}</div>
     </div>
     {% endif %}
 
     <div class="section">
         <div class="section-heading">Findings</div>
-        <pre class="section-body">{{ report.findings|default:"—" }}</pre>
+        <div class="section-body">{{ report.findings|default:"—"|safe }}</div>
     </div>
 
+    {% if report.impression %}
     <div class="section">
         <div class="section-heading">Impression</div>
-        <pre class="section-body">{{ report.impression|default:"—" }}</pre>
+        <div class="section-body">{{ report.impression|safe }}</div>
     </div>
+    {% endif %}
 
     {% if report.recommendations %}
     <div class="section">
         <div class="section-heading">Recommendations</div>
-        <pre class="section-body">{{ report.recommendations|default:"—" }}</pre>
+        <div class="section-body">{{ report.recommendations|safe }}</div>
     </div>
     {% endif %}
 

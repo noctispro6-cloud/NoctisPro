@@ -6,6 +6,7 @@ from django.db import transaction
 from django.db.models import Q, Count
 from django.core.paginator import Paginator
 from django.utils import timezone
+from django.urls import reverse
 from accounts.models import User, Facility
 from .utils import get_user_caps
 from worklist.models import Study, Modality
@@ -547,16 +548,15 @@ def user_create(request):
                 creation_time = round((time.time() - creation_start_time) * 1000, 1)
                 facility_info = f" - Assigned to {user.facility.name}" if user.facility else ""
                 license_info = f" - License: {user.license_number}" if user.license_number else ""
-                
+                login_url = reverse('accounts:login') if user.is_admin() else reverse('accounts:portal_login')
+
                 logger.info(f"Professional user created successfully: {user.username} in {creation_time}ms")
-                
+
                 messages.success(
-                    request, 
-                    f'🏥 Professional medical staff created successfully!\n'
-                    f'👤 User: {user.username} ({user.get_full_name()})\n'
-                    f'🏷️ Role: {user.get_role_display()}{facility_info}{license_info}\n'
-                    f'✅ Status: Active & Verified\n'
-                    f'⚡ Processing: {creation_time}ms (Medical Grade Excellence)'
+                    request,
+                    f'User {user.username} ({user.get_role_display()}) created successfully.'
+                    f'{facility_info}{license_info}'
+                    f' Login URL: {login_url}'
                 )
                 
                 return redirect('admin_panel:user_management')

@@ -5,6 +5,8 @@ from django.contrib import messages
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
+from django.utils.safestring import mark_safe
+from django.urls import reverse
 from django.contrib.auth.forms import AuthenticationForm
 from django.conf import settings
 from .models import User, UserSession, Facility
@@ -162,8 +164,13 @@ def login_view(request):
         # Only admins can use the main /login/ endpoint.
         # Radiologists and facility users must use /portal/login/
         if not user.is_admin():
+            portal_url = reverse('accounts:portal_login')
             list(messages.get_messages(request))
-            messages.error(request, 'This login page is for administrators only. Please use the staff portal at /portal/login/')
+            messages.error(request, mark_safe(
+                'This login page is for administrators only. '
+                f'Please use the <a href="{portal_url}" '
+                'style="color:inherit;text-decoration:underline;">staff portal login</a>.'
+            ))
             return render(request, 'accounts/login.html', {'hide_navbar': True})
 
         # Allow superusers/staff to bypass verification to prevent lockout on fresh setups

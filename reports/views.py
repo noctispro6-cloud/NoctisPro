@@ -59,10 +59,9 @@ def _data_url_from_png(png_bytes: bytes) -> str:
 
 @login_required
 def report_list(request):
-    # Restrict to admin and radiologist
-    if not getattr(request.user, 'can_edit_reports', None) or not request.user.can_edit_reports():
-        return HttpResponse(status=403)
-    """List all reports"""
+    """List all reports. Admins/radiologists can write; facility users can view+print only."""
+    user = request.user
+    can_write = bool(getattr(user, 'can_edit_reports', None) and user.can_edit_reports())
     # Get filter parameters
     search_query = request.GET.get('search', '')
     status_filter = request.GET.get('status', '')
@@ -72,8 +71,10 @@ def report_list(request):
     sort = request.GET.get('sort', '')
     order = request.GET.get('order', 'desc')
 
-    # Base queryset
+    # Base queryset — facility users see only their own facility's reports
     reports = Report.objects.select_related('study', 'study__patient', 'study__modality', 'radiologist').all()
+    if not can_write and hasattr(user, 'facility') and user.facility:
+        reports = reports.filter(study__facility=user.facility)
 
     # Apply filters
     if search_query:
@@ -126,6 +127,7 @@ def report_list(request):
 
     context = {
         'reports': reports,
+        'can_write': can_write,
         'total_reports': total_reports,
         'draft_reports': draft_reports,
         'pending_reports': pending_reports,

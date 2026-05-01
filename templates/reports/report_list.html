@@ -334,18 +334,22 @@
                     <td class="timestamp">{{ report.report_date|date:"M d, Y H:i" }}</td>
                     <td>
                         <div class="action-buttons">
+                            {% if can_write %}
                             <a href="{% url 'reports:write_report' report.study.id %}" class="btn-viewer" title="View/Edit Report">
                                 <i class="fas fa-edit"></i> EDIT
                             </a>
+                            {% endif %}
                             <a href="{% url 'reports:print_report' report.study.id %}" class="btn-viewer viewer-only" title="Print Report" target="_blank">
                                 <i class="fas fa-print"></i> PRINT
                             </a>
+                            {% if can_write %}
                             <a href="{% url 'reports:export_report_pdf' report.study.id %}" class="btn-viewer viewer-only" title="Download PDF">
                                 <i class="fas fa-download"></i> PDF
                             </a>
                             <a href="{% url 'reports:export_report_docx' report.study.id %}" class="btn-viewer viewer-only" title="Export Word">
                                 <i class="fas fa-file-word"></i> DOCX
                             </a>
+                            {% endif %}
                         </div>
                     </td>
                 </tr>
@@ -366,11 +370,11 @@
 
 <!-- ── Right-click context menu ── -->
 <div id="reportCtxMenu">
-    <div class="ctx-item" id="ctxEdit"><i class="fas fa-edit"></i> Edit Report</div>
+    {% if can_write %}<div class="ctx-item" id="ctxEdit"><i class="fas fa-edit"></i> Edit Report</div>{% endif %}
     <div class="ctx-item" id="ctxPrint"><i class="fas fa-print"></i> Print / Letterhead</div>
-    <div class="ctx-item" id="ctxPdf"><i class="fas fa-file-pdf"></i> Download PDF</div>
+    {% if can_write %}<div class="ctx-item" id="ctxPdf"><i class="fas fa-file-pdf"></i> Download PDF</div>{% endif %}
+    {% if can_write %}
     <div class="ctx-sep"></div>
-    {% if user.role == 'admin' or user.role == 'radiologist' %}
     <div class="ctx-item" id="ctxAmend"><i class="fas fa-pen-nib"></i> Amend Report</div>
     <div class="ctx-item" id="ctxSuspend"><i class="fas fa-pause-circle"></i> Suspend / Cancel</div>
     {% endif %}

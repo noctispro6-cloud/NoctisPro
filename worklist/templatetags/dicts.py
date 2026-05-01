@@ -1,5 +1,5 @@
 from django import template
-from admin_panel.utils import get_user_caps
+from admin_panel.utils import get_user_caps, is_ai_visible
 
 register = template.Library()
 
@@ -16,6 +16,9 @@ def user_caps(context):
         user = context.get('user')
         if not user or not getattr(user, 'username', None):
             return {}
-        return get_user_caps(user.username)
+        caps = dict(get_user_caps(user.username))
+        # Combine user-level cap with role-level toggle so both controls take effect
+        caps['ai_visible'] = is_ai_visible(user)
+        return caps
     except Exception:
         return {}

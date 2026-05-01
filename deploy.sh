@@ -599,7 +599,106 @@ issue_letsencrypt_cert() {
     --non-interactive \
     --redirect
 
+  # Overwrite with the full correct config (certbot's auto-edit sometimes
+  # produces a redirect-only HTTPS block with no proxy_pass).
+  local site_avail="/etc/nginx/sites-available/noctis-pro"
+  cat > "$site_avail" <<EOF
+server {
+    listen 80;
+    server_name ${DOMAIN} www.${DOMAIN};
+
+    # Let's Encrypt HTTP-01 renewals
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${DOMAIN} www.${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    client_max_body_size 5120M;
+    client_body_timeout 3600;
+    client_header_timeout 60;
+    send_timeout 3600;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_connect_timeout 60;
+        proxy_read_timeout 3600;
+        proxy_send_timeout 3600;
+    }
+}
+EOF
+
+  nginx -t
   systemctl reload nginx
+}
+
+setup_auto_update() {
+  info "Installing 3 AM daily auto-update cron job..."
+
+  cat > "${APP_DIR}/update.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+# Auto-update NoctisPro: pull latest code, apply migrations, restart services.
+set -euo pipefail
+LOG=/var/log/noctispro-update.log
+APP_DIR=/opt/noctispro
+ENV_FILE=/etc/noctis-pro/noctis-pro.env
+
+echo "=== $(date '+%Y-%m-%d %H:%M:%S') NoctisPro update start ===" >> "$LOG"
+
+cd "$APP_DIR"
+git pull >> "$LOG" 2>&1
+
+"$APP_DIR/venv/bin/pip" install -q -r requirements.server.txt >> "$LOG" 2>&1
+
+# Source env so manage.py can reach the database
+set -a
+# shellcheck source=/dev/null
+source "$ENV_FILE"
+set +a
+
+"$APP_DIR/venv/bin/python" manage.py migrate --noinput >> "$LOG" 2>&1
+"$APP_DIR/venv/bin/python" manage.py collectstatic --noinput >> "$LOG" 2>&1
+
+systemctl restart noctis-pro.service >> "$LOG" 2>&1
+systemctl restart noctis-pro-dicom.service >> "$LOG" 2>&1
+
+echo "=== $(date '+%Y-%m-%d %H:%M:%S') NoctisPro update done ===" >> "$LOG"
+SCRIPT
+
+  chmod +x "${APP_DIR}/update.sh"
+
+  # Install cron for root (deploy runs as root); remove any previous entry first.
+  ( crontab -l 2>/dev/null | grep -v "noctispro.*update\.sh" || true
+    echo "0 3 * * * ${APP_DIR}/update.sh >> /var/log/noctispro-update.log 2>&1"
+  ) | crontab -
+
+  info "Auto-update scheduled: 3 AM daily. Logs: /var/log/noctispro-update.log"
 }
 
 show_result() {
@@ -701,6 +800,7 @@ migrate_and_collectstatic
 ensure_admin_user
 install_systemd_units
 enable_services
+setup_auto_update
 
 if [[ "$MODE" == "domain" ]]; then
   configure_nginx_for_domain

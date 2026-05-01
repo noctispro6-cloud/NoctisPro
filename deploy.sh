@@ -380,8 +380,10 @@ SQL
 
 django_manage() {
   ( set +u
+    set -a          # auto-export every variable that gets set
     # shellcheck disable=SC1090
     source "$ENV_FILE"
+    set +a
     set -u
     cd "$APP_DIR"
     "${APP_DIR}/venv/bin/python" "$APP_DIR/manage.py" "$@"
@@ -413,8 +415,10 @@ PY
   # - If `admin` exists but is not a superuser: promote it and reset password (printed).
   # - If `admin` already is a superuser: do not change password.
   ( set +u
+    set -a
     # shellcheck disable=SC1090
     source "$ENV_FILE"
+    set +a
     set -u
     cd "$APP_DIR"
     NOCTIS_ADMIN_PW='${pw}' NOCTIS_ADMIN_EMAIL='admin@${DOMAIN}' "${APP_DIR}/venv/bin/python" "$APP_DIR/manage.py" shell -c "

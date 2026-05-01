@@ -1124,16 +1124,12 @@
                 </button>
                 <span>Total Studies: <strong>{{ total_studies|default:0 }}</strong></span>
                 <span>Urgent: <strong style="color: var(--urgent-color);">{{ urgent_studies|default:0 }}</strong></span>
-                <span>In Progress: <strong style="color: var(--in-progress-color);">{{ in_progress_studies|default:0
-                        }}</strong></span>
-                <span>Completed: <strong style="color: var(--completed-color);">{{ completed_studies|default:0
-                        }}</strong></span>
+                <span>In Progress: <strong style="color: var(--in-progress-color);">{{ in_progress_studies|default:0 }}</strong></span>
+                <span>Completed: <strong style="color: var(--completed-color);">{{ completed_studies|default:0 }}</strong></span>
                 {% if radiologist_view %}
                 <span>My Studies: <strong>{{ my_studies_count|default:0 }}</strong></span>
-                <span>Unassigned: <strong style="color:var(--warning-color);">{{ unassigned_count|default:0
-                        }}</strong></span>
-                <span>My Reports: <strong style="color:var(--completed-color);">{{ my_reports_count|default:0
-                        }}</strong></span>
+                <span>Unassigned: <strong style="color:var(--warning-color);">{{ unassigned_count|default:0 }}</strong></span>
+                <span>My Reports: <strong style="color:var(--completed-color);">{{ my_reports_count|default:0 }}</strong></span>
                 {% endif %}
             </div>
             <div class="status-right">

@@ -335,7 +335,8 @@ PY
 )"
   fi
 
-  # Create role/db idempotently
+  # Create role if it doesn't exist, then always sync the password so
+  # re-runs with a freshly generated password don't break the connection.
   sudo -u postgres psql -v ON_ERROR_STOP=1 <<SQL
 DO \$\$
 BEGIN
@@ -344,6 +345,7 @@ BEGIN
   END IF;
 END
 \$\$;
+ALTER ROLE ${db_user} PASSWORD '${db_pass}';
 SQL
 
   # CREATE DATABASE cannot run inside a PL/pgSQL block; check existence in the shell instead.

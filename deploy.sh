@@ -346,15 +346,10 @@ END
 \$\$;
 SQL
 
-  sudo -u postgres psql -v ON_ERROR_STOP=1 <<SQL
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${db_name}') THEN
-    CREATE DATABASE ${db_name} OWNER ${db_user};
-  END IF;
-END
-\$\$;
-SQL
+  # CREATE DATABASE cannot run inside a PL/pgSQL block; check existence in the shell instead.
+  if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${db_name}'" | grep -q 1; then
+    sudo -u postgres createdb -O "${db_user}" "${db_name}"
+  fi
 
   # Update env file to use Postgres (keep existing SECRET_KEY/etc)
   info "Updating env to use Postgres..."

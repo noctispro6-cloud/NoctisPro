@@ -49,6 +49,9 @@ SimpleITK
 # Utilities
 requests
 python-magic
+django-ratelimit
+django-redis
+redis
 
 # Background tasks
 celery

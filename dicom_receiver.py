@@ -397,11 +397,23 @@ class DicomReceiver:
                 return 0xC000
             
             # Validate facility authorization
+            # 1. Match by exact AE title
             facility = Facility.objects.filter(ae_title__iexact=calling_aet, is_active=True).first()
             if not facility:
-                self.logger.warning(f"C-STORE rejected: Unknown Calling AET '{calling_aet}' from {peer_ip}")
+                # 2. Fall back to any active facility with a blank AE title (catch-all)
+                facility = Facility.objects.filter(ae_title='', is_active=True).first()
+            if not facility:
+                # 3. If only one active facility exists, use it regardless of AE title
+                active = Facility.objects.filter(is_active=True)
+                if active.count() == 1:
+                    facility = active.first()
+            if not facility:
+                self.logger.warning(
+                    f"C-STORE rejected: no matching or default facility for AET '{calling_aet}' from {peer_ip}. "
+                    f"Set a facility's AE Title to '{calling_aet}' in the admin panel, or leave one facility's AE Title blank to accept all."
+                )
                 self.stats['total_errors'] += 1
-                return 0xC000  # Refused: Out of Resources - A400?
+                return 0xC000
             
             # Get the dataset
             try:

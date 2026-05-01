@@ -161,18 +161,6 @@ def login_view(request):
                 messages.error(request, 'Invalid username/email or password')
             return render(request, 'accounts/login.html', {'hide_navbar': True})
 
-        # Only admins can use the main /login/ endpoint.
-        # Radiologists and facility users must use /portal/login/
-        if not user.is_admin():
-            portal_url = reverse('accounts:portal_login')
-            list(messages.get_messages(request))
-            messages.error(request, mark_safe(
-                'This login page is for administrators only. '
-                f'Please use the <a href="{portal_url}" '
-                'style="color:inherit;text-decoration:underline;">staff portal login</a>.'
-            ))
-            return render(request, 'accounts/login.html', {'hide_navbar': True})
-
         # Allow superusers/staff to bypass verification to prevent lockout on fresh setups
         if user and user.is_active and (getattr(user, 'is_verified', True) or getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)):
             # Track login session

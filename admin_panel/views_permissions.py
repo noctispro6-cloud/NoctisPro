@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.http import JsonResponse
 from accounts.models import User
 from .utils import (
-    get_user_caps, set_user_caps, DEFAULT_CAPS, load_capabilities,
+    get_user_caps, set_user_caps, DEFAULT_CAPS,
     get_role_toggles, set_role_toggles
 )
 
@@ -33,7 +33,6 @@ def permissions_dashboard(request):
         }
         set_role_toggles(updates)
         messages.success(request, 'Role-based AI visibility updated')
-    caps_store = load_capabilities()
     # Build a simple table of users and capabilities
     table = []
     for u in users:

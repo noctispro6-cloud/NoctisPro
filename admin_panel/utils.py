@@ -1,113 +1,93 @@
 import json
-import os
-from pathlib import Path
 from django.conf import settings
 
 
-CAPS_FILE = Path(settings.BASE_DIR) / 'config' / 'admin_capabilities.json'
-
-
 DEFAULT_CAPS = {
-    # IMPORTANT:
-    # These are *capability defaults* for non-admin users unless overridden in
-    # `config/admin_capabilities.json` for a specific username.
-    #
-    # Keep these restrictive by default so Facility/Radiologist users do not
-    # implicitly inherit admin-like controls.
     'manage_users': False,
     'manage_facilities': False,
     'view_logs': False,
     'manage_settings': False,
-    'run_backup': True,   # Backup system implemented via backup_system mgmt command + Celery task
+    'run_backup': True,
     'manage_permissions': False,
-    # AI visibility is additionally gated by per-role toggles; default to True
-    # here so the role toggle file is the primary control surface.
     'ai_visible': True,
     'manage_ai': False,
 }
 
+_DEFAULT_ROLE_TOGGLES = {
+    'admin':       {'ai_visible': True},
+    'radiologist': {'ai_visible': True},
+    'facility':    {'ai_visible': False},
+}
 
-def _ensure_caps_file() -> None:
+_USER_CAPS_KEY_PREFIX = 'user_caps:'
+_ROLE_TOGGLES_KEY = 'role_toggles'
+
+
+def _get_config(key: str, default):
+    """Read a json-typed SystemConfiguration row, returning default on any error."""
     try:
-        CAPS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        if not CAPS_FILE.exists():
-            CAPS_FILE.write_text(json.dumps({
-                "__default__": DEFAULT_CAPS,
-                "__roles__": {
-                    "admin": {"ai_visible": True},
-                    "radiologist": {"ai_visible": True},
-                    "facility": {"ai_visible": False}
-                }
-            }, indent=2))
+        from .models import SystemConfiguration
+        obj = SystemConfiguration.objects.filter(key=key).first()
+        if obj is None:
+            return default
+        return json.loads(obj.value)
     except Exception:
-        # Best-effort only
-        pass
+        return default
 
 
-def load_capabilities() -> dict:
-    _ensure_caps_file()
-    try:
-        with open(CAPS_FILE, 'r') as f:
-            data = json.load(f)
-            if not isinstance(data, dict):
-                return {"__default__": DEFAULT_CAPS}
-            return data
-    except Exception:
-        return {"__default__": DEFAULT_CAPS}
-
-
-def save_capabilities(data: dict) -> None:
-    _ensure_caps_file()
-    try:
-        with open(CAPS_FILE, 'w') as f:
-            json.dump(data, f, indent=2)
-    except Exception:
-        pass
+def _set_config(key: str, value) -> None:
+    """Upsert a json-typed SystemConfiguration row. Raises on failure."""
+    from .models import SystemConfiguration
+    serialized = json.dumps(value)
+    obj, _ = SystemConfiguration.objects.get_or_create(
+        key=key,
+        defaults={
+            'value': serialized,
+            'data_type': 'json',
+            'category': 'permissions',
+        },
+    )
+    if obj.value != serialized or obj.data_type != 'json':
+        obj.value = serialized
+        obj.data_type = 'json'
+        obj.category = 'permissions'
+        obj.save(update_fields=['value', 'data_type', 'category'])
 
 
 def get_user_caps(username: str) -> dict:
-    data = load_capabilities()
-    caps = data.get(username)
-    if not isinstance(caps, dict):
-        caps = data.get('__default__', DEFAULT_CAPS)
-    # Merge with defaults to ensure all keys present
-    merged = {**DEFAULT_CAPS, **caps}
-    return merged
+    raw = _get_config(_USER_CAPS_KEY_PREFIX + username, None)
+    if not isinstance(raw, dict):
+        raw = {}
+    return {**DEFAULT_CAPS, **raw}
 
 
 def set_user_caps(username: str, caps_update: dict) -> None:
-    data = load_capabilities()
-    user_caps = data.get(username, {})
-    # Only accept known keys
-    cleaned = {k: bool(caps_update.get(k, user_caps.get(k, DEFAULT_CAPS.get(k)))) for k in DEFAULT_CAPS.keys()}
-    data[username] = cleaned
-    save_capabilities(data)
+    cleaned = {k: bool(caps_update.get(k, DEFAULT_CAPS.get(k))) for k in DEFAULT_CAPS}
+    _set_config(_USER_CAPS_KEY_PREFIX + username, cleaned)
 
 
 def get_role_toggles() -> dict:
-    data = load_capabilities()
-    roles = data.get('__roles__', {})
-    # Ensure keys present
-    merged = {
-        'admin': { 'ai_visible': True },
-        'radiologist': { 'ai_visible': True },
-        'facility': { 'ai_visible': False },
-    }
-    for r in merged.keys():
-        merged[r].update(roles.get(r, {}))
+    raw = _get_config(_ROLE_TOGGLES_KEY, None)
+    if not isinstance(raw, dict):
+        raw = {}
+    merged = {r: dict(v) for r, v in _DEFAULT_ROLE_TOGGLES.items()}
+    for role, conf in raw.items():
+        if role in merged and isinstance(conf, dict):
+            merged[role].update(conf)
     return merged
 
 
 def set_role_toggles(updates: dict) -> None:
-    data = load_capabilities()
-    roles = data.get('__roles__', {})
+    current = get_role_toggles()
     for role, conf in updates.items():
-        base = roles.get(role, {})
-        # Support only ai_visible for now
-        base['ai_visible'] = bool(conf.get('ai_visible', base.get('ai_visible', role != 'facility')))
-        roles[role] = base
-    data['__roles__'] = roles
-    save_capabilities(data)
+        if role in current:
+            current[role]['ai_visible'] = bool(conf.get('ai_visible', current[role].get('ai_visible')))
+    _set_config(_ROLE_TOGGLES_KEY, current)
+
+
+def load_capabilities() -> dict:
+    """Legacy shim — no longer used for storage but kept for call-site compatibility."""
+    return {}
 
 
 def is_ai_visible(user) -> bool:
@@ -122,4 +102,3 @@ def is_ai_visible(user) -> bool:
         return bool(roles.get(role_key, {}).get('ai_visible', role_key != 'facility'))
     except Exception:
         return False
-

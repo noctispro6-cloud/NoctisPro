@@ -1314,6 +1314,7 @@
     {% csrf_token %}
 
     <!-- Load essential JavaScript files -->
+    <script src="{% static 'js/vendor/dicomParser.min.js' %}" type="text/javascript"></script>
     <script src="{% static 'js/dicom-viewer-utils.js' %}" type="text/javascript"></script>
     <script src="{% static 'js/dicom-print-export-fix.js' %}" type="text/javascript"></script>
     <script src="{% static 'js/delete-button-fix.js' %}" type="text/javascript"></script>
@@ -1328,6 +1329,8 @@
         let images = [];
         let currentImageIndex = 0;
         let dicomData = [];
+        let _localMode = false;
+        let _localRawSlices = [];
         
         // Display parameters - Professional grade from PyQt
         let windowWidth = 400;
@@ -1846,6 +1849,22 @@
             if (!images.length || currentImageIndex < 0 || currentImageIndex >= images.length) {
                 return;
             }
+
+            // LOCAL MODE: render from pixel data in-browser, no server request
+            if (_localMode && _localRawSlices.length) {
+                const idx = Math.max(0, Math.min(_localRawSlices.length - 1, currentImageIndex));
+                const slice = _localRawSlices[idx];
+                if (slice) {
+                    const dicomImage = document.getElementById('dicomImage');
+                    const welcomeScreen = document.getElementById('welcomeScreen');
+                    const singleView    = document.getElementById('singleView');
+                    if (welcomeScreen) welcomeScreen.style.display = 'none';
+                    if (singleView)    singleView.style.display    = 'flex';
+                    if (dicomImage) dicomImage.src = _renderLocalDicomSlice(slice, windowWidth, windowLevel, inverted);
+                }
+                return;
+            }
+
             
             const currentImage = images[currentImageIndex];
             if (!currentImage) return;
@@ -2172,49 +2191,140 @@
 
 
         async function processDicomFiles(files) {
+            if (!window.dicomParser) {
+                showToast('DICOM parser not loaded — refresh the page', 'error');
+                return;
+            }
             try {
-                showLoading('Processing DICOM files...');
-                
-                const formData = new FormData();
-                files.forEach(file => {
-                    formData.append('dicom_files', file);
-                });
-                formData.append('priority', 'normal');
-                formData.append('clinical_info', 'Uploaded via standalone viewer');
-                
-                const response = await fetch('/worklist/upload/', {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-CSRFToken': getCSRFToken()
-                    },
-                    credentials: 'same-origin'
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    const created = Array.isArray(data.created_study_ids) ? data.created_study_ids : [];
-                    if (created.length > 0) {
-                        window.location.href = '/dicom-viewer/?study=' + created[0];
-                    } else if (data.study_id) {
-                        await loadStudy(data.study_id);
+                showLoading('Reading local DICOM files…');
+                const sortedFiles = Array.from(files).sort((a, b) =>
+                    a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+                const parsed = [];
+                for (const file of sortedFiles) {
+                    try {
+                        const buf = await file.arrayBuffer();
+                        const bytes = new Uint8Array(buf);
+                        const ds = dicomParser.parseDicom(bytes);
+
+                        const rows = ds.uint16('x00280010') || 0;
+                        const cols = ds.uint16('x00280011') || 0;
+                        if (!rows || !cols) continue;
+
+                        const bitsAlloc = ds.uint16('x00280100') || 16;
+                        const pixRep   = ds.uint16('x00280103') || 0;
+                        const slope    = parseFloat(ds.string('x00281053') || '') || 1;
+                        const intercept = parseFloat(ds.string('x00281052') || '') || 0;
+                        const instNum  = parseInt(ds.string('x00200013') || '', 10) || 0;
+
+                        const wcStr = ds.string('x00281050');
+                        const wwStr = ds.string('x00281051');
+                        const winCenter = wcStr ? parseFloat(wcStr.split('\\')[0]) : null;
+                        const winWidth  = wwStr ? parseFloat(wwStr.split('\\')[0]) : null;
+
+                        const pxEl = ds.elements.x7fe00010;
+                        if (!pxEl) continue;
+
+                        const off = pxEl.dataOffset;
+                        const nPx = rows * cols;
+                        let pixelData;
+                        if (bitsAlloc <= 8) {
+                            pixelData = new Uint8Array(bytes.buffer.slice(off, off + nPx));
+                        } else if (pixRep === 1) {
+                            pixelData = new Int16Array(bytes.buffer.slice(off, off + nPx * 2));
+                        } else {
+                            pixelData = new Uint16Array(bytes.buffer.slice(off, off + nPx * 2));
+                        }
+
+                        parsed.push({ rows, cols, pixelData, winCenter, winWidth,
+                                      slope, intercept, instNum, filename: file.name });
+                    } catch (e) {
+                        console.warn('Skipping file (not readable DICOM):', file.name, e.message);
                     }
-                    showToast(`Uploaded ${data.processed_files || files.length} files`, 'success');
-                } else {
-                    hideLoading();
-                    showToast(data.error || 'Upload failed', 'error');
                 }
-                
+
+                if (!parsed.length) {
+                    hideLoading();
+                    showToast('No valid DICOM pixel data found in the selected files', 'error');
+                    return;
+                }
+
+                parsed.sort((a, b) => a.instNum - b.instNum);
+
+                // Auto-windowing from first slice
+                const first = parsed[0];
+                let initWW = windowWidth, initWL = windowLevel;
+                if (first.winCenter !== null && first.winWidth !== null) {
+                    initWW = first.winWidth;
+                    initWL = first.winCenter;
+                } else {
+                    let lo = Infinity, hi = -Infinity;
+                    for (const v of first.pixelData) {
+                        const hu = v * first.slope + first.intercept;
+                        if (hu < lo) lo = hu;
+                        if (hu > hi) hi = hu;
+                    }
+                    initWW = hi - lo || 256;
+                    initWL = (hi + lo) / 2;
+                }
+                windowWidth = Math.round(initWW);
+                windowLevel = Math.round(initWL);
+                windowingInitializedForSeries = true;
+                windowingLockedByUser = false;
+                try { _syncWindowLevelUI(); } catch (_) {}
+
+                _localRawSlices = parsed;
+                _localMode = true;
+                currentSeries = null;
+
+                images = parsed.map((_, i) => ({ id: 'local_' + i }));
+                currentImageIndex = 0;
+
+                const slider = document.getElementById('sliceSlider');
+                if (slider) { slider.min = 0; slider.max = images.length - 1; slider.value = 0; }
+                const sliceValue = document.getElementById('sliceValue');
+                if (sliceValue) sliceValue.textContent = '1/' + images.length;
+
+                const welcomeScreen = document.getElementById('welcomeScreen');
+                const singleView    = document.getElementById('singleView');
+                if (welcomeScreen) welcomeScreen.style.display = 'none';
+                if (singleView)    singleView.style.display    = 'flex';
+
+                const dicomImage = document.getElementById('dicomImage');
+                if (dicomImage) dicomImage.src = _renderLocalDicomSlice(parsed[0], windowWidth, windowLevel, inverted);
+
+                hideLoading();
+                showToast('Viewing ' + parsed.length + ' local DICOM image' +
+                          (parsed.length > 1 ? 's' : '') + ' — not uploaded to server', 'success');
+
             } catch (error) {
                 hideLoading();
-                console.error('Error processing files:', error);
-                showToast('Error processing DICOM files', 'error');
+                console.error('Local DICOM load error:', error);
+                showToast('Error reading DICOM files: ' + error.message, 'error');
             }
+        }
+
+        function _renderLocalDicomSlice(slice, ww, wl, isInverted) {
+            const { rows, cols, pixelData, slope, intercept } = slice;
+            const canvas = document.createElement('canvas');
+            canvas.width = cols;
+            canvas.height = rows;
+            const ctx = canvas.getContext('2d');
+            const imgData = ctx.createImageData(cols, rows);
+            const px = imgData.data;
+            const lo = wl - ww / 2;
+            const hi = wl + ww / 2;
+            for (let i = 0; i < rows * cols; i++) {
+                let val = pixelData[i] * slope + intercept;
+                let gray = val <= lo ? 0 : val >= hi ? 255 : Math.round(((val - lo) / ww) * 255);
+                if (isInverted) gray = 255 - gray;
+                px[i * 4]     = gray;
+                px[i * 4 + 1] = gray;
+                px[i * 4 + 2] = gray;
+                px[i * 4 + 3] = 255;
+            }
+            ctx.putImageData(imgData, 0, 0);
+            return canvas.toDataURL('image/jpeg', 0.88);
         }
 
         // Advanced Features

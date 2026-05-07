@@ -2,7 +2,6 @@
 {% block title %}Write Report — {{ study.accession_number|default:"Study" }}{% endblock %}
 
 {% block extra_css %}
-<link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
 <style>
 /* ── Control bar ── */
 .rpt-bar {
@@ -27,20 +26,6 @@
     font-size: 12px;
     cursor: pointer;
 }
-.rpt-fmt-btn {
-    background: none;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    color: var(--text-secondary, #aaa);
-    padding: 4px 8px;
-    font-size: 13px;
-    cursor: pointer;
-    font-weight: 700;
-    transition: background 0.1s, color 0.1s;
-    line-height: 1;
-}
-.rpt-fmt-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-primary,#fff); }
-.rpt-fmt-btn.active { background: rgba(0,212,255,0.15); color: var(--accent-color,#00d4ff); border-color: rgba(0,212,255,0.3); }
 .rpt-action-btn {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600;
@@ -57,7 +42,7 @@
 .rpt-ai-status { font-size: 11px; color: var(--text-muted,#666); margin-left: 4px; }
 .rpt-autosave { font-size: 10px; color: var(--text-muted,#666); }
 
-/* ── Paper wrap ── */
+/* ── Paper canvas ── */
 .rpt-canvas {
     background: #b0b0b0;
     min-height: calc(100vh - 110px);
@@ -65,7 +50,6 @@
     justify-content: center;
     padding: 32px 16px 60px;
 }
-/* A4 paper sheet */
 .rpt-paper {
     background: #fff;
     color: #111;
@@ -87,8 +71,6 @@
     padding-bottom: 10px;
     margin-bottom: 10px;
     border-bottom: 3px solid #003d7a;
-    user-select: none;
-    pointer-events: none;
 }
 .rpt-lh-logo { max-height: 70px; max-width: 200px; object-fit: contain; }
 .rpt-lh-text { text-align: right; }
@@ -99,7 +81,7 @@
 .rpt-title {
     text-align: center; font-size: 12pt; font-weight: 700;
     letter-spacing: 0.06em; text-transform: uppercase; color: #003d7a;
-    margin: 8px 0 10px; user-select: none;
+    margin: 8px 0 10px;
 }
 
 /* ── Patient bar ── */
@@ -112,28 +94,36 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(130px,1fr));
     gap: 8px 16px;
-    user-select: none;
-    pointer-events: none;
 }
 .rpt-pf-label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.06em; color: #003d7a; font-weight: 700; display: block; margin-bottom: 1px; }
 .rpt-pf-value { font-size: 10pt; font-weight: 600; color: #111; }
 
-/* ── Quill editor lives inside the paper ── */
-#rptEditorWrap { margin-bottom: 12px; }
-.ql-toolbar.ql-snow { display: none !important; }   /* formatting done via bar */
-.ql-container.ql-snow { border: none !important; }
-.ql-editor {
-    padding: 0 !important;
-    font-family: 'Arial', 'Helvetica Neue', sans-serif !important;
-    font-size: 11pt !important;
-    color: #111 !important;
-    min-height: 160mm;
-    line-height: 1.55 !important;
+/* ── Plain text sections ── */
+.rpt-section { margin-bottom: 14px; }
+.rpt-section-label {
+    font-size: 10pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: #003d7a;
+    border-bottom: 1px solid #b8cde8;
+    padding-bottom: 2px; margin-bottom: 6px;
 }
-.ql-editor:focus { outline: 2px dashed rgba(0,61,122,0.18) !important; outline-offset: 2px; }
-.ql-editor h2 { font-size: 10pt !important; font-weight: 700 !important; text-transform: uppercase; letter-spacing: 0.06em; color: #003d7a !important; border-bottom: 1px solid #b8cde8; padding-bottom: 2px; margin: 12px 0 4px !important; }
-.ql-editor p { margin: 0 0 4px !important; }
-.ql-editor ul, .ql-editor ol { padding-left: 18px !important; margin: 4px 0 !important; }
+.rpt-section textarea {
+    width: 100%;
+    border: none;
+    outline: none;
+    resize: vertical;
+    font-family: 'Arial', 'Helvetica Neue', sans-serif;
+    font-size: 11pt;
+    color: #111;
+    line-height: 1.55;
+    background: transparent;
+    padding: 0;
+    min-height: 60px;
+}
+.rpt-section textarea:focus {
+    outline: 2px dashed rgba(0,61,122,0.18);
+    outline-offset: 2px;
+}
+.rpt-section textarea::placeholder { color: #bbb; }
 
 /* ── Signature ── */
 .rpt-sig {
@@ -142,22 +132,21 @@
     border: 1px solid #dde4ef;
     border-radius: 4px;
     background: #fafbfd;
-    user-select: none;
 }
 .rpt-sig-label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; color: #003d7a; margin-bottom: 4px; }
 .rpt-sig-name { font-size: 11pt; font-weight: 600; color: #111; }
 .rpt-sig-detail { font-size: 8.5pt; color: #555; }
-.rpt-sig-canvas-wrap { margin-top: 8px; }
-.rpt-sig-canvas { border: 1px solid #bbb; border-radius: 3px; background: #fff; cursor: crosshair; display: block; width: 100%; max-width: 360px; height: 72px; }
+.rpt-sig-canvas { border: 1px solid #bbb; border-radius: 3px; background: #fff; cursor: crosshair; display: block; width: 100%; max-width: 360px; height: 72px; margin-top: 8px; }
 
 @media (max-width: 700px) {
     .rpt-paper { padding: 12mm 14mm 14mm; }
     .rpt-canvas { padding: 16px 6px 40px; }
 }
 @media print {
-    .rpt-bar, .rpt-ai-panel { display: none !important; }
+    .rpt-bar { display: none !important; }
     .rpt-canvas { background: #fff !important; padding: 0 !important; }
     .rpt-paper { box-shadow: none !important; }
+    .rpt-section textarea { resize: none; }
 }
 </style>
 {% endblock %}
@@ -166,58 +155,47 @@
 <form id="reportForm" method="post">
 {% csrf_token %}
 
-<!-- ── Control / toolbar bar ── -->
+<!-- ── Toolbar ── -->
 <div class="rpt-bar">
-    <!-- Breadcrumb -->
-    <a href="{% url 'worklist:dashboard' %}" class="rpt-fmt-btn" style="font-size:11px;font-weight:500;"><i class="fas fa-chevron-left"></i></a>
+    <a href="{% url 'worklist:dashboard' %}" class="rpt-action-btn" style="padding:5px 10px;">
+        <i class="fas fa-chevron-left"></i>
+    </a>
     <span style="font-size:12px;color:var(--text-secondary,#aaa);">{{ study.accession_number|default:"Report" }}</span>
     <div class="rpt-bar-sep"></div>
 
-    <!-- Status -->
     <select id="statusField" name="status" class="rpt-status" title="Report status">
-        <option value="draft" {% if not report or report.status == 'draft' %}selected{% endif %}>Draft</option>
+        <option value="draft"       {% if not report or report.status == 'draft' %}selected{% endif %}>Draft</option>
         <option value="preliminary" {% if report.status == 'preliminary' %}selected{% endif %}>Preliminary</option>
-        <option value="final" {% if report.status == 'final' %}selected{% endif %}>Final</option>
-        <option value="amended" {% if report and report.status == 'amended' %}selected{% endif %}>Amended</option>
+        <option value="final"       {% if report.status == 'final' %}selected{% endif %}>Final</option>
+        <option value="amended"     {% if report and report.status == 'amended' %}selected{% endif %}>Amended</option>
     </select>
     <div class="rpt-bar-sep"></div>
 
-    <!-- Formatting buttons (wire to Quill) -->
-    <button type="button" id="fmtBold"   class="rpt-fmt-btn" title="Bold (Ctrl+B)"><b>B</b></button>
-    <button type="button" id="fmtItalic" class="rpt-fmt-btn" title="Italic (Ctrl+I)"><i>I</i></button>
-    <button type="button" id="fmtUnder"  class="rpt-fmt-btn" title="Underline (Ctrl+U)" style="text-decoration:underline;">U</button>
-    <div class="rpt-bar-sep"></div>
-    <button type="button" id="fmtH2"     class="rpt-fmt-btn" title="Section heading" style="font-size:11px;">H</button>
-    <button type="button" id="fmtOL"     class="rpt-fmt-btn" title="Numbered list"><i class="fas fa-list-ol" style="font-size:11px;"></i></button>
-    <button type="button" id="fmtUL"     class="rpt-fmt-btn" title="Bullet list"><i class="fas fa-list-ul" style="font-size:11px;"></i></button>
-    <button type="button" id="fmtClean"  class="rpt-fmt-btn" title="Clear formatting"><i class="fas fa-remove-format" style="font-size:11px;"></i></button>
-    <div class="rpt-bar-sep"></div>
-
-    <!-- AI -->
-    <button type="button" class="rpt-action-btn ai" onclick="generateAIFindings()" title="Generate AI preliminary findings">
+    <button type="button" class="rpt-action-btn ai" onclick="generateAIFindings()">
         <i class="fas fa-brain"></i> AI Draft
     </button>
     <span id="aiStatus" class="rpt-ai-status"></span>
     <div class="rpt-bar-sep"></div>
 
-    <!-- Actions -->
-    <button type="button" class="rpt-action-btn" onclick="saveReport()" title="Save as draft">
+    <button type="button" class="rpt-action-btn" onclick="saveReport()">
         <i class="fas fa-save"></i> Save
     </button>
     <span id="autoSaveStatus" class="rpt-autosave"></span>
-    <a href="{% url 'reports:print_report' study.id %}" target="_blank" class="rpt-action-btn" title="Open print/letterhead view">
+
+    <a href="{% url 'reports:print_report' study.id %}" target="_blank" class="rpt-action-btn">
         <i class="fas fa-print"></i> Print
     </a>
-    <button type="button" class="rpt-action-btn success" onclick="submitFinal()" title="Sign and submit final report">
+
+    <button type="button" class="rpt-action-btn success" onclick="submitFinal()">
         <i class="fas fa-paper-plane"></i> Submit Final
     </button>
 </div>
 
-<!-- ── Paper canvas ── -->
+<!-- ── Paper ── -->
 <div class="rpt-canvas">
   <div class="rpt-paper">
 
-    <!-- Letterhead (read-only display) -->
+    <!-- Letterhead -->
     <div class="rpt-lh">
       <div>
         {% if letterhead_b64 %}
@@ -234,7 +212,7 @@
 
     <div class="rpt-title">Radiology Report</div>
 
-    <!-- Patient bar (read-only) -->
+    <!-- Patient info -->
     <div class="rpt-patient">
       <div>
         <span class="rpt-pf-label">Patient</span>
@@ -266,174 +244,117 @@
       </div>
     </div>
 
-    <!-- ── Editable document body ── -->
-    <div id="rptEditorWrap">
-      <div id="rptEditor"></div>
+    <!-- Report sections — plain textareas -->
+    <div class="rpt-section">
+      <div class="rpt-section-label">Clinical Information</div>
+      <textarea name="clinical_history" id="f_clinical_history" rows="3"
+                placeholder="Clinical history and indication…">{{ report.clinical_history|default:study.clinical_info|default:'' }}</textarea>
     </div>
 
-    <!-- Signature block (prefilled) -->
+    <div class="rpt-section">
+      <div class="rpt-section-label">Technique</div>
+      <textarea name="technique" id="f_technique" rows="2"
+                placeholder="Imaging technique…">{{ report.technique|default:'' }}</textarea>
+    </div>
+
+    <div class="rpt-section">
+      <div class="rpt-section-label">Comparison</div>
+      <textarea name="comparison" id="f_comparison" rows="2"
+                placeholder="Prior studies compared…">{{ report.comparison|default:'' }}</textarea>
+    </div>
+
+    <div class="rpt-section">
+      <div class="rpt-section-label">Findings</div>
+      <textarea name="findings" id="f_findings" rows="8"
+                placeholder="Describe imaging findings…">{{ report.findings|default:'' }}</textarea>
+    </div>
+
+    <div class="rpt-section">
+      <div class="rpt-section-label">Impression</div>
+      <textarea name="impression" id="f_impression" rows="4"
+                placeholder="Summary impression…">{{ report.impression|default:'' }}</textarea>
+    </div>
+
+    <div class="rpt-section">
+      <div class="rpt-section-label">Recommendations</div>
+      <textarea name="recommendations" id="f_recommendations" rows="3"
+                placeholder="Follow-up recommendations…">{{ report.recommendations|default:'' }}</textarea>
+    </div>
+
+    <!-- Signature -->
     <div class="rpt-sig">
       <div class="rpt-sig-label">Reporting Radiologist</div>
       <div class="rpt-sig-name">{{ request.user.get_full_name|default:request.user.username }}</div>
       {% if request.user.license_number %}
       <div class="rpt-sig-detail">License: {{ request.user.license_number }}</div>
       {% endif %}
-      <div class="rpt-sig-detail" id="sigDateDisplay">
-        {% if report and report.signed_date %}Signed: {{ report.signed_date|date:"d M Y H:i" }}{% else %}Date: <span id="sigNow"></span>{% endif %}
+      <div class="rpt-sig-detail">
+        {% if report and report.signed_date %}
+          Signed: {{ report.signed_date|date:"d M Y H:i" }}
+        {% else %}
+          Date: <span id="sigNow"></span>
+        {% endif %}
       </div>
       {% if report and report.digital_signature %}
-        <div class="rpt-sig-canvas-wrap">
-          <img src="data:image/png;base64,{{ report.digital_signature }}" alt="Signature" style="max-height:60px;">
-        </div>
+        <img src="data:image/png;base64,{{ report.digital_signature }}" alt="Signature" style="max-height:60px;margin-top:8px;">
       {% else %}
-        <div class="rpt-sig-canvas-wrap" id="sigPadWrap" style="display:none;">
+        <div id="sigPadWrap" style="display:none;">
           <canvas id="sigCanvas" class="rpt-sig-canvas"></canvas>
           <div style="margin-top:4px;display:flex;gap:8px;">
-            <button type="button" onclick="clearSig()" class="rpt-fmt-btn" style="font-size:11px;"><i class="fas fa-eraser"></i> Clear</button>
-            <button type="button" onclick="applySig()" class="rpt-fmt-btn" style="font-size:11px;color:#00c853;"><i class="fas fa-check"></i> Apply</button>
+            <button type="button" onclick="clearSig()" style="font-size:11px;cursor:pointer;">
+              <i class="fas fa-eraser"></i> Clear
+            </button>
+            <button type="button" onclick="applySig()" style="font-size:11px;cursor:pointer;color:#00c853;">
+              <i class="fas fa-check"></i> Apply
+            </button>
           </div>
         </div>
       {% endif %}
     </div>
 
-    <!-- Hidden fields consumed by the view -->
     <input type="hidden" name="report_html" id="reportHtmlField">
-    <!-- Keep per-section names the view already handles, populated on submit -->
-    <textarea name="clinical_history" id="hf_clinical_history" style="display:none;"></textarea>
-    <textarea name="technique"        id="hf_technique"        style="display:none;"></textarea>
-    <textarea name="comparison"       id="hf_comparison"       style="display:none;"></textarea>
-    <textarea name="findings"         id="hf_findings"         style="display:none;"></textarea>
-    <textarea name="impression"       id="hf_impression"       style="display:none;"></textarea>
-    <textarea name="recommendations"  id="hf_recommendations"  style="display:none;"></textarea>
     <input type="hidden" name="digital_signature" id="digitalSigField">
     <input type="hidden" name="action" id="actionField" value="save">
 
-  </div><!-- .rpt-paper -->
-</div><!-- .rpt-canvas -->
+  </div>
+</div>
 </form>
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
 <script>
-// ── Quill setup ────────────────────────────────────────────────────────────
-const quill = new Quill('#rptEditor', {
-    theme: 'snow',
-    modules: {
-        toolbar: false,   // custom toolbar in rpt-bar
-        keyboard: {
-            bindings: {
-                bold:      { key: 'B', shortKey: true, handler() { quill.format('bold',      !quill.getFormat().bold);      _syncFmt(); } },
-                italic:    { key: 'I', shortKey: true, handler() { quill.format('italic',    !quill.getFormat().italic);    _syncFmt(); } },
-                underline: { key: 'U', shortKey: true, handler() { quill.format('underline', !quill.getFormat().underline); _syncFmt(); } },
-            }
-        }
-    },
-    placeholder: 'Begin your report here…',
-});
-
-// Sync format button active states
-function _syncFmt() {
-    const fmt = quill.getFormat();
-    document.getElementById('fmtBold').classList.toggle('active',  !!fmt.bold);
-    document.getElementById('fmtItalic').classList.toggle('active', !!fmt.italic);
-    document.getElementById('fmtUnder').classList.toggle('active',  !!fmt.underline);
-    document.getElementById('fmtH2').classList.toggle('active',     fmt.header === 2);
-}
-quill.on('selection-change', _syncFmt);
-
-// Toolbar button wiring
-document.getElementById('fmtBold').addEventListener('click',   () => { quill.format('bold',      !quill.getFormat().bold);      _syncFmt(); });
-document.getElementById('fmtItalic').addEventListener('click', () => { quill.format('italic',    !quill.getFormat().italic);    _syncFmt(); });
-document.getElementById('fmtUnder').addEventListener('click',  () => { quill.format('underline', !quill.getFormat().underline); _syncFmt(); });
-document.getElementById('fmtH2').addEventListener('click',     () => {
-    const cur = quill.getFormat().header;
-    quill.format('header', cur === 2 ? false : 2);
-    _syncFmt();
-});
-document.getElementById('fmtOL').addEventListener('click',    () => { quill.format('list', quill.getFormat().list === 'ordered' ? false : 'ordered'); });
-document.getElementById('fmtUL').addEventListener('click',    () => { quill.format('list', quill.getFormat().list === 'bullet'  ? false : 'bullet');  });
-document.getElementById('fmtClean').addEventListener('click', () => {
-    const range = quill.getSelection();
-    if (range) quill.removeFormat(range.index, range.length);
-});
-
-// ── Pre-populate editor from existing report data ─────────────────────────
-(function populateEditor() {
-    // Data embedded safely by Django template
-    const sections = [
-        { label: 'Clinical Information', value: "{{ report.clinical_history|default:study.clinical_info|default:''|escapejs }}" },
-        { label: 'Technique',            value: "{{ report.technique|default:''|escapejs }}" },
-        { label: 'Comparison',           value: "{{ report.comparison|default:''|escapejs }}" },
-        { label: 'Findings',             value: "{{ report.findings|default:''|escapejs }}" },
-        { label: 'Impression',           value: "{{ report.impression|default:''|escapejs }}" },
-        { label: 'Recommendations',      value: "{{ report.recommendations|default:''|escapejs }}" },
-    ];
-
-    let html = '';
-    sections.forEach(function(s) {
-        html += `<h2>${s.label}</h2>`;
-        if (s.value && s.value.trim()) {
-            // Preserve existing HTML or plain text
-            html += `<p>${s.value.replace(/\n/g, '</p><p>')}</p>`;
-        } else {
-            html += '<p><br></p>';
-        }
-    });
-    quill.root.innerHTML = html;
+// ── Current date ──────────────────────────────────────────────────────────────
+(function() {
+    const el = document.getElementById('sigNow');
+    if (el) el.textContent = new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
 })();
 
-// ── Section extraction on submit ──────────────────────────────────────────
-const _SECTION_MAP = {
-    'clinical information': 'hf_clinical_history',
-    'technique':            'hf_technique',
-    'comparison':           'hf_comparison',
-    'findings':             'hf_findings',
-    'impression':           'hf_impression',
-    'recommendations':      'hf_recommendations',
-};
-
-function _extractSections() {
-    // Walk child nodes of editor; bucket content between h2 headings
-    const children = Array.from(quill.root.children);
-    let currentKey = null;
-    const buckets = {};
-
-    children.forEach(function(node) {
-        if (node.tagName === 'H2') {
-            const text = (node.textContent || '').trim().toLowerCase();
-            currentKey = Object.keys(_SECTION_MAP).find(k => text.includes(k)) || null;
-        } else {
-            if (currentKey) {
-                buckets[currentKey] = (buckets[currentKey] || '') + (node.outerHTML || '');
-            }
-        }
-    });
-
-    Object.entries(_SECTION_MAP).forEach(function([key, fieldId]) {
-        const el = document.getElementById(fieldId);
-        if (el) el.value = buckets[key] || '';
-    });
-
-    // Also save full HTML
-    const htmlField = document.getElementById('reportHtmlField');
-    if (htmlField) htmlField.value = quill.root.innerHTML;
+// ── Build report HTML from plain textareas (for report_html field) ────────────
+function _buildHtml() {
+    const sections = [
+        ['Clinical Information', 'f_clinical_history'],
+        ['Technique',            'f_technique'],
+        ['Comparison',           'f_comparison'],
+        ['Findings',             'f_findings'],
+        ['Impression',           'f_impression'],
+        ['Recommendations',      'f_recommendations'],
+    ];
+    return sections.map(([label, id]) => {
+        const val = (document.getElementById(id)?.value || '').trim();
+        return `<h2>${label}</h2><p>${val.replace(/\n/g, '</p><p>') || '<br>'}</p>`;
+    }).join('');
 }
 
-// ── Save / Submit ─────────────────────────────────────────────────────────
-function _getCookie(name) {
-    try { const v = `; ${document.cookie}`; const p = v.split(`; ${name}=`); if (p.length === 2) return p.pop().split(';').shift(); } catch (_) {} return '';
-}
-
+// ── Save ──────────────────────────────────────────────────────────────────────
 function saveReport() {
-    _extractSections();
+    document.getElementById('reportHtmlField').value = _buildHtml();
     document.getElementById('actionField').value = 'save';
     document.getElementById('reportForm').submit();
 }
 
+// ── Submit final ──────────────────────────────────────────────────────────────
 function submitFinal() {
     document.getElementById('statusField').value = 'final';
-    // Show signature pad if not already signed
     const padWrap = document.getElementById('sigPadWrap');
     if (padWrap && padWrap.style.display === 'none') {
         padWrap.style.display = 'block';
@@ -441,24 +362,24 @@ function submitFinal() {
         padWrap.scrollIntoView({ behavior: 'smooth' });
         return;
     }
-    _extractSections();
+    document.getElementById('reportHtmlField').value = _buildHtml();
     document.getElementById('actionField').value = 'submit';
     document.getElementById('reportForm').submit();
 }
 
-// ── Signature pad ─────────────────────────────────────────────────────────
+// ── Signature pad ─────────────────────────────────────────────────────────────
 let _sigCtx = null, _sigDrawing = false;
 function _initSigPad() {
     const canvas = document.getElementById('sigCanvas');
     if (!canvas || canvas._init) return;
     canvas._init = true;
     const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width || 360;
+    canvas.width  = rect.width || 360;
     canvas.height = 72;
     _sigCtx = canvas.getContext('2d');
     _sigCtx.strokeStyle = '#111';
-    _sigCtx.lineWidth = 1.8;
-    _sigCtx.lineCap = 'round';
+    _sigCtx.lineWidth   = 1.8;
+    _sigCtx.lineCap     = 'round';
     canvas.addEventListener('mousedown',  e => { _sigDrawing = true; _sigCtx.beginPath(); _sigCtx.moveTo(e.offsetX, e.offsetY); });
     canvas.addEventListener('mousemove',  e => { if (!_sigDrawing) return; _sigCtx.lineTo(e.offsetX, e.offsetY); _sigCtx.stroke(); });
     canvas.addEventListener('mouseup',    () => { _sigDrawing = false; });
@@ -471,54 +392,47 @@ function clearSig() {
 function applySig() {
     const c = document.getElementById('sigCanvas');
     document.getElementById('digitalSigField').value = c.toDataURL('image/png').split(',')[1];
-    _extractSections();
-    document.getElementById('actionField').value = 'submit';
+    document.getElementById('reportHtmlField').value  = _buildHtml();
+    document.getElementById('actionField').value      = 'submit';
     document.getElementById('reportForm').submit();
 }
 
-// Current date display
-(function() {
-    const el = document.getElementById('sigNow');
-    if (el) el.textContent = new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
-})();
-
-// ── Auto-save every 40 s ──────────────────────────────────────────────────
-let _origHtml = quill.root.innerHTML;
+// ── Auto-save every 40 s ──────────────────────────────────────────────────────
+let _origSnapshot = document.getElementById('f_findings')?.value || '';
 setInterval(async function() {
-    const html = quill.root.innerHTML;
-    if (html === _origHtml) return;
-    _extractSections();
-    const form = document.getElementById('reportForm');
+    const cur = document.getElementById('f_findings')?.value || '';
+    if (cur === _origSnapshot) return;
+    document.getElementById('reportHtmlField').value = _buildHtml();
+    const fd = new FormData(document.getElementById('reportForm'));
+    fd.set('action', 'save');
     try {
-        const fd = new FormData(form);
-        fd.set('action', 'save');
-        const resp = await fetch(form.action || window.location.href, {
-            method: 'POST', body: fd, credentials: 'same-origin',
-        });
+        const resp = await fetch(window.location.href, { method: 'POST', body: fd, credentials: 'same-origin' });
         if (resp.ok) {
             const el = document.getElementById('autoSaveStatus');
             if (el) el.textContent = 'Saved ' + new Date().toLocaleTimeString();
-            _origHtml = html;
+            _origSnapshot = cur;
         }
     } catch (_) {}
 }, 40000);
 
 // Warn on close if changed
 window.addEventListener('beforeunload', function(e) {
-    if (quill.root.innerHTML !== _origHtml) { e.preventDefault(); e.returnValue = ''; }
+    const cur = document.getElementById('f_findings')?.value || '';
+    if (cur !== _origSnapshot) { e.preventDefault(); e.returnValue = ''; }
 });
 
-// ── AI findings generation ────────────────────────────────────────────────
+// ── AI generation ─────────────────────────────────────────────────────────────
+function _getCookie(name) {
+    try { const v = `; ${document.cookie}`; const p = v.split(`; ${name}=`); if (p.length === 2) return p.pop().split(';').shift(); } catch (_) {} return '';
+}
 function _setAiStatus(msg, color) {
     const el = document.getElementById('aiStatus');
     if (el) { el.textContent = msg || ''; el.style.color = color || ''; }
 }
-
 async function _safeJson(resp) {
     const text = await resp.text();
-    if (!text || !text.trim()) throw new Error(`Empty response (HTTP ${resp.status}) — check server logs`);
-    try { return JSON.parse(text); }
-    catch(_) { throw new Error(`Server returned non-JSON (HTTP ${resp.status}): ${text.slice(0, 120)}`); }
+    if (!text.trim()) throw new Error(`Empty response (HTTP ${resp.status})`);
+    try { return JSON.parse(text); } catch(_) { throw new Error(`Non-JSON (HTTP ${resp.status}): ${text.slice(0,120)}`); }
 }
 
 async function generateAIFindings() {
@@ -535,44 +449,23 @@ async function generateAIFindings() {
         if (!r1.ok || j1.success === false) throw new Error(j1.error || `HTTP ${r1.status}`);
 
         _setAiStatus('Generating draft…', '#00d4ff');
-        // Use the LLM report endpoint — returns JSON always, no redirect on permission check.
-        // Pass analysis metadata from step 1 so the LLM has context even if no stored analysis exists.
         const r2 = await fetch(`/ai/api/study/${studyId}/llm-report/`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': _getCookie('csrftoken'),
-                'X-Requested-With': 'XMLHttpRequest',
-            },
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest' },
             body: JSON.stringify({
-                findings_summary: (j1.report_text || ''),
-                abnormalities: (j1.measurements && j1.measurements.abnormalities) || [],
-                triage_level: (j1.triage && j1.triage.triage_level) || '',
-                confidence: (j1.measurements && j1.measurements.confidence) || 0,
+                findings_summary: j1.report_text || '',
+                abnormalities:    (j1.measurements && j1.measurements.abnormalities) || [],
+                triage_level:     (j1.triage && j1.triage.triage_level) || '',
+                confidence:       (j1.measurements && j1.measurements.confidence) || 0,
             }),
             credentials: 'same-origin',
         });
         const j2 = await _safeJson(r2);
         if (!r2.ok || j2.success === false) throw new Error(j2.error || `HTTP ${r2.status}`);
 
-        // Inject AI content into corresponding sections
-        const aiMap = {
-            'findings':        j2.findings,
-            'impression':      j2.impression,
-            'recommendations': j2.recommendations,
-        };
-        // Walk editor children, find section headings, replace content after each
-        const children = Array.from(quill.root.children);
-        let activeSec = null;
-        children.forEach(function(node) {
-            if (node.tagName === 'H2') {
-                const txt = (node.textContent || '').trim().toLowerCase();
-                activeSec = Object.keys(aiMap).find(k => txt.includes(k)) || null;
-            } else if (activeSec && aiMap[activeSec]) {
-                node.innerHTML = aiMap[activeSec].replace(/\n/g, '<br>');
-                aiMap[activeSec] = null; // only fill first paragraph block
-            }
-        });
+        if (j2.findings)        document.getElementById('f_findings').value        = j2.findings;
+        if (j2.impression)      document.getElementById('f_impression').value      = j2.impression;
+        if (j2.recommendations) document.getElementById('f_recommendations').value = j2.recommendations;
 
         const tri = (j2 && j2.triage) || (j1 && j1.triage);
         _setAiStatus(tri && tri.triage_level ? `AI ready · Triage: ${String(tri.triage_level).toUpperCase()}` : 'AI ready', '#00c853');
@@ -581,26 +474,15 @@ async function generateAIFindings() {
     }
 }
 
-// Template loader support (optional, if backend sends report_templates)
 {% if report_templates %}
 async function loadTemplate(templateId) {
     if (!confirm('Load this template? Unsaved changes will be lost.')) return;
     try {
         const resp = await fetch('/reports/api/template/' + templateId + '/');
         const data = await resp.json();
-        // Merge into editor sections
-        const fieldMap = { findings: data.findings, impression: data.impression, recommendations: data.recommendations };
-        const children = Array.from(quill.root.children);
-        let activeSec = null;
-        children.forEach(function(node) {
-            if (node.tagName === 'H2') {
-                const txt = (node.textContent || '').trim().toLowerCase();
-                activeSec = Object.keys(fieldMap).find(k => txt.includes(k)) || null;
-            } else if (activeSec && fieldMap[activeSec]) {
-                node.innerHTML = fieldMap[activeSec].replace(/\n/g, '<br>');
-                fieldMap[activeSec] = null;
-            }
-        });
+        if (data.findings)        document.getElementById('f_findings').value        = data.findings;
+        if (data.impression)      document.getElementById('f_impression').value      = data.impression;
+        if (data.recommendations) document.getElementById('f_recommendations').value = data.recommendations;
     } catch(e) { alert('Failed to load template'); }
 }
 {% endif %}

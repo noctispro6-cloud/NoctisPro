@@ -580,6 +580,9 @@ def _load_local_model():
 
             device = -1  # CPU
             if any(x in model_id.lower() for x in ("flan", "t5", "bart")):
+                # Newer transformers removed text2text-generation from the pipeline registry.
+                # Try it first (works on older installs), then fall back to the direct model API.
+                pipe = None
                 for task in ("text2text-generation", "text-generation"):
                     try:
                         pipe = hf_pipeline(
@@ -589,10 +592,31 @@ def _load_local_model():
                             model_kwargs={"low_cpu_mem_usage": True, "dtype": torch.float32},
                         )
                         break
-                    except ValueError:
+                    except (ValueError, KeyError):
                         continue
-                else:
-                    raise ValueError(f"No working task for model {model_id}")
+
+                if pipe is None:
+                    # Direct seq2seq model (T5/BART) — wrap in a callable that mimics the pipeline API.
+                    from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
+                    _tok = AutoTokenizer.from_pretrained(model_id)
+                    _mdl = AutoModelForSeq2SeqLM.from_pretrained(
+                        model_id, low_cpu_mem_usage=True, torch_dtype=torch.float32
+                    )
+
+                    class _Seq2SeqPipe:
+                        def __call__(self, prompt, max_new_tokens=500, do_sample=False, num_beams=4, **kw):
+                            inputs = _tok(prompt, return_tensors="pt", truncation=True, max_length=1024)
+                            out = _mdl.generate(
+                                **inputs,
+                                max_new_tokens=max_new_tokens,
+                                num_beams=num_beams,
+                                early_stopping=True,
+                            )
+                            text = _tok.decode(out[0], skip_special_tokens=True)
+                            return [{"generated_text": text}]
+
+                    pipe = _Seq2SeqPipe()
             else:
                 pipe = hf_pipeline(
                     "text-generation",

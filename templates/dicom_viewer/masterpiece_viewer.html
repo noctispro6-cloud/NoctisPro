@@ -73,7 +73,9 @@
             .series-thumb-placeholder { color: #999 !important; }
             .panel-section { border-color: #c0c4cc !important; }
             .series-title { color: #1a1a1a !important; }
-            .btn, .btn-sm, .btn-icon { background: #d0d3d8 !important; color: #1a1a1a !important; border-color: #b0b4bc !important; }
+            .btn, .btn-sm, .btn-icon, .topbar-btn { background: #d0d3d8 !important; color: #1a1a1a !important; border-color: #b0b4bc !important; }
+            .topbar-btn-primary { background: var(--accent-color) !important; color: #fff !important; border-color: var(--accent-color) !important; }
+            #writeReportBtn { background: rgba(180,106,8,0.12) !important; color: var(--warning-color) !important; border-color: rgba(180,106,8,0.3) !important; }
             .modal-content { background: #f5f5f5 !important; color: #1a1a1a !important; border-color: #c0c4cc !important; }
             .ai-analysis-section { border-color: #c0c4cc !important; }
         }
@@ -93,6 +95,21 @@
             --warning-color: #b46a08;
             --danger-color: #c42b1c;
         }
+        [data-theme="light"] .topbar-btn {
+            background: rgba(0,0,0,0.05);
+            border-color: #c0c4cc;
+            color: #1a1a1a;
+        }
+        [data-theme="light"] .topbar-btn:hover {
+            background: rgba(0,120,212,0.1);
+            border-color: rgba(0,120,212,0.4);
+            color: #0078d4;
+        }
+        [data-theme="light"] .topbar-btn-primary {
+            background: #0078d4; border-color: #0078d4; color: #fff;
+        }
+        [data-theme="light"] .topbar-btn-primary:hover { background: #006abc; border-color: #006abc; }
+        [data-theme="light"] .nav-dd-menu { box-shadow: 0 6px 18px rgba(0,0,0,0.15); }
 
         * {
             margin: 0;
@@ -165,6 +182,79 @@
             margin-bottom: 4px;
         }
 
+        /* Toolbar collapsible groups */
+        .toolbar-divider {
+            width: 38px;
+            height: 1px;
+            background: rgba(255,255,255,0.12);
+            border-radius: 1px;
+            flex-shrink: 0;
+        }
+
+        .toolbar-group {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .toolbar-group > summary {
+            list-style: none;
+            width: 55px;
+            min-height: 46px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, rgba(0,120,212,0.18), rgba(0,120,212,0.06));
+            border: 1px solid rgba(0,120,212,0.25);
+            color: #8ec5f7;
+            cursor: pointer;
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            user-select: none;
+            -webkit-user-select: none;
+            transition: background 0.2s;
+            position: relative;
+        }
+
+        .toolbar-group > summary::-webkit-details-marker { display: none; }
+
+        .toolbar-group > summary i {
+            font-size: 15px;
+        }
+
+        .toolbar-group > summary::after {
+            content: '▾';
+            font-size: 8px;
+            opacity: 0.7;
+            transition: transform 0.2s;
+            display: block;
+        }
+
+        .toolbar-group[open] > summary::after {
+            transform: rotate(-180deg);
+        }
+
+        .toolbar-group > summary:hover {
+            background: linear-gradient(135deg, rgba(0,120,212,0.28), rgba(0,120,212,0.12));
+            color: #c2e0ff;
+        }
+
+        .toolbar-group-items {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 0 4px;
+            width: 100%;
+            border-left: 2px solid rgba(0,120,212,0.2);
+            margin-top: 4px;
+        }
+
         /* Center Area */
         .center-area {
             flex: 1;
@@ -174,16 +264,139 @@
         }
 
         .top-bar {
-            height: 60px;
+            height: 56px;
             background: linear-gradient(135deg, var(--header-bg), #2a2a2a);
-            border-bottom: 2px solid var(--border-color);
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
-            padding: 0 20px;
-            gap: 20px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            padding: 0 16px;
+            gap: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
         }
 
+        /* ─── Top-bar three-zone layout ───────────────────────── */
+        .topbar-logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--accent-color);
+            font-weight: 700;
+            font-size: 14px;
+            white-space: nowrap;
+            flex-shrink: 0;
+            letter-spacing: 0.3px;
+        }
+        .topbar-logo i { font-size: 16px; }
+
+        .topbar-sep {
+            width: 1px;
+            height: 26px;
+            background: var(--border-color);
+            flex-shrink: 0;
+            margin: 0 4px;
+        }
+
+        .topbar-sep-v {
+            width: 1px;
+            height: 20px;
+            background: rgba(255,255,255,0.12);
+            flex-shrink: 0;
+            margin: 0 2px;
+        }
+        [data-theme="light"] .topbar-sep-v { background: rgba(0,0,0,0.12); }
+
+        .patient-info {
+            color: var(--text-secondary);
+            font-size: 12px;
+            flex: 1 1 120px;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .topbar-actions {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            margin-left: auto;
+            flex-shrink: 0;
+        }
+
+        /* Base top-bar button */
+        .topbar-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            padding: 5px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: rgba(255,255,255,0.04);
+            color: var(--text-primary);
+            font-size: 11px;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+            white-space: nowrap;
+            font-family: inherit;
+            text-decoration: none;
+            flex-shrink: 0;
+        }
+        .topbar-btn:hover {
+            background: rgba(0,212,255,0.12);
+            border-color: rgba(0,212,255,0.35);
+            color: var(--accent-color);
+        }
+
+        /* Primary accent action */
+        .topbar-btn-primary {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+            color: #000;
+            font-weight: 600;
+        }
+        .topbar-btn-primary:hover {
+            background: #00b8d4;
+            border-color: #00b8d4;
+            color: #000;
+        }
+
+        /* Icon-only compact square */
+        .topbar-btn-icon {
+            padding: 5px 7px;
+            min-width: 30px;
+        }
+
+        /* Dropdown caret label */
+        .topbar-btn .dd-caret { font-size: 8px; opacity: 0.55; }
+
+        /* Report button (role-gated, shows when study loaded) */
+        #writeReportBtn {
+            background: rgba(255,170,0,0.1);
+            border-color: rgba(255,170,0,0.3);
+            color: var(--warning-color);
+        }
+        #writeReportBtn:hover {
+            background: rgba(255,170,0,0.2);
+            border-color: var(--warning-color);
+        }
+
+        /* Dropdown panel — replaces per-element inline styles */
+        .nav-dd-menu {
+            position: absolute;
+            top: calc(100% + 3px);
+            left: 0;
+            background: var(--card-bg, #252525);
+            border: 1px solid var(--border-color, #404040);
+            border-top: 2px solid var(--accent-color);
+            border-radius: 0 6px 6px 6px;
+            padding: 4px 0;
+            z-index: 1000;
+            min-width: 150px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+        }
+
+        /* Keep .logo for any legacy references */
         .logo {
             color: var(--accent-color);
             font-weight: bold;
@@ -191,12 +404,6 @@
             display: flex;
             align-items: center;
             gap: 8px;
-        }
-
-        .patient-info {
-            color: var(--text-secondary);
-            font-size: 12px;
-            margin-left: auto;
         }
 
         .btn {
@@ -239,6 +446,7 @@
             width: 100%;
             height: 100%;
             position: relative;
+            overflow: hidden;
         }
 
         #dicomCanvas {
@@ -248,6 +456,7 @@
             width: 100%;
             height: 100%;
             object-fit: contain;
+            touch-action: none;
         }
 
         /* MPR Four Window Layout */
@@ -312,33 +521,25 @@
             z-index: 10;
         }
 
-        /* Overlay Labels */
-        .overlay-labels {
+        /* 4-corner DICOM overlays */
+        .dcm-corner {
             position: absolute;
-            top: 15px;
-            left: 15px;
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
-            padding: 12px;
-            border-radius: 8px;
-            font-size: 12px;
-            line-height: 1.5;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255,255,255,0.88);
+            font-size: 11px;
+            line-height: 1.55;
+            font-family: 'Consolas','Menlo',monospace;
+            pointer-events: none;
+            text-shadow: 0 0 3px #000, 1px 1px 2px rgba(0,0,0,0.95);
+            white-space: nowrap;
+            z-index: 10;
         }
+        .dcm-tl { top: 10px; left: 10px; }
+        .dcm-tr { top: 10px; right: 10px; text-align: right; }
+        .dcm-bl { bottom: 10px; left: 10px; }
+        .dcm-br { bottom: 10px; right: 10px; text-align: right; }
+        .dcm-corner .dcm-label { color: rgba(255,255,255,0.45); font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
+        .dcm-corner .dcm-val   { font-weight: 600; }
 
-        .zoom-info {
-            position: absolute;
-            bottom: 15px;
-            left: 15px;
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
 
         /* Right Panel */
         .right-panel {
@@ -500,8 +701,38 @@
         /* Series List */
         .series-list {
             max-height: 200px;
+            min-height: 60px;
             overflow-y: auto;
-            margin-bottom: 16px;
+            overflow-x: hidden;
+            margin-bottom: 4px;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+        }
+
+        .series-list-resize-handle {
+            height: 10px;
+            cursor: row-resize;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .series-list-resize-handle::after {
+            content: '';
+            display: block;
+            width: 40px;
+            height: 4px;
+            border-radius: 2px;
+            background: var(--border-color);
+            transition: background 0.2s;
+        }
+
+        .series-list-resize-handle:hover::after,
+        .series-list-resize-handle.dragging::after {
+            background: var(--accent-color);
         }
 
         .series-item {
@@ -927,6 +1158,8 @@
                 height: 300px;
                 border-left: none;
                 border-top: 2px solid var(--border-color);
+                -webkit-overflow-scrolling: touch;
+                overscroll-behavior: contain;
             }
 
             .tool-btn {
@@ -1002,20 +1235,14 @@
             min-height: 44px;
             height: auto !important;
         }
-        .top-bar .btn {
+        .top-bar .btn, .topbar-btn {
             flex-shrink: 0;
             white-space: nowrap;
-            font-size: clamp(10px, 1.1vw, 13px);
-            padding: clamp(4px, 0.5vw, 7px) clamp(6px, 0.8vw, 12px);
-        }
-        .patient-info {
-            flex: 1 1 140px;
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
             font-size: clamp(10px, 1.1vw, 12px);
+            padding: clamp(4px, 0.45vw, 6px) clamp(6px, 0.75vw, 10px);
         }
+        .topbar-btn-icon { padding: clamp(4px, 0.45vw, 6px) clamp(5px, 0.6vw, 7px); }
+        .patient-info { font-size: clamp(10px, 1.1vw, 12px); }
 
         /* Toolbar buttons: scale down on tablets */
         .tool-btn {
@@ -1046,7 +1273,7 @@
                 font-size: 11px;
                 padding: 4px 6px !important;
             }
-            .top-bar .logo { display: none; }
+            .topbar-logo { display: none; }
             .right-panel { display: none; }
             .toolbar {
                 width: 100%;
@@ -1091,7 +1318,8 @@
             .tool-btn { min-width: 44px !important; min-height: 44px !important; }
             .series-nav-btn { min-height: 36px; padding: 6px 10px; }
             .series-item { padding: 10px 8px; }
-            .btn { min-height: 36px; }
+            .btn, .topbar-btn { min-height: 36px; }
+            .topbar-btn-icon { min-width: 36px; min-height: 36px; }
             .nav-dropdown-item { padding: 10px 14px; }
         }
     </style>
@@ -1101,96 +1329,120 @@
     <div class="viewer-container">
         <!-- Left Toolbar -->
         <div class="toolbar">
+
+            <!-- Primary interaction tools — always visible -->
             <button class="tool-btn active" data-tool="windowing" title="Window/Level">
-                <i class="fas fa-adjust"></i>
-                <span>Window</span>
+                <i class="fas fa-adjust"></i><span>W/L</span>
             </button>
             <button class="tool-btn" data-tool="zoom" title="Zoom">
-                <i class="fas fa-search-plus"></i>
-                <span>Zoom</span>
+                <i class="fas fa-search-plus"></i><span>Zoom</span>
             </button>
             <button class="tool-btn" data-tool="pan" title="Pan">
-                <i class="fas fa-hand-paper"></i>
-                <span>Pan</span>
+                <i class="fas fa-hand-paper"></i><span>Pan</span>
             </button>
-            <button class="tool-btn" data-tool="measure" title="Measure">
-                <i class="fas fa-ruler"></i>
-                <span>Measure</span>
-            </button>
-            <button class="tool-btn" data-tool="angle" title="Angle Measurement">
-                <i class="fas fa-drafting-compass"></i>
-                <span>Angle</span>
-            </button>
-            <button class="tool-btn" data-tool="area" title="Area Measurement">
-                <i class="fas fa-vector-square"></i>
-                <span>Area</span>
-            </button>
-            <button class="tool-btn" data-tool="roi" title="HU ROI (Ellipse)">
-                <i class="fas fa-bullseye"></i>
-                <span>ROI</span>
-            </button>
-            <button class="tool-btn" data-tool="annotate" title="Annotate">
-                <i class="fas fa-comment"></i>
-                <span>Note</span>
-            </button>
-            <button class="tool-btn" data-tool="crosshair" title="Crosshair">
-                <i class="fas fa-crosshairs"></i>
-                <span>Cross</span>
-            </button>
-            <button class="tool-btn" data-tool="magnify" title="Magnifying Glass">
-                <i class="fas fa-search"></i>
-                <span>Magnify</span>
-            </button>
-            <button class="tool-btn" data-tool="cine" title="Cine Mode">
-                <i class="fas fa-play"></i>
-                <span>Cine</span>
-            </button>
-            <button class="tool-btn" data-tool="invert" title="Invert">
-                <i class="fas fa-adjust"></i>
-                <span>Invert</span>
-            </button>
-            <button class="tool-btn" data-tool="rotate" title="Rotate Clockwise (+90°)">
-                <i class="fas fa-redo"></i>
-                <span>Rotate</span>
-            </button>
-            <button class="tool-btn" data-tool="rotate-ccw" title="Rotate Counter-Clockwise (-90°)"
-                onclick="handleRotateCCW(); event.stopPropagation();">
-                <i class="fas fa-undo"></i>
-                <span>Rot CCW</span>
-            </button>
-            <button class="tool-btn" data-tool="flip" title="Flip Horizontal">
-                <i class="fas fa-exchange-alt"></i>
-                <span>Flip H</span>
-            </button>
-            <button class="tool-btn" data-tool="flipv" title="Flip Vertical"
-                onclick="handleFlipV(); event.stopPropagation();">
-                <i class="fas fa-arrows-alt-v"></i>
-                <span>Flip V</span>
-            </button>
-            <button class="tool-btn" data-tool="reset" title="Reset View">
-                <i class="fas fa-undo"></i>
-                <span>Reset</span>
-            </button>
-            <button class="tool-btn" data-tool="mpr" title="MPR View">
-                <i class="fas fa-th-large"></i>
-                <span>MPR</span>
-            </button>
-            <button class="tool-btn" data-tool="3d" title="3D Reconstruction">
-                <i class="fas fa-cube"></i>
-                <span>3D</span>
-            </button>
+
+            <div class="toolbar-divider"></div>
+
+            <!-- Measure group -->
+            <details class="toolbar-group">
+                <summary><i class="fas fa-ruler"></i>Measure</summary>
+                <div class="toolbar-group-items">
+                    <button class="tool-btn" data-tool="measure" title="Length">
+                        <i class="fas fa-ruler-horizontal"></i><span>Length</span>
+                    </button>
+                    <button class="tool-btn" data-tool="angle" title="Angle">
+                        <i class="fas fa-drafting-compass"></i><span>Angle</span>
+                    </button>
+                    <button class="tool-btn" data-tool="cobb_angle" title="Cobb Angle">
+                        <i class="fas fa-angle-double-up"></i><span>Cobb</span>
+                    </button>
+                    <button class="tool-btn" data-tool="area" title="Area">
+                        <i class="fas fa-vector-square"></i><span>Area</span>
+                    </button>
+                    <button class="tool-btn" data-tool="roi" title="HU ROI">
+                        <i class="fas fa-bullseye"></i><span>ROI</span>
+                    </button>
+                    <button class="tool-btn" data-tool="annotate" title="Annotate">
+                        <i class="fas fa-comment"></i><span>Note</span>
+                    </button>
+                </div>
+            </details>
+
+            <div class="toolbar-divider"></div>
+
+            <!-- View group -->
+            <details class="toolbar-group">
+                <summary><i class="fas fa-eye"></i>View</summary>
+                <div class="toolbar-group-items">
+                    <button class="tool-btn" data-tool="crosshair" title="Crosshair">
+                        <i class="fas fa-crosshairs"></i><span>Cross</span>
+                    </button>
+                    <button class="tool-btn" data-tool="magnify" title="Magnify">
+                        <i class="fas fa-search"></i><span>Magnify</span>
+                    </button>
+                    <button class="tool-btn" data-tool="cine" title="Cine Mode">
+                        <i class="fas fa-play"></i><span>Cine</span>
+                    </button>
+                </div>
+            </details>
+
+            <div class="toolbar-divider"></div>
+
+            <!-- Transform group -->
+            <details class="toolbar-group">
+                <summary><i class="fas fa-sync-alt"></i>Transform</summary>
+                <div class="toolbar-group-items">
+                    <button class="tool-btn" data-tool="invert" title="Invert">
+                        <i class="fas fa-circle-half-stroke"></i><span>Invert</span>
+                    </button>
+                    <button class="tool-btn" data-tool="rotate" title="Rotate CW">
+                        <i class="fas fa-redo"></i><span>Rot CW</span>
+                    </button>
+                    <button class="tool-btn" data-tool="rotate-ccw" title="Rotate CCW"
+                        onclick="handleRotateCCW(); event.stopPropagation();">
+                        <i class="fas fa-undo"></i><span>Rot CCW</span>
+                    </button>
+                    <button class="tool-btn" data-tool="flip" title="Flip Horizontal">
+                        <i class="fas fa-exchange-alt"></i><span>Flip H</span>
+                    </button>
+                    <button class="tool-btn" data-tool="flipv" title="Flip Vertical"
+                        onclick="handleFlipV(); event.stopPropagation();">
+                        <i class="fas fa-arrows-alt-v"></i><span>Flip V</span>
+                    </button>
+                    <button class="tool-btn" data-tool="reset" title="Reset View">
+                        <i class="fas fa-undo-alt"></i><span>Reset</span>
+                    </button>
+                </div>
+            </details>
+
+            <div class="toolbar-divider"></div>
+
+            <!-- 3D / MPR group -->
+            <details class="toolbar-group">
+                <summary><i class="fas fa-cube"></i>3D</summary>
+                <div class="toolbar-group-items">
+                    <button class="tool-btn" data-tool="mpr" title="MPR View">
+                        <i class="fas fa-th-large"></i><span>MPR</span>
+                    </button>
+                    <button class="tool-btn" data-tool="3d" title="3D Reconstruction">
+                        <i class="fas fa-cube"></i><span>3D</span>
+                    </button>
+                </div>
+            </details>
+
+            <div class="toolbar-divider"></div>
+
+            <!-- Output tools -->
             <button class="tool-btn" data-tool="ai" title="AI Analysis" onclick="toggleAIPanel()">
-                <i class="fas fa-brain"></i>
-                <span>AI</span>
+                <i class="fas fa-brain"></i><span>AI</span>
             </button>
             <button class="tool-btn" data-tool="print" title="Print">
-                <i class="fas fa-print"></i>
-                <span>Print</span>
+                <i class="fas fa-print"></i><span>Print</span>
             </button>
             <button class="tool-btn" data-tool="export" title="Export">
-                <i class="fas fa-download"></i>
-                <span>Export</span>
+                <i class="fas fa-download"></i><span>Export</span>
             </button>
+
         </div>
 
         <!-- (Removed) Crosshair rotate control (MPR only). -->
@@ -1198,168 +1450,168 @@
         <div class="center-area">
             <!-- Top Bar -->
             <div class="top-bar">
-                <div class="logo">
+
+                <!-- Zone 1: Logo -->
+                <div class="topbar-logo">
                     <i class="fas fa-hospital-symbol"></i>
-                    Noctis Pro DICOM Viewer
+                    <span>Noctis Pro</span>
                 </div>
+                <div class="topbar-sep"></div>
 
-                <button class="btn" onclick="window.loadFromLocalFiles()" title="View DICOM from CD, DVD, or USB flash drive (no upload)">
-                    <i class="fas fa-compact-disc"></i> Load Disc / Flash
-                </button>
+                <!-- Zone 2: Patient info (expands to fill available space) -->
+                <div class="patient-info" id="patientInfo">Patient: — | Study Date: — | Modality: —</div>
 
-                <div class="patient-info" id="patientInfo">
-                    Patient: - | Study Date: - | Modality: -
-                </div>
+                <!-- Zone 3: All actions, right-aligned -->
+                <div class="topbar-actions">
 
-                {% if user.is_admin or user.is_radiologist %}
-                <button type="button" id="writeReportBtn" class="btn"
-                    onclick="if(window.currentStudyId){ window.location.href='/reports/write/'+window.currentStudyId+'/'; } else { alert('Please load a study first'); }"
-                    title="Write Report for current study" style="display:none">
-                    <i class="fas fa-file-signature"></i> Report
-                </button>
-                <script>
-                    // Show write report button when a study is loaded
-                    document.addEventListener('studyLoaded', function (e) {
-                        const btn = document.getElementById('writeReportBtn');
-                        if (btn) btn.style.display = '';
-                    });
-                    // Also check on load
-                    window.addEventListener('load', function () {
-                        if (window.currentStudyId) {
+                    <!-- Primary: Load local DICOM -->
+                    <button class="topbar-btn topbar-btn-primary" onclick="window.loadFromLocalFiles()"
+                        title="View DICOM from CD, DVD, or USB flash drive (no upload)">
+                        <i class="fas fa-compact-disc"></i><span>Load</span>
+                    </button>
+
+                    <div class="topbar-sep-v"></div>
+
+                    <!-- W/L presets -->
+                    <div class="nav-dropdown-group" style="position:relative;">
+                        <button class="topbar-btn" onclick="toggleDropdown('wlDropdown')" title="Window/Level Presets">
+                            <i class="fas fa-adjust"></i><span>W/L</span><span class="dd-caret">▾</span>
+                        </button>
+                        <div id="wlDropdown" class="nav-dd-menu" style="display:none;">
+                            <div class="nav-dropdown-item" onclick="applyPreset('lung')"><i class="fas fa-lungs"></i>Lung</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('bone')"><i class="fas fa-bone"></i>Bone</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('soft')"><i class="fas fa-circle"></i>Soft Tissue</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('brain')"><i class="fas fa-brain"></i>Brain</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('liver')"><i class="fas fa-circle"></i>Liver</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('default')"><i class="fas fa-undo"></i>Reset W/L</div>
+                        </div>
+                    </div>
+
+                    <!-- Navigation sliders -->
+                    <div class="nav-dropdown-group" style="position:relative;">
+                        <button class="topbar-btn" onclick="toggleDropdown('navDropdown')" title="Slice &amp; Zoom">
+                            <i class="fas fa-sliders-h"></i><span>Nav</span><span class="dd-caret">▾</span>
+                        </button>
+                        <div id="navDropdown" class="nav-dd-menu" style="display:none;min-width:200px;">
+                            <div style="padding:8px 14px 4px;">
+                                <label style="font-size:10px;color:var(--text-muted);">Slice</label>
+                                <input type="range" id="sliceSlider2" min="0" max="100" value="0"
+                                    oninput="updateSlice(this.value)" style="width:100%;margin-top:3px;">
+                            </div>
+                            <div style="padding:4px 14px 10px;">
+                                <label style="font-size:10px;color:var(--text-muted);">Zoom</label>
+                                <input type="range" id="zoomSlider2" min="0.1" max="5" step="0.1" value="1"
+                                    oninput="updateZoom(this.value)" style="width:100%;margin-top:3px;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Measurements (Cobb + Clear All) -->
+                    <div class="nav-dropdown-group" style="position:relative;">
+                        <button class="topbar-btn" onclick="toggleDropdown('measDropdown')" title="Measurements">
+                            <i class="fas fa-ruler"></i><span>Meas.</span><span class="dd-caret">▾</span>
+                        </button>
+                        <div id="measDropdown" class="nav-dd-menu" style="display:none;">
+                            <div class="nav-dropdown-item" onclick="setActiveTool('cobb_angle')"><i class="fas fa-angle-double-up"></i>Cobb Angle</div>
+                            <div style="height:1px;background:var(--border-color);margin:4px 0;"></div>
+                            <div class="nav-dropdown-item" onclick="clearAllMeasurements()"><i class="fas fa-trash"></i>Clear All</div>
+                        </div>
+                    </div>
+
+                    <!-- MIP -->
+                    <button class="topbar-btn" onclick="generateMIP()" title="Maximum Intensity Projection">
+                        <i class="fas fa-layer-group"></i><span>MIP</span>
+                    </button>
+
+                    <div class="topbar-sep-v"></div>
+
+                    <!-- Report (role-gated, shown when study is loaded) -->
+                    {% if user.is_admin or user.is_radiologist %}
+                    <button type="button" id="writeReportBtn" class="topbar-btn"
+                        onclick="if(window.currentStudyId){ window.location.href='/reports/write/'+window.currentStudyId+'/'; } else { alert('Please load a study first'); }"
+                        title="Write Report for current study" style="display:none;">
+                        <i class="fas fa-file-signature"></i><span>Report</span>
+                    </button>
+                    <script>
+                        document.addEventListener('studyLoaded', function () {
                             const btn = document.getElementById('writeReportBtn');
                             if (btn) btn.style.display = '';
-                        }
-                    });
-                </script>
-                {% endif %}
-                <a class="btn" href="{% url 'worklist:dashboard' %}" title="Home">
-                    <i class="fas fa-home"></i> Home
-                </a>
-                <button class="btn" onclick="toggleUI()" title="Toggle UI Auto Hide">
-                    <i class="fas fa-eye-slash"></i> UI
-                </button>
-                <button class="btn" id="themeToggleBtn" onclick="toggleViewerTheme()" title="Toggle light/dark mode">
-                    <i class="fas fa-circle-half-stroke"></i>
-                </button>
+                        });
+                        window.addEventListener('load', function () {
+                            if (window.currentStudyId) {
+                                const btn = document.getElementById('writeReportBtn');
+                                if (btn) btn.style.display = '';
+                            }
+                        });
+                    </script>
+                    {% endif %}
 
-                <!-- Navbar dropdowns -->
-                <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+                    <div class="topbar-sep-v"></div>
 
-                    <!-- Window/Level presets dropdown -->
-                    <div class="nav-dropdown-group" style="position:relative;">
-                        <button class="btn" onclick="toggleDropdown('wlDropdown')" title="Window/Level Presets">
-                            <i class="fas fa-adjust"></i> W/L ▾
-                        </button>
-                        <div id="wlDropdown" class="nav-dropdown-menu"
-                            style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:140px;">
-                            <div class="nav-dropdown-item" onclick="applyPreset('lung')"><i class="fas fa-lungs"></i>
-                                Lung</div>
-                            <div class="nav-dropdown-item" onclick="applyPreset('bone')"><i class="fas fa-bone"></i>
-                                Bone</div>
-                            <div class="nav-dropdown-item" onclick="applyPreset('soft')"><i class="fas fa-circle"></i>
-                                Soft Tissue</div>
-                            <div class="nav-dropdown-item" onclick="applyPreset('brain')"><i class="fas fa-brain"></i>
-                                Brain</div>
-                            <div class="nav-dropdown-item" onclick="applyPreset('liver')"><i class="fas fa-circle"></i>
-                                Liver</div>
-                            <div class="nav-dropdown-item" onclick="applyPreset('default')"><i class="fas fa-undo"></i>
-                                Reset W/L</div>
-                        </div>
-                    </div>
+                    <!-- Icon-only utility buttons -->
+                    <a class="topbar-btn topbar-btn-icon" href="{% url 'worklist:dashboard' %}" title="Home (worklist)">
+                        <i class="fas fa-home"></i>
+                    </a>
+                    <button class="topbar-btn topbar-btn-icon" onclick="toggleUI()" title="Toggle UI auto-hide">
+                        <i class="fas fa-eye-slash"></i>
+                    </button>
+                    <button class="topbar-btn topbar-btn-icon" id="themeToggleBtn" onclick="toggleViewerTheme()" title="Toggle light / dark mode">
+                        <i class="fas fa-circle-half-stroke"></i>
+                    </button>
 
-                    <!-- Navigation/Cine dropdown -->
-                    <div class="nav-dropdown-group" style="position:relative;">
-                        <button class="btn" onclick="toggleDropdown('navDropdown')" title="Navigation">
-                            <i class="fas fa-sliders-h"></i> Nav ▾
-                        </button>
-                        <div id="navDropdown" class="nav-dropdown-menu"
-                            style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:200px;">
-                            <div style="padding:8px 12px;">
-                                <label style="font-size:10px;color:#999;">Slice</label>
-                                <input type="range" id="sliceSlider2" min="0" max="100" value="0"
-                                    oninput="updateSlice(this.value)" style="width:100%">
-                            </div>
-                            <div style="padding:4px 12px;">
-                                <label style="font-size:10px;color:#999;">Zoom</label>
-                                <input type="range" id="zoomSlider2" min="0.1" max="5" step="0.1" value="1"
-                                    oninput="updateZoom(this.value)" style="width:100%">
-                            </div>
-                            <div class="nav-dropdown-item" onclick="toggleCineMode()"><i class="fas fa-play"></i> Cine
-                                Play/Stop</div>
-                        </div>
-                    </div>
-
-                    <!-- Measurements dropdown -->
-                    <div class="nav-dropdown-group" style="position:relative;">
-                        <button class="btn" onclick="toggleDropdown('measDropdown')" title="Measurements">
-                            <i class="fas fa-ruler"></i> Measure ▾
-                        </button>
-                        <div id="measDropdown" class="nav-dropdown-menu"
-                            style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:150px;">
-                            <div class="nav-dropdown-item" onclick="setActiveTool('measure')"><i
-                                    class="fas fa-ruler-horizontal"></i> Length</div>
-                            <div class="nav-dropdown-item" onclick="setActiveTool('angle')"><i
-                                    class="fas fa-drafting-compass"></i> Angle</div>
-                            <div class="nav-dropdown-item" onclick="setActiveTool('cobb_angle')"><i
-                                    class="fas fa-angle-double-up"></i> Cobb Angle</div>
-                            <div class="nav-dropdown-item" onclick="setActiveTool('area')"><i
-                                    class="fas fa-draw-polygon"></i> Area</div>
-                            <div class="nav-dropdown-item" onclick="setActiveTool('roi')"><i
-                                    class="fas fa-circle-notch"></i> HU ROI</div>
-                            <div style="height:1px;background:#404040;margin:4px 0;"></div>
-                            <div class="nav-dropdown-item" onclick="clearAllMeasurements()"><i class="fas fa-trash"></i>
-                                Clear All</div>
-                        </div>
-                    </div>
-
-                    <!-- 3D/MPR dropdown -->
-                    <div class="nav-dropdown-group" style="position:relative;">
-                        <button class="btn" onclick="toggleDropdown('threeDDropdown')" title="3D/MPR">
-                            <i class="fas fa-cube"></i> 3D ▾
-                        </button>
-                        <div id="threeDDropdown" class="nav-dropdown-menu"
-                            style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:150px;">
-                            <div class="nav-dropdown-item" onclick="generateMPRViews()"><i class="fas fa-th-large"></i>
-                                MPR Views</div>
-                            <div class="nav-dropdown-item" onclick="generateMIP()"><i class="fas fa-layer-group"></i>
-                                MIP</div>
-                            <div class="nav-dropdown-item" onclick="toggle3DView()"><i class="fas fa-cube"></i> 3D
-                                Reconstruction</div>
-                        </div>
-                    </div>
-
-                    <!-- Export/Print dropdown -->
-                    <div class="nav-dropdown-group" style="position:relative;">
-                        <button class="btn" onclick="toggleDropdown('exportDropdown')" title="Export/Print">
-                            <i class="fas fa-download"></i> Export ▾
-                        </button>
-                        <div id="exportDropdown" class="nav-dropdown-menu"
-                            style="display:none;position:absolute;top:100%;left:0;background:var(--card-bg,#252525);border:1px solid var(--border-color,#404040);border-radius:6px;padding:4px 0;z-index:1000;min-width:160px;">
-                            <div class="nav-dropdown-item" onclick="exportCurrentImage()"><i class="fas fa-image"></i>
-                                Download Image</div>
-                            <div class="nav-dropdown-item" onclick="printCurrentImage()"><i class="fas fa-print"></i>
-                                Print / PDF</div>
-                        </div>
-                    </div>
-
-                </div>
+                </div><!-- /.topbar-actions -->
             </div>
 
             <!-- Viewport -->
             <div class="viewport">
                 <!-- Single View Canvas -->
                 <div class="canvas-container" id="singleView">
-                    <canvas id="dicomCanvas"></canvas>
-                    <div class="overlay-labels" id="overlayLabels">
-                        <div>WW: <span id="windowWidth">400</span></div>
-                        <div>WL: <span id="windowLevel">40</span></div>
-                        <div>Slice: <span id="currentSlice">1</span>/<span id="totalSlices">1</span></div>
-                        <div id="frameOverlay" style="display:none;">Frame: <span id="frameValue">1</span>/<span
-                                id="totalFrames">1</span></div>
-                        <div>HU: <span id="hounsfield">-</span></div>
+                    <!-- Clinical photo display (XC studies) -->
+                    <img id="photoImage" alt="Clinical Photo" style="
+                        display:none; object-fit:contain; position:absolute;
+                        top:0; left:0; width:100%; height:100%;
+                        user-select:none; -webkit-user-drag:none;">
+                    <!-- Photo prev/next nav -->
+                    <div id="photoNav" style="
+                        display:none; position:absolute; bottom:0; left:0; right:0;
+                        background:rgba(0,0,0,.65); padding:8px 16px;
+                        align-items:center; justify-content:center; gap:16px; z-index:20;">
+                        <button onclick="stepPhoto(-1)" style="
+                            background:rgba(255,255,255,.12); border:none; color:#fff;
+                            width:34px; height:34px; border-radius:50%; cursor:pointer; font-size:15px;
+                            display:flex; align-items:center; justify-content:center;">&#8249;</button>
+                        <span id="photoNavLabel" style="color:#ccc; font-size:12px; min-width:60px; text-align:center;"></span>
+                        <button onclick="stepPhoto(1)" style="
+                            background:rgba(255,255,255,.12); border:none; color:#fff;
+                            width:34px; height:34px; border-radius:50%; cursor:pointer; font-size:15px;
+                            display:flex; align-items:center; justify-content:center;">&#8250;</button>
                     </div>
-                    <div class="zoom-info" id="zoomInfo">
-                        Zoom: <span id="zoomLevel">100%</span>
+                    <canvas id="dicomCanvas"></canvas>
+                    <!-- Top-left: patient -->
+                    <div class="dcm-corner dcm-tl" id="overlayTL">
+                        <div class="dcm-val" id="olPatientName">—</div>
+                        <div id="olPatientId"></div>
+                        <div id="olBodyPart"></div>
+                    </div>
+                    <!-- Top-right: study -->
+                    <div class="dcm-corner dcm-tr" id="overlayTR">
+                        <div class="dcm-val" id="olStudyDate">—</div>
+                        <div id="olModality"></div>
+                        <div id="olAccession"></div>
+                    </div>
+                    <!-- Bottom-left: imaging parameters -->
+                    <div class="dcm-corner dcm-bl" id="overlayBL">
+                        <div>WW <span id="windowWidth">400</span> &nbsp; WL <span id="windowLevel">40</span></div>
+                        <div>Slice <span id="currentSlice">1</span>/<span id="totalSlices">1</span></div>
+                        <div id="frameOverlay" style="display:none;">Frame <span id="frameValue">1</span>/<span id="totalFrames">1</span></div>
+                        <div>HU <span id="hounsfield">—</span></div>
+                        <div>Zoom <span id="zoomLevel">100%</span></div>
+                    </div>
+                    <!-- Bottom-right: acquisition -->
+                    <div class="dcm-corner dcm-br" id="overlayBR">
+                        <div id="olInstitution"></div>
+                        <div id="olSeriesDesc"></div>
+                        <div id="imageDimensions"></div>
                     </div>
                 </div>
 
@@ -1443,6 +1695,7 @@
                             <div class="series-details">Load a study first</div>
                         </div>
                     </div>
+                    <div class="series-list-resize-handle" id="seriesResizeHandle" title="Drag to resize series list"></div>
                 </div>
             </details>
 
@@ -1530,12 +1783,12 @@
             const menu = document.getElementById(id);
             if (!menu) return;
             const isOpen = menu.style.display !== 'none';
-            document.querySelectorAll('.nav-dropdown-menu').forEach(m => m.style.display = 'none');
+            document.querySelectorAll('.nav-dd-menu, .nav-dropdown-menu').forEach(m => m.style.display = 'none');
             if (!isOpen) menu.style.display = 'block';
         }
         document.addEventListener('click', function (e) {
             if (!e.target.closest('.nav-dropdown-group')) {
-                document.querySelectorAll('.nav-dropdown-menu').forEach(m => m.style.display = 'none');
+                document.querySelectorAll('.nav-dd-menu, .nav-dropdown-menu').forEach(m => m.style.display = 'none');
             }
         });
         function setActiveTool(tool) {
@@ -1589,6 +1842,9 @@
             renderMeta: { axial: null, sagittal: null, coronal: null },
             lastImage: { axial: null, sagittal: null, coronal: null }, // HTMLImageElement (current rendered)
         };
+        // True while the three MPR canvases show a MIP projection rather than regular MPR slices.
+        // First scroll gesture after MIP exits this mode and returns to slice-by-slice MPR.
+        let mipMode = false;
         // Per-plane MPR pan/zoom state (independent for each viewport)
         let mprViewTransform = {
             axial: { zoom: 1.0, panX: 0, panY: 0 },
@@ -2447,6 +2703,104 @@
             generateBoneReconstruction();
         }
 
+        // ── Photo mode (XC / clinical photo studies) ──────────────────────────
+        let _pgPhotos = [], _pgIdx = 0;
+        let _pgZoom = 1, _pgPanX = 0, _pgPanY = 0;
+        let _pgDragging = false, _pgDragX = 0, _pgDragY = 0;
+        let _pgEventsAttached = false;
+
+        function showPhotoMode(photos) {
+            _pgPhotos = photos;
+            _pgIdx = 0;
+            _renderPhoto();
+            var nav = document.getElementById('photoNav');
+            if (nav) nav.style.display = photos.length > 1 ? 'flex' : 'none';
+            _pgAttachEvents();
+        }
+
+        function _resetPhotoTransform() {
+            _pgZoom = 1; _pgPanX = 0; _pgPanY = 0;
+            _applyPhotoTransform();
+        }
+
+        function _applyPhotoTransform() {
+            var img = document.getElementById('photoImage');
+            if (!img) return;
+            img.style.transformOrigin = 'center center';
+            img.style.transform = 'scale(' + _pgZoom + ') translate(' + _pgPanX + 'px,' + _pgPanY + 'px)';
+            img.style.cursor = _pgDragging ? 'grabbing' : (_pgZoom > 1 ? 'grab' : 'default');
+        }
+
+        function _renderPhoto() {
+            var photo  = _pgPhotos[_pgIdx];
+            var img    = document.getElementById('photoImage');
+            var canvas = document.getElementById('dicomCanvas');
+            if (canvas) canvas.style.display = 'none';
+            if (img) {
+                img.style.display = 'block';
+                img.src = photo.url;
+                img.alt = photo.name || 'Clinical Photo';
+            }
+            _resetPhotoTransform();
+            var lbl = document.getElementById('photoNavLabel');
+            if (lbl) lbl.textContent = (_pgIdx + 1) + ' / ' + _pgPhotos.length;
+        }
+
+        function stepPhoto(delta) {
+            if (!_pgPhotos.length) return;
+            _pgIdx = (_pgIdx + delta + _pgPhotos.length) % _pgPhotos.length;
+            _renderPhoto();
+        }
+
+        function _pgAttachEvents() {
+            if (_pgEventsAttached) return;
+            _pgEventsAttached = true;
+            var sv = document.getElementById('singleView');
+            if (!sv) return;
+
+            // Scroll to zoom
+            sv.addEventListener('wheel', function(e) {
+                if (!_pgPhotos.length) return;
+                e.preventDefault();
+                var factor = e.deltaY < 0 ? 1.12 : 0.9;
+                _pgZoom = Math.max(0.25, Math.min(10, _pgZoom * factor));
+                _applyPhotoTransform();
+            }, { passive: false });
+
+            // Drag to pan
+            sv.addEventListener('mousedown', function(e) {
+                if (!_pgPhotos.length || e.button !== 0) return;
+                _pgDragging = true;
+                _pgDragX = e.clientX;
+                _pgDragY = e.clientY;
+                _applyPhotoTransform();
+                e.preventDefault();
+            });
+            sv.addEventListener('mousemove', function(e) {
+                if (!_pgDragging || !_pgPhotos.length) return;
+                _pgPanX += (e.clientX - _pgDragX) / _pgZoom;
+                _pgPanY += (e.clientY - _pgDragY) / _pgZoom;
+                _pgDragX = e.clientX;
+                _pgDragY = e.clientY;
+                _applyPhotoTransform();
+            });
+            sv.addEventListener('mouseup',    function() { _pgDragging = false; _applyPhotoTransform(); });
+            sv.addEventListener('mouseleave', function() { _pgDragging = false; _applyPhotoTransform(); });
+
+            // Double-click resets zoom/pan
+            sv.addEventListener('dblclick', function() {
+                if (!_pgPhotos.length) return;
+                _resetPhotoTransform();
+            });
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (!_pgPhotos.length) return;
+            if (e.key === 'ArrowLeft')  { stepPhoto(-1); e.preventDefault(); }
+            if (e.key === 'ArrowRight') { stepPhoto(1);  e.preventDefault(); }
+        });
+        // ──────────────────────────────────────────────────────────────────────
+
         async function loadStudies() {
             try {
                 showLoading(true);
@@ -2499,6 +2853,15 @@
                     // Load related references automatically based on study context
                     try { fetchReferences(); } catch (e) { }
 
+                    // ── Photo gallery mode (XC / clinical photo studies) ──────────
+                    if (data.photos && data.photos.length > 0 && data.series.length === 0) {
+                        showLoading(false);
+                        showPhotoMode(data.photos);
+                        showToast(`${data.photos.length} photo(s) loaded`, 'success');
+                        return;
+                    }
+                    // ─────────────────────────────────────────────────────────────
+
                     // Auto-load the "best" series (largest diagnostic stack) so local uploads
                     // look identical to worklist-opened studies. First series is often a low-res scout/localizer.
                     if (data.series.length > 0) {
@@ -2506,6 +2869,8 @@
                         const candidateList = withImages.length ? withImages : data.series;
                         const best = pickBestSeriesForDisplay(candidateList);
                         await loadSeries((best && best.id) ? best.id : candidateList[0].id);
+                    } else {
+                        showToast('No images found for this study', 'warning');
                     }
 
                     showToast(`Loaded study: ${currentStudy.patient_name}`, 'success');
@@ -4097,7 +4462,17 @@
                 updateSliders();
                 windowingLockedByUser = true;
                 _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
-                redrawCurrentImage();
+                if (viewMode === 'mpr') {
+                    // In MPR / MIP view: re-render all planes with new W/L immediately.
+                    if (mipMode) {
+                        // MIP: recompute projection with new windowing.
+                        generateMIP();
+                    } else {
+                        _fetchAndRenderAllMPRPlanes();
+                    }
+                } else {
+                    redrawCurrentImage();
+                }
                 showToast(`Applied ${preset} preset`, 'success');
             }
         }
@@ -5086,8 +5461,28 @@
         }
 
         function updatePatientInfo(study) {
+            // Navbar centre
             document.getElementById('patientInfo').textContent =
-                `Patient: ${study.patient_name} | Study Date: ${study.study_date} | Modality: ${study.modality}`;
+                `${study.patient_name || '—'} • ${study.study_date || '—'} • ${study.modality || '—'}`;
+            // Top-left: patient
+            const pn = document.getElementById('olPatientName');
+            const pi = document.getElementById('olPatientId');
+            const pb = document.getElementById('olBodyPart');
+            if (pn) pn.textContent = study.patient_name || '—';
+            if (pi) pi.textContent = study.patient_id ? `ID: ${study.patient_id}` : '';
+            if (pb) pb.textContent = study.body_part ? `Body: ${study.body_part}` : '';
+            // Top-right: study
+            const sd = document.getElementById('olStudyDate');
+            const sm = document.getElementById('olModality');
+            const sa = document.getElementById('olAccession');
+            if (sd) sd.textContent = study.study_date || '—';
+            if (sm) sm.textContent = study.modality || '—';
+            if (sa) sa.textContent = study.accession_number ? `Acc: ${study.accession_number}` : '';
+            // Bottom-right: series/acquisition
+            const si = document.getElementById('olInstitution');
+            const ss = document.getElementById('olSeriesDesc');
+            if (si) si.textContent = study.institution || '';
+            if (ss) ss.textContent = study.study_description || '';
         }
 
         function updateImageInfo(series) {
@@ -5166,6 +5561,7 @@
                 // MPR canvases might have been hidden at first load (0x0). Resize before rendering.
                 try { resizeCanvas(); } catch (e) { }
 
+                mipMode = false; // MPR replaces any active MIP projection
                 const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
                 // Always use high quality for crisp MPR rendering.
                 mprQuality = 'high';
@@ -5204,19 +5600,28 @@
                         settled.forEach((r) => { if (r.status === 'rejected') console.warn('MPR pane render failed:', r.reason); });
                     }
                 } else {
-                    // Fetch metadata only (counts/shape) to avoid large base64 payloads.
-                    const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?${qsBase}&quality=${encodeURIComponent(mprQuality)}&meta_only=1`, { credentials: 'same-origin' });
-                    const data = await response.json();
-                    if (!response.ok) {
-                        const msg = (data && (data.error || data.message)) ? (data.error || data.message) : `HTTP ${response.status}`;
-                        throw new Error(msg);
+                    // Resolve slice counts — from local memory for local DICOM, from server otherwise.
+                    if (String(currentSeries.id).startsWith('local_')) {
+                        const _ls = window._localDicomSeries &&
+                            window._localDicomSeries.find(function (s) { return s.id === currentSeries.id; });
+                        if (!_ls || !_ls.payloads || !_ls.payloads.length)
+                            throw new Error('Local DICOM series payloads not found in memory');
+                        mprState.counts.axial    = _ls.payloads.length;
+                        mprState.counts.sagittal = _ls.payloads[0].columns;
+                        mprState.counts.coronal  = _ls.payloads[0].rows;
+                    } else {
+                        // Fetch metadata only (counts/shape) to avoid large base64 payloads.
+                        const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mpr/?${qsBase}&quality=${encodeURIComponent(mprQuality)}&meta_only=1`, { credentials: 'same-origin' });
+                        const data = await response.json();
+                        if (!response.ok) {
+                            const msg = (data && (data.error || data.message)) ? (data.error || data.message) : `HTTP ${response.status}`;
+                            throw new Error(msg);
+                        }
+                        const counts = data.counts || {};
+                        mprState.counts.axial    = Number(counts.axial    || 0);
+                        mprState.counts.sagittal = Number(counts.sagittal || 0);
+                        mprState.counts.coronal  = Number(counts.coronal  || 0);
                     }
-
-                    // Initialize counts + mid-slice indices.
-                    const counts = data.counts || {};
-                    mprState.counts.axial = Number(counts.axial || 0);
-                    mprState.counts.sagittal = Number(counts.sagittal || 0);
-                    mprState.counts.coronal = Number(counts.coronal || 0);
                     mprState.index.axial = Math.floor((mprState.counts.axial || 1) / 2);
                     mprState.index.sagittal = Math.floor((mprState.counts.sagittal || 1) / 2);
                     mprState.index.coronal = Math.floor((mprState.counts.coronal || 1) / 2);
@@ -5970,10 +6375,312 @@
             ctx.closePath();
         }
 
+        /**
+         * Render one MPR plane slice from local DICOM payloads into a 512×512 PNG data URL.
+         * Mirrors the server's _extract_mpr_slice + windowing logic exactly:
+         *   axial[z]    → payload[z].pixel_data (rows × cols)
+         *   sagittal[x] → each payload at col x, all Z rows, flipud (superior at top)
+         *   coronal[y]  → each payload at row y, all Z cols, flipud (superior at top)
+         */
+        function _computeLocalMPRSlice(seriesObj, plane, sliceIndex, overrideWW, overrideWL, overrideInv, skipOblique) {
+            const payloads = seriesObj.payloads;
+            const numZ  = payloads.length;
+            const rows  = payloads[0].rows;
+            const cols  = payloads[0].columns;
+            if (!numZ || !rows || !cols) return null;
+
+            const TARGET = 512;
+            const ww  = (typeof overrideWW  === 'number' && isFinite(overrideWW))  ? overrideWW  : (windowWidth  || 400);
+            const wl  = (typeof overrideWL  === 'number' && isFinite(overrideWL))  ? overrideWL  : (windowLevel  || 40);
+            const inv = (typeof overrideInv === 'boolean') ? overrideInv : !!inverted;
+            const low = wl - ww / 2, scl = 255 / (ww || 1);
+
+            // ── Oblique path: mirrors server _extract_oblique_mpr_slice ──────────
+            const rotDeg = (!skipOblique && Math.abs(Number(crosshairRotation) || 0) >= 0.5 && mprCrosshairVoxel)
+                ? (Number(crosshairRotation) || 0) : 0;
+
+            if (rotDeg !== 0) {
+                const rad = rotDeg * Math.PI / 180;
+                const ca = Math.cos(rad), sa = Math.sin(rad);
+                const cvx = Number(mprCrosshairVoxel.x) || 0; // col index
+                const cvy = Number(mprCrosshairVoxel.y) || 0; // row index
+                const outC = document.createElement('canvas');
+                outC.width = TARGET; outC.height = TARGET;
+                const outCx = outC.getContext('2d');
+                const dat = outCx.createImageData(TARGET, TARGET);
+                const b = dat.data;
+                const T1 = TARGET - 1;
+                for (var iy = 0; iy < TARGET; iy++) {
+                    for (var ix = 0; ix < TARGET; ix++) {
+                        var xv, yv, zv;
+                        if (plane === 'axial') {
+                            var cv = (ix / T1 - 0.5) * cols, rv = (iy / T1 - 0.5) * rows;
+                            xv = cvx + cv * ca + rv * sa;
+                            yv = cvy - cv * sa + rv * ca;
+                            zv = Math.max(0, Math.min(numZ - 1, sliceIndex));
+                        } else if (plane === 'sagittal') {
+                            var p_s = sliceIndex - cols / 2;
+                            var ox = cvx + p_s * ca, oy = cvy + p_s * sa;
+                            var tv = (ix / T1 - 0.5) * rows; // t_range linspace(-ny/2, ny/2)
+                            zv = (numZ - 1) * (1 - iy / T1); // z_range linspace(nz-1, 0)
+                            xv = ox + tv * (-sa);
+                            yv = oy + tv * ca;
+                        } else { // coronal
+                            var q_c = sliceIndex - rows / 2;
+                            var ox2 = cvx - q_c * sa, oy2 = cvy + q_c * ca;
+                            var tv2 = (ix / T1 - 0.5) * cols; // t_range linspace(-nx/2, nx/2)
+                            zv = (numZ - 1) * (1 - iy / T1);
+                            xv = ox2 + tv2 * ca;
+                            yv = oy2 + tv2 * sa;
+                        }
+                        var hu = _localVolumeTrilinear(payloads, numZ, rows, cols, zv, yv, xv);
+                        var v = (hu - low) * scl;
+                        v = v < 0 ? 0 : v > 255 ? 255 : Math.round(v);
+                        if (inv) v = 255 - v;
+                        var o4 = (iy * TARGET + ix) * 4;
+                        b[o4] = b[o4+1] = b[o4+2] = v; b[o4+3] = 255;
+                    }
+                }
+                outCx.putImageData(dat, 0, 0);
+                return outC.toDataURL('image/png');
+            }
+
+            // ── Orthogonal path ───────────────────────────────────────────────────
+            let imgW, imgH, getHU;
+            if (plane === 'axial') {
+                const z = Math.max(0, Math.min(numZ - 1, sliceIndex));
+                const pd = payloads[z].pixel_data;
+                imgW = cols; imgH = rows;
+                getHU = function (x, y) { return pd[y * cols + x]; };
+            } else if (plane === 'sagittal') {
+                const x = Math.max(0, Math.min(cols - 1, sliceIndex));
+                imgW = rows; imgH = numZ;
+                getHU = function (imgX, imgY) {
+                    var zIdx = numZ - 1 - imgY;
+                    var p = payloads[zIdx];
+                    return p ? p.pixel_data[imgX * cols + x] : 0;
+                };
+            } else {
+                const y = Math.max(0, Math.min(rows - 1, sliceIndex));
+                imgW = cols; imgH = numZ;
+                getHU = function (imgX, imgY) {
+                    var zIdx = numZ - 1 - imgY;
+                    var p = payloads[zIdx];
+                    return p ? p.pixel_data[y * cols + imgX] : 0;
+                };
+            }
+
+            const offCanvas = document.createElement('canvas');
+            offCanvas.width = imgW; offCanvas.height = imgH;
+            const offCtx = offCanvas.getContext('2d');
+            const idat = offCtx.createImageData(imgW, imgH);
+            const buf  = idat.data;
+
+            for (var iy2 = 0; iy2 < imgH; iy2++) {
+                for (var ix2 = 0; ix2 < imgW; ix2++) {
+                    var hu2 = getHU(ix2, iy2);
+                    var v2  = (hu2 - low) * scl;
+                    v2 = v2 < 0 ? 0 : v2 > 255 ? 255 : Math.round(v2);
+                    if (inv) v2 = 255 - v2;
+                    var o4b = (iy2 * imgW + ix2) * 4;
+                    buf[o4b] = buf[o4b+1] = buf[o4b+2] = v2; buf[o4b+3] = 255;
+                }
+            }
+            offCtx.putImageData(idat, 0, 0);
+
+            const outCanvas = document.createElement('canvas');
+            outCanvas.width = TARGET; outCanvas.height = TARGET;
+            const outCtx = outCanvas.getContext('2d');
+            outCtx.imageSmoothingEnabled = true;
+            outCtx.imageSmoothingQuality = 'high';
+            outCtx.drawImage(offCanvas, 0, 0, TARGET, TARGET);
+            return outCanvas.toDataURL('image/png');
+        }
+
+        // Compute MIP for all three planes from a local series (no server call).
+        // Returns { axial, sagittal, coronal } — each a 512×512 data URL.
+        function _computeLocalMIP(seriesObj) {
+            const payloads = seriesObj.payloads;
+            const numZ = payloads.length;
+            const rows = payloads[0].rows;
+            const cols = payloads[0].columns;
+            if (!numZ || !rows || !cols) return null;
+
+            const ww  = windowWidth  || 400;
+            const wl  = windowLevel  || 40;
+            const inv = !!inverted;
+            const low = wl - ww / 2;
+            const scl = 255 / (ww || 1);
+            const TARGET = 512;
+
+            function applyWL(hu) {
+                var v = (hu - low) * scl;
+                v = v < 0 ? 0 : v > 255 ? 255 : Math.round(v);
+                return inv ? 255 - v : v;
+            }
+
+            function renderPlane(imgW, imgH, fillFn) {
+                const oc = document.createElement('canvas');
+                oc.width = imgW; oc.height = imgH;
+                const cx = oc.getContext('2d');
+                const id = cx.createImageData(imgW, imgH);
+                const d = id.data;
+                for (var iy = 0; iy < imgH; iy++) {
+                    for (var ix = 0; ix < imgW; ix++) {
+                        var v = applyWL(fillFn(ix, iy));
+                        var o = (iy * imgW + ix) * 4;
+                        d[o] = d[o+1] = d[o+2] = v; d[o+3] = 255;
+                    }
+                }
+                cx.putImageData(id, 0, 0);
+                const out = document.createElement('canvas');
+                out.width = TARGET; out.height = TARGET;
+                const octx = out.getContext('2d');
+                octx.imageSmoothingEnabled = true;
+                octx.imageSmoothingQuality = 'high';
+                octx.drawImage(oc, 0, 0, TARGET, TARGET);
+                return out.toDataURL('image/png');
+            }
+
+            // Axial MIP: project along Z → output cols × rows
+            const axial = renderPlane(cols, rows, function(x, y) {
+                var mx = -Infinity;
+                for (var z = 0; z < numZ; z++) {
+                    var v = payloads[z].pixel_data[y * cols + x];
+                    if (v > mx) mx = v;
+                }
+                return mx;
+            });
+
+            // Sagittal MIP: project along X (columns) → output rows × numZ (flipud)
+            const sagittal = renderPlane(rows, numZ, function(imgX, imgY) {
+                var zIdx = numZ - 1 - imgY;
+                var pd = payloads[zIdx] ? payloads[zIdx].pixel_data : null;
+                if (!pd) return 0;
+                var mx = -Infinity;
+                for (var x = 0; x < cols; x++) {
+                    var v = pd[imgX * cols + x];
+                    if (v > mx) mx = v;
+                }
+                return mx;
+            });
+
+            // Coronal MIP: project along Y (rows) → output cols × numZ (flipud)
+            const coronal = renderPlane(cols, numZ, function(imgX, imgY) {
+                var zIdx = numZ - 1 - imgY;
+                var pd = payloads[zIdx] ? payloads[zIdx].pixel_data : null;
+                if (!pd) return 0;
+                var mx = -Infinity;
+                for (var y = 0; y < rows; y++) {
+                    var v = pd[y * cols + imgX];
+                    if (v > mx) mx = v;
+                }
+                return mx;
+            });
+
+            return { axial, sagittal, coronal };
+        }
+
+        function _localVolumeTrilinear(payloads, numZ, rows, cols, zf, yf, xf) {
+            zf = zf < 0 ? 0 : zf > numZ - 1 ? numZ - 1 : zf;
+            yf = yf < 0 ? 0 : yf > rows - 1 ? rows - 1 : yf;
+            xf = xf < 0 ? 0 : xf > cols - 1 ? cols - 1 : xf;
+            var z0 = Math.floor(zf), z1 = z0 + 1 < numZ ? z0 + 1 : z0;
+            var y0 = Math.floor(yf), y1 = y0 + 1 < rows ? y0 + 1 : y0;
+            var x0 = Math.floor(xf), x1 = x0 + 1 < cols ? x0 + 1 : x0;
+            var dz = zf - z0, dy = yf - y0, dx = xf - x0;
+            var pz0 = payloads[z0], pz1 = payloads[z1];
+            if (!pz0 || !pz1) return 0;
+            var pd0 = pz0.pixel_data, pd1 = pz1.pixel_data;
+            var c000 = pd0[y0*cols+x0], c001 = pd0[y0*cols+x1], c010 = pd0[y1*cols+x0], c011 = pd0[y1*cols+x1];
+            var c100 = pd1[y0*cols+x0], c101 = pd1[y0*cols+x1], c110 = pd1[y1*cols+x0], c111 = pd1[y1*cols+x1];
+            return c000*(1-dz)*(1-dy)*(1-dx) + c001*(1-dz)*(1-dy)*dx +
+                   c010*(1-dz)*dy*(1-dx)     + c011*(1-dz)*dy*dx +
+                   c100*dz*(1-dy)*(1-dx)     + c101*dz*(1-dy)*dx +
+                   c110*dz*dy*(1-dx)         + c111*dz*dy*dx;
+        }
+
+        function _computeLocalMPRROIStats(seriesObj, plane, sliceIndex, cx, cy, rx, ry) {
+            var payloads = seriesObj.payloads;
+            var numZ = payloads.length;
+            var rows = payloads[0].rows;
+            var cols = payloads[0].columns;
+            var T = 512;
+            var huValues = [];
+            var x0 = Math.max(0, Math.floor(cx - rx));
+            var x1 = Math.min(T - 1, Math.ceil(cx + rx));
+            var y0 = Math.max(0, Math.floor(cy - ry));
+            var y1 = Math.min(T - 1, Math.ceil(cy + ry));
+            for (var iy = y0; iy <= y1; iy++) {
+                for (var ix = x0; ix <= x1; ix++) {
+                    var dx = (ix - cx) / rx, dy = (iy - cy) / ry;
+                    if (dx * dx + dy * dy > 1) continue;
+                    var hu = 0;
+                    try {
+                        if (plane === 'axial') {
+                            var vx = Math.min(cols - 1, Math.max(0, Math.round(ix * cols / T)));
+                            var vy = Math.min(rows - 1, Math.max(0, Math.round(iy * rows / T)));
+                            var z  = Math.min(numZ - 1, Math.max(0, sliceIndex));
+                            var pd = payloads[z] && payloads[z].pixel_data;
+                            if (pd) hu = pd[vy * cols + vx];
+                        } else if (plane === 'sagittal') {
+                            var vy2  = Math.min(rows - 1, Math.max(0, Math.round(ix * rows / T)));
+                            var zi2  = Math.min(numZ - 1, Math.max(0, numZ - 1 - Math.round(iy * numZ / T)));
+                            var x2   = Math.min(cols - 1, Math.max(0, sliceIndex));
+                            var pd2  = payloads[zi2] && payloads[zi2].pixel_data;
+                            if (pd2) hu = pd2[vy2 * cols + x2];
+                        } else {
+                            var vx3  = Math.min(cols - 1, Math.max(0, Math.round(ix * cols / T)));
+                            var zi3  = Math.min(numZ - 1, Math.max(0, numZ - 1 - Math.round(iy * numZ / T)));
+                            var y3   = Math.min(rows - 1, Math.max(0, sliceIndex));
+                            var pd3  = payloads[zi3] && payloads[zi3].pixel_data;
+                            if (pd3) hu = pd3[y3 * cols + vx3];
+                        }
+                    } catch (e) { continue; }
+                    huValues.push(hu);
+                }
+            }
+            if (!huValues.length) return null;
+            var sum = 0, min = huValues[0], max = huValues[0];
+            for (var k = 0; k < huValues.length; k++) {
+                sum += huValues[k];
+                if (huValues[k] < min) min = huValues[k];
+                if (huValues[k] > max) max = huValues[k];
+            }
+            var mean = sum / huValues.length;
+            var varSum = 0;
+            for (var k2 = 0; k2 < huValues.length; k2++) varSum += (huValues[k2] - mean) * (huValues[k2] - mean);
+            return {
+                mean: Math.round(mean * 10) / 10,
+                std:  Math.round(Math.sqrt(varSum / huValues.length) * 10) / 10,
+                min:  Math.round(min),
+                max:  Math.round(max),
+                count: huValues.length,
+            };
+        }
+
         async function fetchMPRPlaneSlice(plane, sliceIndex, qsBase) {
             if (!currentSeries) throw new Error('No series loaded');
             if (!(plane === 'axial' || plane === 'sagittal' || plane === 'coronal')) throw new Error('Invalid plane');
             const idx = Math.max(0, Number(sliceIndex) || 0);
+
+            // ── Local DICOM: compute slice entirely on the client ──────────────────
+            if (String(currentSeries.id).startsWith('local_')) {
+                const _ls = window._localDicomSeries &&
+                    window._localDicomSeries.find(function (s) { return s.id === currentSeries.id; });
+                if (!_ls || !_ls.payloads || !_ls.payloads.length)
+                    throw new Error('Local series not in memory');
+                const _numZ = _ls.payloads.length;
+                const _rows = _ls.payloads[0].rows;
+                const _cols = _ls.payloads[0].columns;
+                const _localCounts = { axial: _numZ, sagittal: _cols, coronal: _rows };
+                const _count = _localCounts[plane] || _numZ;
+                const _clamped = Math.max(0, Math.min(_count - 1, Math.round(idx)));
+                const _dataUrl = _computeLocalMPRSlice(_ls, plane, _clamped);
+                if (!_dataUrl) throw new Error('Local MPR slice render failed (' + plane + ')');
+                return { image: _dataUrl, index: _clamped, count: _count };
+            }
+            // ─────────────────────────────────────────────────────────────────────
             try { _mprPlaneAbort[plane]?.abort(); } catch (e) { }
             const ac = new AbortController();
             _mprPlaneAbort[plane] = ac;
@@ -6165,23 +6872,26 @@
         function _fetchAndRenderAllMPRPlanes() {
             if (viewMode !== 'mpr' || !currentSeries) return;
             const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
-            Promise.all([
-                fetchMPRPlaneSlice('axial', mprState.index.axial || 0, qsBase),
-                fetchMPRPlaneSlice('sagittal', mprState.index.sagittal || 0, qsBase),
-                fetchMPRPlaneSlice('coronal', mprState.index.coronal || 0, qsBase),
-            ]).then(([ax, sa, co]) => {
-                mprState.counts.axial = ax.count || mprState.counts.axial;
-                mprState.counts.sagittal = sa.count || mprState.counts.sagittal;
-                mprState.counts.coronal = co.count || mprState.counts.coronal;
-                mprState.index.axial = ax.index;
-                mprState.index.sagittal = sa.index;
-                mprState.index.coronal = co.index;
-                return Promise.allSettled([
-                    _renderMPRDataUrl('axial', ax.image),
-                    _renderMPRDataUrl('sagittal', sa.image),
-                    _renderMPRDataUrl('coronal', co.image),
-                ]);
-            }).catch(() => { });
+            // Fetch each plane independently so a transient abort on one plane (e.g. from
+            // a concurrent user scroll) does not prevent the other two planes from updating.
+            ['axial', 'sagittal', 'coronal'].forEach(function (p) {
+                const prevCount = mprState.counts[p] || 0;
+                fetchMPRPlaneSlice(p, mprState.index[p] || 0, qsBase)
+                    .then(function (r) {
+                        const newCount = r.count || prevCount;
+                        mprState.counts[p] = newCount;
+                        // If counts were unknown (e.g. MIP activated from single-view without
+                        // prior MPR load), seed to centre so both scroll directions work.
+                        if (!prevCount && newCount > 1) {
+                            mprState.index[p] = Math.floor(newCount / 2);
+                        } else {
+                            mprState.index[p] = r.index;
+                        }
+                        return _renderMPRDataUrl(p, r.image);
+                    })
+                    .then(function () { if (crosshair) redrawMPRPlane(p); })
+                    .catch(function () {});
+            });
         }
 
         function _scheduleMPRSyncFetch() {
@@ -6204,6 +6914,43 @@
                 document.getElementById('hounsfield').textContent = '-';
                 return;
             }
+
+            // For local DICOM: read HU directly from payload (no server needed)
+            if (String(currentSeries.id).startsWith('local_')) {
+                const _ls = window._localDicomSeries &&
+                    window._localDicomSeries.find(function (s) { return s.id === currentSeries.id; });
+                if (!_ls || !_ls.payloads || !_ls.payloads.length) return;
+                var _numZ = _ls.payloads.length;
+                var _rows = _ls.payloads[0].rows;
+                var _cols = _ls.payloads[0].columns;
+                var T = p.w || 512;
+                var slice = mprState.index[plane] || 0;
+                var hu = 0;
+                try {
+                    if (plane === 'axial') {
+                        var vx = Math.min(_cols - 1, Math.max(0, Math.round(p.ix * _cols / T)));
+                        var vy = Math.min(_rows - 1, Math.max(0, Math.round(p.iy * _rows / T)));
+                        var pd = _ls.payloads[slice] && _ls.payloads[slice].pixel_data;
+                        if (pd) hu = pd[vy * _cols + vx];
+                    } else if (plane === 'sagittal') {
+                        var vy2 = Math.min(_rows - 1, Math.max(0, Math.round(p.ix * _rows / T)));
+                        var zIdx = Math.min(_numZ - 1, Math.max(0, _numZ - 1 - Math.round(p.iy * _numZ / T)));
+                        var x = Math.min(_cols - 1, Math.max(0, slice));
+                        var pd2 = _ls.payloads[zIdx] && _ls.payloads[zIdx].pixel_data;
+                        if (pd2) hu = pd2[vy2 * _cols + x];
+                    } else {
+                        var vx3 = Math.min(_cols - 1, Math.max(0, Math.round(p.ix * _cols / T)));
+                        var zIdx3 = Math.min(_numZ - 1, Math.max(0, _numZ - 1 - Math.round(p.iy * _numZ / T)));
+                        var y3 = Math.min(_rows - 1, Math.max(0, slice));
+                        var pd3 = _ls.payloads[zIdx3] && _ls.payloads[zIdx3].pixel_data;
+                        if (pd3) hu = pd3[y3 * _cols + vx3];
+                    }
+                } catch (e) { hu = 0; }
+                var huEl = document.getElementById('hounsfield');
+                if (huEl) huEl.textContent = Math.round(hu).toString();
+                return;
+            }
+
             if (_mprHUTimer) return;
             _mprHUTimer = setTimeout(async () => {
                 _mprHUTimer = null;
@@ -6280,6 +7027,12 @@
                 const z = Number(t.zoom) || 1.0;
                 t.zoom = Math.max(0.2, Math.min(10.0, z * (d > 0 ? 0.9 : 1.1)));
                 redrawMPRPlane(plane);
+                return;
+            }
+            // If MIP is active, first scroll exits MIP mode and returns to regular MPR slice view.
+            if (mipMode) {
+                mipMode = false;
+                _fetchAndRenderAllMPRPlanes();
                 return;
             }
             const delta = Math.sign(event.deltaY || 0);
@@ -6664,24 +7417,36 @@
             const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
             const slice = mprState.index[plane] || 0;
             try {
-                // Include x/y for backwards-compatible servers; backend also supports ellipse ROI without them.
-                const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&shape=ellipse&cx=${encodeURIComponent(Math.round(cx))}&cy=${encodeURIComponent(Math.round(cy))}&x=${encodeURIComponent(Math.round(cx))}&y=${encodeURIComponent(Math.round(cy))}&rx=${encodeURIComponent(Math.round(rx))}&ry=${encodeURIComponent(Math.round(ry))}&quality=${encodeURIComponent((mprQuality === 'high') ? 'high' : 'fast')}`;
-                const resp = await fetch(url, { credentials: 'same-origin' });
-                const data = await resp.json();
-                if (!resp.ok) throw new Error(data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${resp.status}`);
-                if (data && data.stats) {
+                let _roiStats = null;
+                if (String(currentSeries.id).startsWith('local_')) {
+                    // Compute ROI HU stats from local payload (no server needed)
+                    const _ls2 = window._localDicomSeries &&
+                        window._localDicomSeries.find(function (s) { return s.id === currentSeries.id; });
+                    if (!_ls2 || !_ls2.payloads || !_ls2.payloads.length)
+                        throw new Error('Local series not in memory');
+                    _roiStats = _computeLocalMPRROIStats(_ls2, plane, slice, cx, cy, rx, ry);
+                    if (!_roiStats) throw new Error('No pixels in ROI');
+                } else {
+                    // Include x/y for backwards-compatible servers; backend also supports ellipse ROI without them.
+                    const url = `/dicom-viewer/api/hu/?mode=mpr&series_id=${encodeURIComponent(currentSeries.id)}&plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(slice)}&shape=ellipse&cx=${encodeURIComponent(Math.round(cx))}&cy=${encodeURIComponent(Math.round(cy))}&x=${encodeURIComponent(Math.round(cx))}&y=${encodeURIComponent(Math.round(cy))}&rx=${encodeURIComponent(Math.round(rx))}&ry=${encodeURIComponent(Math.round(ry))}&quality=${encodeURIComponent((mprQuality === 'high') ? 'high' : 'fast')}`;
+                    const resp = await fetch(url, { credentials: 'same-origin' });
+                    const data = await resp.json();
+                    if (!resp.ok) throw new Error(data && (data.error || data.message) ? (data.error || data.message) : `HTTP ${resp.status}`);
+                    _roiStats = data && data.stats;
+                }
+                if (_roiStats) {
                     measurements.push({
                         type: 'roi',
                         mode: 'mpr',
-                        seriesId: (currentSeries && currentSeries.id != null) ? Number(currentSeries.id) : null,
+                        seriesId: (currentSeries && currentSeries.id != null && !String(currentSeries.id).startsWith('local_')) ? Number(currentSeries.id) : null,
                         plane,
                         slice,
                         cx, cy, rx, ry,
-                        stats: data.stats,
+                        stats: _roiStats,
                         createdAt: Date.now(),
                     });
                     updateMeasurementsList();
-                    showToast(`ROI mean: ${data.stats.mean.toFixed(1)} HU`, 'success');
+                    showToast(`ROI mean: ${_roiStats.mean.toFixed(1)} HU`, 'success');
                 }
             } catch (e) {
                 showToast(`ROI failed: ${e?.message || e}`, 'error');
@@ -6706,6 +7471,32 @@
 
         async function generateBoneReconstruction() {
             if (!currentSeries) return;
+
+            // For local DICOM: render a bone-windowed coronal preview (no server needed)
+            if (String(currentSeries.id).startsWith('local_')) {
+                const _ls = window._localDicomSeries &&
+                    window._localDicomSeries.find(function (s) { return s.id === currentSeries.id; });
+                if (!_ls || !_ls.payloads || !_ls.payloads.length) return;
+                try {
+                    showLoading(true);
+                    try { resizeCanvas(); } catch (e) {}
+                    const midC = Math.floor(_ls.payloads[0].rows / 2);
+                    const boneUrl = _computeLocalMPRSlice(_ls, 'coronal', midC, 2000, 300, false);
+                    const bCanvas = mprCanvases.bone3d;
+                    if (bCanvas) {
+                        if (boneUrl) {
+                            await _render2DIntoCanvas(bCanvas, bCanvas.getContext('2d'), boneUrl);
+                        } else {
+                            renderBonePlaceholder(bCanvas.getContext('2d'), bCanvas.width, bCanvas.height);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Local bone preview failed:', e);
+                } finally {
+                    showLoading(false);
+                }
+                return;
+            }
 
             try {
                 showLoading(true);
@@ -7294,6 +8085,31 @@
                     setActiveMPRPlane('axial');
                 }
                 try { resizeCanvas(); } catch (e) { }
+
+                // ── Local DICOM: compute MIP client-side (no server call) ──────────
+                if (String(currentSeries.id).startsWith('local_')) {
+                    const _ls = window._localDicomSeries && window._localDicomSeries.find(s => s.id === currentSeries.id);
+                    if (!_ls) throw new Error('Local series not loaded');
+                    // Set counts so handleMPRWheel can clamp correctly if/when user scrolls out of MIP.
+                    mprState.counts.axial    = _ls.payloads.length;
+                    mprState.counts.sagittal = _ls.payloads[0].columns;
+                    mprState.counts.coronal  = _ls.payloads[0].rows;
+                    // Seed centre-slice indices for when user exits MIP via scroll.
+                    if (!mprState.index.axial)    mprState.index.axial    = Math.floor(_ls.payloads.length / 2);
+                    if (!mprState.index.sagittal) mprState.index.sagittal = Math.floor(_ls.payloads[0].columns / 2);
+                    if (!mprState.index.coronal)  mprState.index.coronal  = Math.floor(_ls.payloads[0].rows / 2);
+                    const mipViews = _computeLocalMIP(_ls);
+                    if (!mipViews) throw new Error('MIP computation failed');
+                    await Promise.allSettled([
+                        _renderMPRDataUrl('axial',    mipViews.axial),
+                        _renderMPRDataUrl('sagittal', mipViews.sagittal),
+                        _renderMPRDataUrl('coronal',  mipViews.coronal),
+                    ]);
+                    mipMode = true;
+                    showToast('MIP ready', 'success');
+                    return;
+                }
+
                 const qs = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
                 const response = await fetch(`/dicom-viewer/api/series/${currentSeries.id}/mip/?${qs}`, { credentials: 'same-origin' });
                 const data = await response.json();
@@ -7306,11 +8122,25 @@
                 if (!views || (!views.axial && !views.sagittal && !views.coronal)) {
                     throw new Error('Unexpected MIP response');
                 }
+                // Populate counts + centre-seed indices from the MIP response so that
+                // scrolling out of MIP mode works in both directions immediately.
+                if (data.counts) {
+                    const ac = Number(data.counts.axial    || 0);
+                    const sc = Number(data.counts.sagittal || 0);
+                    const cc = Number(data.counts.coronal  || 0);
+                    if (ac > 0) mprState.counts.axial    = ac;
+                    if (sc > 0) mprState.counts.sagittal = sc;
+                    if (cc > 0) mprState.counts.coronal  = cc;
+                    if (!mprState.index.axial)    mprState.index.axial    = Math.floor(ac / 2);
+                    if (!mprState.index.sagittal) mprState.index.sagittal = Math.floor(sc / 2);
+                    if (!mprState.index.coronal)  mprState.index.coronal  = Math.floor(cc / 2);
+                }
                 await Promise.allSettled([
                     _renderMPRDataUrl('axial', views.axial),
                     _renderMPRDataUrl('sagittal', views.sagittal),
                     _renderMPRDataUrl('coronal', views.coronal),
                 ]);
+                mipMode = true;
                 showToast('MIP ready', 'success');
             } catch (error) {
                 console.error('Error generating MIP:', error);
@@ -8343,13 +9173,14 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
 
         /**
          * Attach unified touch + pointer events to a canvas element.
-         * Supports: 1-finger drag, 2-finger pinch-zoom, 2-finger swipe-scroll.
+         * Supports: 1-finger drag, 2-finger pinch-zoom, 2-finger vertical-swipe for slice scroll.
          * Callbacks mirror mouse event handlers so the caller doesn't need to branch on device.
          */
         function _attachCanvasTouch(el, { onDragStart, onDragMove, onDragEnd, onPinchZoom, onScroll }) {
             let _ptrs = new Map();
-            let _pinchDist = null;
-            let _dragging = false;
+            let _pinchDist  = null;
+            let _pinchCY    = null; // center-Y of the 2 pointers — tracks vertical swipe
+            let _dragging   = false;
 
             function _dist2(a, b) {
                 return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -8361,33 +9192,48 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                 _ptrs.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 
                 if (_ptrs.size === 1) {
-                    _dragging = true;
-                    _pinchDist = null;
+                    _dragging   = true;
+                    _pinchDist  = null;
+                    _pinchCY    = null;
                     if (onDragStart) onDragStart(e.clientX, e.clientY, e.button);
                 } else if (_ptrs.size === 2) {
-                    // Second finger — switch to pinch mode; cancel active drag.
+                    // Second finger — switch to 2-finger mode; cancel active drag.
                     _dragging = false;
                     if (onDragEnd) onDragEnd(e.clientX, e.clientY);
                     const pts = Array.from(_ptrs.values());
                     _pinchDist = _dist2(pts[0], pts[1]);
+                    _pinchCY   = (pts[0].clientY + pts[1].clientY) / 2;
                 }
                 e.preventDefault();
             }, { passive: false });
 
             el.addEventListener('pointermove', (e) => {
                 if (!_ptrs.has(e.pointerId)) return;
-                const prev = _ptrs.get(e.pointerId);
                 _ptrs.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 
                 if (_ptrs.size === 2) {
-                    // Pinch zoom
-                    const pts = Array.from(_ptrs.values());
+                    const pts    = Array.from(_ptrs.values());
                     const newDist = _dist2(pts[0], pts[1]);
+                    const newCX  = (pts[0].clientX + pts[1].clientX) / 2;
+                    const newCY  = (pts[0].clientY + pts[1].clientY) / 2;
+
+                    // Pinch zoom — fire when finger-distance changes
                     if (_pinchDist !== null && onPinchZoom) {
                         const delta = newDist - _pinchDist;
-                        if (Math.abs(delta) > 1) onPinchZoom(delta, (pts[0].clientX + pts[1].clientX) / 2, (pts[0].clientY + pts[1].clientY) / 2);
+                        if (Math.abs(delta) > 1) onPinchZoom(delta, newCX, newCY);
                     }
                     _pinchDist = newDist;
+
+                    // 2-finger vertical swipe → slice scroll (14 px threshold per step)
+                    if (_pinchCY !== null && onScroll) {
+                        const dy = newCY - _pinchCY;
+                        if (Math.abs(dy) >= 14) {
+                            onScroll(dy > 0 ? -1 : 1); // swipe-up = next slice, swipe-down = prev slice
+                            _pinchCY = newCY;
+                        }
+                    } else {
+                        _pinchCY = newCY;
+                    }
                 } else if (_ptrs.size === 1 && _dragging) {
                     if (onDragMove) onDragMove(e.clientX, e.clientY);
                 }
@@ -8398,23 +9244,23 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                 _ptrs.delete(e.pointerId);
                 if (_ptrs.size === 0) {
                     if (_dragging && onDragEnd) onDragEnd(e.clientX, e.clientY);
-                    _dragging = false;
+                    _dragging  = false;
                     _pinchDist = null;
+                    _pinchCY   = null;
                 } else {
                     _pinchDist = null;
+                    _pinchCY   = null;
                 }
             });
 
             el.addEventListener('pointercancel', (e) => {
                 _ptrs.delete(e.pointerId);
-                if (_ptrs.size === 0) { _dragging = false; _pinchDist = null; }
+                if (_ptrs.size === 0) { _dragging = false; _pinchDist = null; _pinchCY = null; }
             });
 
-            // Touch scroll (2-finger swipe up/down) — maps to slice scroll
+            // Prevent browser scroll/pan when 2+ fingers are on the canvas
             el.addEventListener('touchmove', (e) => {
-                if (e.touches.length === 2 && onScroll) {
-                    e.preventDefault();
-                }
+                if (e.touches.length >= 2) e.preventDefault();
             }, { passive: false });
         }
 
@@ -8474,6 +9320,56 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                 try { _closeModal('printExportModal'); } catch (e) { }
             }
         }, true);
+
+        // Series-list drag-to-resize
+        (function () {
+            var handle = document.getElementById('seriesResizeHandle');
+            var list   = document.getElementById('seriesList');
+            if (!handle || !list) return;
+
+            // Restore saved height from previous session
+            var saved = localStorage.getItem('noctis_seriesListH');
+            if (saved) {
+                var h = parseInt(saved, 10);
+                if (h >= 60) list.style.maxHeight = h + 'px';
+            }
+
+            var startY = 0, startH = 0, active = false;
+
+            function begin(y) {
+                startY  = y;
+                startH  = list.getBoundingClientRect().height;
+                active  = true;
+                handle.classList.add('dragging');
+                document.body.style.userSelect = 'none';
+            }
+            function move(y) {
+                if (!active) return;
+                var maxH = Math.round(window.innerHeight * 0.6);
+                var newH = Math.max(60, Math.min(maxH, startH + (y - startY)));
+                list.style.maxHeight = newH + 'px';
+            }
+            function end() {
+                if (!active) return;
+                active = false;
+                handle.classList.remove('dragging');
+                document.body.style.userSelect = '';
+                var finalH = list.getBoundingClientRect().height;
+                try { localStorage.setItem('noctis_seriesListH', Math.round(finalH)); } catch (_) {}
+            }
+
+            // Mouse
+            handle.addEventListener('mousedown', function (e) { e.preventDefault(); begin(e.clientY); });
+            document.addEventListener('mousemove', function (e) { move(e.clientY); });
+            document.addEventListener('mouseup', end);
+
+            // Touch
+            handle.addEventListener('touchstart', function (e) { e.preventDefault(); begin(e.touches[0].clientY); }, { passive: false });
+            document.addEventListener('touchmove', function (e) {
+                if (active) { e.preventDefault(); move(e.touches[0].clientY); }
+            }, { passive: false });
+            document.addEventListener('touchend', end);
+        })();
 
         // HIPAA: idle timeout warning at 25 minutes, lock at 30 minutes
         (function () {

@@ -1,0 +1,418 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Upload Photos — Noctis Pro{% endblock %}
+
+{% block extra_css %}
+<style>
+.uph-wrap {
+    min-height: calc(100vh - 64px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 16px;
+}
+.uph-card {
+    width: 100%; max-width: 760px;
+    background: var(--card-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 16px; overflow: hidden;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.55);
+}
+.uph-stripe { height: 3px; background: linear-gradient(90deg, var(--warning-color) 0%, #ff5500 50%, var(--warning-color) 100%); }
+.uph-head {
+    padding: 16px 22px; border-bottom: 1px solid var(--border-color);
+    display: flex; align-items: center; justify-content: space-between;
+}
+.uph-head-left { display: flex; align-items: center; gap: 12px; }
+.uph-icon {
+    width: 42px; height: 42px; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--warning-color), #ff5500);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    color: #000; font-size: 18px;
+}
+.uph-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+.uph-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.uph-section { padding: 18px 22px; border-bottom: 1px solid var(--border-color); }
+.uph-section:last-child { border-bottom: none; }
+.uph-sec-lbl {
+    font-size: 10px; font-weight: 700; color: var(--warning-color);
+    text-transform: uppercase; letter-spacing: 1px;
+    margin-bottom: 12px; display: flex; align-items: center; gap: 6px;
+}
+.uph-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.uph-grid-full { grid-column: 1 / -1; }
+.uph-lbl {
+    display: block; font-size: 10px; font-weight: 600;
+    color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 5px;
+}
+.uph-req { color: var(--danger-color); }
+.uph-inp, .uph-sel, .uph-ta {
+    width: 100%; box-sizing: border-box;
+    background: var(--secondary-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary); border-radius: 7px;
+    padding: 8px 10px; font-size: 12px; outline: none;
+    transition: border-color 0.2s;
+}
+.uph-inp:focus, .uph-sel:focus, .uph-ta:focus {
+    border-color: var(--warning-color);
+    box-shadow: 0 0 0 2px rgba(255,170,0,0.12);
+}
+.uph-ta { min-height: 58px; resize: vertical; }
+
+/* states */
+#uphDrop, #uphThumbs, #uphProg, #uphOk { display: none; }
+#uphDrop.uph-active { display: block; }
+#uphThumbs.uph-active { display: block; }
+#uphProg.uph-active { display: block; }
+#uphOk.uph-active { display: flex; }
+
+.uph-dropzone {
+    border: 2px dashed var(--border-color); border-radius: 12px;
+    padding: 28px 20px; text-align: center; cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    background: transparent;
+}
+.uph-dropzone:hover, .uph-dropzone.dragover {
+    border-color: var(--warning-color);
+    background: rgba(255,170,0,0.04);
+}
+.uph-dz-icon { font-size: 2.4rem; color: var(--warning-color); display: block; margin-bottom: 10px;
+    filter: drop-shadow(0 0 8px rgba(255,170,0,0.35)); }
+.uph-dz-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+.uph-dz-sub { font-size: 11px; color: var(--text-muted); margin-bottom: 14px; }
+
+.uph-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--secondary-bg); border: 1px solid var(--border-color);
+    color: var(--text-secondary); border-radius: 8px; padding: 7px 14px;
+    font-size: 12px; cursor: pointer; transition: all 0.15s; text-decoration: none;
+}
+.uph-btn:hover { border-color: var(--text-muted); color: var(--text-primary); }
+.uph-btn-orange {
+    background: linear-gradient(135deg, var(--warning-color), #ff6000);
+    border-color: var(--warning-color); color: #000; font-weight: 700;
+}
+.uph-btn-orange:hover { box-shadow: 0 4px 14px rgba(255,170,0,0.4); transform: translateY(-1px); color: #000; }
+.uph-btn-orange:disabled { opacity: 0.45; transform: none; box-shadow: none; cursor: not-allowed; }
+.uph-btn-cyan {
+    background: var(--gradient-accent);
+    border-color: var(--accent-color); color: #000; font-weight: 700;
+}
+.uph-btn-cyan:hover { box-shadow: 0 4px 14px rgba(0,212,255,0.35); transform: translateY(-1px); color: #000; }
+
+.uph-thumb-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(90px,1fr)); gap: 8px;
+}
+.uph-thumb {
+    position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden;
+    background: var(--primary-bg); border: 1px solid var(--border-color);
+}
+.uph-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.uph-thumb-rm {
+    position: absolute; top: 3px; right: 3px;
+    background: rgba(0,0,0,0.65); border: none; color: #aaa;
+    border-radius: 50%; width: 18px; height: 18px;
+    font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.uph-thumb-rm:hover { background: rgba(255,68,68,0.7); color: #fff; }
+
+.uph-prog-bar-wrap {
+    background: var(--secondary-bg); border-radius: 6px; height: 8px;
+    overflow: hidden; border: 1px solid var(--border-color);
+    max-width: 360px; margin: 0 auto;
+}
+.uph-prog-bar {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--warning-color), #ff5500);
+    border-radius: 6px; transition: width 0.25s;
+}
+
+#uphOk { flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.uph-ok-ring {
+    width: 58px; height: 58px;
+    background: rgba(0,255,136,0.1); border: 2px solid var(--success-color);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+}
+.uph-foot {
+    padding: 14px 22px; border-top: 1px solid var(--border-color);
+    display: flex; justify-content: space-between; align-items: center;
+    background: rgba(0,0,0,0.18);
+}
+
+@media (max-width: 600px) {
+    .uph-grid { grid-template-columns: 1fr; }
+    .uph-foot { flex-direction: column; gap: 10px; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="np-page">
+<div class="uph-wrap">
+<div class="uph-card">
+    <div class="uph-stripe"></div>
+    <div class="uph-head">
+        <div class="uph-head-left">
+            <div class="uph-icon"><i class="fas fa-camera"></i></div>
+            <div>
+                <div class="uph-title">Photo / Image Upload</div>
+                <div class="uph-sub">JPG &middot; PNG &middot; HEIC &middot; TIFF &middot; WEBP &middot; BMP</div>
+            </div>
+        </div>
+        <a href="{% url 'worklist:upload_study' %}" class="uph-btn">
+            <i class="fas fa-arrow-left"></i>Upload DICOM
+        </a>
+    </div>
+
+    <form id="uphForm">
+        {% csrf_token %}
+        <div class="uph-section">
+            <div class="uph-sec-lbl"><i class="fas fa-user-circle"></i>Patient Information
+                <span style="color:var(--danger-color);font-weight:400;font-size:10px;text-transform:none;letter-spacing:0;margin-left:4px;">— first &amp; last name required</span>
+            </div>
+            <div class="uph-grid">
+                <div>
+                    <label class="uph-lbl" for="uphFirstName">First Name <span class="uph-req">*</span></label>
+                    <input type="text" id="uphFirstName" class="uph-inp" placeholder="John" autocomplete="off">
+                </div>
+                <div>
+                    <label class="uph-lbl" for="uphLastName">Last Name <span class="uph-req">*</span></label>
+                    <input type="text" id="uphLastName" class="uph-inp" placeholder="Doe" autocomplete="off">
+                </div>
+                <div>
+                    <label class="uph-lbl" for="uphAge">Age</label>
+                    <input type="number" id="uphAge" class="uph-inp" placeholder="35" min="0" max="130">
+                </div>
+                <div>
+                    <label class="uph-lbl" for="uphGender">Gender</label>
+                    <select id="uphGender" class="uph-sel">
+                        <option value="O">Unknown</option>
+                        <option value="M">Male</option>
+                        <option value="F">Female</option>
+                    </select>
+                </div>
+                {% if facilities %}
+                <div class="uph-grid-full">
+                    <label class="uph-lbl" for="uphFacility">Facility</label>
+                    <select id="uphFacility" class="uph-sel">
+                        {% for fac in facilities %}<option value="{{ fac.id }}">{{ fac.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+                <div class="uph-grid-full">
+                    <label class="uph-lbl" for="uphClinical">Clinical Info</label>
+                    <textarea id="uphClinical" class="uph-ta" placeholder="Reason for photos / clinical context (optional)"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div class="uph-section">
+            <div id="uphDrop" class="uph-active">
+                <div id="uphDropZone" class="uph-dropzone">
+                    <i class="fas fa-images uph-dz-icon"></i>
+                    <div class="uph-dz-title">Drop photos here or click to browse</div>
+                    <div class="uph-dz-sub">JPG · JPEG · PNG · HEIC · TIFF · WEBP · BMP</div>
+                    <button type="button" id="uphBrowseBtn" class="uph-btn uph-btn-orange">
+                        <i class="fas fa-folder-open"></i>Browse Photos
+                    </button>
+                </div>
+            </div>
+
+            <div id="uphThumbs">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                    <span style="font-size:12px;font-weight:600;color:var(--text-primary);">
+                        <i class="fas fa-images" style="color:var(--warning-color);margin-right:5px;"></i>
+                        <span id="uphCountLbl">0 photos</span>
+                    </span>
+                    <div style="display:flex;gap:8px;">
+                        <button type="button" id="uphAddMore" class="uph-btn" style="font-size:11px;padding:3px 10px;">
+                            <i class="fas fa-plus"></i>Add more
+                        </button>
+                        <button type="button" id="uphClear" class="uph-btn" style="font-size:11px;padding:3px 10px;">
+                            <i class="fas fa-times"></i>Clear
+                        </button>
+                    </div>
+                </div>
+                <div id="uphThumbGrid" class="uph-thumb-grid"></div>
+            </div>
+
+            <div id="uphProg" style="text-align:center;padding:16px 0;">
+                <i class="fas fa-spinner fa-spin" style="font-size:1.8rem;color:var(--warning-color);display:block;margin-bottom:12px;"></i>
+                <div style="font-size:13px;color:var(--text-primary);margin-bottom:14px;">Uploading photos…</div>
+                <div class="uph-prog-bar-wrap"><div id="uphBar" class="uph-prog-bar"></div></div>
+                <div id="uphPct" style="font-size:13px;color:var(--warning-color);font-weight:600;margin-top:8px;">0%</div>
+            </div>
+
+            <div id="uphOk" style="padding:24px 0;">
+                <div class="uph-ok-ring"><i class="fas fa-check" style="color:var(--success-color);font-size:22px;"></i></div>
+                <div id="uphOkMsg" style="font-size:15px;font-weight:700;color:var(--text-primary);"></div>
+                <div style="font-size:11px;color:var(--text-muted);">Study created and visible in the worklist.</div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:10px;">
+                    <a href="{% url 'worklist:dashboard' %}" class="uph-btn uph-btn-cyan">
+                        <i class="fas fa-list"></i>Go to Worklist
+                    </a>
+                    <button type="button" id="uphAnotherBtn" class="uph-btn">
+                        <i class="fas fa-plus"></i>Upload Another
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="uph-foot">
+            <a href="{% url 'worklist:dashboard' %}" class="uph-btn">
+                <i class="fas fa-home"></i>Home
+            </a>
+            <button type="button" id="uphUploadBtn" class="uph-btn uph-btn-orange" disabled>
+                <i class="fas fa-cloud-upload-alt"></i>Upload Photos
+            </button>
+        </div>
+    </form>
+</div>
+</div>
+</div>
+
+<input type="file" id="uphFileInput" style="position:fixed;left:-9999px;width:1px;height:1px;opacity:0;" multiple accept="image/*,.heic,.heif">
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    'use strict';
+    let photos = [];
+    const form       = document.getElementById('uphForm');
+    const fileInput  = document.getElementById('uphFileInput');
+    const dropZone   = document.getElementById('uphDropZone');
+    const browseBtn  = document.getElementById('uphBrowseBtn');
+    const addMoreBtn = document.getElementById('uphAddMore');
+    const clearBtn   = document.getElementById('uphClear');
+    const uploadBtn  = document.getElementById('uphUploadBtn');
+    const anotherBtn = document.getElementById('uphAnotherBtn');
+    const thumbGrid  = document.getElementById('uphThumbGrid');
+    const countLbl   = document.getElementById('uphCountLbl');
+    const barEl      = document.getElementById('uphBar');
+    const pctEl      = document.getElementById('uphPct');
+    const okMsg      = document.getElementById('uphOkMsg');
+
+    const elDrop   = document.getElementById('uphDrop');
+    const elThumbs = document.getElementById('uphThumbs');
+    const elProg   = document.getElementById('uphProg');
+    const elOk     = document.getElementById('uphOk');
+
+    function show(el) {
+        [elDrop, elThumbs, elProg, elOk].forEach(e => e.classList.remove('uph-active'));
+        if (el) el.classList.add('uph-active');
+    }
+
+    function reset() {
+        photos = [];
+        thumbGrid.innerHTML = '';
+        countLbl.textContent = '0 photos';
+        uploadBtn.disabled = true;
+        barEl.style.width = '0%';
+        pctEl.textContent = '0%';
+        show(elDrop);
+    }
+
+    function addPhotos(files) {
+        const exts = new Set(['.jpg','.jpeg','.png','.heic','.heif','.tiff','.tif','.webp','.bmp','.gif']);
+        Array.from(files).forEach(f => {
+            if (exts.has(('.' + f.name.split('.').pop()).toLowerCase())) photos.push(f);
+        });
+        renderThumbs();
+    }
+
+    function renderThumbs() {
+        thumbGrid.innerHTML = '';
+        photos.forEach((f, i) => {
+            const wrap = document.createElement('div');
+            wrap.className = 'uph-thumb';
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(f);
+            img.onload = () => URL.revokeObjectURL(img.src);
+            const rm = document.createElement('button');
+            rm.type = 'button'; rm.className = 'uph-thumb-rm';
+            rm.innerHTML = '<i class="fas fa-times"></i>';
+            rm.onclick = () => { photos.splice(i, 1); renderThumbs(); };
+            wrap.appendChild(img); wrap.appendChild(rm);
+            thumbGrid.appendChild(wrap);
+        });
+        const n = photos.length;
+        countLbl.textContent = n + ' photo' + (n === 1 ? '' : 's');
+        uploadBtn.disabled = (n === 0);
+        show(n > 0 ? elThumbs : elDrop);
+    }
+
+    function upload() {
+        const first = document.getElementById('uphFirstName').value.trim();
+        const last  = document.getElementById('uphLastName').value.trim();
+        if (!first && !last) {
+            alert("Please enter the patient's first and last name.");
+            document.getElementById('uphFirstName').focus();
+            return;
+        }
+        if (photos.length === 0) return;
+
+        const fd = new FormData(form);
+        fd.append('photo_first_name', first);
+        fd.append('photo_last_name', last);
+        fd.append('photo_age', document.getElementById('uphAge').value.trim());
+        fd.append('photo_gender', document.getElementById('uphGender').value);
+        fd.append('clinical_info', document.getElementById('uphClinical').value.trim());
+        const fac = document.getElementById('uphFacility');
+        if (fac) fd.append('facility_id', fac.value);
+        photos.forEach(f => fd.append('dicom_files', f, f.name));
+
+        show(elProg);
+        barEl.style.width = '0%';
+        pctEl.textContent = '0%';
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '{% url "worklist:upload_study" %}');
+        xhr.setRequestHeader('X-CSRFToken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+        xhr.upload.onprogress = e => {
+            if (e.lengthComputable) {
+                const p = Math.round((e.loaded / e.total) * 100);
+                barEl.style.width = p + '%';
+                pctEl.textContent = p + '%';
+            }
+        };
+        xhr.onload = () => {
+            try {
+                const d = JSON.parse(xhr.responseText);
+                if (d.success) {
+                    barEl.style.width = '100%';
+                    pctEl.textContent = '100%';
+                    okMsg.textContent = d.message || 'Upload complete!';
+                    show(elOk);
+                } else {
+                    show(elThumbs);
+                    alert('Upload failed: ' + (d.error || 'Unknown error'));
+                }
+            } catch (err) {
+                show(elThumbs);
+                alert('Upload failed: unexpected server response.');
+            }
+        };
+        xhr.onerror = () => { show(elThumbs); alert('Network error — upload failed.'); };
+        xhr.send(fd);
+    }
+
+    browseBtn.addEventListener('click', () => fileInput.click());
+    addMoreBtn.addEventListener('click', () => fileInput.click());
+    clearBtn.addEventListener('click', reset);
+    uploadBtn.addEventListener('click', upload);
+    anotherBtn.addEventListener('click', reset);
+    fileInput.addEventListener('change', () => { addPhotos(fileInput.files); fileInput.value = ''; });
+
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); addPhotos(e.dataTransfer.files); });
+    dropZone.addEventListener('click', e => { if (e.target !== browseBtn && !browseBtn.contains(e.target)) fileInput.click(); });
+
+    reset();
+}());
+</script>
+{% endblock %}

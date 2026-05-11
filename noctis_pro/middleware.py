@@ -11,6 +11,7 @@ from django.core.files.storage import default_storage
 import mimetypes
 
 from django.db.utils import OperationalError, ProgrammingError, InterfaceError
+from asgiref.sync import iscoroutinefunction, markcoroutinefunction
 
 
 class ImageOptimizationMiddleware:
@@ -308,35 +309,44 @@ class DatabaseOperationalErrorMiddleware:
     """
     Convert common DB outage/overload errors into a clear 503 instead of a generic 500.
 
-    This helps when Postgres hits max_connections ("too many clients already") or
-    when the schema is temporarily out of date during deploys.
+    Async-capable: works in both WSGI and ASGI mode without generating CancelledError
+    noise when clients disconnect mid-request.
     """
+    async_capable = True
+    sync_capable = True
 
     def __init__(self, get_response):
         self.get_response = get_response
+        if iscoroutinefunction(self.get_response):
+            markcoroutinefunction(self)
 
     def __call__(self, request):
+        if iscoroutinefunction(self):
+            return self.__acall__(request)
         try:
             return self.get_response(request)
         except (OperationalError, InterfaceError, ProgrammingError) as e:
-            # Prefer JSON when this looks like an API call.
-            accept = (request.headers.get("Accept") or "").lower()
-            is_json = "application/json" in accept or request.path.startswith("/worklist/api/") or request.path.startswith("/dicomweb/")
+            return self._error_response(request, e)
 
-            msg = "Database is temporarily unavailable or busy. Please retry in a moment."
-            # Keep details out of responses unless DEBUG is enabled.
-            details = str(e) if getattr(settings, "DEBUG", False) else None
+    async def __acall__(self, request):
+        try:
+            return await self.get_response(request)
+        except (OperationalError, InterfaceError, ProgrammingError) as e:
+            return self._error_response(request, e)
 
-            if is_json:
-                from django.http import JsonResponse
-
-                payload = {"success": False, "error": msg, "error_code": "DB_UNAVAILABLE"}
-                if details:
-                    payload["details"] = details
-                return JsonResponse(payload, status=503)
-
-            body = msg if not details else f"{msg}\n\n{details}"
-            return HttpResponse(body, status=503, content_type="text/plain")
+    def _error_response(self, request, e):
+        accept = (request.headers.get("Accept") or "").lower()
+        is_json = "application/json" in accept or request.path.startswith("/worklist/api/") or request.path.startswith("/dicomweb/")
+        msg = "Database is temporarily unavailable or busy. Please retry in a moment."
+        details = str(e) if getattr(settings, "DEBUG", False) else None
+        if is_json:
+            from django.http import JsonResponse
+            payload = {"success": False, "error": msg, "error_code": "DB_UNAVAILABLE"}
+            if details:
+                payload["details"] = details
+            return JsonResponse(payload, status=503)
+        body = msg if not details else f"{msg}\n\n{details}"
+        return HttpResponse(body, status=503, content_type="text/plain")
 
 
 import time
@@ -417,36 +427,54 @@ class SubscriptionRequiredMiddleware:
     Redirect facility users with expired/missing subscriptions to a subscription-expired page.
     Admins and radiologists always bypass this check.
 
-    NOTE: This middleware is defined but NOT registered in settings.MIDDLEWARE.
-    To activate it, add 'noctis_pro.middleware.SubscriptionRequiredMiddleware' to MIDDLEWARE
-    (after AuthenticationMiddleware) and ensure the /subscription-expired/ URL is configured.
+    Async-capable: works in both WSGI and ASGI mode.
     """
+    async_capable = True
+    sync_capable = True
     EXEMPT_PATHS = {'/login/', '/portal/login/', '/logout/', '/static/', '/media/', '/health/', '/favicon.ico'}
 
     def __init__(self, get_response):
         self.get_response = get_response
+        if iscoroutinefunction(self.get_response):
+            markcoroutinefunction(self)
+
+    def _subscription_redirect(self, request):
+        """Return a redirect response if subscription is required, else None."""
+        if not request.user.is_authenticated:
+            return None
+        user = request.user
+        path = request.path
+        if user.is_admin() or user.is_radiologist():
+            return None
+        is_exempt = any(path.startswith(p) for p in self.EXEMPT_PATHS)
+        if is_exempt or path == '/subscription-expired/':
+            return None
+        facility = getattr(user, 'facility', None)
+        if not facility:
+            return None
+        from django.utils import timezone as _tz
+        subscription_ok = facility.has_ai_subscription
+        if subscription_ok and facility.subscription_expires_at:
+            subscription_ok = facility.subscription_expires_at > _tz.now()
+        if not subscription_ok:
+            from django.shortcuts import redirect
+            return redirect('/subscription-expired/')
+        return None
 
     def __call__(self, request):
-        if request.user.is_authenticated:
-            user = request.user
-            path = request.path
-
-            # Admins and radiologists always have access
-            if not (user.is_admin() or user.is_radiologist()):
-                # Check if path is exempt
-                is_exempt = any(path.startswith(p) for p in self.EXEMPT_PATHS)
-                if not is_exempt and path != '/subscription-expired/':
-                    facility = getattr(user, 'facility', None)
-                    if facility:
-                        from django.utils import timezone as _tz
-                        subscription_ok = facility.has_ai_subscription
-                        if subscription_ok and facility.subscription_expires_at:
-                            subscription_ok = facility.subscription_expires_at > _tz.now()
-                        if not subscription_ok:
-                            from django.shortcuts import redirect
-                            return redirect('/subscription-expired/')
-
+        if iscoroutinefunction(self):
+            return self.__acall__(request)
+        r = self._subscription_redirect(request)
+        if r is not None:
+            return r
         return self.get_response(request)
+
+    async def __acall__(self, request):
+        from asgiref.sync import sync_to_async
+        r = await sync_to_async(self._subscription_redirect)(request)
+        if r is not None:
+            return r
+        return await self.get_response(request)
 
 
 class SessionTimeoutWarningMiddleware(MiddlewareMixin):

@@ -5,715 +5,369 @@
 
 {% block extra_css %}
 <style>
-    /* Page shell */
-    .np-upload-shell {
-        max-width: 980px;
-        margin: 0 auto;
-    }
+/* ── Shell ── */
+.up-wrap { max-width: 860px; margin: 0 auto; padding: 0 0 40px; }
 
-    .np-upload-card {
-        background: var(--card-bg);
-        border: 1px solid var(--border-color);
-        border-radius: 16px;
-        padding: 18px;
-        position: relative;
-        overflow: hidden;
-        box-shadow: 0 18px 34px rgba(0, 0, 0, 0.25);
-    }
+/* ── Page header ── */
+.up-ph { display:flex; align-items:center; justify-content:space-between; margin-bottom:22px; gap:12px; flex-wrap:wrap; }
+.up-ph-left { display:flex; align-items:center; gap:12px; }
+.up-ph-icon { width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#00d4ff,#00b8d4);
+    display:flex;align-items:center;justify-content:center;color:#000;font-size:19px;flex-shrink:0; }
+.up-ph-title { font-size:18px; font-weight:700; color:#e8e8e8; margin:0; }
+.up-ph-sub { font-size:11px; color:#666; margin:2px 0 0; }
+.up-ph-acts { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 
-    .np-upload-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 3px;
-        background: linear-gradient(90deg, var(--accent-color) 0%, #00b8d4 55%, var(--success-color) 100%);
-    }
+/* Photo button */
+.up-photo-btn {
+    display:inline-flex; align-items:center; gap:7px;
+    background:linear-gradient(135deg,#ffaa00,#ff6600);
+    border:none; border-radius:8px; color:#000; font-weight:700; font-size:12px;
+    padding:8px 16px; cursor:pointer; text-decoration:none;
+    box-shadow:0 3px 10px rgba(255,170,0,0.3); transition:all 0.2s;
+}
+.up-photo-btn:hover { transform:translateY(-1px); box-shadow:0 5px 16px rgba(255,170,0,0.45); color:#000; }
 
-    .upload-header { 
-        text-align: center; 
-        margin-bottom: 1.5rem; 
-        position: relative;
-    }
-    
-    .upload-icon { 
-        background: var(--accent-color);
-        border-radius: 50%; 
-        width: 64px; 
-        height: 64px; 
-        display: flex; 
-        align-items: center; 
-        justify-content: center; 
-        font-size: 1.6rem; 
-        color: var(--primary-bg); 
-        margin: 0 auto 1rem; 
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
-        position: relative;
-    }
+/* Home btn */
+.up-home-btn {
+    display:inline-flex; align-items:center; gap:7px;
+    background:rgba(255,255,255,0.06); border:1px solid #3a3a3a;
+    color:#a0a0a0; border-radius:8px; padding:8px 16px; font-size:12px;
+    cursor:pointer; text-decoration:none; transition:all 0.15s;
+}
+.up-home-btn:hover { border-color:#555; color:#d0d0d0; }
 
-    /* compact helper text */
-    .helper-text { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem; }
+/* ── Card ── */
+.up-card {
+    background: #1c1c1c;
+    border: 1px solid #2e2e2e;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+}
+.up-card-stripe { height:3px; background:linear-gradient(90deg,#00d4ff 0%,#00b8d4 50%,#00ff88 100%); }
 
-    .capability-item {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        color: var(--text-secondary);
-        font-size: 0.9rem;
-        font-weight: 500;
-    }
+/* ── Card hero ── */
+.up-hero { text-align:center; padding:28px 24px 16px; border-bottom:1px solid #262626; }
+.up-hero-icon {
+    width:68px; height:68px; border-radius:50%;
+    background:linear-gradient(135deg,#00d4ff,#00b8d4);
+    display:inline-flex; align-items:center; justify-content:center;
+    color:#000; font-size:26px; margin-bottom:14px;
+    box-shadow:0 4px 20px rgba(0,212,255,0.3);
+}
+.up-hero-title { font-size:20px; font-weight:700; color:#e8e8e8; margin:0 0 6px; }
+.up-hero-sub { font-size:12px; color:#666; }
+.up-hero-sub strong { color:#aaa; }
 
-    .capability-item i {
-        font-size: 1.1rem;
-    }
+/* ── Config section ── */
+.up-config { padding:20px 24px; border-bottom:1px solid #262626; }
+.up-cfg-row { display:grid; grid-template-columns:1fr 1fr auto; gap:16px; align-items:end; }
+.up-cfg-full { grid-column:1/-1; }
+.up-lbl {
+    display:block; font-size:10px; font-weight:700; color:#555;
+    text-transform:uppercase; letter-spacing:0.8px; margin-bottom:6px;
+}
+.up-sel, .up-ta {
+    background:#111; border:1px solid #2e2e2e;
+    color:#c8c8c8; border-radius:8px; padding:9px 12px; font-size:12px;
+    width:100%; box-sizing:border-box; outline:none; transition:border-color 0.2s;
+}
+.up-sel:focus, .up-ta:focus { border-color:#00d4ff; box-shadow:0 0 0 2px rgba(0,212,255,0.1); }
+.up-ta { min-height:70px; resize:vertical; }
+.up-ck-wrap { display:flex; flex-direction:column; gap:6px; }
+.up-ck-lbl {
+    display:flex; align-items:center; gap:8px; cursor:pointer;
+    font-size:11px; color:#777; padding:9px 0; white-space:nowrap;
+}
+.up-ck { accent-color:#00d4ff; width:15px; height:15px; flex-shrink:0; }
 
-    .text-accent {
-        color: var(--accent-color) !important;
-    }
+/* ── Stats bar (shown after file selection) ── */
+#uploadStats { padding:0 24px 16px; }
+.up-stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.stat-item { text-align:center; padding:10px 6px; background:#111; border:1px solid #2a2a2a; border-radius:8px; }
+.stat-value { font-size:1.3rem; font-weight:700; color:#00d4ff; font-family:'Courier New',monospace; }
+.stat-label { font-size:10px; color:#555; text-transform:uppercase; letter-spacing:0.4px; margin-top:3px; }
 
-    @media (max-width: 768px) {
-        .upload-capabilities {
-            flex-direction: column;
-            gap: 0.5rem;
-            text-align: center;
-        }
-    }
-    
-    @keyframes iconGlow {
-        0% { 
-            box-shadow: 
-                0 8px 24px rgba(0, 212, 255, 0.3),
-                0 0 20px rgba(0, 212, 255, 0.2),
-                inset 0 2px 0 rgba(255, 255, 255, 0.2);
-        }
-        100% { 
-            box-shadow: 
-                0 12px 32px rgba(0, 212, 255, 0.4),
-                0 0 30px rgba(0, 212, 255, 0.3),
-                inset 0 2px 0 rgba(255, 255, 255, 0.3);
-        }
-    }
+/* ── Folder / series info ── */
+.folder-info { background:rgba(255,170,0,0.05); border:1px solid rgba(255,170,0,0.2); border-radius:8px; padding:10px 12px; font-size:12px; color:#999; margin:0 24px 12px; }
+.series-preview { background:#111; border:1px solid #2a2a2a; border-radius:8px; padding:10px; max-height:140px; overflow-y:auto; font-size:12px; margin:0 24px 12px; }
+.series-item { display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #222; color:#888; }
+.series-item:last-child { border-bottom:none; }
 
-    .drop-zone { 
-        border: 2px dashed var(--border-color); 
-        border-radius: 12px; 
-        padding: 2rem; 
-        text-align: center; 
-        cursor: pointer; 
-        transition: border-color 0.2s ease, background 0.2s ease; 
-        background: var(--secondary-bg);
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .drop-zone::before { display: none; }
-    
-    @keyframes subtleRotate {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-    
-    .drop-zone:hover, .drop-zone.dragover { background: #151515; }
-    
-    .drop-zone:hover, .drop-zone.dragover { border-color: var(--accent-color); }
-    
-    .drop-zone.uploading { 
-        cursor: not-allowed; 
-        opacity: 0.7; 
-        animation: pulse 2s ease-in-out infinite;
-    }
-    
-    @keyframes pulse {
-        0% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0.4); }
-        70% { box-shadow: 0 0 0 20px rgba(0, 212, 255, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0); }
-    }
+/* ── Drop zone section ── */
+.up-dz-section { padding:20px 24px 24px; }
 
-    /* Keep file inputs "hidden but clickable" across browsers.
-       Some browsers block `.click()` on `display:none` inputs. */
-    .file-input {
-        position: absolute;
-        left: -9999px;
-        width: 1px;
-        height: 1px;
-        opacity: 0;
-        pointer-events: none;
-    }
+/* State containers */
+#upStateIdle, #upStateRing, #uploadSuccess { width:100%; }
 
-    .upload-actions { display: flex; gap: 1rem; margin-top: 2rem; justify-content: center; }
+/* Drop zone */
+.drop-zone {
+    border:2px dashed #2e2e2e; border-radius:14px;
+    padding:2.5rem 2rem; text-align:center; cursor:pointer;
+    transition:border-color 0.2s, background 0.2s;
+    background:rgba(255,255,255,0.015);
+}
+.drop-zone:hover, .drop-zone.dragover {
+    border-color:#00d4ff; background:rgba(0,212,255,0.04);
+}
+.drop-zone.uploading { opacity:0.5; cursor:not-allowed; }
+.up-dz-icon { font-size:2.4rem; color:#00d4ff; display:block; margin-bottom:12px;
+    filter:drop-shadow(0 0 10px rgba(0,212,255,0.35)); }
+.up-dz-title { font-size:15px; font-weight:700; color:#d8d8d8; margin-bottom:5px; }
+.up-dz-sub { font-size:12px; color:#777; margin-bottom:4px; }
+.up-dz-hint { font-size:10px; color:#4a4a4a; margin-bottom:18px; }
+.up-dz-hint kbd { background:rgba(255,255,255,0.06); border:1px solid #333; border-radius:3px; padding:1px 5px; font-size:10px; }
+.up-dz-btns { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
 
-    .np-upload-primary.btn-control.primary {
-        padding: 10px 18px;
-        border-radius: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.6px;
-        font-size: 12px;
-    }
+/* Buttons */
+.up-btn {
+    display:inline-flex; align-items:center; gap:6px;
+    background:rgba(255,255,255,0.06); border:1px solid #3a3a3a;
+    color:#a0a0a0; border-radius:8px; padding:8px 16px;
+    font-size:12px; cursor:pointer; transition:all 0.15s;
+}
+.up-btn:hover { background:rgba(255,255,255,0.10); border-color:#555; color:#d0d0d0; }
+.up-btn-accent {
+    background:linear-gradient(135deg,#00d4ff,#00b8d4);
+    border-color:#00d4ff; color:#000; font-weight:700;
+}
+.up-btn-accent:hover { box-shadow:0 4px 14px rgba(0,212,255,0.35); transform:translateY(-1px); }
+.up-btn-accent:disabled { opacity:0.45; transform:none; box-shadow:none; cursor:not-allowed; }
 
-    .progress-section { margin-top: 2rem; display: none; }
+/* ── Ring progress ── */
+.up-ring-wrap { display:flex; flex-direction:column; align-items:center; gap:16px; padding:16px 0; }
+.up-ring-box { position:relative; display:inline-flex; align-items:center; justify-content:center; }
+.up-ring-svg { width:156px; height:156px; transform:rotate(-90deg); }
+.up-ring-track { fill:none; stroke:rgba(255,255,255,0.05); stroke-width:9; }
+.up-ring-arc {
+    fill:none; stroke:#00d4ff; stroke-width:9; stroke-linecap:round;
+    stroke-dasharray:326.73; stroke-dashoffset:326.73;
+    transition:stroke-dashoffset 0.35s ease;
+    filter:drop-shadow(0 0 6px rgba(0,212,255,0.6));
+}
+.up-ring-center { position:absolute; display:flex; flex-direction:column; align-items:center; }
+.up-ring-pct { font-size:32px; font-weight:800; color:#fff; line-height:1; font-variant-numeric:tabular-nums; }
+.up-ring-lbl { font-size:10px; color:#555; text-transform:uppercase; letter-spacing:1px; margin-top:3px; }
+.up-ring-meta-wrap { text-align:center; }
+.up-ring-filemeta { font-size:12px; color:#888; }
+.up-ring-detail { font-size:11px; color:#555; margin-top:2px; }
 
-    .file-list { margin-top: 2rem; }
-    
-    .file-item { 
-        background: linear-gradient(135deg, 
-            rgba(255, 255, 255, 0.08) 0%, 
-            rgba(0, 212, 255, 0.05) 50%,
-            rgba(255, 255, 255, 0.08) 100%); 
-        border: 1px solid var(--border-color); 
-        border-radius: 12px; 
-        padding: 1.2rem; 
-        margin-bottom: 1rem; 
-        display: flex; 
-        align-items: center; 
-        justify-content: space-between;
-        animation: slideInEnhanced 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        position: relative;
-        overflow: hidden;
-        box-shadow: 
-            0 2px 8px rgba(0, 0, 0, 0.1),
-            inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    }
-    
-    .file-item:hover {
-        background: linear-gradient(135deg, 
-            rgba(0, 212, 255, 0.12) 0%, 
-            rgba(0, 255, 136, 0.08) 50%,
-            rgba(0, 212, 255, 0.12) 100%);
-        border-color: var(--accent-color);
-        transform: translateX(8px) translateY(-2px);
-        box-shadow: 
-            0 6px 20px rgba(0, 212, 255, 0.2),
-            inset 3px 0 0 var(--accent-color),
-            inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    }
-    
-    @keyframes slideIn {
-        from {
-            opacity: 0;
-            transform: translateX(-20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateX(0);
-        }
-    }
-    
-    @keyframes slideInEnhanced {
-        0% {
-            opacity: 0;
-            transform: translateX(-30px) translateY(10px) scale(0.95);
-        }
-        60% {
-            opacity: 0.8;
-            transform: translateX(5px) translateY(-2px) scale(1.02);
-        }
-        100% {
-            opacity: 1;
-            transform: translateX(0) translateY(0) scale(1);
-        }
-    }
-    
-    .file-info { display: flex; align-items: center; gap: 1rem; }
-    
-    .file-icon { 
-        color: var(--accent-color); 
-        font-size: 1.8rem;
-        animation: iconAppear 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-        text-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
-        position: relative;
-    }
-    
-    @keyframes iconAppear {
-        0% { 
-            opacity: 0; 
-            transform: scale(0.5) rotate(-180deg);
-            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
-        }
-        70% { 
-            opacity: 0.8; 
-            transform: scale(1.1) rotate(10deg);
-            text-shadow: 0 0 15px rgba(0, 212, 255, 0.4);
-        }
-        100% { 
-            opacity: 1; 
-            transform: scale(1) rotate(0deg);
-            text-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
-        }
-    }
-    
-    @keyframes fadeIn {
-        from { opacity: 0; transform: scale(0.8); }
-        to { opacity: 1; transform: scale(1); }
-    }
-    
-    .file-details h6 { margin: 0; color: var(--text-primary); font-weight: 600; }
-    .file-size { color: var(--text-secondary); font-size: 0.9rem; }
-    
-    .remove-file { 
-        background: var(--danger-color); 
-        border: none; 
-        border-radius: 50%; 
-        width: 32px; 
-        height: 32px; 
-        display: flex; 
-        align-items: center; 
-        justify-content: center; 
-        color: white; 
-        cursor: pointer; 
-        transition: all 0.3s ease;
-        box-shadow: 0 2px 8px rgba(255, 68, 68, 0.3);
-    }
-    
-    .remove-file:hover { 
-        background: #dc2626; 
-        transform: scale(1.1) rotate(90deg);
-        box-shadow: 0 4px 12px rgba(255, 68, 68, 0.5);
-    }
+/* ── Success state ── */
+.up-success-wrap { display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center; padding:24px 0; }
+.up-success-icon { font-size:3rem; color:#00ff88; filter:drop-shadow(0 0 14px rgba(0,255,136,0.4)); }
+.up-success-title { font-size:17px; font-weight:700; color:#e0e0e0; }
+.up-success-sub { font-size:12px; color:#666; }
+.up-summary { width:100%; margin-top:8px; }
+.up-summary .stats-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; max-width:320px; margin:0 auto; }
+.up-summary .stat-item { background:rgba(0,212,255,0.06); border:1px solid rgba(0,212,255,0.18); border-radius:8px; padding:10px 6px; }
+.up-summary .stat-value { font-size:1.4rem; font-weight:700; color:#00d4ff; font-family:'Courier New',monospace; }
+.up-summary .stat-label { font-size:10px; color:#666; text-transform:uppercase; letter-spacing:0.5px; margin-top:2px; }
 
-    .upload-stats {
-        background: linear-gradient(135deg, 
-            rgba(0, 212, 255, 0.12) 0%, 
-            rgba(0, 255, 136, 0.08) 50%,
-            rgba(0, 212, 255, 0.12) 100%);
-        border: 2px solid var(--accent-color);
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin-top: 1.5rem;
-        display: none;
-        position: relative;
-        overflow: hidden;
-        box-shadow: 
-            0 4px 16px rgba(0, 212, 255, 0.2),
-            inset 0 1px 0 rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(2px);
-    }
-    
-    .upload-stats::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 2px;
-        background: linear-gradient(90deg, 
-            var(--accent-color) 0%, 
-            var(--success-color) 50%, 
-            var(--accent-color) 100%);
-    }
+/* Progress bar (hidden, JS compat) */
+.progress { background:#111; border-radius:6px; height:8px; overflow:hidden; border:1px solid #2a2a2a; }
+.progress-bar { background:linear-gradient(90deg,#00d4ff,#00ff88); border-radius:6px; transition:width 0.3s; }
 
-    .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-        gap: 1.2rem;
-        margin-top: 1rem;
-    }
+/* File inputs */
+.file-input { position:absolute; left:-9999px; width:1px; height:1px; opacity:0; pointer-events:none; }
 
-    .stat-item {
-        text-align: center;
-        padding: 1rem;
-        background: linear-gradient(135deg, 
-            rgba(255, 255, 255, 0.08) 0%, 
-            rgba(0, 212, 255, 0.05) 100%);
-        border-radius: 10px;
-        border: 1px solid rgba(0, 212, 255, 0.4);
-        position: relative;
-        overflow: hidden;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 
-            0 2px 8px rgba(0, 0, 0, 0.1),
-            inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    }
-    
-    .stat-item:hover {
-        transform: translateY(-3px) scale(1.02);
-        box-shadow: 
-            0 6px 20px rgba(0, 212, 255, 0.2),
-            inset 0 1px 0 rgba(255, 255, 255, 0.2);
-        border-color: var(--accent-color);
-    }
-
-    .stat-value {
-        font-size: 1.8rem;
-        font-weight: bold;
-        color: var(--accent-color);
-        font-family: 'Courier New', monospace;
-        text-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
-        animation: countUp 0.8s ease-out;
-    }
-
-    .stat-label {
-        font-size: 0.85rem;
-        color: var(--text-secondary);
-        margin-top: 0.5rem;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        font-weight: 600;
-    }
-    
-    @keyframes countUp {
-        0% { 
-            opacity: 0; 
-            transform: scale(0.5) translateY(20px);
-        }
-        60% { 
-            opacity: 0.8; 
-            transform: scale(1.1) translateY(-5px);
-        }
-        100% { 
-            opacity: 1; 
-            transform: scale(1) translateY(0);
-        }
-    }
-
-    .folder-info {
-        background: rgba(255, 170, 0, 0.1);
-        border: 1px solid var(--warning-color);
-        border-radius: 8px;
-        padding: 1rem;
-        margin-top: 1rem;
-        display: none;
-    }
-
-    .series-preview {
-        background: rgba(255, 255, 255, 0.02);
-        border: 1px solid var(--border-color);
-        border-radius: 8px;
-        padding: 1rem;
-        margin-top: 1rem;
-        max-height: 200px;
-        overflow-y: auto;
-        display: none;
-    }
-
-    .series-item {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0.5rem;
-        border-bottom: 1px solid var(--border-color);
-    }
-
-    .series-item:last-child {
-        border-bottom: none;
-    }
-
-    .upload-success {
-        background: rgba(0, 255, 136, 0.1);
-        border: 1px solid var(--success-color);
-        border-radius: 8px;
-        padding: 1rem;
-        margin-top: 1rem;
-        display: none;
-        text-align: center;
-    }
-
-    .upload-success i {
-        font-size: 3rem;
-        color: var(--success-color);
-        margin-bottom: 1rem;
-    }
-
-    /* Enhanced metadata form - Professional medical input styling */
-    .meta-grid { 
-        display: grid; 
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); 
-        gap: 1.5rem; 
-        margin-bottom: 1.5rem; 
-        padding: 1.5rem;
-        background: linear-gradient(135deg, 
-            rgba(255, 255, 255, 0.03) 0%, 
-            rgba(0, 212, 255, 0.02) 100%);
-        border-radius: 12px;
-        border: 1px solid rgba(64, 64, 64, 0.5);
-    }
-    
-    .meta-field { 
-        display: flex; 
-        flex-direction: column; 
-        gap: 8px; 
-        position: relative;
-    }
-    
-    .meta-label { 
-        color: var(--text-secondary); 
-        font-size: 0.95rem; 
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    
-    .meta-input, .meta-select, .meta-textarea { 
-        background: linear-gradient(135deg, 
-            rgba(255, 255, 255, 0.08) 0%, 
-            rgba(0, 212, 255, 0.03) 100%); 
-        border: 1px solid var(--border-color); 
-        color: var(--text-primary); 
-        border-radius: 8px; 
-        padding: 0.75rem 1rem; 
-        font-size: 12px;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
-    }
-    
-    .meta-input:focus, .meta-select:focus, .meta-textarea:focus {
-        outline: none;
-        border-color: var(--accent-color);
-        box-shadow: 
-            0 0 0 3px rgba(0, 212, 255, 0.2),
-            inset 0 1px 3px rgba(0, 0, 0, 0.1),
-            0 2px 8px rgba(0, 212, 255, 0.1);
-        background: var(--primary-bg);
-        transform: translateY(-1px);
-    }
-    
-    .meta-textarea { 
-        min-height: 100px; 
-        resize: vertical; 
-        font-family: 'Segoe UI', sans-serif;
-    }
-    
-    /* Enhanced Progress Bar Styling - Medical Grade */
-    .progress {
-        background: var(--secondary-bg);
-        border-radius: 8px;
-        height: 12px;
-        overflow: hidden;
-        box-shadow: 
-            inset 0 2px 4px rgba(0, 0, 0, 0.2),
-            0 1px 2px rgba(0, 0, 0, 0.1);
-        border: 1px solid var(--border-color);
-        position: relative;
-    }
-    
-    .progress-bar {
-        background: linear-gradient(90deg, 
-            var(--accent-color) 0%, 
-            #00b8d4 25%,
-            var(--success-color) 50%,
-            #00b8d4 75%,
-            var(--accent-color) 100%) !important;
-        border-radius: 8px;
-        transition: width 0.3s ease;
-        position: relative;
-        overflow: hidden;
-        box-shadow: 
-            0 0 10px rgba(0, 212, 255, 0.3),
-            inset 0 1px 0 rgba(255, 255, 255, 0.2);
-    }
-    
-    .progress-bar-animated {
-        background-size: 200% 100% !important;
-        animation: progressShimmer 2s linear infinite;
-    }
-    
-    @keyframes progressShimmer {
-        0% { background-position: 200% 0; }
-        100% { background-position: -200% 0; }
-    }
-    
-    /* Keep the upload card content readable on narrow widths */
-    @media (max-width: 768px) {
-        .np-upload-card { padding: 14px; }
-        .drop-zone { padding: 1.4rem; }
-    }
+@media (max-width:640px) {
+    .up-cfg-row { grid-template-columns:1fr; }
+    .up-stats-row { grid-template-columns:repeat(2,1fr); }
+}
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="np-page">
-    <div class="np-upload-shell">
-        <div class="np-page-header">
+<div class="up-wrap">
+
+    <!-- Page header -->
+    <div class="up-ph">
+        <div class="up-ph-left">
+            <div class="up-ph-icon"><i class="fas fa-cloud-upload-alt"></i></div>
             <div>
-                <h1 class="np-page-title"><i class="fas fa-cloud-upload-alt"></i> Upload DICOM Studies</h1>
-                <div class="np-page-subtitle">Drag & drop a DICOM folder (recommended) or choose files. Max 5,000 objects (5GB).</div>
-            </div>
-            <div class="np-actions">
-                <a href="{% url 'worklist:dashboard' %}" class="btn-control" title="Home">
-                    <i class="fas fa-home me-2"></i>Home
-                </a>
+                <h1 class="up-ph-title">Upload DICOM Studies</h1>
+                <p class="up-ph-sub">Drag &amp; drop a DICOM folder (recommended) or choose files. Max 5,000 objects (5&nbsp;GB).</p>
             </div>
         </div>
+        <div class="up-ph-acts">
+            <a href="{% url 'worklist:upload_photos' %}" class="up-photo-btn">
+                <i class="fas fa-camera"></i>Upload Photos
+            </a>
+            <a href="{% url 'worklist:dashboard' %}" class="up-home-btn">
+                <i class="fas fa-home"></i>Home
+            </a>
+        </div>
+    </div>
 
-        <div class="np-upload-card">
-            <div class="upload-header">
-                <div class="upload-icon">
-                    <i class="fas fa-cloud-upload-alt"></i>
-                </div>
-                <h3 class="text-light" style="margin-bottom: 0.25rem;">Secure DICOM Upload</h3>
-                <div class="helper-text">Supports <strong>all DICOM modalities</strong> (CT/MR/US/CR/DX/MG/SR/etc). The server will validate DICOM content.</div>
-            </div>
+    {% if db_schema_error %}
+    <div style="margin-bottom:14px;padding:12px 16px;border-radius:8px;background:rgba(255,68,68,0.08);border:1px solid rgba(255,68,68,0.3);font-size:12px;color:#ff6b6b;">
+        <strong>Schema issue:</strong> run <code>python manage.py migrate</code> then reload.
+        <details style="margin-top:6px;"><summary style="cursor:pointer;font-size:11px;">Details</summary>
+            <pre style="white-space:pre-wrap;margin-top:6px;font-size:10px;opacity:0.7;">{{ db_schema_error }}</pre>
+        </details>
+    </div>
+    {% endif %}
 
-            {% if db_schema_error %}
-            <div class="alert alert-danger" style="margin: 0 0 1rem 0;">
-                <strong>Server configuration issue:</strong> the database schema looks out of date, so uploads may fail.
-                <div class="mt-2" style="font-size: 0.9rem;">
-                    Fix: run <code>python manage.py migrate</code> on the server, then reload this page.
-                </div>
-                <details class="mt-2">
-                    <summary style="cursor: pointer;">Technical details</summary>
-                    <pre style="white-space: pre-wrap; margin-top: 0.5rem;">{{ db_schema_error }}</pre>
-                </details>
-            </div>
-            {% endif %}
+    <!-- Main card -->
+    <div class="up-card">
+        <div class="up-card-stripe"></div>
+
+        <!-- Hero -->
+        <div class="up-hero">
+            <div class="up-hero-icon"><i class="fas fa-cloud-upload-alt"></i></div>
+            <h2 class="up-hero-title">Secure DICOM Upload</h2>
+            <p class="up-hero-sub">Supports <strong>all DICOM modalities</strong> (CT/MR/US/CR/DX/MG/SR/etc). The server will validate DICOM content.</p>
+        </div>
 
         <form id="uploadForm" enctype="multipart/form-data">
             {% csrf_token %}
-            <!-- New: study metadata inputs -->
-            <div class="meta-grid">
-                <div class="meta-field">
-                    <label class="meta-label" for="priorityInput">Priority</label>
-                    <select id="priorityInput" class="meta-select">
-                        <option value="low">Low</option>
-                        <option value="normal" selected>Normal</option>
-                        <option value="high">High</option>
-                        <option value="urgent">Urgent</option>
-                    </select>
-                </div>
-                {% if facilities %}
-                <div class="meta-field">
-                    <label class="meta-label" for="facilitySelect">Target Facility</label>
-                    <select id="facilitySelect" class="meta-select">
-                        {% for fac in facilities %}
-                        <option value="{{ fac.id }}">{{ fac.name }}{% if fac.ae_title %} ({{ fac.ae_title }}){% endif %}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="meta-field">
-                    <label class="meta-label" for="assignToMe"><input type="checkbox" id="assignToMe"/> Assign to my worklist</label>
-                </div>
-                {% endif %}
-                <div class="meta-field" style="grid-column: 1 / -1;">
-                    <label class="meta-label" for="clinicalInfoInput">Clinical Information / Indication</label>
-                    <textarea id="clinicalInfoInput" class="meta-textarea" placeholder="Enter relevant clinical history and indication (optional)"></textarea>
-                </div>
-            </div>
-            <!-- End metadata inputs -->
-            <div class="drop-zone" id="dropZone">
-                <div class="drop-zone-icon">
-                    <i class="fas fa-file-medical" style="font-size: 2.5rem; margin-bottom: 0.5rem; color: var(--accent-color);"></i>
-                </div>
-                <h4 class="text-light mb-2" style="font-size: 1.1rem; font-weight: 600;">Drop DICOM files or folders here</h4>
-                <p class="text-secondary mb-2" style="font-size: 0.95rem; line-height: 1.4;">
-                    Files upload automatically once selected.
-                    <span class="helper-text" style="display:block;margin-top:6px;">
-                        Tip: use <strong>Shift</strong> and <strong>Ctrl/Cmd</strong> in “Choose Files” to multi-select.
-                    </span>
-                </p>
-                <div class="upload-actions" style="margin-top: 0.75rem;">
-                    <button type="button" class="btn-control primary np-upload-primary" id="chooseFilesBtn">
-                    <i class="fas fa-folder-open me-2"></i>
-                    Choose Files
-                    </button>
-                    <button type="button" class="btn-control np-upload-primary" id="chooseFolderBtn" title="Select a folder (uploads the entire directory tree)">
-                        <i class="fas fa-folder-tree me-2"></i>
-                        Choose Folder
-                    </button>
-                </div>
-            </div>
-            
-            <style>
-            @keyframes floatIcon {
-                0% { 
-                    transform: translateY(0px) scale(1);
-                    text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
-                }
-                100% { 
-                    transform: translateY(-8px) scale(1.05);
-                    text-shadow: 0 0 30px rgba(0, 212, 255, 0.7);
-                }
-            }
-            </style>
-            
-            <!-- Two pickers:
-                 - Files picker: supports Shift/Ctrl/Cmd multi-select
-                 - Folder picker: uploads entire directory tree (webkitdirectory) -->
-            <input type="file" id="fileInputFiles" class="file-input" multiple>
-            <!-- Folder selection: Chromium uses webkitdirectory; Firefox supports mozdirectory. -->
-            <input type="file" id="fileInputFolder" class="file-input" webkitdirectory directory mozdirectory multiple>
-            
-            <div class="upload-stats" id="uploadStats">
-                <h5 class="text-light mb-2">Upload Summary</h5>
-                <div class="stats-grid">
-                    <div class="stat-item">
-                        <div class="stat-value" id="totalFiles">0</div>
-                        <div class="stat-label">Total Files</div>
+
+            <!-- Config row -->
+            <div class="up-config">
+                <div class="up-cfg-row">
+                    <div>
+                        <label class="up-lbl" for="priorityInput">Priority</label>
+                        <select id="priorityInput" class="up-sel" name="priority">
+                            <option value="low">Low</option>
+                            <option value="normal" selected>Normal</option>
+                            <option value="high">High</option>
+                            <option value="urgent">Urgent</option>
+                        </select>
                     </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="dicomFiles">0</div>
-                        <div class="stat-label">DICOM Files</div>
+                    {% if facilities %}
+                    <div>
+                        <label class="up-lbl" for="facilitySelect">Target Facility</label>
+                        <select id="facilitySelect" class="up-sel" name="facility_id">
+                            {% for fac in facilities %}
+                            <option value="{{ fac.id }}">{{ fac.name }}{% if fac.ae_title %} ({{ fac.ae_title }}){% endif %}</option>
+                            {% endfor %}
+                        </select>
                     </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="totalSize">0 MB</div>
-                        <div class="stat-label">Total Size</div>
+                    <div class="up-ck-wrap">
+                        <label class="up-lbl">&nbsp;</label>
+                        <label class="up-ck-lbl">
+                            <input type="checkbox" id="assignToMe" name="assign_to_me" value="1" class="up-ck">
+                            Assign to my worklist
+                        </label>
                     </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="estimatedStudies">0</div>
-                        <div class="stat-label">Est. Studies</div>
+                    {% else %}
+                    <div></div><div></div>
+                    {% endif %}
+                    <div class="up-cfg-full">
+                        <label class="up-lbl" for="clinicalInfoInput">Clinical Information / Indication</label>
+                        <textarea id="clinicalInfoInput" name="clinical_info" class="up-ta"
+                            placeholder="Enter relevant clinical history and indication (optional)"></textarea>
                     </div>
                 </div>
             </div>
 
-            <div class="folder-info" id="folderInfo">
-                <h6 class="text-warning mb-2"><i class="fas fa-folder-open me-2"></i>Folder Structure Detected</h6>
-                <p class="text-secondary mb-2">Large folder with multiple series detected. This may take several minutes to process.</p>
+            <!-- Stats (shown after file selection) -->
+            <div id="uploadStats" style="display:none;">
+                <div class="up-stats-row">
+                    <div class="stat-item"><div class="stat-value" id="totalFiles">0</div><div class="stat-label">Files</div></div>
+                    <div class="stat-item"><div class="stat-value" id="dicomFiles">0</div><div class="stat-label">DICOM</div></div>
+                    <div class="stat-item"><div class="stat-value" id="totalSize">0</div><div class="stat-label">Size</div></div>
+                    <div class="stat-item"><div class="stat-value" id="estimatedStudies">0</div><div class="stat-label">Studies</div></div>
+                </div>
+            </div>
+
+            <!-- Folder info -->
+            <div id="folderInfo" style="display:none;" class="folder-info">
+                <div style="font-weight:600;color:#ffaa00;margin-bottom:6px;font-size:12px;"><i class="fas fa-folder-open me-1"></i>Folder Structure</div>
                 <div id="folderStructure"></div>
             </div>
-            
-            <div class="series-preview" id="seriesPreview">
-                <h6 class="text-light mb-2"><i class="fas fa-layer-group me-2"></i>Series Preview</h6>
+
+            <!-- Series preview -->
+            <div id="seriesPreview" style="display:none;" class="series-preview">
+                <div style="font-weight:600;color:#aaa;margin-bottom:6px;font-size:11px;"><i class="fas fa-layer-group me-1"></i>Series</div>
                 <div id="seriesList"></div>
             </div>
-            
-            <div class="file-list" id="fileList" style="display: none;">
-                <h5 class="text-light mb-3">Selected Files</h5>
-                <div id="selectedFiles"></div>
-            </div>
-            
-            <div class="progress-section" id="progressSection">
-                <h5 class="text-light mb-2">Upload Progress</h5>
-                <div class="progress mb-2">
-                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
-                         role="progressbar" 
-                         style="width: 0%" 
-                         id="progressBar">
-                        <span id="progressText">0%</span>
+
+            <!-- Drop zone / ring / success -->
+            <div class="up-dz-section">
+
+                <!-- Idle: drop zone -->
+                <div id="upStateIdle">
+                    <div class="drop-zone" id="dropZone">
+                        <i class="fas fa-file-medical up-dz-icon"></i>
+                        <div class="up-dz-title">Drop DICOM files or folders here</div>
+                        <div class="up-dz-sub">Files upload automatically once selected.</div>
+                        <div class="up-dz-hint">Tip: use <strong style="color:#888;">Shift</strong> and <strong style="color:#888;">Ctrl/Cmd</strong> in &ldquo;Choose Files&rdquo; to multi-select.</div>
+                        <div class="up-dz-btns">
+                            <button type="button" id="chooseFilesBtn" class="up-btn up-btn-accent">
+                                <i class="fas fa-folder-open"></i>CHOOSE FILES
+                            </button>
+                            <button type="button" id="chooseFolderBtn" class="up-btn">
+                                <i class="fas fa-folder-tree"></i>Choose Folder
+                            </button>
+                        </div>
                     </div>
                 </div>
-                <div id="progressMeta" class="text-secondary mt-2" style="font-size: 0.9rem;"></div>
-                <div id="uploadDetails" class="text-secondary mt-1" style="font-size: 0.8rem;"></div>
+
+                <!-- Uploading: ring progress -->
+                <div id="upStateRing" style="display:none;">
+                    <div class="up-ring-wrap">
+                        <div class="up-ring-box">
+                            <svg viewBox="0 0 120 120" class="up-ring-svg">
+                                <circle class="up-ring-track" cx="60" cy="60" r="52"/>
+                                <circle class="up-ring-arc" id="progressRing" cx="60" cy="60" r="52"
+                                    stroke-dasharray="326.73" stroke-dashoffset="326.73"/>
+                            </svg>
+                            <div class="up-ring-center">
+                                <span class="up-ring-pct" id="ringPct">0%</span>
+                                <span class="up-ring-lbl">uploading</span>
+                            </div>
+                        </div>
+                        <div class="up-ring-meta-wrap">
+                            <div id="ringFileMeta" class="up-ring-filemeta"></div>
+                            <div id="ringDetails" class="up-ring-detail"></div>
+                        </div>
+                    </div>
+                    <!-- Hidden JS compat elements -->
+                    <div id="progressSection" style="display:none;">
+                        <div class="progress"><div class="progress-bar" id="progressBar" role="progressbar" style="width:0%"><span id="progressText">0%</span></div></div>
+                        <div id="progressMeta"></div>
+                        <div id="uploadDetails"></div>
+                    </div>
+                </div>
+
+                <!-- Success -->
+                <div id="uploadSuccess" style="display:none;">
+                    <div class="up-success-wrap">
+                        <i class="fas fa-check-circle up-success-icon"></i>
+                        <div class="up-success-title">Upload Complete!</div>
+                        <div class="up-success-sub">Studies are now visible in the worklist.</div>
+                        <div id="uploadSummary" class="up-summary"></div>
+                        <button type="button" class="up-btn up-btn-accent" style="margin-top:16px;"
+                            onclick="window.location.href='{% url 'worklist:dashboard' %}'">
+                            <i class="fas fa-list me-1"></i>Return to Worklist
+                        </button>
+                    </div>
+                </div>
+
+            </div><!-- /up-dz-section -->
+
+            <!-- Bottom home button -->
+            <div style="text-align:center;padding:0 24px 24px;">
+                <a href="{% url 'worklist:dashboard' %}" class="up-home-btn">
+                    <i class="fas fa-home"></i>Home
+                </a>
             </div>
 
-            <div class="upload-success" id="uploadSuccess">
-                <i class="fas fa-check-circle"></i>
-                <h4 class="text-light mb-2">Upload Successful!</h4>
-                <p class="text-secondary mb-3">Your DICOM studies have been uploaded successfully.</p>
-                <div id="uploadSummary" class="text-light mb-3"></div>
-                <button type="button" class="btn-control primary np-upload-primary" onclick="redirectToDashboard()">
-                    <i class="fas fa-arrow-left me-2"></i>Return to Worklist
-                </button>
-            </div>
-            
-            <div class="upload-actions" id="uploadActions" style="display: none;">
-                <a href="{% url 'worklist:dashboard' %}" class="btn-control">
-                    <i class="fas fa-arrow-left me-2"></i>Cancel
-                </a>
-                <button type="submit" class="btn-control primary np-upload-primary" id="uploadBtn" disabled>
-                    <i class="fas fa-upload me-2"></i>Upload Studies
-                </button>
-            </div>
-            
-            <!-- Initial cancel button -->
-            <div class="upload-actions" id="initialActions">
-                <a href="{% url 'worklist:dashboard' %}" class="btn-control">
-                    <i class="fas fa-home me-2"></i>Home
-                </a>
-            </div>
+            <!-- Hidden JS compat -->
+            <div id="fileList" style="display:none;"><div id="selectedFiles"></div></div>
+            <div id="uploadActions" style="display:none;"><button type="submit" id="uploadBtn" class="up-btn up-btn-accent" disabled><i class="fas fa-upload me-1"></i>Upload</button></div>
+            <div id="initialActions" style="display:none;"></div>
+
+            <input type="file" id="fileInputFiles" class="file-input" multiple>
+            <input type="file" id="fileInputFolder" class="file-input" webkitdirectory directory mozdirectory multiple>
         </form>
-    </div>
+    </div><!-- /up-card -->
+
 </div>
 </div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -721,6 +375,23 @@
 let selectedFiles = [];
 let isUploading = false;
 let createdStudyIds = [];
+
+// ── Upload state machine ──
+const RING_CIRC = 326.73;
+function switchUploadState(state) {
+    const idle    = document.getElementById('upStateIdle');
+    const ring    = document.getElementById('upStateRing');
+    const success = document.getElementById('uploadSuccess');
+    if (idle)    idle.style.display    = state === 'idle'    ? '' : 'none';
+    if (ring)    ring.style.display    = state === 'ring'    ? '' : 'none';
+    if (success) success.style.display = state === 'success' ? '' : 'none';
+}
+function updateRing(pct) {
+    const arc = document.getElementById('progressRing');
+    if (arc) arc.style.strokeDashoffset = RING_CIRC - (Math.min(100, Math.max(0, pct)) / 100) * RING_CIRC;
+    const p = document.getElementById('ringPct');
+    if (p) p.textContent = Math.round(pct) + '%';
+}
 
 document.addEventListener('DOMContentLoaded', function() {
     const dropZone = document.getElementById('dropZone');
@@ -865,7 +536,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (isUploading) return;
 
             if (!supportsFolderPicker()) {
-                showNotification('Folder selection is not supported in this browser. Use Chrome/Edge for “Choose Folder”, or use “Choose Files” (multi-select) / drag & drop.', 'warning');
+                showNotification('Folder selection is not supported in this browser. Use Chrome/Edge for "Choose Folder", or use "Choose Files" (multi-select) / drag & drop.', 'warning');
                 try { fileInputFiles.click(); } catch (_) {}
                 return;
             }
@@ -1164,20 +835,25 @@ document.addEventListener('DOMContentLoaded', function() {
         const bar = document.getElementById('progressBar');
         const text = document.getElementById('progressText');
         const detailsEl = document.getElementById('uploadDetails');
-        
-        bar.style.width = percent + '%';
-        text.textContent = Math.round(percent) + '%';
-        if (meta) progressMeta.textContent = meta; else progressMeta.textContent = '';
-        if (details) detailsEl.textContent = details; else detailsEl.textContent = '';
+        if (bar) bar.style.width = percent + '%';
+        if (text) text.textContent = Math.round(percent) + '%';
+        if (progressMeta) progressMeta.textContent = meta || '';
+        if (detailsEl) detailsEl.textContent = details || '';
+        // Drive ring
+        updateRing(percent);
+        const fm = document.getElementById('ringFileMeta');
+        const rd = document.getElementById('ringDetails');
+        if (fm) fm.textContent = meta || '';
+        if (rd) rd.textContent = details || '';
     }
 
     function resetUploadState() {
         isUploading = false;
-        uploadBtn.disabled = false;
-        uploadBtn.innerHTML = '<i class="fas fa-upload me-2"></i>Upload Studies';
-        progressSection.style.display = 'none';
+        if (uploadBtn) { uploadBtn.disabled = false; uploadBtn.innerHTML = '<i class="fas fa-upload me-1"></i>Upload'; }
+        if (progressSection) progressSection.style.display = 'none';
         dropZone.classList.remove('uploading');
         updateProgress(0);
+        switchUploadState('idle');
     }
 
     // -------- Background upload (Service Worker + IndexedDB) --------
@@ -1327,9 +1003,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // UI state
         isUploading = true;
         dropZone.classList.add('uploading');
-        uploadBtn.disabled = true;
-        uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Queueing...';
-        progressSection.style.display = 'block';
+        if (uploadBtn) { uploadBtn.disabled = true; uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Queueing…'; }
+        switchUploadState('ring');
+        if (progressSection) progressSection.style.display = 'none';
         updateProgress(0, `0 / ${totalFiles} images`, 'Saving to background queue...');
 
         const sessionId = 'bg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
@@ -1425,9 +1101,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateProgress(pct, `${done} / ${total} images`, `Background upload • Created ${msg.studiesCreated || 0} studies, ${msg.totalSeries || 0} series`);
             }
             if (msg.type === 'UPLOAD_STATUS' && msg.status === 'completed') {
-                progressSection.style.display = 'none';
-                uploadActions.style.display = 'none';
-                uploadSuccess.style.display = 'block';
+                if (progressSection) progressSection.style.display = 'none';
+                if (uploadActions) uploadActions.style.display = 'none';
+                switchUploadState('success');
                 showNotification('Background upload completed successfully.', 'success');
             }
             if (msg.type === 'UPLOAD_STATUS' && msg.status === 'failed') {
@@ -1522,11 +1198,11 @@ document.addEventListener('DOMContentLoaded', function() {
         // Set uploading state
         isUploading = true;
         dropZone.classList.add('uploading');
-        uploadBtn.disabled = true;
-        uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Uploading...';
+        if (uploadBtn) { uploadBtn.disabled = true; uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Uploading…'; }
+        switchUploadState('ring');
 
-        // UI state
-        progressSection.style.display = 'block';
+        // UI state (progressSection stays hidden — ring is the visual)
+        if (progressSection) progressSection.style.display = 'none';
         updateProgress(0, `0 / ${totalFiles} files`, isTunnelHost ? 'Preparing upload (tunnel mode)...' : 'Preparing upload...');
 
         async function pollProcessing(taskId) {
@@ -1683,9 +1359,9 @@ document.addEventListener('DOMContentLoaded', function() {
             await Promise.all(workers);
 
             if (errors.length === 0) {
-                progressSection.style.display = 'none';
-                uploadActions.style.display = 'none';
-                uploadSuccess.style.display = 'block';
+                if (progressSection) progressSection.style.display = 'none';
+                if (uploadActions) uploadActions.style.display = 'none';
+                switchUploadState('success');
 
                 const uploadSummary = document.getElementById('uploadSummary');
                 uploadSummary.innerHTML = `
@@ -1758,11 +1434,16 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     window.redirectToDashboard = function() {
-        // Add a small delay to ensure database consistency before redirecting
-        setTimeout(() => {
-            window.location.href = '{% url "worklist:dashboard" %}';
-        }, 1500);
+        window.location.href = '{% url "worklist:dashboard" %}';
     };
+
+    // DICOM drop zone click-to-browse (clicking zone but not a button inside it)
+    dropZone.addEventListener('click', (e) => {
+        if (e.target === chooseFilesBtn || chooseFilesBtn.contains(e.target)) return;
+        if (e.target === chooseFolderBtn || chooseFolderBtn.contains(e.target)) return;
+        if (!isUploading) fileInputFiles.click();
+    });
 });
+
 </script>
 {% endblock %}

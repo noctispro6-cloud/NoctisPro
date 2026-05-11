@@ -11,7 +11,7 @@
 <div class="adm-page-header">
     <div>
         <h1 class="adm-page-title"><i class="fas fa-database"></i>Database Backups</h1>
-        <div class="adm-page-subtitle">Create, download, and manage system backups</div>
+        <div class="adm-page-subtitle">Create, download, and push backups to your remote server</div>
     </div>
     <div class="adm-page-actions">
         <form method="post" action="{% url 'admin_panel:backups' %}">
@@ -38,8 +38,9 @@
 {% endif %}
 
 <div class="row g-3">
-    <!-- Backup info -->
+    <!-- Left column: info + server config -->
     <div class="col-lg-4">
+        <!-- Backup Info -->
         <div class="adm-card mb-3">
             <div class="adm-card-header"><div><i class="fas fa-info-circle"></i>Backup Info</div></div>
             <div class="adm-card-body">
@@ -56,6 +57,14 @@
                         <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Backup Directory</div>
                         <div style="font-size:11px;color:var(--text-secondary);word-break:break-all;">{{ backup_dir }}</div>
                     </div>
+                    <div>
+                        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Remote Server</div>
+                        {% if server_configured %}
+                        <div style="font-size:12px;color:var(--success-color);"><i class="fas fa-check-circle me-1"></i>{{ server_user }}@{{ server_ip }}:{{ server_path }}</div>
+                        {% else %}
+                        <div style="font-size:12px;color:var(--warning-color);"><i class="fas fa-exclamation-triangle me-1"></i>Not configured</div>
+                        {% endif %}
+                    </div>
                     {% if backups %}
                     <div>
                         <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Last Backup</div>
@@ -64,29 +73,71 @@
                         </div>
                     </div>
                     {% else %}
-                    <div style="padding:16px;background:rgba(255,170,0,0.08);border:1px solid rgba(255,170,0,0.2);border-radius:6px;font-size:12px;color:var(--warning-color);">
-                        <i class="fas fa-exclamation-triangle me-2"></i>No backups found. Create one now.
+                    <div style="padding:12px;background:rgba(255,170,0,0.08);border:1px solid rgba(255,170,0,0.2);border-radius:6px;font-size:12px;color:var(--warning-color);">
+                        <i class="fas fa-exclamation-triangle me-2"></i>No backups yet. Click "Create Backup Now".
                     </div>
                     {% endif %}
                 </div>
             </div>
         </div>
 
+        <!-- Remote Server Config -->
+        <div class="adm-card mb-3">
+            <div class="adm-card-header"><div><i class="fas fa-server"></i>Backup Server</div></div>
+            <div class="adm-card-body">
+                <form method="post" action="{% url 'admin_panel:backups' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="save_server">
+                    <div style="display:flex;flex-direction:column;gap:12px;">
+                        <div>
+                            <label style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Server IP / Hostname</label>
+                            <input type="text" name="server_ip" value="{{ server_ip }}"
+                                   placeholder="192.168.1.100 or backup.example.com"
+                                   class="form-control form-control-sm" style="font-size:12px;">
+                        </div>
+                        <div>
+                            <label style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">SSH Username</label>
+                            <input type="text" name="server_user" value="{{ server_user|default:'root' }}"
+                                   placeholder="root"
+                                   class="form-control form-control-sm" style="font-size:12px;">
+                        </div>
+                        <div>
+                            <label style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Remote Path</label>
+                            <input type="text" name="server_path" value="{{ server_path|default:'/backups' }}"
+                                   placeholder="/backups"
+                                   class="form-control form-control-sm" style="font-size:12px;">
+                        </div>
+                        <div>
+                            <label style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">SSH Key Path <span style="color:var(--text-muted)">(optional)</span></label>
+                            <input type="text" name="server_key" value="{{ server_key }}"
+                                   placeholder="/home/user/.ssh/id_rsa"
+                                   class="form-control form-control-sm" style="font-size:12px;">
+                            <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Leave blank to use default SSH key. Make sure the server's authorized_keys has this server's public key.</div>
+                        </div>
+                        <button type="submit" class="btn-control" style="width:100%;justify-content:center;">
+                            <i class="fas fa-save me-1"></i>Save Server Config
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Tips -->
         <div class="adm-card">
-            <div class="adm-card-header"><div><i class="fas fa-lightbulb"></i>Backup Tips</div></div>
+            <div class="adm-card-header"><div><i class="fas fa-lightbulb"></i>Tips</div></div>
             <div class="adm-card-body">
                 <ul style="font-size:12px;color:var(--text-secondary);padding-left:16px;margin:0;line-height:1.8;">
-                    <li>Schedule daily backups before peak hours</li>
-                    <li>Store backups off-site or in cloud storage</li>
-                    <li>Test restores periodically</li>
+                    <li>Create a backup before updates or migrations</li>
+                    <li>Push backups to remote server for off-site storage</li>
+                    <li>Set up SSH key auth so rsync can connect without a password</li>
                     <li>Keep at least 7 days of backup history</li>
-                    <li>Encrypt backups containing patient data</li>
+                    <li>Test restores periodically</li>
                 </ul>
             </div>
         </div>
     </div>
 
-    <!-- Backups list -->
+    <!-- Right column: backup list -->
     <div class="col-lg-8">
         <div class="adm-card">
             <div class="adm-card-header">
@@ -124,11 +175,20 @@
                             <td style="color:var(--text-secondary);font-size:12px;">{{ backup.size_human }}</td>
                             <td style="color:var(--text-muted);font-size:11px;">{{ backup.created|date:"d M Y, H:i" }}</td>
                             <td>
-                                <div style="display:flex;gap:6px;">
+                                <div style="display:flex;gap:6px;flex-wrap:wrap;">
                                     <a href="{% url 'admin_panel:backup_download' %}?file={{ backup.filename|urlencode }}"
                                        class="btn-control" style="font-size:11px;padding:4px 10px;">
                                         <i class="fas fa-download me-1"></i>Download
                                     </a>
+                                    <form method="post" action="{% url 'admin_panel:backups' %}" style="display:inline;">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="push_remote">
+                                        <input type="hidden" name="filename" value="{{ backup.filename }}">
+                                        <button type="submit" class="btn-control" style="font-size:11px;padding:4px 10px;"
+                                                {% if not server_configured %}title="Configure backup server first" disabled{% endif %}>
+                                            <i class="fas fa-cloud-upload-alt me-1"></i>Push to Server
+                                        </button>
+                                    </form>
                                     <form method="post" action="{% url 'admin_panel:backups' %}" style="display:inline;"
                                           onsubmit="return confirm('Delete this backup?')">
                                         {% csrf_token %}
@@ -156,4 +216,19 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+/* Handle the inline server config form inside backups page */
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.querySelector('form[action="{% url "admin_panel:backups" %}"] input[name="action"][value="save_server"]');
+    if (form) {
+        form.closest('form').addEventListener('submit', function () {
+            const ip = this.querySelector('[name="server_ip"]').value.trim();
+            if (!ip) { alert('Please enter a server IP or hostname.'); return false; }
+        });
+    }
+});
+</script>
 {% endblock %}

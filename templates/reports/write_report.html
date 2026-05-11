@@ -2,7 +2,6 @@
 {% block title %}Write Report — {{ study.accession_number|default:"Study" }}{% endblock %}
 
 {% block extra_css %}
-<link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
 <style>
 /* ── Word-style ribbon ───────────────────────────────────────────────────── */
 .rpt-ribbon {
@@ -107,20 +106,18 @@
 .rpt-pf-label { font-size: 7pt; text-transform: uppercase; letter-spacing: 0.06em; color: #003d7a; font-weight: 700; display: block; margin-bottom: 1px; }
 .rpt-pf-value { font-size: 9.5pt; font-weight: 600; color: #111; }
 
-/* ── Quill ───────────────────────────────────────────────────────────────── */
-.ql-toolbar.ql-snow  { display: none !important; }
-.ql-container.ql-snow { border: none !important; }
-.ql-editor { padding: 0 !important; font-family: 'Calibri','Arial',sans-serif !important; font-size: 11pt !important; color: #111 !important; min-height: 120mm; line-height: 1.6 !important; }
-.ql-editor:focus { outline: none !important; }
-.ql-editor h1 { font-size: 14pt !important; font-weight: 700 !important; color: #003d7a !important; margin: 10px 0 4px !important; }
-.ql-editor h2 { font-size: 10pt !important; font-weight: 700 !important; text-transform: uppercase; letter-spacing: 0.06em; color: #003d7a !important; border-bottom: 1px solid #b8cde8; padding-bottom: 2px; margin: 12px 0 4px !important; }
-.ql-editor h3 { font-size: 10.5pt !important; font-weight: 700 !important; color: #222 !important; margin: 8px 0 3px !important; }
-.ql-editor p  { margin: 0 0 4px !important; }
-.ql-editor ul, .ql-editor ol { padding-left: 18px !important; margin: 4px 0 !important; }
-.ql-editor blockquote { border-left: 3px solid #b8cde8; margin: 6px 0; padding: 4px 10px; color: #555; font-style: italic; }
-.ql-editor table { border-collapse: collapse; width: 100%; margin: 8px 0; }
-.ql-editor table td, .ql-editor table th { border: 1px solid #b8cde8; padding: 4px 8px; font-size: 10pt; }
-.ql-editor table th { background: #e8f0fb; font-weight: 700; }
+/* ── Report editor ───────────────────────────────────────────────────────── */
+.rpt-sec-h2 { font-size: 10pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #003d7a; border-bottom: 1px solid #b8cde8; padding-bottom: 2px; margin: 14px 0 3px; user-select: none; }
+.rpt-sec-body { font-family: 'Calibri','Arial',sans-serif; font-size: 11pt; color: #111; min-height: 40px; line-height: 1.6; outline: none; margin-bottom: 4px; }
+.rpt-sec-body:focus { outline: none; }
+.rpt-sec-body h1 { font-size: 14pt; font-weight: 700; color: #003d7a; margin: 10px 0 4px; }
+.rpt-sec-body h3 { font-size: 10.5pt; font-weight: 700; color: #222; margin: 8px 0 3px; }
+.rpt-sec-body p  { margin: 0 0 4px; }
+.rpt-sec-body ul, .rpt-sec-body ol { padding-left: 18px; margin: 4px 0; }
+.rpt-sec-body blockquote { border-left: 3px solid #b8cde8; margin: 6px 0; padding: 4px 10px; color: #555; font-style: italic; }
+.rpt-sec-body table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.rpt-sec-body table td, .rpt-sec-body table th { border: 1px solid #b8cde8; padding: 4px 8px; font-size: 10pt; }
+.rpt-sec-body table th { background: #e8f0fb; font-weight: 700; }
 
 /* ── QR footer ───────────────────────────────────────────────────────────── */
 .rpt-footer {
@@ -343,7 +340,11 @@
     </div>
 
     <!-- Rich text editor -->
-    <div id="rptEditor"></div>
+    <div id="rptEditor">
+      <div class="rpt-sec-h2">Clinical Information</div>
+      <div class="rpt-sec-body" data-section="clinical_information" contenteditable="true">{% if report.clinical_history %}{{ report.clinical_history|safe }}{% elif study.clinical_info %}<p>{{ study.clinical_info }}</p>{% endif %}</div>
+      <div class="rpt-sec-body" data-section="report_body" contenteditable="true" style="min-height:80mm;">{% if report.findings %}{{ report.findings|safe }}{% endif %}</div>
+    </div>
 
     <!-- Signature -->
     <div class="rpt-sig">
@@ -414,167 +415,162 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
 <script>
-// ── Quill ─────────────────────────────────────────────────────────────────────
-const quill = new Quill('#rptEditor', {
-    theme: 'snow',
-    modules: {
-        toolbar: false,
-        keyboard: { bindings: {
-            bold:      { key:'B', shortKey:true, handler(){ quill.format('bold',      !quill.getFormat().bold);      _s(); }},
-            italic:    { key:'I', shortKey:true, handler(){ quill.format('italic',    !quill.getFormat().italic);    _s(); }},
-            underline: { key:'U', shortKey:true, handler(){ quill.format('underline', !quill.getFormat().underline); _s(); }},
-            save:      { key:'S', shortKey:true, handler(){ saveReport(); return false; }},
-        }}
-    },
-    placeholder: 'Begin the report here…',
+// ── execCommand-based rich text editor ────────────────────────────────────────
+const _editor = document.getElementById('rptEditor');
+
+// Prevent toolbar button clicks from stealing focus away from the active section
+document.querySelectorAll('.rb').forEach(el => {
+    el.addEventListener('mousedown', e => e.preventDefault());
 });
 
-// Populate from existing report
-(function(){
-    const secs = [
-        ['Clinical Information', "{{ report.clinical_history|default:study.clinical_info|default:''|escapejs }}"],
-        ['Technique',            "{{ report.technique|default:''|escapejs }}"],
-        ['Comparison',           "{{ report.comparison|default:''|escapejs }}"],
-        ['Findings',             "{{ report.findings|default:''|escapejs }}"],
-        ['Impression',           "{{ report.impression|default:''|escapejs }}"],
-        ['Recommendations',      "{{ report.recommendations|default:''|escapejs }}"],
-    ];
-    quill.root.innerHTML = secs.map(([label, val]) =>
-        `<h2>${label}</h2>` + (val && val.trim()
-            ? `<p>${val.replace(/\n/g,'</p><p>')}</p>`
-            : '<p><br></p>')
-    ).join('');
-})();
-
-// ── Toolbar sync ──────────────────────────────────────────────────────────────
+// ── Toolbar state sync ────────────────────────────────────────────────────────
 function _s() {
-    const f = quill.getFormat();
-    ['fmtBold','fmtItalic','fmtUnder','fmtStrike'].forEach((id,i) => {
-        const keys = ['bold','italic','underline','strike'];
-        document.getElementById(id).classList.toggle('active', !!f[keys[i]]);
-    });
-    document.getElementById('fmtUL').classList.toggle('active', f.list==='bullet');
-    document.getElementById('fmtOL').classList.toggle('active', f.list==='ordered');
-    ['fmtAlignL','fmtAlignC','fmtAlignR','fmtAlignJ'].forEach(id => document.getElementById(id).classList.remove('active'));
-    const aMap = {'':`fmtAlignL`,center:`fmtAlignC`,right:`fmtAlignR`,justify:`fmtAlignJ`};
-    const aEl = document.getElementById(aMap[f.align||'']);
-    if (aEl) aEl.classList.add('active');
-    const hs = document.getElementById('headingStyle');
-    hs.value = f.blockquote ? 'blockquote' : f['code-block'] ? 'code-block' : f.header ? String(f.header) : '';
-    if (f.font) document.getElementById('fontFamily').value = f.font;
-    if (f.size) document.getElementById('fontSize').value = f.size;
+    try {
+        document.getElementById('fmtBold').classList.toggle('active',  document.queryCommandState('bold'));
+        document.getElementById('fmtItalic').classList.toggle('active', document.queryCommandState('italic'));
+        document.getElementById('fmtUnder').classList.toggle('active',  document.queryCommandState('underline'));
+        document.getElementById('fmtStrike').classList.toggle('active', document.queryCommandState('strikethrough'));
+        document.getElementById('fmtUL').classList.toggle('active', document.queryCommandState('insertUnorderedList'));
+        document.getElementById('fmtOL').classList.toggle('active', document.queryCommandState('insertOrderedList'));
+        document.getElementById('fmtAlignL').classList.toggle('active', document.queryCommandState('justifyLeft'));
+        document.getElementById('fmtAlignC').classList.toggle('active', document.queryCommandState('justifyCenter'));
+        document.getElementById('fmtAlignR').classList.toggle('active', document.queryCommandState('justifyRight'));
+        document.getElementById('fmtAlignJ').classList.toggle('active', document.queryCommandState('justifyFull'));
+    } catch(_) {}
 }
-quill.on('selection-change', _s);
-quill.on('text-change', _s);
+document.addEventListener('selectionchange', _s);
+
+// ── Keyboard shortcuts (only when focus is inside a section body) ─────────────
+document.addEventListener('keydown', function(e) {
+    if (!_editor.contains(document.activeElement)) return;
+    if (e.ctrlKey || e.metaKey) {
+        if      (e.key === 'b') { e.preventDefault(); document.execCommand('bold'); }
+        else if (e.key === 'i') { e.preventDefault(); document.execCommand('italic'); }
+        else if (e.key === 'u') { e.preventDefault(); document.execCommand('underline'); }
+        else if (e.key === 's') { e.preventDefault(); saveReport(); }
+    }
+});
 
 // ── Button wiring ─────────────────────────────────────────────────────────────
-document.getElementById('fmtBold').onclick   = () => { quill.format('bold',      !quill.getFormat().bold);      _s(); };
-document.getElementById('fmtItalic').onclick = () => { quill.format('italic',    !quill.getFormat().italic);    _s(); };
-document.getElementById('fmtUnder').onclick  = () => { quill.format('underline', !quill.getFormat().underline); _s(); };
-document.getElementById('fmtStrike').onclick = () => { quill.format('strike',    !quill.getFormat().strike);    _s(); };
-document.getElementById('fmtUL').onclick     = () => { quill.format('list', quill.getFormat().list==='bullet'  ? false:'bullet');  _s(); };
-document.getElementById('fmtOL').onclick     = () => { quill.format('list', quill.getFormat().list==='ordered' ? false:'ordered'); _s(); };
-document.getElementById('fmtAlignL').onclick = () => { quill.format('align', false);     _s(); };
-document.getElementById('fmtAlignC').onclick = () => { quill.format('align', 'center');  _s(); };
-document.getElementById('fmtAlignR').onclick = () => { quill.format('align', 'right');   _s(); };
-document.getElementById('fmtAlignJ').onclick = () => { quill.format('align', 'justify'); _s(); };
-document.getElementById('fmtIndentIn').onclick  = () => quill.format('indent', '+1');
-document.getElementById('fmtIndentOut').onclick = () => quill.format('indent', '-1');
-document.getElementById('fmtClean').onclick = () => { const r=quill.getSelection(); if(r) quill.removeFormat(r.index,r.length); };
-document.getElementById('fmtHR').onclick = () => {
-    const r=quill.getSelection(true);
-    quill.insertText(r.index,'\n');
-    quill.insertEmbed(r.index+1,'hr',true);
-    quill.setSelection(r.index+2);
-};
-document.getElementById('fmtTable').onclick = () => {
-    const r=quill.getSelection(true);
-    quill.clipboard.dangerouslyPasteHTML(r.index,
-        '<table><thead><tr><th>Column 1</th><th>Column 2</th><th>Column 3</th></tr></thead>'
-       +'<tbody><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>'
-       +'<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr></tbody></table><p><br></p>');
-};
+document.getElementById('fmtBold').onclick    = () => document.execCommand('bold');
+document.getElementById('fmtItalic').onclick  = () => document.execCommand('italic');
+document.getElementById('fmtUnder').onclick   = () => document.execCommand('underline');
+document.getElementById('fmtStrike').onclick  = () => document.execCommand('strikethrough');
+document.getElementById('fmtUL').onclick      = () => document.execCommand('insertUnorderedList');
+document.getElementById('fmtOL').onclick      = () => document.execCommand('insertOrderedList');
+document.getElementById('fmtAlignL').onclick  = () => document.execCommand('justifyLeft');
+document.getElementById('fmtAlignC').onclick  = () => document.execCommand('justifyCenter');
+document.getElementById('fmtAlignR').onclick  = () => document.execCommand('justifyRight');
+document.getElementById('fmtAlignJ').onclick  = () => document.execCommand('justifyFull');
+document.getElementById('fmtIndentIn').onclick  = () => document.execCommand('indent');
+document.getElementById('fmtIndentOut').onclick = () => document.execCommand('outdent');
+document.getElementById('fmtClean').onclick   = () => document.execCommand('removeFormat');
+document.getElementById('fmtHR').onclick = () =>
+    document.execCommand('insertHTML', false, '<hr style="border:none;border-top:1px solid #b8cde8;margin:8px 0;"><p><br></p>');
+document.getElementById('fmtTable').onclick = () =>
+    document.execCommand('insertHTML', false,
+        '<table style="border-collapse:collapse;width:100%;margin:8px 0;">'
+        + '<thead><tr>'
+        + '<th style="border:1px solid #b8cde8;padding:4px 8px;background:#e8f0fb;">Column 1</th>'
+        + '<th style="border:1px solid #b8cde8;padding:4px 8px;background:#e8f0fb;">Column 2</th>'
+        + '<th style="border:1px solid #b8cde8;padding:4px 8px;background:#e8f0fb;">Column 3</th>'
+        + '</tr></thead><tbody>'
+        + '<tr><td style="border:1px solid #b8cde8;padding:4px 8px;">&nbsp;</td>'
+        + '<td style="border:1px solid #b8cde8;padding:4px 8px;">&nbsp;</td>'
+        + '<td style="border:1px solid #b8cde8;padding:4px 8px;">&nbsp;</td></tr>'
+        + '</tbody></table><p><br></p>');
 document.getElementById('headingStyle').onchange = function() {
-    quill.format('header',false); quill.format('blockquote',false); quill.format('code-block',false);
-    if (this.value==='blockquote') quill.format('blockquote',true);
-    else if (this.value==='code-block') quill.format('code-block',true);
-    else if (this.value) quill.format('header', parseInt(this.value));
+    const v = this.value;
+    if (!v)                    document.execCommand('formatBlock', false, 'p');
+    else if (v==='blockquote') document.execCommand('formatBlock', false, 'blockquote');
+    else if (v==='code-block') document.execCommand('formatBlock', false, 'pre');
+    else                       document.execCommand('formatBlock', false, 'h' + v);
+    this.value = '';
 };
-document.getElementById('fontFamily').onchange = function() { quill.format('font', this.value||false); };
-document.getElementById('fontSize').onchange   = function() { quill.format('size', this.value||false); };
+document.getElementById('fontFamily').onchange = function() {
+    if (this.value) document.execCommand('fontName', false, this.value);
+};
+document.getElementById('fontSize').onchange = function() {
+    const m = {'8pt':1,'9pt':1,'10pt':2,'11pt':3,'12pt':3,'14pt':4,'16pt':5,'18pt':5,'24pt':6,'36pt':7};
+    document.execCommand('fontSize', false, String(m[this.value] || 3));
+};
 
 // ── Color pickers ─────────────────────────────────────────────────────────────
-const COLORS=['#000000','#ffffff','#c00000','#ff0000','#ffc000','#ffff00','#92d050',
-              '#00b050','#00b0f0','#0070c0','#002060','#7030a0','#595959','#a6a6a6',
-              '#ff6600','#003d7a','#e8f0fb','#ffd966'];
-function _mkColorDd(id, onPick) {
-    const dd=document.getElementById(id);
+const COLORS = ['#000000','#ffffff','#c00000','#ff0000','#ffc000','#ffff00','#92d050',
+                '#00b050','#00b0f0','#0070c0','#002060','#7030a0','#595959','#a6a6a6',
+                '#ff6600','#003d7a','#e8f0fb','#ffd966'];
+function _mkColorDd(id, cmd) {
+    const dd = document.getElementById(id);
     COLORS.forEach(c => {
-        const s=document.createElement('span'); s.className='color-swatch';
-        s.style.background=c; s.title=c;
-        s.onclick = () => { onPick(c); dd.classList.remove('show'); };
+        const s = document.createElement('span'); s.className = 'color-swatch';
+        s.style.background = c; s.title = c;
+        s.onmousedown = e => { e.preventDefault(); document.execCommand(cmd, false, c); dd.classList.remove('show'); };
         dd.appendChild(s);
     });
 }
-_mkColorDd('colorDropdown', c => quill.format('color', c));
-_mkColorDd('hlDropdown',    c => quill.format('background', c));
+_mkColorDd('colorDropdown', 'foreColor');
+_mkColorDd('hlDropdown',    'backColor');
 
-document.getElementById('fmtColor').onclick = e => {
-    e.stopPropagation();
+document.getElementById('fmtColor').addEventListener('mousedown', e => {
+    e.preventDefault(); e.stopPropagation();
     document.getElementById('colorDropdown').classList.toggle('show');
     document.getElementById('hlDropdown').classList.remove('show');
-};
-document.getElementById('fmtHL').onclick = e => {
-    e.stopPropagation();
+});
+document.getElementById('fmtHL').addEventListener('mousedown', e => {
+    e.preventDefault(); e.stopPropagation();
     document.getElementById('hlDropdown').classList.toggle('show');
     document.getElementById('colorDropdown').classList.remove('show');
-};
+});
 document.addEventListener('click', () => {
     document.getElementById('colorDropdown').classList.remove('show');
     document.getElementById('hlDropdown').classList.remove('show');
 });
 
-// ── Section extraction ────────────────────────────────────────────────────────
-const _SEC = {
-    'clinical information':'hf_clinical_history', 'technique':'hf_technique',
-    'comparison':'hf_comparison', 'findings':'hf_findings',
-    'impression':'hf_impression', 'recommendations':'hf_recommendations',
+// ── Section helpers ───────────────────────────────────────────────────────────
+const _SECMAP = {
+    'clinical_information': 'hf_clinical_history',
+    'report_body':          'hf_findings',
 };
+function _secEl(key) {
+    return _editor.querySelector('[data-section="' + key + '"]');
+}
+function _setSection(key, html) {
+    const el = _secEl(key);
+    if (el) el.innerHTML = html ? html.replace(/\n/g, '<br>') : '';
+}
 function _extract() {
-    let cur=null; const b={};
-    Array.from(quill.root.children).forEach(n => {
-        if (n.tagName==='H2') { const t=(n.textContent||'').trim().toLowerCase(); cur=Object.keys(_SEC).find(k=>t.includes(k))||null; }
-        else if (cur) b[cur]=(b[cur]||'')+(n.outerHTML||'');
+    Object.entries(_SECMAP).forEach(([sec, fieldId]) => {
+        const body  = _secEl(sec);
+        const field = document.getElementById(fieldId);
+        if (body && field) field.value = body.innerHTML;
     });
-    Object.entries(_SEC).forEach(([k,id]) => { const e=document.getElementById(id); if(e) e.value=b[k]||''; });
-    document.getElementById('reportHtmlField').value = quill.root.innerHTML;
+    document.getElementById('reportHtmlField').value = _editor.innerHTML;
 }
 
-// Macro insert
+// ── Macro insert ──────────────────────────────────────────────────────────────
 function insertMacro(sel) {
     if (!sel.value) return;
-    quill.clipboard.dangerouslyPasteHTML(quill.getSelection(true).index, sel.value.replace(/\n/g,'<br>'));
-    sel.value='';
+    document.execCommand('insertHTML', false, sel.value.replace(/\n/g, '<br>'));
+    sel.value = '';
 }
 
 // ── Save / Submit ─────────────────────────────────────────────────────────────
 function _cookie(n){try{const v=`; ${document.cookie}`,p=v.split(`; ${n}=`);if(p.length===2)return p.pop().split(';').shift();}catch(_){}return'';}
 function saveReport()  { _extract(); document.getElementById('actionField').value='save';   document.getElementById('reportForm').submit(); }
 function submitFinal() {
-    document.getElementById('statusField').value='final';
-    const pad=document.getElementById('sigPadWrap');
-    if (pad && pad.style.display==='none') { pad.style.display='block'; _initSig(); pad.scrollIntoView({behavior:'smooth'}); return; }
-    _extract(); document.getElementById('actionField').value='submit'; document.getElementById('reportForm').submit();
+    document.getElementById('statusField').value = 'final';
+    const pad = document.getElementById('sigPadWrap');
+    if (pad && pad.style.display === 'none') { pad.style.display='block'; _initSig(); pad.scrollIntoView({behavior:'smooth'}); return; }
+    _extract(); document.getElementById('actionField').value = 'submit'; document.getElementById('reportForm').submit();
 }
 
 // ── Signature pad ─────────────────────────────────────────────────────────────
-let _sc=null,_sd=false;
+let _sc=null, _sd=false;
 function _initSig() {
-    const c=document.getElementById('sigCanvas'); if(!c||c._i) return; c._i=true;
-    c.width=c.getBoundingClientRect().width||300; c.height=60;
-    _sc=c.getContext('2d'); _sc.strokeStyle='#111'; _sc.lineWidth=1.8; _sc.lineCap='round';
+    const c = document.getElementById('sigCanvas'); if(!c||c._i) return; c._i=true;
+    c.width = c.getBoundingClientRect().width||300; c.height=60;
+    _sc = c.getContext('2d'); _sc.strokeStyle='#111'; _sc.lineWidth=1.8; _sc.lineCap='round';
     c.onmousedown=e=>{_sd=true;_sc.beginPath();_sc.moveTo(e.offsetX,e.offsetY);};
     c.onmousemove=e=>{if(!_sd)return;_sc.lineTo(e.offsetX,e.offsetY);_sc.stroke();};
     c.onmouseup=c.onmouseleave=()=>_sd=false;
@@ -588,15 +584,17 @@ function applySig(){
 (function(){const e=document.getElementById('sigNow');if(e)e.textContent=new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});})();
 
 // ── Auto-save ─────────────────────────────────────────────────────────────────
-let _oh=quill.root.innerHTML;
-setInterval(async()=>{
-    const h=quill.root.innerHTML; if(h===_oh)return;
+let _oh = _editor.innerHTML;
+setInterval(async () => {
+    const h = _editor.innerHTML; if(h === _oh) return;
     _extract();
-    const fd=new FormData(document.getElementById('reportForm')); fd.set('action','save');
-    try{const r=await fetch(window.location.href,{method:'POST',body:fd,credentials:'same-origin'});
-        if(r.ok){const e=document.getElementById('autoSaveStatus');if(e)e.textContent='Saved '+new Date().toLocaleTimeString();_oh=h;}}catch(_){}
-},40000);
-window.addEventListener('beforeunload',e=>{if(quill.root.innerHTML!==_oh){e.preventDefault();e.returnValue='';}});
+    const fd = new FormData(document.getElementById('reportForm')); fd.set('action','save');
+    try {
+        const r = await fetch(window.location.href, {method:'POST', body:fd, credentials:'same-origin'});
+        if(r.ok){const e=document.getElementById('autoSaveStatus');if(e)e.textContent='Saved '+new Date().toLocaleTimeString();_oh=h;}
+    } catch(_) {}
+}, 40000);
+window.addEventListener('beforeunload', e => { if(_editor.innerHTML !== _oh){e.preventDefault();e.returnValue='';} });
 
 // ── AI generation ─────────────────────────────────────────────────────────────
 function _setAI(m,c){const e=document.getElementById('aiStatus');if(e){e.textContent=m||'';e.style.color=c||'';}}
@@ -610,11 +608,8 @@ async function generateAIFindings(){
         _setAI('Drafting…','#6b46c1');
         const r2=await fetch(`/ai/api/study/${sid}/llm-report/`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':_cookie('csrftoken'),'X-Requested-With':'XMLHttpRequest'},body:JSON.stringify({findings_summary:j1.report_text||'',abnormalities:(j1.measurements&&j1.measurements.abnormalities)||[],triage_level:(j1.triage&&j1.triage.triage_level)||'',confidence:(j1.measurements&&j1.measurements.confidence)||0}),credentials:'same-origin'});
         const j2=await _json(r2); if(!r2.ok||j2.success===false) throw new Error(j2.error||`HTTP ${r2.status}`);
-        const am={findings:j2.findings,impression:j2.impression,recommendations:j2.recommendations}; let ac=null;
-        Array.from(quill.root.children).forEach(n=>{
-            if(n.tagName==='H2'){const t=(n.textContent||'').trim().toLowerCase();ac=Object.keys(am).find(k=>t.includes(k))||null;}
-            else if(ac&&am[ac]){n.innerHTML=am[ac].replace(/\n/g,'<br>');am[ac]=null;}
-        });
+        const body = [j2.findings, j2.impression, j2.recommendations].filter(Boolean).join('\n\n');
+        if (body) _setSection('report_body', body);
         const tri=(j2&&j2.triage)||(j1&&j1.triage);
         _setAI(tri&&tri.triage_level?`AI ready · Triage: ${String(tri.triage_level).toUpperCase()}`:'AI ready','#00873a');
     }catch(e){_setAI('AI failed: '+(e.message||'error'),'#c00');}
@@ -622,9 +617,10 @@ async function generateAIFindings(){
 {% if report_templates %}
 async function loadTemplate(id){
     if(!id||!confirm('Load template? Unsaved changes will be lost.')) return;
-    try{const data=await(await fetch('/reports/api/template/'+id+'/')).json();
-        const m={findings:data.findings,impression:data.impression,recommendations:data.recommendations};let c=null;
-        Array.from(quill.root.children).forEach(n=>{if(n.tagName==='H2'){const t=(n.textContent||'').trim().toLowerCase();c=Object.keys(m).find(k=>t.includes(k))||null;}else if(c&&m[c]){n.innerHTML=m[c].replace(/\n/g,'<br>');m[c]=null;}});
+    try{
+        const data=await(await fetch('/reports/api/template/'+id+'/')).json();
+        const tplBody = [data.findings, data.impression, data.recommendations].filter(Boolean).join('\n\n');
+        if(tplBody) _setSection('report_body', tplBody);
     }catch(e){alert('Failed to load template');}
 }
 {% endif %}

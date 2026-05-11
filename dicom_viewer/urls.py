@@ -130,4 +130,7 @@ urlpatterns += [
     # Fast Reconstruction APIs
     path('api/fast-reconstruction/<int:series_id>/', views.fast_reconstruction_api, name='fast_reconstruction_api'),
     path('api/mpr-slice/<int:series_id>/<str:plane>/<int:slice_index>/', views.mpr_slice_api, name='mpr_slice_api'),
+
+    # Photo attachment serving (for XC/clinical-photo studies)
+    path('api/attachment/<int:attachment_id>/image/', views.serve_photo_attachment, name='serve_photo_attachment'),
 ]

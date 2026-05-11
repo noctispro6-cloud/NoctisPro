@@ -167,7 +167,7 @@
 				<select id="studyStatusSelect" class="form-select form-select-sm"
 					style="width:auto;display:inline-block">
 					{% for val, label in status_choices %}
-					<option value="{{ val }}" {% if study.status==val %}selected{% endif %}>{{ label }}</option>
+					<option value="{{ val }}" {% if study.status == val %}selected{% endif %}>{{ label }}</option>
 					{% endfor %}
 				</select>
 				<button onclick="updateStudyStatus()" class="btn btn-sm btn-outline-light ms-2">Update</button>

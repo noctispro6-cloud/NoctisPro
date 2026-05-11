@@ -125,6 +125,34 @@ services:
       - noctis_static:/data/staticfiles
     restart: unless-stopped
 
+  dicom:
+    build:
+      context: .
+    env_file:
+      - .env.docker
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_HOST: pgbouncer
+      DB_PORT: "6432"
+      DB_NAME: ${DB_NAME:-noctispro}
+      DB_USER: ${DB_USER:-noctispro}
+      DB_PASSWORD: ${DB_PASSWORD:-change-me}
+      USE_PGBOUNCER: "true"
+      MEDIA_ROOT: /data/media
+      STATIC_ROOT: /data/staticfiles
+      DJANGO_SETTINGS_MODULE: noctis_pro.settings
+    command: ["bash", "-lc", "exec python dicom_receiver.py --port 11112 --aet ${DICOM_AE_TITLE:-NOCTIS_SCP}"]
+    ports:
+      - "${DICOM_PORT:-11112}:11112"
+    volumes:
+      - noctis_media:/data/media
+    depends_on:
+      db:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    restart: unless-stopped
+
   nginx:
     image: nginx:1.25-alpine
     depends_on:

@@ -490,11 +490,97 @@ def upload_study(request):
 			
 			# Professional file validation
 			uploaded_files = request.FILES.getlist('dicom_files')
-			
+
+			# ── Photo / image upload fast-path ───────────────────────────────────
+			_PHOTO_EXTS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.tiff', '.tif', '.webp', '.bmp', '.gif'}
+			_photo_files = [f for f in uploaded_files if os.path.splitext(f.name.lower())[1] in _PHOTO_EXTS]
+			_dicom_files = [f for f in uploaded_files if f not in _photo_files]
+
+			if _photo_files and not _dicom_files:
+				from datetime import datetime as _dt
+				# Patient info from form
+				_first = (request.POST.get('photo_first_name', '') or '').strip()
+				_last  = (request.POST.get('photo_last_name',  '') or '').strip()
+				_age   = (request.POST.get('photo_age',        '') or '').strip()
+				_sex   = (request.POST.get('photo_gender',     'O') or 'O').strip().upper()[:1]
+				_clin  = (request.POST.get('clinical_info',    '') or '').strip()
+				if not _first and not _last:
+					return JsonResponse({'success': False, 'error': 'Patient name is required for photo uploads.'}, status=400)
+				_full_name = f'{_first} {_last}'.strip()
+				# Generate patient ID from name + timestamp (stable-ish per upload session)
+				_ts = int(timezone.now().timestamp())
+				_patient_id = f'PHOTO_{_ts}'
+				# DOB from age (approximate)
+				try:
+					_dob = (_dt.now().date().replace(year=_dt.now().year - int(_age))) if _age else _dt.now().date().replace(year=1900, month=1, day=1)
+				except Exception:
+					_dob = _dt.now().date().replace(year=1900, month=1, day=1)
+				# Facility
+				_facility = None
+				_fac_id = (request.POST.get('facility_id', '') or '').strip()
+				if _fac_id:
+					_facility = Facility.objects.filter(id=_fac_id, is_active=True).first()
+				if not _facility and getattr(request.user, 'facility', None):
+					_facility = request.user.facility
+				if not _facility:
+					_facility = Facility.objects.filter(is_active=True).first()
+				if not _facility:
+					return JsonResponse({'success': False, 'error': 'No facility available. Configure a facility first.'}, status=400)
+				with transaction.atomic():
+					_patient, _ = Patient.objects.get_or_create(
+						patient_id=_patient_id,
+						defaults={
+							'first_name': _first or 'Unknown',
+							'last_name': _last or 'Patient',
+							'date_of_birth': _dob,
+							'gender': _sex if _sex in ('M', 'F', 'O') else 'O',
+						}
+					)
+					_modality, _ = Modality.objects.get_or_create(
+						code='XC', defaults={'name': 'External Camera / Photo', 'is_active': True}
+					)
+					_accession = f'PHOTO_{_ts}'
+					_study = Study.objects.create(
+						study_instance_uid=f'2.25.{_ts}',
+						accession_number=_accession,
+						patient=_patient,
+						facility=_facility,
+						modality=_modality,
+						study_description=f'Photo Study - {_full_name}',
+						study_date=timezone.now(),
+						referring_physician='',
+						status='scheduled',
+						priority=priority or 'normal',
+						clinical_info=_clin,
+						uploaded_by=request.user,
+					)
+					_saved = []
+					for _pf in _photo_files:
+						_ext = os.path.splitext(_pf.name.lower())[1]
+						_att = StudyAttachment.objects.create(
+							study=_study,
+							name=_pf.name,
+							file_type='image',
+							uploaded_by=request.user,
+							is_current_version=True,
+						)
+						_att.file.save(_pf.name, _pf, save=True)
+						_saved.append(_pf.name)
+				return JsonResponse({
+					'success': True,
+					'photo_upload': True,
+					'study_id': _study.id,
+					'patient_name': _patient.full_name,
+					'accession_number': _accession,
+					'files_saved': len(_saved),
+					'message': f'{len(_saved)} photo(s) uploaded for {_patient.full_name}',
+				})
+			# ── End photo fast-path ──────────────────────────────────────────────
+
 			if not uploaded_files:
 				logger.warning(f"Upload attempt with no files by user {request.user.username}")
 				return JsonResponse({
-					'success': False, 
+					'success': False,
 					'error': 'No files uploaded',
 					'details': 'Please select DICOM files to upload',
 					'timestamp': timezone.now().isoformat(),
@@ -1742,6 +1828,25 @@ def upload_study(request):
 	return render(request, 'worklist/upload.html', {'facilities': facilities, 'db_schema_error': db_schema_error})
 
 @login_required
+def upload_photos(request):
+	"""Standalone photo / image upload page."""
+	facilities = []
+	try:
+		if request.user.is_superuser or getattr(request.user, 'role', None) in ('admin', 'radiologist'):
+			facilities = list(Facility.objects.filter(is_active=True).order_by('name'))
+		elif getattr(request.user, 'facility', None):
+			facilities = [request.user.facility]
+	except Exception:
+		facilities = []
+
+	if request.method == 'POST':
+		# Delegate entirely to the shared photo fast-path inside upload_study.
+		# We POST to the same endpoint by forwarding the request.
+		return upload_study(request)
+
+	return render(request, 'worklist/upload_photos.html', {'facilities': facilities})
+
+@login_required
 def modern_worklist(request):
 	"""Legacy route: redirect to main dashboard UI"""
 	return redirect('worklist:dashboard')
@@ -1795,6 +1900,11 @@ def api_studies(request):
 			.annotate(
 				series_count_db=Count('series', distinct=True),
 				image_count_db=Count('series__images', distinct=True),
+				photo_count_db=Count(
+					'attachments',
+					filter=Q(attachments__file_type='image', attachments__is_current_version=True),
+					distinct=True,
+				),
 			)
 			# IMPORTANT:
 			# Worklist UX expects the most recently *uploaded* studies first.
@@ -1826,10 +1936,12 @@ def api_studies(request):
 			else:
 				upload_date = study.study_date.isoformat()
 			
-			# Professional image and series counting
-			# Use annotated values when available (fast + consistent)
+			# Use annotated values when available (fast + consistent).
+			# For photo studies (XC / no DICOM series) fall back to attachment count.
 			try:
 				image_count = int(getattr(study, 'image_count_db', 0) or 0)
+				if image_count == 0:
+					image_count = int(getattr(study, 'photo_count_db', 0) or 0)
 			except Exception:
 				image_count = 0
 			try:
@@ -2147,8 +2259,9 @@ def view_attachment(request, attachment_id):
             # Open main web viewer
             return redirect('/dicom-viewer/')
     
-    # Handle viewable files (PDF, images)
-    if attachment.is_viewable_in_browser():
+    # Handle viewable files (PDF, images) — also serve image attachments directly
+    is_image_att = attachment.file_type == 'image'
+    if attachment.is_viewable_in_browser() or is_image_att:
         action = request.GET.get('action', 'view')
         # Ensure file exists before attempting to open
         try:
@@ -2164,8 +2277,13 @@ def view_attachment(request, attachment_id):
             # Force download
             return FileResponse(file_handle, as_attachment=True, filename=attachment.name)
         else:
-            # View in browser
-            return FileResponse(file_handle, content_type=attachment.mime_type or 'application/octet-stream')
+            # Detect content type from extension when not stored
+            import mimetypes as _mt
+            ct = attachment.mime_type
+            if not ct:
+                fname = attachment.name or (attachment.file.name if attachment.file else '')
+                ct = _mt.guess_type(fname)[0] or 'application/octet-stream'
+            return FileResponse(file_handle, content_type=ct)
     
     # For non-viewable files, force download
     try:
@@ -2599,6 +2717,11 @@ def api_refresh_worklist(request):
         .annotate(
             series_count_db=Count('series', distinct=True),
             image_count_db=Count('series__images', distinct=True),
+            photo_count_db=Count(
+                'attachments',
+                filter=Q(attachments__file_type='image', attachments__is_current_version=True),
+                distinct=True,
+            ),
         )
         .order_by('-upload_date')
     )
@@ -2617,7 +2740,7 @@ def api_refresh_worklist(request):
             'upload_date': study.upload_date.isoformat(),
             'facility': study.facility.name,
             'series_count': int(getattr(study, 'series_count_db', 0) or 0),
-            'image_count': int(getattr(study, 'image_count_db', 0) or 0),
+            'image_count': int(getattr(study, 'image_count_db', 0) or 0) or int(getattr(study, 'photo_count_db', 0) or 0),
             'uploaded_by': study.uploaded_by.get_full_name() if study.uploaded_by else 'Unknown',
             'study_description': study.study_description,
         })

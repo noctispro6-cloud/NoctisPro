@@ -756,6 +756,11 @@ LOGGING = {
             'level': 'INFO',
             'propagate': True,
         },
+        'asyncio': {
+            'handlers': ['file'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
     },
 }
 
@@ -807,9 +812,12 @@ if not DEBUG:
         from django.core.exceptions import ImproperlyConfigured
         raise ImproperlyConfigured(f"Test-only packages found in INSTALLED_APPS in production: {_bad}")
 
-# django-ratelimit: fail open when cache backend isn't shared (dev fallback)
-# In production with Redis, this setting has no effect since E003 won't trigger.
-RATELIMIT_FAIL_OPEN = True
+# django-ratelimit: use the shared Redis cache so all Gunicorn workers share
+# the same counters. Without this each worker has its own LocMemCache bucket,
+# which divides the effective limit by the number of workers.
+RATELIMIT_USE_CACHE = 'default'
+# Fail open only in dev (LocMemCache). In prod Redis is always available.
+RATELIMIT_FAIL_OPEN = not bool(REDIS_URL)
 SILENCED_SYSTEM_CHECKS = ['django_ratelimit.E003', 'django_ratelimit.W001']
 
 import logging as _startup_logging

@@ -144,6 +144,52 @@
             </div>
         </div>
 
+        <!-- Backup Server -->
+        <div class="col-12">
+            <div class="adm-card">
+                <div class="adm-card-header">
+                    <div><i class="fas fa-server"></i>Backup Server (Remote Push)</div>
+                    <span style="font-size:10px;color:var(--text-muted);">Backup files are pushed via rsync over SSH</span>
+                </div>
+                <div class="adm-card-body">
+                    <form method="post" style="margin:0;">
+                        {% csrf_token %}
+                        <input type="hidden" name="save_backup_server" value="1">
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label" style="font-size:12px;color:var(--text-secondary);">Server IP / Hostname</label>
+                                <input class="form-control form-control-medical" name="backup_server_ip"
+                                       value="{{ backup_server_ip }}" placeholder="192.168.1.100" style="font-size:12px;">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label" style="font-size:12px;color:var(--text-secondary);">SSH User</label>
+                                <input class="form-control form-control-medical" name="backup_server_user"
+                                       value="{{ backup_server_user|default:'root' }}" placeholder="root" style="font-size:12px;">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label" style="font-size:12px;color:var(--text-secondary);">Remote Path</label>
+                                <input class="form-control form-control-medical" name="backup_server_path"
+                                       value="{{ backup_server_path|default:'/backups' }}" placeholder="/backups" style="font-size:12px;">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label" style="font-size:12px;color:var(--text-secondary);">SSH Key Path <span style="color:var(--text-muted)">(optional)</span></label>
+                                <input class="form-control form-control-medical" name="backup_server_key"
+                                       value="{{ backup_server_key }}" placeholder="/home/user/.ssh/id_rsa" style="font-size:12px;">
+                            </div>
+                            <div class="col-md-1 d-flex align-items-end">
+                                <button type="submit" class="btn-control" style="width:100%;justify-content:center;">
+                                    <i class="fas fa-save"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
+                            <i class="fas fa-info-circle me-1"></i>The server must have this PACS server's SSH public key in <code>~/.ssh/authorized_keys</code>. Backups are then pushed from Admin → Backups.
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
         <!-- Data Retention -->
         <div class="col-lg-6">
             <div class="adm-card">

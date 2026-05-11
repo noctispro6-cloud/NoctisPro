@@ -1,6 +1,6 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required, user_passes_test
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, FileResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
 from worklist.models import Study, Series, DicomImage, Patient, Modality
@@ -1008,7 +1008,39 @@ def api_study_data(request, study_id):
             except Exception as e:
                 logger.warning(f"Error processing series {series.id}: {e}")
                 continue
-        
+
+        # Photo studies (XC modality) store images as StudyAttachment, not DicomImage.
+        # Include them so the viewer can render a photo gallery when no DICOM series exist.
+        try:
+            modality_code = study.modality.code if study.modality else ''
+            if modality_code == 'XC' or not data['series']:
+                from worklist.models import StudyAttachment as _SA
+                photo_exts = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.tiff', '.tif', '.webp', '.bmp', '.gif'}
+                photos = []
+                for att in study.attachments.filter(file_type='image').order_by('id'):
+                    try:
+                        import os as _os
+                        ext = _os.path.splitext((att.name or '').lower())[1]
+                        if ext not in photo_exts:
+                            # also accept if file field name has image ext
+                            try:
+                                ext = _os.path.splitext((att.file.name or '').lower())[1]
+                            except Exception:
+                                pass
+                        if ext in photo_exts or att.file_type == 'image':
+                            photos.append({
+                                'id': att.id,
+                                'name': att.name,
+                                'url': f'/dicom-viewer/api/attachment/{att.id}/image/',
+                                'size': att.file_size,
+                            })
+                    except Exception:
+                        continue
+                if photos:
+                    data['photos'] = photos
+        except Exception as e:
+            logger.warning(f"Could not attach photos to study {study_id}: {e}")
+
         return JsonResponse(data)
         
     except Exception as e:
@@ -7464,3 +7496,36 @@ def api_anonymize_study(request, study_id):
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+@login_required
+def serve_photo_attachment(request, attachment_id):
+    """Serve a clinical photo attachment for the DICOM viewer photo gallery."""
+    import mimetypes
+    from worklist.models import StudyAttachment
+
+    try:
+        att = StudyAttachment.objects.select_related('study').get(id=attachment_id, file_type='image')
+    except StudyAttachment.DoesNotExist:
+        return HttpResponse(status=404)
+
+    # Permission: facility users can only view attachments from their facility
+    user = request.user
+    if hasattr(user, 'is_facility_user') and user.is_facility_user():
+        study_facility = getattr(att.study, 'facility', None)
+        user_facility  = getattr(user, 'facility', None)
+        if study_facility and user_facility and study_facility != user_facility:
+            return HttpResponse(status=403)
+
+    try:
+        if not att.file or not default_storage.exists(att.file.name):
+            logger.warning(f'serve_photo_attachment: file missing for attachment {attachment_id}')
+            return HttpResponse(status=404)
+
+        fname = att.name or att.file.name or ''
+        ct = att.mime_type or mimetypes.guess_type(fname)[0] or 'image/jpeg'
+        fh = att.file.open('rb')
+        return FileResponse(fh, content_type=ct)
+    except Exception as e:
+        logger.error(f'serve_photo_attachment error for attachment {attachment_id}: {e}')
+        return HttpResponse(status=500)

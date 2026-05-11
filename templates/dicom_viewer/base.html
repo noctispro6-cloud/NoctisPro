@@ -1325,12 +1325,172 @@
             .viewer-container {
                 grid-template-columns: 60px 1fr 50px;
             }
-            
+
             .control-popup {
                 width: 220px;
                 right: 40px;
             }
         }
+
+        /* ── Photo Gallery View ──────────────────────────────────── */
+        .photo-gallery-view {
+            position: absolute;
+            inset: 0;
+            background: #0a0a0a;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 10;
+        }
+
+        .pg-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            background: #1a1a1a;
+            border-bottom: 1px solid #404040;
+            flex-shrink: 0;
+        }
+
+        .pg-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #ffaa00;
+        }
+
+        .pg-title i { font-size: 14px; }
+
+        .pg-meta {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .pg-grid {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 10px;
+            align-content: start;
+        }
+
+        .pg-grid::-webkit-scrollbar { width: 6px; }
+        .pg-grid::-webkit-scrollbar-track { background: #111; }
+        .pg-grid::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+        .pg-thumb {
+            position: relative;
+            aspect-ratio: 4 / 3;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 2px solid #2e2e2e;
+            cursor: pointer;
+            background: #111;
+            transition: border-color .15s, transform .15s;
+        }
+
+        .pg-thumb:hover {
+            border-color: #ffaa00;
+            transform: scale(1.03);
+        }
+
+        .pg-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .pg-thumb-label {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(transparent, rgba(0,0,0,.85));
+            color: #ccc;
+            font-size: 10px;
+            padding: 18px 6px 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Lightbox */
+        .pg-lightbox {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,.96);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+        }
+
+        .pg-lb-img {
+            max-width: calc(100% - 120px);
+            max-height: calc(100% - 60px);
+            object-fit: contain;
+            border-radius: 4px;
+            box-shadow: 0 0 40px rgba(0,0,0,.8);
+        }
+
+        .pg-lb-close {
+            position: absolute;
+            top: 12px;
+            right: 14px;
+            background: rgba(255,255,255,.12);
+            border: none;
+            color: #fff;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background .15s;
+        }
+
+        .pg-lb-close:hover { background: rgba(255,255,255,.25); }
+
+        .pg-lb-prev, .pg-lb-next {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255,255,255,.1);
+            border: none;
+            color: #fff;
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background .15s;
+        }
+
+        .pg-lb-prev:hover, .pg-lb-next:hover { background: rgba(255,255,255,.22); }
+        .pg-lb-prev { left: 14px; }
+        .pg-lb-next { right: 14px; }
+
+        .pg-lb-caption {
+            position: absolute;
+            bottom: 14px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            color: #777;
+            font-size: 11px;
+        }
+        /* ─────────────────────────────────────────────────────────── */
     </style>
 </head>
 <body>
@@ -1461,6 +1621,27 @@
                 <div class="zoom-info" id="zoomInfo">
                     Zoom: 100%
                 </div>
+
+                <!-- Photo navigation bar (visible only in photo mode) -->
+                <div id="photoNav" style="
+                    display:none; position:absolute; bottom:0; left:0; right:0;
+                    background:rgba(0,0,0,.7); padding:8px 16px;
+                    align-items:center; justify-content:center; gap:16px;
+                    z-index:20;">
+                    <button onclick="stepPhoto(-1)" style="
+                        background:rgba(255,255,255,.12); border:none; color:#fff;
+                        width:36px; height:36px; border-radius:50%; cursor:pointer;
+                        font-size:16px; display:flex; align-items:center; justify-content:center;">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <span id="photoNavLabel" style="color:#ccc; font-size:12px; min-width:80px; text-align:center;"></span>
+                    <button onclick="stepPhoto(1)" style="
+                        background:rgba(255,255,255,.12); border:none; color:#fff;
+                        width:36px; height:36px; border-radius:50%; cursor:pointer;
+                        font-size:16px; display:flex; align-items:center; justify-content:center;">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
             </div>
 
             <!-- Professional 2x2 Orthogonal View Grid -->
@@ -1517,6 +1698,26 @@
                 <div class="mpr-viewport" data-plane="3d" onclick="onMPRViewportClick('3d', event)">
                     <div class="mpr-label">3D Volume</div>
                     <div id="threeDContainer" class="three-container"></div>
+                </div>
+            </div>
+
+            <!-- Photo Gallery View (XC / clinical photo studies) -->
+            <div class="photo-gallery-view" id="photoGalleryView" style="display: none;">
+                <div class="pg-header">
+                    <div class="pg-title">
+                        <i class="fas fa-images"></i>
+                        <span id="pgTitle">Clinical Photos</span>
+                    </div>
+                    <div class="pg-meta" id="pgMeta"></div>
+                </div>
+                <div class="pg-grid" id="pgGrid"></div>
+                <!-- Lightbox -->
+                <div class="pg-lightbox" id="pgLightbox" style="display: none;">
+                    <button class="pg-lb-close" onclick="closePgLightbox()" title="Close"><i class="fas fa-times"></i></button>
+                    <button class="pg-lb-prev" id="pgLbPrev" onclick="stepPgLightbox(-1)" title="Previous"><i class="fas fa-chevron-left"></i></button>
+                    <img class="pg-lb-img" id="pgLbImg" alt="">
+                    <button class="pg-lb-next" id="pgLbNext" onclick="stepPgLightbox(1)" title="Next"><i class="fas fa-chevron-right"></i></button>
+                    <div class="pg-lb-caption" id="pgLbCaption"></div>
                 </div>
             </div>
         </div>
@@ -2869,9 +3070,73 @@
             }
         }
 
+        // ── Photo mode (XC / clinical photo studies) ─────────────────────────
+        let _pgPhotos = [];
+        let _pgIdx    = 0;
+
+        function showPhotoGallery(photos, study) {
+            _pgPhotos = photos;
+            _pgIdx    = 0;
+            _renderPhoto();
+
+            // Show photo nav bar only when multiple photos
+            var nav = document.getElementById('photoNav');
+            if (nav) nav.style.display = photos.length > 1 ? 'flex' : 'none';
+
+            // Update status bar
+            var label = (study && study.patient_name) ? study.patient_name + ' — Photos' : 'Clinical Photos';
+            var statusEl = document.getElementById('studyStatus');
+            if (statusEl) statusEl.textContent = label;
+        }
+
+        function _renderPhoto() {
+            var photo    = _pgPhotos[_pgIdx];
+            var dicomImg = document.getElementById('dicomImage');
+            var canvas   = document.getElementById('dicomCanvas');
+
+            // Show img element, hide canvas
+            if (canvas)   canvas.style.display   = 'none';
+            if (dicomImg) {
+                dicomImg.style.display = 'block';
+                dicomImg.src           = photo.url;
+                dicomImg.alt           = photo.name || 'Clinical Photo';
+                dicomImg.style.maxWidth  = '100%';
+                dicomImg.style.maxHeight = '100%';
+                dicomImg.style.objectFit = 'contain';
+            }
+
+            // Nav label
+            var lbl = document.getElementById('photoNavLabel');
+            if (lbl) lbl.textContent = (_pgIdx + 1) + ' / ' + _pgPhotos.length;
+        }
+
+        function stepPhoto(delta) {
+            if (_pgPhotos.length === 0) return;
+            _pgIdx = (_pgIdx + delta + _pgPhotos.length) % _pgPhotos.length;
+            _renderPhoto();
+        }
+
+        function hidePhotoGallery() {
+            _pgPhotos = [];
+            var nav      = document.getElementById('photoNav');
+            var dicomImg = document.getElementById('dicomImage');
+            var canvas   = document.getElementById('dicomCanvas');
+            if (nav)      nav.style.display      = 'none';
+            if (dicomImg) dicomImg.style.display = 'none';
+            if (canvas)   canvas.style.display   = '';
+        }
+
+        // Keyboard nav in photo mode
+        document.addEventListener('keydown', function(e) {
+            if (_pgPhotos.length === 0) return;
+            if (e.key === 'ArrowLeft')  { stepPhoto(-1); e.preventDefault(); }
+            if (e.key === 'ArrowRight') { stepPhoto(1);  e.preventDefault(); }
+        });
+        // ─────────────────────────────────────────────────────────────────────
+
         function updateImageInfo(info) {
             if (!info) return;
-            
+
             const imageInfoDiv = document.getElementById('imageInfo');
             imageInfoDiv.innerHTML = `
                 <div>Dimensions: ${info.dimensions[1]}×${info.dimensions[0]}</div>
@@ -2933,29 +3198,43 @@
                 
                 if (data.study && data.series) {
                     currentStudy = data.study;
-                    
+
                     // Update study status
-                    document.getElementById('studyStatus').textContent = 
+                    document.getElementById('studyStatus').textContent =
                         `${currentStudy.patient_name} - ${currentStudy.accession_number}`;
-                    
+
+                    // ── Photo gallery mode (XC / no DICOM series) ──────────────────
+                    console.debug('[viewer] study data:', {
+                        modality: data.study.modality,
+                        seriesCount: data.series.length,
+                        photoCount: data.photos ? data.photos.length : 0
+                    });
+                    if (data.photos && data.photos.length > 0 && data.series.length === 0) {
+                        hideLoading();
+                        showPhotoGallery(data.photos, data.study);
+                        showToast(`${data.photos.length} photo(s) loaded`, 'success');
+                        return;
+                    }
+                    // ─────────────────────────────────────────────────────────────────
+
                     // Populate series dropdown
                     const seriesSelect = document.getElementById('seriesSelect');
                     seriesSelect.innerHTML = '<option value="">Select Series</option>';
-                    
+
                     data.series.forEach(series => {
                         const option = document.createElement('option');
                         option.value = series.id;
                         option.textContent = `Series ${series.series_number}: ${series.description} (${series.image_count} images)`;
                         seriesSelect.appendChild(option);
                     });
-                    
+
                     // Auto-load first series
                     if (data.series.length > 0) {
                         loadSeries(data.series[0].id);
+                    } else {
+                        hideLoading();
+                        showToast('No DICOM images found for this study', 'warning');
                     }
-                    
-                    hideLoading();
-                    showToast('Study loaded successfully', 'success');
                 } else {
                     hideLoading();
                     showToast('Failed to load study data', 'error');

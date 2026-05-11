@@ -321,13 +321,49 @@ class DicomReceiver:
         return nets
 
     def _peer_allowed(self, peer_ip: str) -> bool:
-        if not self.allowed_nets:
-            return True
+        """
+        Allow a connecting peer if:
+          1. No static allowlist (DICOM_ALLOWED_NETS) AND no DB facility hosts configured → open.
+          2. Static allowlist matches → allow.
+          3. Any active Facility.dicom_host entry matches → allow.
+        """
         try:
             ip = ipaddress.ip_address(peer_ip)
         except ValueError:
             return False
-        return any(ip in net for net in self.allowed_nets)
+
+        # Check static env-var allowlist first
+        if self.allowed_nets and any(ip in net for net in self.allowed_nets):
+            return True
+
+        # Check DB-stored facility hosts (Tailscale IPs, clinic CIDRs, etc.)
+        try:
+            from accounts.models import Facility as _Facility
+            db_nets = []
+            for host in _Facility.objects.filter(is_active=True).exclude(dicom_host='').values_list('dicom_host', flat=True):
+                for raw in host.split(','):
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        db_nets.append(ipaddress.ip_network(raw if '/' in raw else f'{raw}/32', strict=False))
+                    except ValueError:
+                        pass
+            if db_nets and any(ip in net for net in db_nets):
+                return True
+        except Exception:
+            pass
+
+        # If neither static list nor DB list is configured at all → open to all
+        if not self.allowed_nets:
+            try:
+                from accounts.models import Facility as _Facility
+                if not _Facility.objects.filter(is_active=True).exclude(dicom_host='').exists():
+                    return True
+            except Exception:
+                return True
+
+        return False
     
     def setup_ae(self):
         """Setup Application Entity with optimized settings"""

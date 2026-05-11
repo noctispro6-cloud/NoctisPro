@@ -295,7 +295,11 @@ class FacilityForm(forms.ModelForm):
 
     class Meta:
         model = Facility
-        fields = ['name', 'address', 'phone', 'email', 'license_number', 'ae_title', 'letterhead', 'is_active', 'has_ai_subscription', 'subscription_expires_at']
+        fields = [
+            'name', 'address', 'phone', 'email', 'license_number',
+            'ae_title', 'dicom_host', 'dicom_port',
+            'letterhead', 'is_active', 'has_ai_subscription', 'subscription_expires_at',
+        ]
         widgets = {
             'name': forms.TextInput(attrs={
                 'class': 'form-control form-control-medical',
@@ -322,6 +326,14 @@ class FacilityForm(forms.ModelForm):
                 'class': 'form-control form-control-medical',
                 'placeholder': 'Auto-generated from name if blank',
                 'maxlength': 16
+            }),
+            'dicom_host': forms.TextInput(attrs={
+                'class': 'form-control form-control-medical',
+                'placeholder': 'e.g. 100.101.2.3  or  192.168.1.0/24  or  100.64.0.0/10',
+            }),
+            'dicom_port': forms.NumberInput(attrs={
+                'class': 'form-control form-control-medical',
+                'min': 1, 'max': 65535,
             }),
             'letterhead': forms.FileInput(attrs={
                 'class': 'form-control form-control-medical',

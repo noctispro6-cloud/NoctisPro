@@ -12,6 +12,19 @@ class Facility(models.Model):
     letterhead = models.ImageField(upload_to='letterheads/', null=True, blank=True)
     # DICOM networking identifier so studies can be attributed to facilities
     ae_title = models.CharField(max_length=32, blank=True, default='')
+
+    # DICOM sender network config — the IP/CIDR of the machine that sends images
+    # (Tailscale IPs look like 100.x.x.x, plain IPs or CIDRs like 192.168.1.0/24 also work)
+    dicom_host = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='IP, CIDR, or comma-separated list (e.g. 100.64.0.0/10 or 100.101.2.3). '
+                  'Leave blank to accept from any address.'
+    )
+    dicom_port = models.PositiveIntegerField(
+        default=11112,
+        help_text='DICOM port the facility modality sends on (default 11112).'
+    )
+
     is_active = models.BooleanField(default=True)
     
     # Subscription Management

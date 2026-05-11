@@ -16,9 +16,36 @@ import re
 import os
 import shutil
 import subprocess
+import socket
 from pathlib import Path
 from datetime import datetime
 from django.utils.crypto import get_random_string
+
+
+def _get_dicom_server_info():
+    """Return DICOM server connection details for display to admin users."""
+    from django.conf import settings as dj_settings
+    ae_title = getattr(dj_settings, 'DICOM_AE_TITLE', 'NOCTIS_SCP')
+    port = getattr(dj_settings, 'DICOM_SCP_PORT', 11112)
+    ips = []
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            ip = info[4][0]
+            if ip not in ips and not ip.startswith('127.'):
+                ips.append(ip)
+    except Exception:
+        pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        if ip not in ips and not ip.startswith('127.'):
+            ips.insert(0, ip)
+    except Exception:
+        pass
+    return {'ae_title': ae_title, 'port': port, 'ips': ips or ['(check server network settings)']}
 
 
 def is_admin(user):
@@ -250,6 +277,15 @@ def settings_view(request):
     auto_ai = SystemConfiguration.objects.filter(key="ai_auto_analysis_on_upload").first()
 
     if request.method == "POST":
+        # Backup server config
+        if request.POST.get("save_backup_server"):
+            upsert("backup_server_ip",   (request.POST.get("backup_server_ip",   "") or "").strip(), category="backup", description="Remote backup server IP or hostname")
+            upsert("backup_server_user", (request.POST.get("backup_server_user", "root") or "root").strip(), category="backup", description="SSH username for backup server")
+            upsert("backup_server_path", (request.POST.get("backup_server_path", "/backups") or "/backups").strip(), category="backup", description="Remote path to store backups")
+            upsert("backup_server_key",  (request.POST.get("backup_server_key",  "") or "").strip(), category="backup", description="Path to SSH private key on this server", sensitive=True)
+            messages.success(request, "Backup server settings saved.")
+            return redirect("admin_panel:settings")
+
         # Twilio
         sid = (request.POST.get("twilio_account_sid") or "").strip()
         token = (request.POST.get("twilio_auth_token") or "").strip()
@@ -306,6 +342,7 @@ def settings_view(request):
     if not auto_ai:
         auto_ai = upsert("ai_auto_analysis_on_upload", "true", data_type="boolean", category="ai", description="Auto AI analysis on upload", sensitive=False)
 
+    bsrv = _get_backup_server_cfg()
     return render(
         request,
         "admin_panel/settings.html",
@@ -315,6 +352,10 @@ def settings_view(request):
             "twilio_from_number": tw_from.value if tw_from else "",
             "ai_auto_analysis_on_upload": (auto_ai.value or "").strip().lower() in ("true", "1", "yes", "on"),
             "adm_active": "settings",
+            "backup_server_ip": bsrv['ip'],
+            "backup_server_user": bsrv['user'],
+            "backup_server_path": bsrv['path'],
+            "backup_server_key": bsrv['key'],
         },
     )
 
@@ -1235,8 +1276,9 @@ def facility_create(request):
     context = {
         'form': form,
         'edit_mode': False,
+        'dicom_server': _get_dicom_server_info(),
     }
-    
+
     return render(request, 'admin_panel/facility_form.html', context)
 
 @login_required
@@ -1346,8 +1388,9 @@ def facility_edit(request, facility_id):
         'form': form,
         'facility': facility,
         'edit_mode': True,
+        'dicom_server': _get_dicom_server_info(),
     }
-    
+
     return render(request, 'admin_panel/facility_form.html', context)
 
 @login_required
@@ -1384,12 +1427,15 @@ def facility_delete(request, facility_id):
 
 # ── Backup helpers ─────────────────────────────────────────────────────────────
 
-BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', '/tmp/noctis_backups'))
+def _default_backup_dir() -> Path:
+    from django.conf import settings as _s
+    return Path(os.environ.get('BACKUP_DIR', str(Path(_s.BASE_DIR) / 'backups')))
 
 
 def _ensure_backup_dir() -> Path:
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    return BACKUP_DIR
+    bdir = _default_backup_dir()
+    bdir.mkdir(parents=True, exist_ok=True)
+    return bdir
 
 
 def _backup_size_human(path: Path) -> str:
@@ -1403,15 +1449,60 @@ def _backup_size_human(path: Path) -> str:
 
 def _list_backups():
     bdir = _ensure_backup_dir()
+    seen: set = set()
     backups = []
-    for f in sorted(bdir.glob('backup_*.sql*'), reverse=True):
-        backups.append({
-            'filename': f.name,
-            'size_human': _backup_size_human(f),
-            'created': datetime.fromtimestamp(f.stat().st_mtime),
-            'path': f,
-        })
-    return backups
+    for pattern in ('backup_*.sql*', 'backup_*.db'):
+        for f in bdir.glob(pattern):
+            if f.name not in seen:
+                seen.add(f.name)
+                backups.append({
+                    'filename': f.name,
+                    'size_human': _backup_size_human(f),
+                    'created': datetime.fromtimestamp(f.stat().st_mtime),
+                    'path': f,
+                })
+    return sorted(backups, key=lambda x: x['created'], reverse=True)
+
+
+def _get_backup_server_cfg() -> dict:
+    """Return remote backup server settings from SystemConfiguration."""
+    keys = ('backup_server_ip', 'backup_server_user', 'backup_server_path', 'backup_server_key')
+    rows = SystemConfiguration.objects.filter(key__in=keys).values('key', 'value')
+    cfg = {r['key']: r['value'] for r in rows}
+    return {
+        'ip': cfg.get('backup_server_ip', '').strip(),
+        'user': cfg.get('backup_server_user', 'root').strip() or 'root',
+        'path': cfg.get('backup_server_path', '/backups').strip() or '/backups',
+        'key': cfg.get('backup_server_key', '').strip(),
+    }
+
+
+def _send_backup_to_remote(filename: str) -> tuple[bool, str]:
+    """Push a local backup file to the remote server via rsync over SSH."""
+    bdir = _ensure_backup_dir()
+    local_path = bdir / filename
+    if not local_path.exists():
+        return False, 'Backup file not found locally.'
+    cfg = _get_backup_server_cfg()
+    if not cfg['ip']:
+        return False, 'No backup server IP configured. Go to Admin → Settings → Backup Server.'
+    dest = f"{cfg['user']}@{cfg['ip']}:{cfg['path']}/"
+    ssh_opts = 'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15'
+    if cfg['key'] and os.path.exists(cfg['key']):
+        ssh_opts += f" -i {cfg['key']}"
+    cmd = ['rsync', '-avz', '--progress', '-e', ssh_opts, str(local_path), dest]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or '')[:300]
+            return False, f'rsync error: {err}'
+        return True, f'Backup pushed to {cfg["ip"]}:{cfg["path"]}'
+    except FileNotFoundError:
+        return False, 'rsync not installed. Run: apt install rsync'
+    except subprocess.TimeoutExpired:
+        return False, 'Remote transfer timed out (300 s).'
+    except Exception as exc:
+        return False, f'Transfer error: {exc}'
 
 
 def _create_backup(request) -> tuple[bool, str]:
@@ -1506,6 +1597,31 @@ def backups_view(request):
             messages.success(request, f'Deleted {count} backup(s).')
             return redirect('admin_panel:backups')
 
+        elif action == 'push_remote':
+            filename = request.POST.get('filename', '').strip()
+            if filename and '/' not in filename and '..' not in filename:
+                ok, msg = _send_backup_to_remote(filename)
+                if ok:
+                    messages.success(request, msg)
+                else:
+                    messages.error(request, msg)
+            return redirect('admin_panel:backups')
+
+        elif action == 'save_server':
+            def _upsert_cfg(key, val, desc, sensitive=False):
+                obj, _ = SystemConfiguration.objects.get_or_create(
+                    key=key,
+                    defaults={'value': val, 'data_type': 'string', 'category': 'backup',
+                              'description': desc, 'is_sensitive': sensitive, 'updated_by': request.user}
+                )
+                obj.value = val; obj.updated_by = request.user; obj.save()
+            _upsert_cfg('backup_server_ip',   request.POST.get('server_ip', '').strip(),   'Remote backup server IP/hostname')
+            _upsert_cfg('backup_server_user', request.POST.get('server_user', 'root').strip() or 'root', 'SSH username')
+            _upsert_cfg('backup_server_path', request.POST.get('server_path', '/backups').strip() or '/backups', 'Remote path')
+            _upsert_cfg('backup_server_key',  request.POST.get('server_key', '').strip(),   'SSH key path', sensitive=True)
+            messages.success(request, 'Backup server configuration saved.')
+            return redirect('admin_panel:backups')
+
     from django.conf import settings as dj_settings
     db_cfg = dj_settings.DATABASES.get('default', {})
     engine_raw = db_cfg.get('ENGINE', '')
@@ -1516,11 +1632,17 @@ def backups_view(request):
     else:
         db_engine = engine_raw.split('.')[-1]
 
+    srv = _get_backup_server_cfg()
     return render(request, 'admin_panel/backups.html', {
         'backups': _list_backups(),
         'backup_dir': str(bdir),
         'db_engine': db_engine,
         'adm_active': 'backups',
+        'server_ip': srv['ip'],
+        'server_user': srv['user'],
+        'server_path': srv['path'],
+        'server_key': srv['key'],
+        'server_configured': bool(srv['ip']),
     })
 
 

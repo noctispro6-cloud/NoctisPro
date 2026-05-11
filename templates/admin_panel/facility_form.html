@@ -99,7 +99,7 @@
                         </label>
                         {{ form.ae_title }}
                         <div class="form-text text-secondary">
-                            <small>Must be <= 16 chars, A-Z, 0-9 or underscore. Will be standardized automatically.</small>
+                            <small>Must be &le;16 chars, A–Z 0–9 or underscore. Auto-generated if blank.</small>
                         </div>
                         {% if form.ae_title.errors %}
                           {% for error in form.ae_title.errors %}
@@ -107,6 +107,94 @@
                           {% endfor %}
                         {% endif %}
                     </div>
+
+                    <!-- DICOM Network / Tunnel config -->
+                    <div class="col-12">
+                        <hr style="border-color:#333; margin:8px 0 14px;">
+                        <div style="font-size:11px; font-weight:700; color:#00d4ff; text-transform:uppercase; letter-spacing:1px; margin-bottom:12px;">
+                            <i class="fas fa-network-wired" style="margin-right:6px;"></i>DICOM Sender Network
+                        </div>
+                    </div>
+
+                    <div class="col-md-8">
+                        <label for="id_dicom_host" class="form-label text-white">
+                            Allowed IP / CIDR
+                            <span style="font-size:10px; color:#666; font-weight:400; margin-left:6px;">(Tailscale, LAN, or public)</span>
+                        </label>
+                        {{ form.dicom_host }}
+                        <div class="form-text text-secondary">
+                            <small>
+                                IP or CIDR of the machine that sends DICOM images here.
+                                For Tailscale enter the <code style="color:#00d4ff;">100.x.x.x</code> address shown in the Tailscale admin panel.
+                                Comma-separate multiple entries. Leave blank to allow any address.
+                            </small>
+                        </div>
+                        {% if form.dicom_host.errors %}
+                          {% for error in form.dicom_host.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
+                    <div class="col-md-4">
+                        <label for="id_dicom_port" class="form-label text-white">DICOM Port</label>
+                        {{ form.dicom_port }}
+                        <div class="form-text text-secondary"><small>Standard is 11112.</small></div>
+                        {% if form.dicom_port.errors %}
+                          {% for error in form.dicom_port.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
+                    <!-- DICOM Server Connection Info (for engineer) -->
+                    {% if dicom_server %}
+                    <div class="col-12">
+                        <div style="background:rgba(0,212,255,.06); border:1px solid rgba(0,212,255,.25); border-radius:8px; padding:16px 20px; margin-top:4px;">
+                            <div style="font-size:11px; font-weight:700; color:#00d4ff; text-transform:uppercase; letter-spacing:1px; margin-bottom:12px;">
+                                <i class="fas fa-plug" style="margin-right:6px;"></i>Server DICOM Connection Details
+                                <span style="font-weight:400; font-size:10px; color:#888; text-transform:none; letter-spacing:0; margin-left:8px;">— hand these to the biomedical engineer to configure the modality</span>
+                            </div>
+                            <div style="display:flex; flex-wrap:wrap; gap:12px;">
+                                <div style="flex:1; min-width:180px; background:rgba(0,0,0,.3); border-radius:6px; padding:10px 14px;">
+                                    <div style="font-size:10px; color:#888; margin-bottom:4px; text-transform:uppercase; letter-spacing:.5px;">AE Title</div>
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <code id="srvAeTitle" style="color:#00d4ff; font-size:14px; font-weight:700; letter-spacing:1px;">{{ dicom_server.ae_title }}</code>
+                                        <button type="button" onclick="copyDicom('srvAeTitle')" title="Copy" style="background:none;border:none;color:#666;cursor:pointer;font-size:11px;padding:0;">
+                                            <i class="fas fa-copy"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div style="flex:1; min-width:120px; background:rgba(0,0,0,.3); border-radius:6px; padding:10px 14px;">
+                                    <div style="font-size:10px; color:#888; margin-bottom:4px; text-transform:uppercase; letter-spacing:.5px;">Port</div>
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <code id="srvPort" style="color:#00d4ff; font-size:14px; font-weight:700;">{{ dicom_server.port }}</code>
+                                        <button type="button" onclick="copyDicom('srvPort')" title="Copy" style="background:none;border:none;color:#666;cursor:pointer;font-size:11px;padding:0;">
+                                            <i class="fas fa-copy"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div style="flex:2; min-width:200px; background:rgba(0,0,0,.3); border-radius:6px; padding:10px 14px;">
+                                    <div style="font-size:10px; color:#888; margin-bottom:4px; text-transform:uppercase; letter-spacing:.5px;">Server IP</div>
+                                    {% for ip in dicom_server.ips %}
+                                    <div style="display:flex; align-items:center; gap:8px; {% if not forloop.first %}margin-top:4px;{% endif %}">
+                                        <code id="srvIp{{ forloop.counter }}" style="color:#00d4ff; font-size:13px; font-weight:600;">{{ ip }}</code>
+                                        <button type="button" onclick="copyDicom('srvIp{{ forloop.counter }}')" title="Copy" style="background:none;border:none;color:#666;cursor:pointer;font-size:11px;padding:0;">
+                                            <i class="fas fa-copy"></i>
+                                        </button>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <div style="margin-top:10px; font-size:11px; color:#777; line-height:1.5;">
+                                <i class="fas fa-info-circle" style="margin-right:4px; color:#555;"></i>
+                                For Tailscale-connected clinics, enter the <code style="color:#00d4ff;">100.x.x.x</code> Tailscale IP.
+                                For same-LAN clinics, use the LAN IP above.
+                                The engineer enters: <strong style="color:#ccc;">IP&nbsp;+&nbsp;Port&nbsp;+&nbsp;AE Title</strong> in the modality's DICOM send destination.
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
 
                     <div class="col-md-6">
                         <label for="id_letterhead" class="form-label text-white">Letterhead (optional)</label>
@@ -304,6 +392,27 @@
 <script>
     function resetForm() {
         document.querySelector('form').reset();
+    }
+
+    function copyDicom(elemId) {
+        var el = document.getElementById(elemId);
+        if (!el) return;
+        var text = el.textContent.trim();
+        navigator.clipboard.writeText(text).then(function() {
+            var btn = el.nextElementSibling;
+            if (btn) {
+                var orig = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-check" style="color:#28a745;"></i>';
+                setTimeout(function(){ btn.innerHTML = orig; }, 1500);
+            }
+        }).catch(function() {
+            var r = document.createRange();
+            r.selectNode(el);
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(r);
+            document.execCommand('copy');
+            window.getSelection().removeAllRanges();
+        });
     }
 
     // AE Title auto-gen from Facility Name when empty

@@ -122,17 +122,18 @@ class Study(models.Model):
         return Series.objects.filter(study=self).count()
 
     def get_image_count(self, force_refresh=False):
-        """Return a fresh count of all DICOM images for this study."""
+        """Return count of DICOM images, or photo attachments for XC/photo studies."""
         if force_refresh:
-            # Clear Django's query log (if enabled) and refresh the DB connection
             try:
                 reset_queries()
             except Exception:
-                # reset_queries is a no-op unless DEBUG is enabled; ignore failures
                 pass
             connection.close_if_unusable_or_obsolete()
             connection.ensure_connection()
-        return DicomImage.objects.filter(series__study=self).count()
+        dicom_count = DicomImage.objects.filter(series__study=self).count()
+        if dicom_count:
+            return dicom_count
+        return self.attachments.filter(file_type='image', is_current_version=True).count()
 
 class Series(models.Model):
     """DICOM Series model"""

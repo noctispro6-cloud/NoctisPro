@@ -6,7 +6,7 @@
 <style>
 /* ── Word-style ribbon ───────────────────────────────────────────────────── */
 .rpt-ribbon {
-    position: sticky; top: 56px; z-index: 120;
+    position: sticky; top: 0; z-index: 120;
     background: #f3f3f3; border-bottom: 1px solid #d1d1d1;
     box-shadow: 0 1px 4px rgba(0,0,0,0.12); user-select: none;
 }
@@ -628,5 +628,19 @@ async function loadTemplate(id){
     }catch(e){alert('Failed to load template');}
 }
 {% endif %}
+
+// ── Sync ribbon with navbar on scroll ─────────────────────────────────────────
+(function(){
+    const ribbon = document.querySelector('.rpt-ribbon');
+    const nav    = document.querySelector('.top-navbar');
+    if (!ribbon) return;
+    function sync() {
+        const navBottom = nav ? Math.max(0, nav.getBoundingClientRect().bottom) : 0;
+        ribbon.style.top = navBottom + 'px';
+    }
+    sync();
+    window.addEventListener('scroll', sync, { passive: true });
+    window.addEventListener('resize', sync);
+})();
 </script>
 {% endblock %}

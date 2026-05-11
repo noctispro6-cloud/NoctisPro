@@ -1203,8 +1203,8 @@
                     Noctis Pro DICOM Viewer
                 </div>
 
-                <button class="btn" onclick="window.loadFromLocalFiles()">
-                    <i class="fas fa-folder-open"></i> Load Local DICOM
+                <button class="btn" onclick="window.loadFromLocalFiles()" title="View DICOM from CD, DVD, or USB flash drive (no upload)">
+                    <i class="fas fa-compact-disc"></i> Load Disc / Flash
                 </button>
 
                 <div class="patient-info" id="patientInfo">
@@ -2588,22 +2588,25 @@
                 item.dataset.seriesId = String(s.id);
                 if (index === 0) item.classList.add('active');
 
+                const isLocal = String(s.id).startsWith('local_');
                 const midSlice = Math.max(0, Math.floor((Number(s.image_count) || 1) / 2));
-                const thumbUrl = `/dicom-viewer/api/mpr-slice/${encodeURIComponent(s.id)}/axial/${midSlice}/?window_width=400&window_level=40&inverted=0&quality=fast`;
+                const thumbUrl = isLocal ? null : `/dicom-viewer/api/mpr-slice/${encodeURIComponent(s.id)}/axial/${midSlice}/?window_width=400&window_level=40&inverted=0&quality=fast`;
                 const desc = String(s.description || '').replace(/</g, '&lt;') || '&mdash;';
                 item.innerHTML = `
                     <div class="series-thumb-wrap">
-                        <img class="series-thumb" alt="" data-thumb="${thumbUrl}"
-                             style="display:none;max-width:100%;max-height:100%;object-fit:contain;">
-                        <i class="fas fa-x-ray series-thumb-placeholder"></i>
+                        ${isLocal
+                            ? '<i class="fas fa-compact-disc series-thumb-placeholder" style="color:#00d4ff;"></i>'
+                            : `<img class="series-thumb" alt="" data-thumb="${thumbUrl}" style="display:none;max-width:100%;max-height:100%;object-fit:contain;"><i class="fas fa-x-ray series-thumb-placeholder"></i>`
+                        }
                     </div>
                     <div class="series-title" title="${desc}">S${s.series_number}: ${desc}</div>
-                    <div class="series-details">${s.modality} &bull; ${s.image_count} img</div>
+                    <div class="series-details">${s.modality} &bull; ${s.image_count} img${isLocal ? ' &bull; <span style="color:#00d4ff;font-size:10px;">LOCAL</span>' : ''}</div>
                 `;
 
                 item.addEventListener('click', () => {
                     document.querySelectorAll('.series-item').forEach(el => el.classList.remove('active'));
                     item.classList.add('active');
+                    if (isLocal) { loadCurrentImage(currentImageIndex); return; }
                     loadSeries(s.id);
                 });
 
@@ -8619,25 +8622,38 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             payloads.sort(function (a, b) { return a._instNum - b._instNum; });
 
             // ── Inject into the full viewer ──────────────────────────────────
-            // 1. Store payloads in a dedicated unlimited map so they are never evicted by
-            //    the LRU server-payload cache (which only holds 24 entries).
-            //    loadCurrentImage() checks this map first for 'local_' ids.
+            // 1. Store payloads in a dedicated unlimited map (never evicted by the 24-slot LRU cache).
             window._localDicomPayloads = new Map(payloads.map(function (p) { return [p.id, p]; }));
 
             // 2. Build the imageData array the viewer expects.
             imageData = payloads.map(function (p, idx) {
-                return { id: p.id, instance_number: idx + 1 };
+                return { id: p.id, instance_number: idx + 1,
+                         columns: p.columns, rows: p.rows };
             });
 
-            // 3. Set a synthetic series object so UI (patient header, etc.) shows local info.
+            // 3. Set synthetic study + series objects using correct field names.
+            var localModality = modality || 'OT';
+            currentStudy = {
+                id:                'local_study',
+                patient_name:      patName    || 'Unknown Patient',
+                patient_id:        '',
+                study_date:        studyDate  || '',
+                study_description: studyDesc  || 'Local Study',
+                modality:          localModality,
+                institution:       'Local Media',
+                institution_name:  'Local Media',
+            };
+            window.currentStudy   = currentStudy;
+            window.currentStudyId = 'local_study';
+
             currentSeries = {
-                id:             'local_series',
-                description:    studyDesc || 'Local Study',
-                modality:       modality  || '—',
-                number_of_images: payloads.length,
-                pixel_spacing:  payloads[0].pixel_spacing || null,
-                patient_name:   patName    || 'Unknown',
-                study_date:     studyDate  || '',
+                id:           'local_series',
+                description:  studyDesc || ('Local ' + localModality + ' Study'),
+                series_description: studyDesc || '',
+                modality:     localModality,
+                image_count:  payloads.length,     // used by updateImageInfo
+                series_number: 1,
+                pixel_spacing: payloads[0].pixel_spacing || null,
             };
 
             // 4. Reset viewer state for the new "series".
@@ -8651,7 +8667,6 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                 windowWidth  = first.window_width;
                 windowLevel  = first.window_center;
             } else {
-                // Fast min/max over a sample of 2000 pixels
                 var pd = first.pixel_data, step = Math.max(1, Math.floor(pd.length / 2000));
                 var lo = pd[0], hi = pd[0];
                 for (var k = 0; k < pd.length; k += step) {
@@ -8663,7 +8678,22 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             }
             try { updateSliders(); } catch (e) {}
 
-            // 5. Update slice slider + count labels.
+            // 5. Update patient header bar and series description panel.
+            try { updatePatientInfo(currentStudy); } catch (e) {}
+            try { updateImageInfo(currentSeries); } catch (e) {}
+
+            // 6. Populate the series list panel with a synthetic entry (no thumbnail).
+            try {
+                displaySeriesList([{
+                    id:           'local_series',
+                    description:  currentSeries.description,
+                    series_number: 1,
+                    modality:     localModality,
+                    image_count:  payloads.length,
+                }]);
+            } catch (e) {}
+
+            // 7. Update slice slider + count labels.
             var sliceSlider  = document.getElementById('sliceSlider');
             var totalSlices  = document.getElementById('totalSlices');
             var currentSlice = document.getElementById('currentSlice');
@@ -8671,23 +8701,19 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             if (totalSlices)  totalSlices.textContent  = String(payloads.length);
             if (currentSlice) currentSlice.textContent = '1';
 
-            // 6. Update patient/study header.
-            try { updateImageInfo(currentSeries); } catch (e) {}
-
-            // 7. Show the viewport (hide welcome screen if visible).
+            // 8. Show the viewport (hide welcome screen if visible).
             try { _resetServerRendered(); } catch (e) {}
             var welcome = document.getElementById('welcomeScreen');
             var viewport = document.querySelector('.viewport');
             if (welcome)  welcome.style.display  = 'none';
             if (viewport) viewport.style.display = '';
 
-            // 8. Render the first slice through the normal pipeline — all tools activate automatically.
+            // 9. Render the first slice — all tools activate automatically.
             await loadCurrentImage(0);
 
             showToast(
-                'Viewing ' + payloads.length + ' local image' + (payloads.length > 1 ? 's' : '') +
-                (patName ? ' — ' + patName : '') +
-                ' (not uploaded to server)',
+                '● Local: ' + (patName || 'Unknown Patient') +
+                ' — ' + payloads.length + ' image' + (payloads.length > 1 ? 's' : ''),
                 'success', 4000
             );
         }

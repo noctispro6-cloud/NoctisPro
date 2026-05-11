@@ -263,8 +263,10 @@ def study_list(request):
 	"""List all studies with filtering and pagination"""
 	user = request.user
 	
-	# Base queryset based on user role
-	if user.is_facility_user() and getattr(user, 'facility', None):
+	# Base queryset based on user role — admins see all, everyone else sees only their facility
+	if user.is_admin():
+		studies = Study.objects.all()
+	elif getattr(user, 'facility', None):
 		studies = Study.objects.filter(facility=user.facility)
 	else:
 		studies = Study.objects.all()
@@ -411,8 +413,8 @@ def study_detail(request, study_id):
 	study = get_object_or_404(Study, id=study_id)
 	user = request.user
 	
-	# Check permissions
-	if user.is_facility_user() and study.facility != user.facility:
+	# Check permissions — admins see all, everyone else is limited to their facility
+	if not user.is_admin() and getattr(user, 'facility', None) and study.facility != user.facility:
 		messages.error(request, 'You do not have permission to view this study.')
 		return redirect('worklist:study_list')
 	

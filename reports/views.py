@@ -71,9 +71,9 @@ def report_list(request):
     sort = request.GET.get('sort', '')
     order = request.GET.get('order', 'desc')
 
-    # Base queryset — facility users see only their own facility's reports
+    # Base queryset — admins see all reports, everyone else sees only their facility's reports
     reports = Report.objects.select_related('study', 'study__patient', 'study__modality', 'radiologist').all()
-    if not can_write and hasattr(user, 'facility') and user.facility:
+    if not user.is_admin() and getattr(user, 'facility', None):
         reports = reports.filter(study__facility=user.facility)
 
     # Apply filters

@@ -2851,6 +2851,7 @@
         }
 
         async function _fetchImagePayloadBinary(imageId, signal) {
+            if (typeof imageId === 'string' && imageId.startsWith('local_')) return null;
             const frameQs = (Number(currentFrameIndex || 0) > 0) ? `&frame=${encodeURIComponent(String(Number(currentFrameIndex || 0)))}` : '';
             const url = `/dicom-viewer/api/image/${imageId}/data/?packed=bin${frameQs}`;
             const resp = await fetch(url, {
@@ -2898,6 +2899,7 @@
         }
 
         async function _fetchImagePayloadJsonPacked(imageId, signal) {
+            if (typeof imageId === 'string' && imageId.startsWith('local_')) return null;
             const frameQs = (Number(currentFrameIndex || 0) > 0) ? `&frame=${encodeURIComponent(String(Number(currentFrameIndex || 0)))}` : '';
             const url = `/dicom-viewer/api/image/${imageId}/data/?packed=1${frameQs}`;
             const response = await fetch(url, {
@@ -2949,6 +2951,7 @@
         // Fast-path server render: avoid the JSON `display/` round-trip during wheel scrubbing.
         // Uses `render.png` directly (user-invert only; MONOCHROME1 auto-invert is handled by full loads).
         async function _loadServerRenderedFrameFast(imageId, { quiet = false } = {}) {
+            if (typeof imageId === 'string' && imageId.startsWith('local_')) return;
             const id = String(imageId);
             const params = new URLSearchParams();
             const ww = Number(windowWidth);
@@ -2983,6 +2986,7 @@
         }
 
         async function _loadServerRenderedFrame(imageId, { quiet = false } = {}) {
+            if (typeof imageId === 'string' && imageId.startsWith('local_')) return;
             const id = String(imageId);
             const params = new URLSearchParams();
             // Prefer a lightweight JSON response that returns a PNG URL (streamed bytes),
@@ -3068,6 +3072,7 @@
             if (!_serverRendered || !_serverRendered.enabled) return;
             const id = imageId != null ? String(imageId) : null;
             if (!id) return;
+            if (id.startsWith('local_')) return;
             if (_serverRenderRefreshTimer) {
                 try { clearTimeout(_serverRenderRefreshTimer); } catch (e) { }
             }
@@ -3200,7 +3205,12 @@
             const forceFull = !!(opts && opts.forceFull);
 
             // During wheel scrubbing, show a quick PNG preview (no raw-pixel payload).
+            // For local files, re-render from the in-memory map — no server request.
             if (fastPreview && !forceFull) {
+                if (typeof imageId === 'string' && imageId.startsWith('local_') && window._localDicomPayloads) {
+                    const lp = window._localDicomPayloads.get(imageId);
+                    if (lp) { _resetServerRendered(); _applyLoadedImagePayload(lp, imageId); return; }
+                }
                 // Abort any in-flight raw pixel fetch (we're only previewing).
                 try { _imageLoadAbortController?.abort(); } catch (e) { }
                 _imageLoadAbortController = null;
@@ -3223,6 +3233,10 @@
                 _schedulePrefetchAround(idx);
                 return;
             }
+
+            // Local files are fully in memory — if we reach this point the map lookup above failed,
+            // which means the payload was never stored. Bail silently rather than hitting the server.
+            if (typeof imageId === 'string' && imageId.startsWith('local_')) return;
 
             // Abort any in-flight image load (latest-slice-wins during scrolling).
             try { _imageLoadAbortController?.abort(); } catch (e) { }
@@ -3300,6 +3314,8 @@
                     if (idx < 0 || idx >= imageData.length) return;
                     const id = imageData[idx]?.id;
                     if (!id) return;
+                    // Local files are always in-memory — nothing to prefetch from the server.
+                    if (typeof id === 'string' && id.startsWith('local_')) return;
                     if (_imagePayloadCache.has(String(id))) return;
                     // Fire-and-forget prefetch; browser cache + our LRU cache will make the next scroll instant.
                     _fetchImagePayloadBinary(id, undefined)

@@ -2606,7 +2606,15 @@
                 item.addEventListener('click', () => {
                     document.querySelectorAll('.series-item').forEach(el => el.classList.remove('active'));
                     item.classList.add('active');
-                    if (isLocal) { loadCurrentImage(currentImageIndex); return; }
+                    if (isLocal) {
+                        // Find the matching series object and switch to it
+                        var localS = window._localDicomSeries &&
+                            window._localDicomSeries.find(function (x) { return x.id === String(s.id); });
+                        if (localS && typeof window._loadLocalSeries === 'function') {
+                            window._loadLocalSeries(localS);
+                        }
+                        return;
+                    }
                     loadSeries(s.id);
                 });
 
@@ -8522,9 +8530,8 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             });
         });
 
-        // Parse DICOM files client-side and load them into the full viewer.
-        // Pixel data is converted to Float32 HU values — the same format the server API returns —
-        // so every viewer feature (windowing, pan/zoom, measurements, cine, etc.) works unchanged.
+        // Parse DICOM files client-side, group by SeriesInstanceUID, show all series in the panel.
+        // Pixel data is Float32 HU — same format the server API returns — so all viewer tools work.
         async function _ingestLocalFiles(files) {
             if (!window.dicomParser) {
                 showToast('DICOM parser not loaded — refresh the page', 'error'); return;
@@ -8535,8 +8542,10 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                 return a.name.localeCompare(b.name, undefined, { numeric: true });
             });
 
-            var payloads = [];          // viewer payload objects, one per valid slice
-            var patName = '', studyDate = '', studyDesc = '', modality = '';
+            // seriesMap: seriesUID → { meta, payloads[] }
+            var seriesMap = new Map();
+            var patName = '', studyDate = '', studyDesc = '', studyModality = '';
+            var globalIdx = 0;
 
             for (var i = 0; i < sorted.length; i++) {
                 try {
@@ -8544,8 +8553,8 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                     var bytes = new Uint8Array(buf);
                     var ds    = dicomParser.parseDicom(bytes);
 
-                    var rows      = ds.uint16('x00280010') || 0;
-                    var cols      = ds.uint16('x00280011') || 0;
+                    var rows = ds.uint16('x00280010') || 0;
+                    var cols = ds.uint16('x00280011') || 0;
                     if (!rows || !cols) continue;
 
                     var bitsAlloc = ds.uint16('x00280100') || 16;
@@ -8559,18 +8568,21 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                     var wl = wcStr ? parseFloat(wcStr.split('\\')[0]) : null;
                     var ww = wwStr ? parseFloat(wwStr.split('\\')[0]) : null;
 
-                    var psStr = ds.string('x00280030'); // PixelSpacing
+                    var psStr = ds.string('x00280030');
                     var psArr = psStr ? psStr.split('\\') : null;
                     var pixelSpacing = psArr && psArr.length >= 2
-                        ? (parseFloat(psArr[0]) + '\\' + parseFloat(psArr[1]))
-                        : null;
+                        ? (parseFloat(psArr[0]) + '\\' + parseFloat(psArr[1])) : null;
 
-                    var sliceThickness = parseFloat(ds.string('x00500010') || ds.string('x00180050') || '') || null;
+                    var sliceThick = parseFloat(ds.string('x00180050') || '') || null;
+                    var fileModality   = ds.string('x00080060') || '';
+                    var seriesUID      = ds.string('x0020000e') || ('__no_uid_' + i);
+                    var seriesDesc     = ds.string('x0008103e') || '';
+                    var seriesNumber   = parseInt(ds.string('x00200011') || '', 10) || 0;
 
-                    if (!patName)    patName    = ds.string('x00100010') || '';
-                    if (!studyDate)  studyDate  = ds.string('x00080020') || '';
-                    if (!studyDesc)  studyDesc  = ds.string('x00081030') || '';
-                    if (!modality)   modality   = ds.string('x00080060') || '';
+                    if (!patName)       patName       = ds.string('x00100010') || '';
+                    if (!studyDate)     studyDate     = ds.string('x00080020') || '';
+                    if (!studyDesc)     studyDesc     = ds.string('x00081030') || '';
+                    if (!studyModality) studyModality = fileModality;
 
                     var pxEl = ds.elements.x7fe00010;
                     if (!pxEl) continue;
@@ -8585,28 +8597,39 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                         raw = new Uint16Array(bytes.buffer.slice(off, off + nPx * 2));
                     }
 
-                    // Convert to Float32 HU — same format the server returns via /api/image/{id}/data/
                     var pixel_data = new Float32Array(nPx);
-                    for (var j = 0; j < nPx; j++) {
-                        pixel_data[j] = raw[j] * slope + intercept;
-                    }
+                    for (var j = 0; j < nPx; j++) pixel_data[j] = raw[j] * slope + intercept;
 
-                    payloads.push({
-                        id:               'local_' + i,
-                        rows:             rows,
-                        columns:          cols,
-                        window_width:     ww,
-                        window_center:    wl,
-                        pixel_spacing:    pixelSpacing,
-                        slice_thickness:  sliceThickness,
-                        modality:         modality || null,
-                        pixel_data:       pixel_data,
-                        pixel_data_b64:   null,
-                        pixel_dtype:      'float32',
-                        pixel_endian:     'little',
-                        _instNum:         instNum,
-                        _filename:        sorted[i].name,
-                    });
+                    var payload = {
+                        id:              'local_' + globalIdx++,
+                        rows:            rows,
+                        columns:         cols,
+                        window_width:    ww,
+                        window_center:   wl,
+                        pixel_spacing:   pixelSpacing,
+                        slice_thickness: sliceThick,
+                        modality:        fileModality || null,
+                        pixel_data:      pixel_data,
+                        pixel_data_b64:  null,
+                        pixel_dtype:     'float32',
+                        pixel_endian:    'little',
+                        _instNum:        instNum,
+                        _filename:       sorted[i].name,
+                        _seriesUID:      seriesUID,
+                    };
+
+                    if (!seriesMap.has(seriesUID)) {
+                        seriesMap.set(seriesUID, {
+                            uid:          seriesUID,
+                            description:  seriesDesc,
+                            series_number: seriesNumber,
+                            modality:     fileModality,
+                            pixel_spacing: pixelSpacing,
+                            payloads:     [],
+                        });
+                    }
+                    seriesMap.get(seriesUID).payloads.push(payload);
+
                 } catch (e) {
                     console.warn('Skipping (not valid DICOM):', sorted[i].name, e.message);
                 }
@@ -8614,31 +8637,43 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
 
             showLoading(false);
 
-            if (!payloads.length) {
+            if (!seriesMap.size) {
                 showToast('No valid DICOM pixel data found in selected files', 'error'); return;
             }
 
-            // Sort by instance number (natural slice order)
-            payloads.sort(function (a, b) { return a._instNum - b._instNum; });
-
-            // ── Inject into the full viewer ──────────────────────────────────
-            // 1. Store payloads in a dedicated unlimited map (never evicted by the 24-slot LRU cache).
-            window._localDicomPayloads = new Map(payloads.map(function (p) { return [p.id, p]; }));
-
-            // 2. Build the imageData array the viewer expects.
-            imageData = payloads.map(function (p, idx) {
-                return { id: p.id, instance_number: idx + 1,
-                         columns: p.columns, rows: p.rows };
+            // Sort payloads within each series by instance number
+            seriesMap.forEach(function (s) {
+                s.payloads.sort(function (a, b) { return a._instNum - b._instNum; });
             });
 
-            // 3. Set synthetic study + series objects using correct field names.
-            var localModality = modality || 'OT';
+            // Assign stable local series IDs and store in global map for series switching
+            var seriesList = [];
+            var sIdx = 0;
+            seriesMap.forEach(function (s) {
+                s.id = 'local_series_' + sIdx;
+                sIdx++;
+                seriesList.push(s);
+            });
+            // Sort series by series_number
+            seriesList.sort(function (a, b) { return (a.series_number || 0) - (b.series_number || 0); });
+
+            // Store all series data globally so clicking a series entry can switch to it
+            window._localDicomSeries = seriesList;
+
+            // Populate the global payloads map with every image across all series
+            window._localDicomPayloads = new Map();
+            seriesList.forEach(function (s) {
+                s.payloads.forEach(function (p) { window._localDicomPayloads.set(p.id, p); });
+            });
+
+            // ── Set study info ───────────────────────────────────────────────
+            var localModality = studyModality || 'OT';
             currentStudy = {
                 id:                'local_study',
-                patient_name:      patName    || 'Unknown Patient',
+                patient_name:      patName   || 'Unknown Patient',
                 patient_id:        '',
-                study_date:        studyDate  || '',
-                study_description: studyDesc  || 'Local Study',
+                study_date:        studyDate || '',
+                study_description: studyDesc || 'Local Study',
                 modality:          localModality,
                 institution:       'Local Media',
                 institution_name:  'Local Media',
@@ -8646,26 +8681,58 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             window.currentStudy   = currentStudy;
             window.currentStudyId = 'local_study';
 
+            try { updatePatientInfo(currentStudy); } catch (e) {}
+
+            // ── Build series list for the panel ──────────────────────────────
+            var panelSeries = seriesList.map(function (s, n) {
+                return {
+                    id:           s.id,
+                    description:  s.description || (s.modality + ' Series ' + (n + 1)),
+                    series_number: s.series_number || (n + 1),
+                    modality:     s.modality || localModality,
+                    image_count:  s.payloads.length,
+                };
+            });
+            try { displaySeriesList(panelSeries); } catch (e) {}
+
+            // ── Load first series ─────────────────────────────────────────────
+            _loadLocalSeries(seriesList[0]);
+
+            var totalImages = 0;
+            seriesList.forEach(function (s) { totalImages += s.payloads.length; });
+            showToast(
+                '● Local: ' + (patName || 'Unknown Patient') +
+                ' — ' + seriesList.length + ' series, ' + totalImages + ' images',
+                'success', 4000
+            );
+        }
+
+        // Switch the viewer to a local series (called on series panel click and on initial load)
+        window._loadLocalSeries = function (seriesObj) {
+            if (!seriesObj || !seriesObj.payloads || !seriesObj.payloads.length) return;
+            var payloads = seriesObj.payloads;
+
             currentSeries = {
-                id:           'local_series',
-                description:  studyDesc || ('Local ' + localModality + ' Study'),
-                series_description: studyDesc || '',
-                modality:     localModality,
-                image_count:  payloads.length,     // used by updateImageInfo
-                series_number: 1,
-                pixel_spacing: payloads[0].pixel_spacing || null,
+                id:            seriesObj.id,
+                description:   seriesObj.description || ('Series ' + (seriesObj.series_number || 1)),
+                modality:      seriesObj.modality || '',
+                image_count:   payloads.length,
+                series_number: seriesObj.series_number || 1,
+                pixel_spacing: seriesObj.pixel_spacing || payloads[0].pixel_spacing || null,
             };
 
-            // 4. Reset viewer state for the new "series".
+            imageData = payloads.map(function (p, idx) {
+                return { id: p.id, instance_number: idx + 1, columns: p.columns, rows: p.rows };
+            });
+
             currentImageIndex     = 0;
             windowingLockedByUser = false;
             inversionLockedByUser = false;
 
-            // Auto-WW/WL from first payload's DICOM header (or compute from pixels if absent).
             var first = payloads[0];
             if (first.window_width && first.window_center) {
-                windowWidth  = first.window_width;
-                windowLevel  = first.window_center;
+                windowWidth = first.window_width;
+                windowLevel = first.window_center;
             } else {
                 var pd = first.pixel_data, step = Math.max(1, Math.floor(pd.length / 2000));
                 var lo = pd[0], hi = pd[0];
@@ -8673,27 +8740,13 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                     if (pd[k] < lo) lo = pd[k];
                     if (pd[k] > hi) hi = pd[k];
                 }
-                windowWidth  = Math.round(hi - lo) || 400;
-                windowLevel  = Math.round((lo + hi) / 2);
+                windowWidth = Math.round(hi - lo) || 400;
+                windowLevel = Math.round((lo + hi) / 2);
             }
-            try { updateSliders(); } catch (e) {}
 
-            // 5. Update patient header bar and series description panel.
-            try { updatePatientInfo(currentStudy); } catch (e) {}
+            try { updateSliders(); } catch (e) {}
             try { updateImageInfo(currentSeries); } catch (e) {}
 
-            // 6. Populate the series list panel with a synthetic entry (no thumbnail).
-            try {
-                displaySeriesList([{
-                    id:           'local_series',
-                    description:  currentSeries.description,
-                    series_number: 1,
-                    modality:     localModality,
-                    image_count:  payloads.length,
-                }]);
-            } catch (e) {}
-
-            // 7. Update slice slider + count labels.
             var sliceSlider  = document.getElementById('sliceSlider');
             var totalSlices  = document.getElementById('totalSlices');
             var currentSlice = document.getElementById('currentSlice');
@@ -8701,22 +8754,14 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             if (totalSlices)  totalSlices.textContent  = String(payloads.length);
             if (currentSlice) currentSlice.textContent = '1';
 
-            // 8. Show the viewport (hide welcome screen if visible).
             try { _resetServerRendered(); } catch (e) {}
             var welcome = document.getElementById('welcomeScreen');
             var viewport = document.querySelector('.viewport');
             if (welcome)  welcome.style.display  = 'none';
             if (viewport) viewport.style.display = '';
 
-            // 9. Render the first slice — all tools activate automatically.
-            await loadCurrentImage(0);
-
-            showToast(
-                '● Local: ' + (patName || 'Unknown Patient') +
-                ' — ' + payloads.length + ' image' + (payloads.length > 1 ? 's' : ''),
-                'success', 4000
-            );
-        }
+            loadCurrentImage(0);
+        };
 
     })();
     </script>

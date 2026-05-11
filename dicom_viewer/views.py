@@ -5156,6 +5156,9 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
         normal = None
         rows = None
         cols = None
+        missing_files = 0
+        read_errors = 0
+        last_error = None
         # Read only metadata (no pixels) to compute ordering + spacing.
         tags = [
             'ImagePositionPatient', 'ImageOrientationPatient', 'SliceLocation', 'InstanceNumber',
@@ -5164,6 +5167,9 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
         for img in images_qs:
             try:
                 dicom_path = _os.path.join(settings.MEDIA_ROOT, str(img.file_path))
+                if not _os.path.exists(dicom_path):
+                    missing_files += 1
+                    continue
                 ds = _pydicom.dcmread(dicom_path, stop_before_pixels=True, specific_tags=tags)
 
                 pos = getattr(ds, 'ImagePositionPatient', None)
@@ -5214,11 +5220,31 @@ def _get_mpr_volume_and_spacing(series, force_rebuild=False, quality='high'):
                         first_ps = (1.0, 1.0)
 
                 slices.append((d, dicom_path))
-            except Exception:
+            except Exception as _e:
+                read_errors += 1
+                last_error = _e
                 continue
 
+        total = images_qs.count()
         if len(slices) < 1:
-            raise ValueError('Could not read any images for MPR')
+            if missing_files == total:
+                raise ValueError(
+                    f'DICOM files not found on disk ({missing_files}/{total} missing). '
+                    'The study images have not been stored on this server yet — '
+                    'send images from the modality via DICOM C-STORE.'
+                )
+            elif missing_files > 0:
+                raise ValueError(
+                    f'No readable slices: {missing_files}/{total} files missing'
+                    + (f', {read_errors} read errors' if read_errors else '')
+                    + (f' (last error: {last_error})' if last_error else '')
+                )
+            else:
+                raise ValueError(
+                    f'Could not read any images for MPR ({read_errors} read errors'
+                    + (f'; last: {last_error}' if last_error else '')
+                    + ')'
+                )
         if not rows or not cols:
             raise ValueError('Missing image dimensions for MPR')
 

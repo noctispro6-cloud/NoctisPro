@@ -3177,6 +3177,25 @@
             if (!entry) return;
 
             const imageId = entry.id;
+
+            // ── Local file fast-path ───────────────────────────────────────────
+            // Local payloads are stored in a separate unlimited map so they are never
+            // evicted by the LRU server-payload cache (max 24 slots).
+            if (typeof imageId === 'string' && imageId.startsWith('local_') && window._localDicomPayloads) {
+                const localPay = window._localDicomPayloads.get(imageId);
+                if (localPay) {
+                    _resetServerRendered();
+                    _applyLoadedImagePayload(localPay, imageId);
+                    _schedulePrefetchAround(idx);
+                    // keep slice UI in sync
+                    const sliceSlider = document.getElementById('sliceSlider');
+                    if (sliceSlider) sliceSlider.value = idx;
+                    const currentSliceEl = document.getElementById('currentSlice');
+                    if (currentSliceEl) currentSliceEl.textContent = idx + 1;
+                    return;
+                }
+            }
+
             const fastPreview = !!(opts && opts.fastPreview);
             const forceFull = !!(opts && opts.forceFull);
 
@@ -8584,8 +8603,10 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             payloads.sort(function (a, b) { return a._instNum - b._instNum; });
 
             // ── Inject into the full viewer ──────────────────────────────────
-            // 1. Pre-populate the payload cache with every slice — no server fetches needed.
-            payloads.forEach(function (p) { _cacheSetPayload(p.id, p); });
+            // 1. Store payloads in a dedicated unlimited map so they are never evicted by
+            //    the LRU server-payload cache (which only holds 24 entries).
+            //    loadCurrentImage() checks this map first for 'local_' ids.
+            window._localDicomPayloads = new Map(payloads.map(function (p) { return [p.id, p]; }));
 
             // 2. Build the imageData array the viewer expects.
             imageData = payloads.map(function (p, idx) {

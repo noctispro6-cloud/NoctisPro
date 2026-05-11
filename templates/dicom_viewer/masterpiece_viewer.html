@@ -8407,54 +8407,10 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             }
         }, 30000); // Save every 30 seconds
 
-        // Directory Loader Functions
-        function showDirectoryLoader() {
-            document.getElementById('directoryModal').style.display = 'flex';
-        }
-
-        function hideDirectoryLoader() {
-            document.getElementById('directoryModal').style.display = 'none';
-        }
-
-        async function loadFromDirectory() {
-            const directoryPath = document.getElementById('directoryPath').value.trim();
-            if (!directoryPath) {
-                showToast('Please enter a directory path', 'error');
-                return;
-            }
-
-            try {
-                showLoading(true);
-                hideDirectoryLoader();
-
-                const formData = new FormData();
-                formData.append('directory_path', directoryPath);
-
-                const response = await fetch('/dicom-viewer/load-directory/', {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') && document.querySelector('meta[name="csrf-token"]').getAttribute('content')) || ''
-                    }
-                });
-
-                const result = await response.json();
-
-                if (result.success) {
-                    showToast(`Successfully loaded ${result.processed_files} DICOM files`, 'success');
-                    // Refresh the studies list
-                    loadStudies();
-                } else {
-                    showToast(`Failed to load directory: ${result.error}`, 'error');
-                }
-
-            } catch (error) {
-                console.error('Error loading directory:', error);
-                showToast('Failed to load directory', 'error');
-            } finally {
-                showLoading(false);
-            }
-        }
+        // Legacy stubs — directory loader replaced by client-side local viewer
+        function showDirectoryLoader() { if (typeof loadFromLocalFiles === 'function') loadFromLocalFiles(); }
+        function hideDirectoryLoader() {}
+        function loadFromDirectory()   {}
 
         // Add keyboard shortcut for directory loader
         // Use capture + stopImmediatePropagation so browser/system shortcuts (e.g. Ctrl+O)
@@ -8507,263 +8463,200 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
         })();
     </script>
 
-    <!-- Hidden file input for client-side local DICOM viewing -->
+    <!-- Hidden file input for client-side local DICOM viewing (no upload) -->
     <input type="file" id="localDicomInput" accept=".dcm,.dicom,.dicm,.ima,*" multiple
         webkitdirectory directory style="display:none;">
 
     <script>
-    // ── Local DICOM Viewer (pure client-side, no upload) ──────────────────────
+    // ── Load Local DICOM: parse client-side, inject into full viewer (no upload) ─
     (function () {
-        var _localMode = false;
-        var _localSlices = [];
-        var _localIdx = 0;
-        var _localWW = 400;
-        var _localWL = 40;
-        var _localInverted = false;
 
         window.loadFromLocalFiles = function () {
             var inp = document.getElementById('localDicomInput');
-            inp.value = '';
-            inp.click();
+            if (inp) { inp.value = ''; inp.click(); }
         };
 
         document.addEventListener('DOMContentLoaded', function () {
-            document.getElementById('localDicomInput').addEventListener('change', function (e) {
+            var inp = document.getElementById('localDicomInput');
+            if (inp) inp.addEventListener('change', function (e) {
                 var files = Array.from(e.target.files);
-                if (files.length) _processLocalFiles(files);
+                if (files.length) _ingestLocalFiles(files);
             });
         });
 
-        async function _processLocalFiles(files) {
+        // Parse DICOM files client-side and load them into the full viewer.
+        // Pixel data is converted to Float32 HU values — the same format the server API returns —
+        // so every viewer feature (windowing, pan/zoom, measurements, cine, etc.) works unchanged.
+        async function _ingestLocalFiles(files) {
             if (!window.dicomParser) {
-                _toast('DICOM parser not loaded — refresh the page', 'error'); return;
+                showToast('DICOM parser not loaded — refresh the page', 'error'); return;
             }
-            _showLocalLoading('Reading ' + files.length + ' file(s)…');
+            showLoading(true);
 
             var sorted = files.slice().sort(function (a, b) {
                 return a.name.localeCompare(b.name, undefined, { numeric: true });
             });
 
-            var parsed = [];
+            var payloads = [];          // viewer payload objects, one per valid slice
+            var patName = '', studyDate = '', studyDesc = '', modality = '';
+
             for (var i = 0; i < sorted.length; i++) {
                 try {
-                    var buf  = await sorted[i].arrayBuffer();
+                    var buf   = await sorted[i].arrayBuffer();
                     var bytes = new Uint8Array(buf);
-                    var ds   = dicomParser.parseDicom(bytes);
+                    var ds    = dicomParser.parseDicom(bytes);
 
-                    var rows = ds.uint16('x00280010') || 0;
-                    var cols = ds.uint16('x00280011') || 0;
+                    var rows      = ds.uint16('x00280010') || 0;
+                    var cols      = ds.uint16('x00280011') || 0;
                     if (!rows || !cols) continue;
 
-                    var bitsAlloc  = ds.uint16('x00280100') || 16;
-                    var pixRep     = ds.uint16('x00280103') || 0;
-                    var slope      = parseFloat(ds.string('x00281053') || '') || 1;
-                    var intercept  = parseFloat(ds.string('x00281052') || '') || 0;
-                    var instNum    = parseInt(ds.string('x00200013') || '', 10) || 0;
-                    var patName    = ds.string('x00100010') || '';
-                    var studyDate  = ds.string('x00080020') || '';
-                    var modality   = ds.string('x00080060') || '';
+                    var bitsAlloc = ds.uint16('x00280100') || 16;
+                    var pixRep    = ds.uint16('x00280103') || 0;
+                    var slope     = parseFloat(ds.string('x00281053') || '') || 1;
+                    var intercept = parseFloat(ds.string('x00281052') || '') || 0;
+                    var instNum   = parseInt(ds.string('x00200013') || '', 10) || i;
 
                     var wcStr = ds.string('x00281050');
                     var wwStr = ds.string('x00281051');
-                    var winCenter = wcStr ? parseFloat(wcStr.split('\\')[0]) : null;
-                    var winWidth  = wwStr ? parseFloat(wwStr.split('\\')[0]) : null;
+                    var wl = wcStr ? parseFloat(wcStr.split('\\')[0]) : null;
+                    var ww = wwStr ? parseFloat(wwStr.split('\\')[0]) : null;
+
+                    var psStr = ds.string('x00280030'); // PixelSpacing
+                    var psArr = psStr ? psStr.split('\\') : null;
+                    var pixelSpacing = psArr && psArr.length >= 2
+                        ? (parseFloat(psArr[0]) + '\\' + parseFloat(psArr[1]))
+                        : null;
+
+                    var sliceThickness = parseFloat(ds.string('x00500010') || ds.string('x00180050') || '') || null;
+
+                    if (!patName)    patName    = ds.string('x00100010') || '';
+                    if (!studyDate)  studyDate  = ds.string('x00080020') || '';
+                    if (!studyDesc)  studyDesc  = ds.string('x00081030') || '';
+                    if (!modality)   modality   = ds.string('x00080060') || '';
 
                     var pxEl = ds.elements.x7fe00010;
                     if (!pxEl) continue;
-
-                    var off  = pxEl.dataOffset;
-                    var nPx  = rows * cols;
-                    var pixelData;
+                    var off = pxEl.dataOffset;
+                    var nPx = rows * cols;
+                    var raw;
                     if (bitsAlloc <= 8) {
-                        pixelData = new Uint8Array(bytes.buffer.slice(off, off + nPx));
+                        raw = new Uint8Array(bytes.buffer, off, nPx);
                     } else if (pixRep === 1) {
-                        pixelData = new Int16Array(bytes.buffer.slice(off, off + nPx * 2));
+                        raw = new Int16Array(bytes.buffer.slice(off, off + nPx * 2));
                     } else {
-                        pixelData = new Uint16Array(bytes.buffer.slice(off, off + nPx * 2));
+                        raw = new Uint16Array(bytes.buffer.slice(off, off + nPx * 2));
                     }
 
-                    parsed.push({ rows, cols, pixelData, winCenter, winWidth,
-                                  slope, intercept, instNum, patName, studyDate, modality,
-                                  filename: sorted[i].name });
+                    // Convert to Float32 HU — same format the server returns via /api/image/{id}/data/
+                    var pixel_data = new Float32Array(nPx);
+                    for (var j = 0; j < nPx; j++) {
+                        pixel_data[j] = raw[j] * slope + intercept;
+                    }
+
+                    payloads.push({
+                        id:               'local_' + i,
+                        rows:             rows,
+                        columns:          cols,
+                        window_width:     ww,
+                        window_center:    wl,
+                        pixel_spacing:    pixelSpacing,
+                        slice_thickness:  sliceThickness,
+                        modality:         modality || null,
+                        pixel_data:       pixel_data,
+                        pixel_data_b64:   null,
+                        pixel_dtype:      'float32',
+                        pixel_endian:     'little',
+                        _instNum:         instNum,
+                        _filename:        sorted[i].name,
+                    });
                 } catch (e) {
-                    console.warn('Skipping (not DICOM):', sorted[i].name, e.message);
+                    console.warn('Skipping (not valid DICOM):', sorted[i].name, e.message);
                 }
             }
 
-            _hideLocalLoading();
+            showLoading(false);
 
-            if (!parsed.length) {
-                _toast('No valid DICOM pixel data found', 'error'); return;
+            if (!payloads.length) {
+                showToast('No valid DICOM pixel data found in selected files', 'error'); return;
             }
 
-            parsed.sort(function (a, b) { return a.instNum - b.instNum; });
+            // Sort by instance number (natural slice order)
+            payloads.sort(function (a, b) { return a._instNum - b._instNum; });
 
-            // Auto-window from first slice
-            var first = parsed[0];
-            if (first.winCenter !== null && first.winWidth !== null) {
-                _localWL = first.winCenter;
-                _localWW = first.winWidth;
+            // ── Inject into the full viewer ──────────────────────────────────
+            // 1. Pre-populate the payload cache with every slice — no server fetches needed.
+            payloads.forEach(function (p) { _cacheSetPayload(p.id, p); });
+
+            // 2. Build the imageData array the viewer expects.
+            imageData = payloads.map(function (p, idx) {
+                return { id: p.id, instance_number: idx + 1 };
+            });
+
+            // 3. Set a synthetic series object so UI (patient header, etc.) shows local info.
+            currentSeries = {
+                id:             'local_series',
+                description:    studyDesc || 'Local Study',
+                modality:       modality  || '—',
+                number_of_images: payloads.length,
+                pixel_spacing:  payloads[0].pixel_spacing || null,
+                patient_name:   patName    || 'Unknown',
+                study_date:     studyDate  || '',
+            };
+
+            // 4. Reset viewer state for the new "series".
+            currentImageIndex     = 0;
+            windowingLockedByUser = false;
+            inversionLockedByUser = false;
+
+            // Auto-WW/WL from first payload's DICOM header (or compute from pixels if absent).
+            var first = payloads[0];
+            if (first.window_width && first.window_center) {
+                windowWidth  = first.window_width;
+                windowLevel  = first.window_center;
             } else {
-                var lo = Infinity, hi = -Infinity;
-                for (var j = 0; j < first.pixelData.length; j++) {
-                    var hu = first.pixelData[j] * first.slope + first.intercept;
-                    if (hu < lo) lo = hu;
-                    if (hu > hi) hi = hu;
+                // Fast min/max over a sample of 2000 pixels
+                var pd = first.pixel_data, step = Math.max(1, Math.floor(pd.length / 2000));
+                var lo = pd[0], hi = pd[0];
+                for (var k = 0; k < pd.length; k += step) {
+                    if (pd[k] < lo) lo = pd[k];
+                    if (pd[k] > hi) hi = pd[k];
                 }
-                _localWW = hi - lo || 256;
-                _localWL = (lo + hi) / 2;
+                windowWidth  = Math.round(hi - lo) || 400;
+                windowLevel  = Math.round((lo + hi) / 2);
             }
+            try { updateSliders(); } catch (e) {}
 
-            _localSlices   = parsed;
-            _localMode     = true;
-            _localIdx      = 0;
-            _localInverted = false;
+            // 5. Update slice slider + count labels.
+            var sliceSlider  = document.getElementById('sliceSlider');
+            var totalSlices  = document.getElementById('totalSlices');
+            var currentSlice = document.getElementById('currentSlice');
+            if (sliceSlider)  { sliceSlider.min = '0'; sliceSlider.max = String(payloads.length - 1); sliceSlider.value = '0'; sliceSlider.disabled = payloads.length <= 1; }
+            if (totalSlices)  totalSlices.textContent  = String(payloads.length);
+            if (currentSlice) currentSlice.textContent = '1';
 
-            _showLocalViewer();
-            _renderLocalSlice(0);
+            // 6. Update patient/study header.
+            try { updateImageInfo(currentSeries); } catch (e) {}
 
-            var info = first.patName
-                ? first.patName + (first.studyDate ? '  |  ' + first.studyDate : '') + (first.modality ? '  |  ' + first.modality : '')
-                : parsed.length + ' image' + (parsed.length > 1 ? 's' : '');
-            _toast('Viewing locally: ' + info, 'success');
+            // 7. Show the viewport (hide welcome screen if visible).
+            try { _resetServerRendered(); } catch (e) {}
+            var welcome = document.getElementById('welcomeScreen');
+            var viewport = document.querySelector('.viewport');
+            if (welcome)  welcome.style.display  = 'none';
+            if (viewport) viewport.style.display = '';
+
+            // 8. Render the first slice through the normal pipeline — all tools activate automatically.
+            await loadCurrentImage(0);
+
+            showToast(
+                'Viewing ' + payloads.length + ' local image' + (payloads.length > 1 ? 's' : '') +
+                (patName ? ' — ' + patName : '') +
+                ' (not uploaded to server)',
+                'success', 4000
+            );
         }
 
-        function _renderLocalSlice(idx) {
-            idx = Math.max(0, Math.min(_localSlices.length - 1, idx));
-            _localIdx = idx;
-            var sl  = _localSlices[idx];
-            var cvs = document.getElementById('localDicomCanvas');
-            if (!cvs || !sl) return;
-            cvs.width  = sl.cols;
-            cvs.height = sl.rows;
-            var ctx = cvs.getContext('2d');
-            var img = ctx.createImageData(sl.cols, sl.rows);
-            var px  = img.data;
-            var lo  = _localWL - _localWW / 2;
-            var hi  = _localWL + _localWW / 2;
-            var inv = _localInverted;
-            for (var i = 0; i < sl.rows * sl.cols; i++) {
-                var val  = sl.pixelData[i] * sl.slope + sl.intercept;
-                var gray = val <= lo ? 0 : val >= hi ? 255 : Math.round(((val - lo) / _localWW) * 255);
-                if (inv) gray = 255 - gray;
-                px[i*4] = px[i*4+1] = px[i*4+2] = gray;
-                px[i*4+3] = 255;
-            }
-            ctx.putImageData(img, 0, 0);
-
-            var lbl = document.getElementById('localSliceLabel');
-            if (lbl) lbl.textContent = (idx + 1) + ' / ' + _localSlices.length;
-            var sld = document.getElementById('localSliceSlider');
-            if (sld) { sld.max = _localSlices.length - 1; sld.value = idx; }
-            var fn = document.getElementById('localFilename');
-            if (fn) fn.textContent = sl.filename;
-        }
-
-        function _showLocalViewer() {
-            var modal = document.getElementById('localDicomModal');
-            if (modal) { modal.style.display = 'flex'; }
-        }
-
-        // Expose to global scope for inline HTML event handlers
-        window._localRenderSlice = function (idx) { _renderLocalSlice(idx); };
-        window._localToggleInvert = function () {
-            _localInverted = !_localInverted;
-            _renderLocalSlice(_localIdx);
-        };
-        window._closeLocalDicomViewer = function () {
-            var modal = document.getElementById('localDicomModal');
-            if (modal) modal.style.display = 'none';
-            _localMode = false;
-        };
-
-        // ── windowing drag ───────────────────────────────────────────────────
-        var _drag = null;
-        document.addEventListener('mousedown', function (e) {
-            if (!_localMode) return;
-            var cvs = document.getElementById('localDicomCanvas');
-            if (e.target === cvs && e.button === 2) {
-                _drag = { x: e.clientX, y: e.clientY, ww: _localWW, wl: _localWL };
-                e.preventDefault();
-            }
-        });
-        document.addEventListener('mousemove', function (e) {
-            if (!_drag) return;
-            var dx = e.clientX - _drag.x;
-            var dy = e.clientY - _drag.y;
-            _localWW = Math.max(1, _drag.ww + dx * 4);
-            _localWL = _drag.wl + dy * 4;
-            _renderLocalSlice(_localIdx);
-        });
-        document.addEventListener('mouseup', function () { _drag = null; });
-
-        // ── scroll to change slice ───────────────────────────────────────────
-        document.addEventListener('wheel', function (e) {
-            if (!_localMode) return;
-            var cvs = document.getElementById('localDicomCanvas');
-            if (e.target !== cvs) return;
-            e.preventDefault();
-            _renderLocalSlice(_localIdx + (e.deltaY > 0 ? 1 : -1));
-        }, { passive: false });
-
-        function _showLocalLoading(msg) {
-            var el = document.getElementById('localLoadingMsg');
-            if (el) { el.textContent = msg; el.style.display = 'block'; }
-        }
-        function _hideLocalLoading() {
-            var el = document.getElementById('localLoadingMsg');
-            if (el) el.style.display = 'none';
-        }
-        function _toast(msg, type) {
-            if (typeof showToast === 'function') showToast(msg, type);
-            else alert(msg);
-        }
     })();
     </script>
-
-    <!-- Local DICOM Viewer Modal (pure client-side, nothing uploaded) -->
-    <div id="localDicomModal"
-        style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:10000;
-               align-items:center; justify-content:center; flex-direction:column;">
-
-        <!-- toolbar -->
-        <div style="display:flex; align-items:center; gap:10px; padding:8px 16px;
-                    background:var(--card-bg,#1e2832); border-radius:8px 8px 0 0;
-                    width:min(98vw,900px); box-sizing:border-box;">
-            <span style="color:var(--accent-color,#00d4ff); font-weight:bold; font-size:15px;">
-                <i class="fas fa-eye"></i> Local DICOM Viewer
-            </span>
-            <span id="localFilename" style="color:#aaa; font-size:12px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
-            <span id="localSliceLabel" style="color:#ccc; font-size:13px; min-width:60px; text-align:center;"></span>
-            <button onclick="window._localRenderSlice(parseInt(document.getElementById('localSliceSlider').value)-1)"
-                style="background:none;border:1px solid #444;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;" title="Previous slice">&#9650;</button>
-            <input type="range" id="localSliceSlider" min="0" max="0" value="0"
-                style="width:120px;" oninput="window._localRenderSlice(parseInt(this.value))">
-            <button onclick="window._localRenderSlice(parseInt(document.getElementById('localSliceSlider').value)+1)"
-                style="background:none;border:1px solid #444;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;" title="Next slice">&#9660;</button>
-            <button onclick="window._localToggleInvert()"
-                style="background:none;border:1px solid #444;color:#ccc;padding:4px 10px;border-radius:4px;cursor:pointer;" title="Invert">&#9670; Invert</button>
-            <button onclick="window._closeLocalDicomViewer()"
-                style="background:#c0392b;border:none;color:white;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:16px;" title="Close">&times;</button>
-        </div>
-
-        <!-- canvas -->
-        <div style="background:#000; width:min(98vw,900px); display:flex; align-items:center; justify-content:center;
-                    min-height:400px; max-height:80vh; overflow:hidden; position:relative;">
-            <canvas id="localDicomCanvas"
-                style="max-width:100%; max-height:80vh; object-fit:contain; cursor:crosshair;"
-                oncontextmenu="return false;"></canvas>
-            <div id="localLoadingMsg"
-                style="display:none; position:absolute; color:#fff; font-size:16px; background:rgba(0,0,0,0.7);
-                       padding:12px 24px; border-radius:8px;"></div>
-        </div>
-
-        <div style="padding:6px 16px; background:var(--card-bg,#1e2832); border-radius:0 0 8px 8px;
-                    width:min(98vw,900px); box-sizing:border-box; color:#888; font-size:11px;">
-            Right-drag to adjust window/level &nbsp;|&nbsp; Scroll wheel to change slice &nbsp;|&nbsp;
-            Images are viewed locally — <strong>nothing is uploaded to the server</strong>
-        </div>
-    </div>
 
     <!-- Print / Export Modal -->
     <div id="printExportModal"

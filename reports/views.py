@@ -258,6 +258,22 @@ def write_report(request, study_id):
     except Exception:
         letterhead_b64 = ''
 
+    # Generate QR codes for the report editor
+    try:
+        viewer_url = request.build_absolute_uri(
+            reverse('dicom_viewer:web_viewer') + f'?study_id={study.id}'
+        )
+        report_url = request.build_absolute_uri(
+            reverse('reports:print_report', args=[study.id])
+        )
+        qr_viewer_b64 = _data_url_from_png(_qr_png_bytes(viewer_url))
+        qr_report_b64 = _data_url_from_png(_qr_png_bytes(report_url))
+    except Exception:
+        qr_viewer_b64 = ''
+        qr_report_b64 = ''
+        viewer_url = ''
+        report_url = ''
+
     context = {
         'study': study,
         'report': report,
@@ -266,6 +282,10 @@ def write_report(request, study_id):
         'report_templates': report_templates,
         'facility': study.facility,
         'letterhead_b64': letterhead_b64,
+        'qr_viewer': qr_viewer_b64,
+        'qr_report': qr_report_b64,
+        'viewer_url': viewer_url,
+        'report_url': report_url,
     }
 
     return render(request, 'reports/write_report.html', context)

@@ -61,28 +61,34 @@ class User(AbstractUser):
     def __str__(self):
         return f"{self.username} ({self.get_role_display()})"
 
+    def _is_superadmin(self):
+        """True for Django superusers and staff regardless of the role field."""
+        return bool(getattr(self, 'is_superuser', False) or getattr(self, 'is_staff', False))
+
     def is_admin(self):
-        # Treat Django superusers and staff as admins for access control
-        if getattr(self, 'is_superuser', False) or getattr(self, 'is_staff', False):
+        if self._is_superadmin():
             return True
         return self.role == 'admin'
 
     def is_radiologist(self):
+        if self._is_superadmin():
+            return False  # superadmins are admins, not radiologists
         return self.role == 'radiologist'
 
     def is_facility_user(self):
-        # Superusers and staff are always admins, never facility-restricted,
-        # regardless of whatever role value was set by createsuperuser default.
-        if getattr(self, 'is_superuser', False) or getattr(self, 'is_staff', False):
+        # Superusers/staff created via createsuperuser get role='facility' by default;
+        # they must never be treated as facility-restricted users.
+        if self._is_superadmin():
             return False
         return self.role == 'facility'
 
     def can_edit_reports(self):
+        if self._is_superadmin():
+            return True
         return self.role in ['admin', 'radiologist']
 
     def can_manage_users(self):
-        # Allow superusers/staff to manage users, in addition to role-based admin
-        if getattr(self, 'is_superuser', False) or getattr(self, 'is_staff', False):
+        if self._is_superadmin():
             return True
         return self.role == 'admin'
 

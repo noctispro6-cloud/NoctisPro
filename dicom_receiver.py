@@ -697,6 +697,21 @@ class DicomReceiver:
             
             file_path = file_dir / f"{sop_instance_uid}.dcm"
             
+            # Ensure File Meta Information is present — some modalities omit it.
+            # pydicom requires TransferSyntaxUID when write_like_original=False.
+            if not hasattr(ds, 'file_meta') or ds.file_meta is None:
+                from pydicom.dataset import FileMetaDataset
+                ds.file_meta = FileMetaDataset()
+            if not getattr(ds.file_meta, 'TransferSyntaxUID', None):
+                from pydicom.uid import ExplicitVRLittleEndian
+                ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+            if not getattr(ds.file_meta, 'MediaStorageSOPClassUID', None) and hasattr(ds, 'SOPClassUID'):
+                ds.file_meta.MediaStorageSOPClassUID = ds.SOPClassUID
+            if not getattr(ds.file_meta, 'MediaStorageSOPInstanceUID', None) and hasattr(ds, 'SOPInstanceUID'):
+                ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
+            ds.is_implicit_VR = False
+            ds.is_little_endian = True
+
             # Save DICOM file
             ds.save_as(file_path, write_like_original=False)
             

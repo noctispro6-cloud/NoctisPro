@@ -160,6 +160,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    env_file:
+      - .env.docker
     environment:
       DOMAIN_NAME: ${DOMAIN_NAME:-example.com}
     volumes:

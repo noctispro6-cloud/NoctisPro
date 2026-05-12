@@ -1320,6 +1320,12 @@ def api_image_data(request, image_id):
                     resp['X-Noctis-Modality'] = str(modv)
             except Exception:
                 pass
+            try:
+                photov = str(getattr(ds, 'PhotometricInterpretation', '') or '').strip() if ds is not None else ''
+                if photov:
+                    resp['X-Noctis-Photometric-Interpretation'] = photov
+            except Exception:
+                pass
             # Modest caching; bytes are immutable per image. Client already uses force-cache.
             resp['Cache-Control'] = 'private, max-age=60'
             if pixel_decode_error or warnings:

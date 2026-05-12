@@ -90,6 +90,28 @@
             #writeReportBtn { background: rgba(154,78,0,0.12) !important; color: #9A4E00 !important; border-color: rgba(154,78,0,0.35) !important; }
             .modal-content { background: #EDF4FF !important; color: #09122B !important; border-color: #93B8F0 !important; }
             .ai-analysis-section { border-color: #93B8F0 !important; }
+
+            /* ── Measure / View / Transform group summaries ── */
+            .toolbar-group > summary {
+                background: linear-gradient(135deg, rgba(24,72,200,0.18), rgba(24,72,200,0.08)) !important;
+                border: 1px solid rgba(24,72,200,0.35) !important;
+                color: #09122B !important;
+            }
+            .toolbar-group > summary:hover {
+                background: linear-gradient(135deg, rgba(24,72,200,0.28), rgba(24,72,200,0.14)) !important;
+                color: #1848C8 !important;
+            }
+            .toolbar-group[open] > summary {
+                background: linear-gradient(135deg, rgba(24,72,200,0.32), rgba(24,72,200,0.18)) !important;
+                color: #1848C8 !important;
+                border-color: #1848C8 !important;
+            }
+            .toolbar-group-items {
+                border-left: 2px solid rgba(24,72,200,0.30) !important;
+            }
+            .toolbar-divider {
+                background: rgba(24,72,200,0.20) !important;
+            }
         }
 
         /* ── Manual theme toggle ── */
@@ -118,10 +140,19 @@
             color: #0078d4;
         }
         [data-theme="light"] .topbar-btn-primary {
-            background: #0078d4; border-color: #0078d4; color: #fff;
+            background: linear-gradient(135deg, #1848C8, #2563EB); border-color: #1440A8; color: #fff;
         }
-        [data-theme="light"] .topbar-btn-primary:hover { background: #006abc; border-color: #006abc; }
+        [data-theme="light"] .topbar-btn-primary:hover { background: #1440A8; border-color: #1030A0; }
         [data-theme="light"] .nav-dd-menu { box-shadow: 0 6px 18px rgba(0,0,0,0.15); }
+        [data-theme="light"] .toolbar-group > summary {
+            background: linear-gradient(135deg, rgba(24,72,200,0.18), rgba(24,72,200,0.08));
+            border: 1px solid rgba(24,72,200,0.35);
+            color: #09122B;
+        }
+        [data-theme="light"] .toolbar-group > summary:hover { color: #1848C8; }
+        [data-theme="light"] .toolbar-group[open] > summary { color: #1848C8; border-color: #1848C8; }
+        [data-theme="light"] .toolbar-group-items { border-left: 2px solid rgba(24,72,200,0.30); }
+        [data-theme="light"] .toolbar-divider { background: rgba(24,72,200,0.20); }
 
         * {
             margin: 0;

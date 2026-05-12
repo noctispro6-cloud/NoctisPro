@@ -1224,13 +1224,16 @@ def api_image_data(request, image_id):
 
     # MONOCHROME1: invert pixel values so display is correct (high=bright) before windowing.
     # Doing this server-side ensures WW/WL percentiles and client rendering are both consistent.
+    _mono1_inverted = False
+    _mono1_max_val = 65535.0
     if pixel_array is not None and ds is not None:
         try:
             _photo = str(getattr(ds, 'PhotometricInterpretation', '') or '').strip().upper()
             if _photo == 'MONOCHROME1':
                 _bits = int(getattr(ds, 'BitsStored', None) or getattr(ds, 'BitsAllocated', None) or 16)
-                _max_val = float((1 << _bits) - 1)
-                pixel_array = _max_val - pixel_array
+                _mono1_max_val = float((1 << _bits) - 1)
+                pixel_array = _mono1_max_val - pixel_array
+                _mono1_inverted = True
         except Exception:
             pass
 
@@ -1245,6 +1248,14 @@ def api_image_data(request, image_id):
 
     window_width = _first_or_none(getattr(ds, 'WindowWidth', None)) if ds is not None else None
     window_center = _first_or_none(getattr(ds, 'WindowCenter', None)) if ds is not None else None
+
+    # After MONOCHROME1 inversion the pixel scale is mirrored: WL must be reflected.
+    # WW stays the same (symmetric window); only WL = max_val - original_WL.
+    if _mono1_inverted and window_center is not None:
+        try:
+            window_center = _mono1_max_val - float(window_center)
+        except Exception:
+            pass
 
     modality_code = str(getattr(ds, 'Modality', '') or '').upper() if ds is not None else ''
 

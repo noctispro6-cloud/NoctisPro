@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Subscription Expired — Noctis Pro</title>
+    <title>AI Subscription Required — Noctis Pro</title>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -20,133 +20,116 @@
             border: 1px solid #30363d;
             border-radius: 12px;
             padding: 48px 40px;
-            max-width: 520px;
+            max-width: 540px;
             width: 100%;
             text-align: center;
             box-shadow: 0 8px 32px rgba(0,0,0,0.4);
         }
-        .icon {
-            font-size: 56px;
-            margin-bottom: 20px;
-        }
-        h1 {
-            font-size: 1.8rem;
-            font-weight: 700;
-            color: #f0883e;
-            margin-bottom: 12px;
-        }
-        .subtitle {
-            color: #8b949e;
-            font-size: 1rem;
-            line-height: 1.6;
-            margin-bottom: 24px;
-        }
-        .expiry-box {
+        .icon { font-size: 52px; margin-bottom: 18px; }
+        h1 { font-size: 1.6rem; font-weight: 700; color: #f0883e; margin-bottom: 10px; }
+        .subtitle { color: #8b949e; font-size: 0.95rem; line-height: 1.6; margin-bottom: 24px; }
+        .facility-name { color: #58a6ff; font-weight: 600; }
+        .info-box {
             background: #1c2128;
             border: 1px solid #30363d;
             border-radius: 8px;
             padding: 16px 20px;
-            margin-bottom: 28px;
-            font-size: 0.9rem;
+            margin-bottom: 24px;
+            font-size: 0.88rem;
+            text-align: left;
         }
-        .expiry-box .label { color: #8b949e; }
-        .expiry-box .value { color: #f85149; font-weight: 600; margin-top: 4px; }
-        {% if facility and facility.name %}
-        .facility-name {
-            color: #58a6ff;
-            font-weight: 600;
-        }
-        {% endif %}
-        .actions {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-        .btn {
-            display: inline-block;
-            padding: 12px 24px;
+        .info-box .row { display: flex; justify-content: space-between; padding: 4px 0; }
+        .info-box .label { color: #8b949e; }
+        .info-box .value { color: #f85149; font-weight: 600; }
+        .info-box .value.ok { color: #3fb950; }
+        .steps {
+            background: #1c2128;
+            border: 1px solid #30363d;
             border-radius: 8px;
-            font-size: 0.95rem;
-            font-weight: 600;
-            text-decoration: none;
-            cursor: pointer;
-            border: none;
-            transition: opacity 0.2s;
+            padding: 16px 20px;
+            margin-bottom: 24px;
+            text-align: left;
+        }
+        .steps h4 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; color: #8b949e; margin-bottom: 12px; }
+        .steps ol { padding-left: 18px; }
+        .steps li { font-size: 0.88rem; color: #c9d1d9; margin-bottom: 8px; line-height: 1.5; }
+        .steps li span { color: #58a6ff; }
+        .actions { display: flex; flex-direction: column; gap: 10px; }
+        .btn {
+            display: inline-block; padding: 11px 24px; border-radius: 8px;
+            font-size: 0.92rem; font-weight: 600; text-decoration: none;
+            cursor: pointer; border: none; transition: opacity 0.2s; width: 100%;
         }
         .btn:hover { opacity: 0.85; }
-        .btn-primary {
-            background: #238636;
-            color: #fff;
-        }
-        .btn-secondary {
-            background: #21262d;
-            color: #c9d1d9;
-            border: 1px solid #30363d;
-        }
-        .contact-info {
-            margin-top: 28px;
-            padding-top: 20px;
-            border-top: 1px solid #30363d;
-            font-size: 0.85rem;
-            color: #8b949e;
-        }
-        .contact-info a { color: #58a6ff; text-decoration: none; }
-        .contact-info a:hover { text-decoration: underline; }
+        .btn-primary { background: #1f6feb; color: #fff; }
+        .btn-green { background: #238636; color: #fff; }
+        .btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+        .divider { margin: 24px 0; border: none; border-top: 1px solid #30363d; }
+        .note { font-size: 0.82rem; color: #8b949e; margin-top: 18px; }
+        .note a { color: #58a6ff; text-decoration: none; }
     </style>
 </head>
 <body>
     <div class="card">
-        <div class="icon">⚠️</div>
-        <h1>Subscription Expired</h1>
+        <div class="icon">🤖</div>
+        <h1>AI Features Not Available</h1>
 
-        {% if facility %}
         <p class="subtitle">
-            The subscription for <span class="facility-name">{{ facility.name }}</span>
-            has expired or is inactive. Access to Noctis Pro has been suspended.
+            {% if facility %}
+            The AI subscription for <span class="facility-name">{{ facility.name }}</span> is
+            {% if facility.subscription_expires_at %}expired{% else %}not active{% endif %}.
+            Your worklist, DICOM viewer, and reports are fully accessible.
+            {% else %}
+            Your facility does not have an active AI subscription.
+            All other features remain fully accessible.
+            {% endif %}
         </p>
 
-        {% if facility.subscription_expires_at %}
-        <div class="expiry-box">
-            <div class="label">Subscription expired on</div>
-            <div class="value">{{ facility.subscription_expires_at|date:"F j, Y, g:i A" }} UTC</div>
+        {% if facility and facility.subscription_expires_at %}
+        <div class="info-box">
+            <div class="row">
+                <span class="label">Subscription expired</span>
+                <span class="value">{{ facility.subscription_expires_at|date:"M j, Y" }}</span>
+            </div>
+            <div class="row">
+                <span class="label">Facility</span>
+                <span class="value ok">{{ facility.name }}</span>
+            </div>
         </div>
         {% endif %}
 
-        {% else %}
-        <p class="subtitle">
-            Your facility's subscription has expired or is inactive.
-            Access to Noctis Pro has been suspended until the subscription is renewed.
-        </p>
-        {% endif %}
+        <div class="steps">
+            <h4>How to renew</h4>
+            <ol>
+                <li>Contact your <span>Noctis Pro administrator</span> or the service provider.</li>
+                <li>Once payment is confirmed, the admin enables AI in <span>Admin Panel → Facilities → Edit → AI Subscription</span>.</li>
+                <li>The admin sets a new <span>Subscription Expires At</span> date and saves.</li>
+                <li>Log out and back in — AI features will be restored immediately.</li>
+            </ol>
+        </div>
 
         <div class="actions">
-            {% if facility and facility.email %}
-            <a class="btn btn-primary" href="mailto:{{ facility.email }}?subject=Subscription%20Renewal%20-%20{{ facility.name|urlencode }}">
-                ✉ Contact Administrator
+            <a href="{% url 'worklist:dashboard' %}" class="btn btn-primary">
+                ← Back to Worklist
             </a>
-            {% elif facility and facility.phone %}
-            <a class="btn btn-primary" href="tel:{{ facility.phone }}">
-                📞 Call {{ facility.phone }}
+            {% if facility and facility.email %}
+            <a class="btn btn-green" href="mailto:{{ facility.email }}?subject=AI%20Subscription%20Renewal%20-%20{{ facility.name|urlencode }}">
+                ✉ Email Administrator
             </a>
             {% else %}
-            <a class="btn btn-primary" href="mailto:admin@noctispro.com?subject=Subscription%20Renewal">
+            <a class="btn btn-green" href="mailto:support@noctis-pro.com?subject=AI%20Subscription%20Renewal">
                 ✉ Contact Support
             </a>
             {% endif %}
-
             <form method="post" action="{% url 'accounts:logout' %}" style="margin:0;">
                 {% csrf_token %}
-                <button type="submit" class="btn btn-secondary" style="width:100%;">
-                    🔓 Log Out
-                </button>
+                <button type="submit" class="btn btn-secondary">Log Out</button>
             </form>
         </div>
 
-        <div class="contact-info">
-            If you believe this is an error, please contact your system administrator
-            or reach out to
-            <a href="mailto:support@noctispro.com">support@noctispro.com</a>.
-        </div>
+        <p class="note">
+            Questions? Contact <a href="mailto:support@noctis-pro.com">support@noctis-pro.com</a>
+        </p>
     </div>
 </body>
 </html>

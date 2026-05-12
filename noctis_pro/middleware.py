@@ -424,14 +424,16 @@ class SessionTimeoutMiddleware(MiddlewareMixin):
 
 class SubscriptionRequiredMiddleware:
     """
-    Redirect facility users with expired/missing subscriptions to a subscription-expired page.
+    Restrict AI pages for facility users without an active AI subscription.
     Admins and radiologists always bypass this check.
+    All non-AI pages (worklist, viewer, reports, login, etc.) are always accessible.
 
     Async-capable: works in both WSGI and ASGI mode.
     """
     async_capable = True
     sync_capable = True
-    EXEMPT_PATHS = {'/login/', '/portal/login/', '/logout/', '/static/', '/media/', '/health/', '/favicon.ico'}
+    # Only these prefixes require an active AI subscription
+    AI_PATHS = ('/ai/', '/ai_analysis/')
 
     def __init__(self, get_response):
         self.get_response = get_response
@@ -439,15 +441,16 @@ class SubscriptionRequiredMiddleware:
             markcoroutinefunction(self)
 
     def _subscription_redirect(self, request):
-        """Return a redirect response if subscription is required, else None."""
+        """Return a redirect if a facility user without AI subscription hits an AI page."""
+        path = request.path
+        # Only enforce on AI pages
+        if not any(path.startswith(p) for p in self.AI_PATHS):
+            return None
         if not request.user.is_authenticated:
             return None
         user = request.user
-        path = request.path
+        # Admins and radiologists always have AI access
         if user.is_admin() or user.is_radiologist():
-            return None
-        is_exempt = any(path.startswith(p) for p in self.EXEMPT_PATHS)
-        if is_exempt or path == '/subscription-expired/':
             return None
         facility = getattr(user, 'facility', None)
         if not facility:

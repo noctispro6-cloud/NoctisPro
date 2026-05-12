@@ -235,6 +235,31 @@
                         </h5>
                         <hr class="border-secondary mb-4">
                     </div>
+
+                    {% if facility %}
+                    <div class="col-12">
+                        {% with now=request.META %}
+                        <div style="background:rgba(0,0,0,.25); border:1px solid #333; border-radius:8px; padding:14px 18px; margin-bottom:8px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+                            <div>
+                                <div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px;">Current Status</div>
+                                {% if facility.has_ai_subscription %}
+                                    {% if facility.subscription_expires_at %}
+                                    <span style="color:#f0883e; font-weight:700; font-size:13px;"><i class="fas fa-clock me-1"></i>Active — expires {{ facility.subscription_expires_at|date:"M j, Y" }}</span>
+                                    {% else %}
+                                    <span style="color:#3fb950; font-weight:700; font-size:13px;"><i class="fas fa-check-circle me-1"></i>Active (no expiry)</span>
+                                    {% endif %}
+                                {% else %}
+                                <span style="color:#f85149; font-weight:700; font-size:13px;"><i class="fas fa-times-circle me-1"></i>Inactive</span>
+                                {% endif %}
+                            </div>
+                            <div style="margin-left:auto; font-size:11px; color:#666;">
+                                To renew: enable toggle + set new expiry date + save
+                            </div>
+                        </div>
+                        {% endwith %}
+                    </div>
+                    {% endif %}
+
                     <div class="col-12">
                         <div class="form-check form-switch">
                             {{ form.has_ai_subscription }}
@@ -243,7 +268,7 @@
                             </label>
                         </div>
                         <div class="form-text text-secondary">
-                            <small>Enable to grant this facility access to AI analysis features.</small>
+                            <small>Enable to grant this facility access to AI analysis features. Disable to revoke immediately.</small>
                         </div>
                         {% if form.has_ai_subscription.errors %}
                           {% for error in form.has_ai_subscription.errors %}
@@ -255,13 +280,24 @@
                         <label for="id_subscription_expires_at" class="form-label text-white">Subscription Expires At</label>
                         {{ form.subscription_expires_at }}
                         <div class="form-text text-secondary">
-                            <small>Leave blank for no expiry. Set a date to auto-expire access.</small>
+                            <small>Leave blank for no expiry. On renewal, update this date to extend access.</small>
                         </div>
                         {% if form.subscription_expires_at.errors %}
                           {% for error in form.subscription_expires_at.errors %}
                             <div class="invalid-feedback d-block">{{ error }}</div>
                           {% endfor %}
                         {% endif %}
+                    </div>
+                    <div class="col-md-6 d-flex align-items-end">
+                        <div style="width:100%;">
+                            <div style="font-size:11px; color:#888; margin-bottom:8px; text-transform:uppercase; letter-spacing:.5px;">Quick Renewal</div>
+                            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                <button type="button" class="btn-control btn-sm" onclick="setExpiry(1)">+1 Month</button>
+                                <button type="button" class="btn-control btn-sm" onclick="setExpiry(6)">+6 Months</button>
+                                <button type="button" class="btn-control btn-sm" onclick="setExpiry(12)">+1 Year</button>
+                                <button type="button" class="btn-control btn-sm" onclick="setExpiry(0)" style="color:#f85149;">Clear</button>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Optional Facility Login -->
@@ -392,6 +428,22 @@
 <script>
     function resetForm() {
         document.querySelector('form').reset();
+    }
+
+    function setExpiry(months) {
+        var field = document.getElementById('id_subscription_expires_at');
+        if (!field) return;
+        if (months === 0) { field.value = ''; return; }
+        var base = field.value ? new Date(field.value) : new Date();
+        if (isNaN(base)) base = new Date();
+        base.setMonth(base.getMonth() + months);
+        // Format as YYYY-MM-DD HH:MM:SS for Django DateTimeField
+        var pad = n => String(n).padStart(2, '0');
+        field.value = base.getFullYear() + '-' + pad(base.getMonth()+1) + '-' + pad(base.getDate())
+                    + ' ' + pad(base.getHours()) + ':' + pad(base.getMinutes()) + ':00';
+        // Also enable the subscription toggle if adding months
+        var toggle = document.getElementById('id_has_ai_subscription');
+        if (toggle && months > 0) toggle.checked = true;
     }
 
     function copyDicom(elemId) {

@@ -3576,9 +3576,37 @@
                 img.onerror = reject;
             });
 
+            // Apply modality gamma for visual consistency with binary render path.
+            let gammaImg = img;
+            try {
+                const srMod = String((currentSeries && currentSeries.modality) || '').toUpperCase();
+                const srGamma = _getGammaForModality(srMod);
+                if (srGamma !== 1.0) {
+                    const iw = img.naturalWidth || img.width;
+                    const ih = img.naturalHeight || img.height;
+                    if (iw > 0 && ih > 0) {
+                        const offsc = document.createElement('canvas');
+                        offsc.width = iw;
+                        offsc.height = ih;
+                        const offCtx = offsc.getContext('2d', { willReadFrequently: true });
+                        offCtx.drawImage(img, 0, 0);
+                        const idata = offCtx.getImageData(0, 0, iw, ih);
+                        const px = idata.data;
+                        const lut = _buildGammaLUT(srGamma);
+                        for (let k = 0; k < px.length; k += 4) {
+                            px[k]     = lut[px[k]];
+                            px[k + 1] = lut[px[k + 1]];
+                            px[k + 2] = lut[px[k + 2]];
+                        }
+                        offCtx.putImageData(idata, 0, 0);
+                        gammaImg = offsc;
+                    }
+                }
+            } catch (_ge) { /* gamma pass failed — use original PNG */ }
+
             _serverRendered.enabled = true;
             _serverRendered.imageId = id;
-            _serverRendered.image = img;
+            _serverRendered.image = gammaImg;
             _serverRendered.dataUrl = srcUrl;
             _serverRendered.info = null;
             _serverRendered.key = _serverRenderKey(id, null);
@@ -3595,12 +3623,17 @@
             // rather than embedding a potentially huge data URL.
             params.set('mode', 'url');
 
-            // Only send WW/WL if we have numeric values; backend can choose sensible defaults if omitted.
-            const ww = Number(windowWidth);
-            const wl = Number(windowLevel);
-            if (Number.isFinite(ww) && Number.isFinite(wl) && ww > 0) {
-                params.set('ww', String(ww));
-                params.set('wl', String(wl));
+            // Only propagate WW/WL that the user explicitly chose.
+            // When windowing isn't locked (e.g. binary decode just failed and client still has CT defaults),
+            // let the server use DICOM-native tags or modality-specific auto-windowing — its defaults
+            // are far more accurate than the client's static 400/40 fallback for DX/CR/MG images.
+            if (windowingLockedByUser) {
+                const ww = Number(windowWidth);
+                const wl = Number(windowLevel);
+                if (Number.isFinite(ww) && Number.isFinite(wl) && ww > 0) {
+                    params.set('ww', String(ww));
+                    params.set('wl', String(wl));
+                }
             }
 
             // First pass: omit invert so backend can apply MONOCHROME1 defaults.
@@ -3636,9 +3669,12 @@
                 throw new Error(msg);
             }
 
-            // Keep WW/WL synced to what backend used (useful when we omitted ww/wl).
+            // Sync WW/WL from what the backend actually used.
+            // Always do this when windowing isn't user-locked (the server just computed correct values
+            // from DICOM tags / auto-windowing that are better than our client defaults).
+            // Skip when the user has explicitly chosen WW/WL — don't stomp their settings.
             try {
-                if (data && data.windowing) {
+                if (!windowingLockedByUser && data && data.windowing) {
                     if (Number.isFinite(Number(data.windowing.window_width))) windowWidth = Number(data.windowing.window_width);
                     if (Number.isFinite(Number(data.windowing.window_level))) windowLevel = Number(data.windowing.window_level);
                     updateSliders();
@@ -3653,9 +3689,38 @@
                 img.onerror = reject;
             });
 
+            // Apply the same modality-specific gamma as the binary render path so
+            // server-rendered images look identical to binary-decoded frames.
+            let gammaImg = img;
+            try {
+                const srMod = String((currentSeries && currentSeries.modality) || '').toUpperCase();
+                const srGamma = _getGammaForModality(srMod);
+                if (srGamma !== 1.0) {
+                    const iw = img.naturalWidth || img.width;
+                    const ih = img.naturalHeight || img.height;
+                    if (iw > 0 && ih > 0) {
+                        const offsc = document.createElement('canvas');
+                        offsc.width = iw;
+                        offsc.height = ih;
+                        const offCtx = offsc.getContext('2d', { willReadFrequently: true });
+                        offCtx.drawImage(img, 0, 0);
+                        const idata = offCtx.getImageData(0, 0, iw, ih);
+                        const px = idata.data;
+                        const lut = _buildGammaLUT(srGamma);
+                        for (let k = 0; k < px.length; k += 4) {
+                            px[k]     = lut[px[k]];
+                            px[k + 1] = lut[px[k + 1]];
+                            px[k + 2] = lut[px[k + 2]];
+                        }
+                        offCtx.putImageData(idata, 0, 0);
+                        gammaImg = offsc;
+                    }
+                }
+            } catch (_ge) { /* gamma pass failed — fall back to original PNG */ }
+
             _serverRendered.enabled = true;
             _serverRendered.imageId = id;
-            _serverRendered.image = img;
+            _serverRendered.image = gammaImg;
             _serverRendered.dataUrl = srcUrl;
             _serverRendered.info = (data && data.image_info) ? data.image_info : info;
             _serverRendered.key = _serverRenderKey(id, _serverRendered.info);

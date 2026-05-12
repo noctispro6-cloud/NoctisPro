@@ -1262,30 +1262,25 @@ def api_image_data(request, image_id):
     if (window_width is None or window_center is None) and pixel_array is not None:
         try:
             # Prefer our medical-tuned window estimator when available.
-            try:
-                processor = DicomProcessor()
-                ww, wl = processor.auto_window_from_data(pixel_array, percentile_range=(2, 98), modality=(modality_code or 'CT'))
-            except Exception:
-                # Derive window using robust percentiles (fast enough for a single slice)
-                flat = pixel_array.astype(np.float32).flatten()
-                p2 = float(np.percentile(flat, 2))
-                p98 = float(np.percentile(flat, 98))
-                ww = max(1.0, p98 - p2)
-                wl = (p98 + p2) / 2.0
-
-            # DX/CR often look "blank" with CT-ish defaults; ensure a usable WW/WL floor.
-            if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG'):
-                ww = max(float(ww), 800.0)
+            processor = DicomProcessor()
+            ww, wl = processor.auto_window_from_data(pixel_array, percentile_range=(2, 98), modality=(modality_code or 'CT'))
             window_width = window_width if window_width is not None else ww
             window_center = window_center if window_center is not None else wl
         except Exception:
-            # Last-resort defaults
-            if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG'):
-                window_width = window_width if window_width is not None else 2500.0
-                window_center = window_center if window_center is not None else 1200.0
-            else:
-                window_width = window_width if window_width is not None else 400.0
-                window_center = window_center if window_center is not None else 40.0
+            # Last-resort safe defaults (not modality-tuned, but always renderable)
+            try:
+                flat = pixel_array.astype(np.float32).flatten()
+                p2 = float(np.percentile(flat, 2))
+                p98 = float(np.percentile(flat, 98))
+                window_width = window_width if window_width is not None else max(1.0, p98 - p2)
+                window_center = window_center if window_center is not None else (p98 + p2) / 2.0
+            except Exception:
+                if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG'):
+                    window_width = window_width if window_width is not None else 2500.0
+                    window_center = window_center if window_center is not None else 1200.0
+                else:
+                    window_width = window_width if window_width is not None else 400.0
+                    window_center = window_center if window_center is not None else 40.0
 
     # Include pixel payload for canvas renderer
     if pixel_array is not None:

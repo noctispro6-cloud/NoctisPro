@@ -334,16 +334,36 @@ class DicomProcessor:
     def auto_window_from_data(self, pixel_array, percentile_range=(1, 99), modality='CT'):
         """Automatically calculate optimal window/level from image data."""
         try:
-            flat = pixel_array.flatten()
+            flat = pixel_array.flatten().astype(np.float32)
+            mod = modality.upper()
 
-            if modality.upper() in ['CR', 'DX', 'DR', 'MG', 'XA', 'RF']:
-                # X-ray: use tight percentiles so full contrast is used, no 1.5 multiplier.
-                p_low  = float(np.percentile(flat, 0.5))
-                p_high = float(np.percentile(flat, 99.5))
-                window_width = max(1000.0, float(p_high - p_low))
+            if mod in ['CR', 'DX', 'DR']:
+                # Projection radiography: exclude extreme tails; typical exposure range matters.
+                # Use p1/p99 rather than p0.5/p99.5 to be slightly more conservative and
+                # avoid letting a few saturated pixels collapse the window.
+                p_low  = float(np.percentile(flat, 1.0))
+                p_high = float(np.percentile(flat, 99.0))
+                window_width = max(500.0, float(p_high - p_low))
                 window_level = (p_high + p_low) / 2.0
                 return float(window_width), float(window_level)
 
+            if mod == 'MG':
+                # Mammography: very tight window for subtle tissue contrast.
+                p_low  = float(np.percentile(flat, 0.5))
+                p_high = float(np.percentile(flat, 99.5))
+                window_width = max(300.0, float(p_high - p_low))
+                window_level = (p_high + p_low) / 2.0
+                return float(window_width), float(window_level)
+
+            if mod in ['XA', 'RF']:
+                # Fluoroscopy / angiography: standard tight window.
+                p_low  = float(np.percentile(flat, 1.0))
+                p_high = float(np.percentile(flat, 99.0))
+                window_width = max(200.0, float(p_high - p_low))
+                window_level = (p_high + p_low) / 2.0
+                return float(window_width), float(window_level)
+
+            # Default (CT, MR, US, NM, …)
             p_low, p_high = np.percentile(flat, percentile_range)
             window_width = max(50, p_high - p_low)
             window_level = (p_high + p_low) / 2.0

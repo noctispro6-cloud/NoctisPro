@@ -1993,6 +1993,41 @@
         let currentImageIndex = 0;
         let imageData = [];
         let activeTool = 'windowing';
+
+        // ── Per-series gamma LUT (cached; rebuilt only when modality changes) ──
+        let _cachedGammaLUT = null;
+        let _cachedGammaModality = null;
+
+        function _getGammaForModality(mod) {
+            // Production-tuned gamma per modality.
+            // Gamma < 1 brightens mid-tones (DICOM GSDF target ≈ 0.45 for medical displays).
+            switch ((mod || '').toUpperCase()) {
+                case 'MG':            return 0.45; // mammography — very strong correction for subtle microcalcifications
+                case 'DX': case 'CR':
+                case 'DR':            return 0.55; // chest/extremity X-ray — strong correction
+                case 'XA': case 'RF': return 0.65; // fluoroscopy/angiography — moderate
+                default:              return 1.0;  // CT, MR, US, NM — use calibrated DICOM windowing as-is
+            }
+        }
+
+        function _buildGammaLUT(gamma) {
+            const lut = new Uint8Array(256);
+            if (gamma === 1.0) {
+                for (let g = 0; g < 256; g++) lut[g] = g;
+            } else {
+                for (let g = 0; g < 256; g++) lut[g] = Math.min(255, Math.round(Math.pow(g / 255, gamma) * 255));
+            }
+            return lut;
+        }
+
+        function _getGammaLUT(modality) {
+            const mod = (modality || '').toUpperCase();
+            if (_cachedGammaModality !== mod) {
+                _cachedGammaLUT = _buildGammaLUT(_getGammaForModality(mod));
+                _cachedGammaModality = mod;
+            }
+            return _cachedGammaLUT;
+        }
         let viewMode = 'single'; // 'single' or 'mpr'
         let measurements = [];
         let annotations = [];
@@ -3237,6 +3272,7 @@
                 currentSeries = data && data.series ? data.series : null;
                 imageData = Array.isArray(data && data.images) ? data.images : [];
                 currentImageIndex = 0;
+                _cachedGammaModality = null; // force gamma LUT rebuild for new series modality
 
                 // Restore persisted WW/WL/invert for this series if present.
                 // If not present, allow the first loaded slice to set defaults.
@@ -3653,8 +3689,10 @@
             // Update window/level from DICOM data - SAME AS YOUR ORIGINAL
             // Do not overwrite user-selected WW/WL while scrolling.
             if (!windowingLockedByUser) {
-                windowWidth = data.window_width || windowWidth;
-                windowLevel = data.window_center || windowLevel;
+                if (data.window_width != null && Number.isFinite(Number(data.window_width)) && Number(data.window_width) > 0)
+                    windowWidth = Number(data.window_width);
+                if (data.window_center != null && Number.isFinite(Number(data.window_center)))
+                    windowLevel = Number(data.window_center);
             }
 
             // Derive WL/WW slider bounds from actual pixel distribution (fast sampled percentiles).
@@ -3959,19 +3997,9 @@
                 _frameCacheKey = null;
             }
 
-            // Gamma correction for X-ray modalities — brightens mid-tones for better
-            // soft-tissue and bone differentiation without a server round-trip.
-            const _xrayMods = ['DX','CR','MG','XA','RF','DR'];
+            // Gamma correction — modality-specific, cached per series.
             const _imgModality = String((imageData.modality || (currentSeries && currentSeries.modality) || '')).toUpperCase();
-            const _isXray = _xrayMods.includes(_imgModality);
-            const _gamma = _isXray ? 0.65 : 1.0;
-            // Pre-build gamma LUT for speed (avoids Math.pow per pixel).
-            const _gammaLUT = new Uint8Array(256);
-            if (_gamma === 1.0) {
-                for (let g = 0; g < 256; g++) _gammaLUT[g] = g;
-            } else {
-                for (let g = 0; g < 256; g++) _gammaLUT[g] = Math.min(255, Math.round(Math.pow(g / 255, _gamma) * 255));
-            }
+            const _gammaLUT = _getGammaLUT(_imgModality);
 
             if (_frameCacheKey !== cacheKey) {
                 try {

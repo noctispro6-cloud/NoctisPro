@@ -54,42 +54,97 @@
                 --warning-color: #9A4E00;
                 --danger-color: #A61220;
             }
-            .toolbar, .right-panel {
-                background: linear-gradient(135deg, #C8D8F8, #D8E8FF) !important;
-                border-color: #93B8F0 !important;
+            /* ── Toolbar (left) ── */
+            .toolbar {
+                background: linear-gradient(180deg, #C0D4F4 0%, #CBD9F6 100%) !important;
+                border-color: #7AAAE8 !important;
             }
+
+            /* ── Right panel (series list + info) ── */
+            .right-panel {
+                background: linear-gradient(180deg, #C8D8F5 0%, #BDD0F2 100%) !important;
+                border-color: #7AAAE8 !important;
+                box-shadow: -2px 0 12px rgba(24,72,200,0.12) !important;
+            }
+
+            /* ── Tool buttons ── */
             .tool-btn {
-                background: linear-gradient(135deg, #BBCEF5, #C8D8F8) !important;
+                background: linear-gradient(135deg, #B0C8F0, #C0D4F8) !important;
                 color: #09122B !important;
-                border: 1px solid #93B8F0 !important;
+                border: 1px solid #7AAAE8 !important;
                 box-shadow: 0 2px 6px rgba(24,72,200,0.12) !important;
             }
-            .tool-btn:hover { background: linear-gradient(135deg, #A0BCEE, #B8CCEE) !important; }
+            .tool-btn:hover { background: linear-gradient(135deg, #94B4E8, #AACAF4) !important; }
             .tool-btn.active {
-                background: linear-gradient(135deg, rgba(24,72,200,0.30), rgba(24,72,200,0.18)) !important;
+                background: linear-gradient(135deg, rgba(24,72,200,0.35), rgba(24,72,200,0.22)) !important;
                 color: #1848C8 !important;
                 border-color: #1848C8 !important;
+                box-shadow: 0 0 0 2px rgba(24,72,200,0.20) !important;
             }
-            .top-bar { background: linear-gradient(135deg, #C8D8F8, #D4E2FF) !important; border-color: #93B8F0 !important; }
-            .series-item { background: rgba(24,72,200,0.05) !important; border-color: rgba(24,72,200,0.15) !important; }
-            .series-item:hover { background: rgba(24,72,200,0.10) !important; }
+
+            /* ── Top bar ── */
+            .top-bar { background: linear-gradient(135deg, #BDD0F2, #C8D8F5) !important; border-color: #7AAAE8 !important; }
+
+            /* ── Series items ── */
+            .series-item {
+                background: rgba(255,255,255,0.55) !important;
+                border: 1px solid rgba(24,72,200,0.20) !important;
+                box-shadow: 0 1px 4px rgba(24,72,200,0.08) !important;
+            }
+            .series-item:hover {
+                background: rgba(255,255,255,0.80) !important;
+                border-color: rgba(24,72,200,0.35) !important;
+            }
             .series-item.active {
-                background: linear-gradient(135deg, rgba(24,72,200,0.20), rgba(24,72,200,0.10)) !important;
-                border-color: #1848C8 !important;
+                background: rgba(255,255,255,0.90) !important;
+                border-color: #0D6B2E !important;
+                border-left: 3px solid #0D6B2E !important;
+                box-shadow: 0 2px 10px rgba(13,107,46,0.18) !important;
             }
-            .series-thumb-wrap { background: #A0BCEE !important; }
-            .series-thumb-placeholder { color: #3D5A8A !important; }
-            .panel-section { border-color: #93B8F0 !important; }
-            .series-title { color: #09122B !important; }
-            .btn, .btn-sm, .btn-icon, .topbar-btn {
-                background: linear-gradient(135deg, #BBCEF5, #C8D8F8) !important;
+
+            /* Thumbnail preview area — keep dark so images are visible */
+            .series-thumb-wrap { background: #0D1828 !important; border-radius: 4px !important; }
+            .series-thumb-placeholder { color: #6B90C0 !important; }
+            .series-title { color: #09122B !important; font-weight: 600 !important; }
+            .series-details { color: #2A4070 !important; }
+
+            /* ── Series prev/next buttons ── */
+            .series-nav .series-nav-btn {
+                background: rgba(255,255,255,0.60) !important;
+                border: 1px solid #7AAAE8 !important;
                 color: #09122B !important;
-                border-color: #93B8F0 !important;
+            }
+            .series-nav .series-nav-btn:hover {
+                background: rgba(255,255,255,0.90) !important;
+                border-color: #1848C8 !important;
+                color: #1848C8 !important;
+            }
+
+            /* ── Panel sections & right-panel text ── */
+            .panel-section {
+                background: rgba(255,255,255,0.55) !important;
+                border-color: rgba(24,72,200,0.20) !important;
+            }
+            .panel-title, .panel-label { color: #1A3464 !important; }
+            .panel-value { color: #09122B !important; }
+
+            /* ── Generic buttons ── */
+            .btn, .btn-sm, .btn-icon, .topbar-btn {
+                background: linear-gradient(135deg, #B0C8F0, #C0D4F8) !important;
+                color: #09122B !important;
+                border-color: #7AAAE8 !important;
             }
             .topbar-btn-primary { background: linear-gradient(135deg, #1848C8, #2563EB) !important; color: #fff !important; border-color: #1440A8 !important; }
             #writeReportBtn { background: rgba(154,78,0,0.12) !important; color: #9A4E00 !important; border-color: rgba(154,78,0,0.35) !important; }
-            .modal-content { background: #EDF4FF !important; color: #09122B !important; border-color: #93B8F0 !important; }
-            .ai-analysis-section { border-color: #93B8F0 !important; }
+
+            /* ── Modals ── */
+            .modal-content { background: #EDF4FF !important; color: #09122B !important; border-color: #7AAAE8 !important; }
+            .ai-analysis-section { border-color: #7AAAE8 !important; }
+
+            /* ── AI status badges ── */
+            .ai-status-badge.completed { background: rgba(13,107,46,0.14) !important; color: #0D6B2E !important; }
+            .ai-status-badge.running   { background: rgba(24,72,200,0.12) !important; color: #1848C8 !important; }
+            .ai-finding-val { color: #1848C8 !important; }
 
             /* ── Measure / View / Transform group summaries ── */
             .toolbar-group > summary {
@@ -129,30 +184,106 @@
             --warning-color: #9A4E00;
             --danger-color: #A61220;
         }
+        [data-theme="light"] .toolbar {
+            background: linear-gradient(180deg, #C0D4F4 0%, #CBD9F6 100%) !important;
+            border-color: #7AAAE8 !important;
+        }
+        [data-theme="light"] .right-panel {
+            background: linear-gradient(180deg, #C8D8F5 0%, #BDD0F2 100%) !important;
+            border-color: #7AAAE8 !important;
+            box-shadow: -2px 0 12px rgba(24,72,200,0.12) !important;
+        }
+        [data-theme="light"] .tool-btn {
+            background: linear-gradient(135deg, #B0C8F0, #C0D4F8) !important;
+            color: #09122B !important;
+            border: 1px solid #7AAAE8 !important;
+            box-shadow: 0 2px 6px rgba(24,72,200,0.12) !important;
+        }
+        [data-theme="light"] .tool-btn:hover { background: linear-gradient(135deg, #94B4E8, #AACAF4) !important; }
+        [data-theme="light"] .tool-btn.active {
+            background: linear-gradient(135deg, rgba(24,72,200,0.35), rgba(24,72,200,0.22)) !important;
+            color: #1848C8 !important;
+            border-color: #1848C8 !important;
+            box-shadow: 0 0 0 2px rgba(24,72,200,0.20) !important;
+        }
+        [data-theme="light"] .top-bar { background: linear-gradient(135deg, #BDD0F2, #C8D8F5) !important; border-color: #7AAAE8 !important; }
+        [data-theme="light"] .series-item {
+            background: rgba(255,255,255,0.55) !important;
+            border: 1px solid rgba(24,72,200,0.20) !important;
+            box-shadow: 0 1px 4px rgba(24,72,200,0.08) !important;
+        }
+        [data-theme="light"] .series-item:hover {
+            background: rgba(255,255,255,0.80) !important;
+            border-color: rgba(24,72,200,0.35) !important;
+        }
+        [data-theme="light"] .series-item.active {
+            background: rgba(255,255,255,0.90) !important;
+            border-color: #0D6B2E !important;
+            border-left: 3px solid #0D6B2E !important;
+            box-shadow: 0 2px 10px rgba(13,107,46,0.18) !important;
+        }
+        [data-theme="light"] .series-thumb-wrap { background: #0D1828 !important; border-radius: 4px !important; }
+        [data-theme="light"] .series-thumb-placeholder { color: #6B90C0 !important; }
+        [data-theme="light"] .series-title { color: #09122B !important; font-weight: 600 !important; }
+        [data-theme="light"] .series-details { color: #2A4070 !important; }
+        [data-theme="light"] .series-nav .series-nav-btn {
+            background: rgba(255,255,255,0.60) !important;
+            border: 1px solid #7AAAE8 !important;
+            color: #09122B !important;
+        }
+        [data-theme="light"] .series-nav .series-nav-btn:hover {
+            background: rgba(255,255,255,0.90) !important;
+            border-color: #1848C8 !important;
+            color: #1848C8 !important;
+        }
+        [data-theme="light"] .panel-section {
+            background: rgba(255,255,255,0.55) !important;
+            border-color: rgba(24,72,200,0.20) !important;
+        }
+        [data-theme="light"] .panel-title, [data-theme="light"] .panel-label { color: #1A3464 !important; }
+        [data-theme="light"] .panel-value { color: #09122B !important; }
+        [data-theme="light"] .btn, [data-theme="light"] .btn-sm, [data-theme="light"] .btn-icon {
+            background: linear-gradient(135deg, #B0C8F0, #C0D4F8) !important;
+            color: #09122B !important;
+            border-color: #7AAAE8 !important;
+        }
         [data-theme="light"] .topbar-btn {
-            background: linear-gradient(135deg, #BBCEF5, #C8D8F8);
-            border-color: #93B8F0;
-            color: #09122B;
+            background: linear-gradient(135deg, #B0C8F0, #C0D4F8) !important;
+            color: #09122B !important;
+            border-color: #7AAAE8 !important;
         }
         [data-theme="light"] .topbar-btn:hover {
-            background: rgba(0,120,212,0.1);
-            border-color: rgba(0,120,212,0.4);
-            color: #0078d4;
+            background: linear-gradient(135deg, #94B4E8, #AACAF4) !important;
+            border-color: #5896D8 !important;
+            color: #1848C8 !important;
         }
         [data-theme="light"] .topbar-btn-primary {
-            background: linear-gradient(135deg, #1848C8, #2563EB); border-color: #1440A8; color: #fff;
+            background: linear-gradient(135deg, #1848C8, #2563EB) !important; border-color: #1440A8 !important; color: #fff !important;
         }
-        [data-theme="light"] .topbar-btn-primary:hover { background: #1440A8; border-color: #1030A0; }
+        [data-theme="light"] .topbar-btn-primary:hover { background: #1440A8 !important; border-color: #1030A0 !important; }
         [data-theme="light"] .nav-dd-menu { box-shadow: 0 6px 18px rgba(0,0,0,0.15); }
+        [data-theme="light"] #writeReportBtn { background: rgba(154,78,0,0.12) !important; color: #9A4E00 !important; border-color: rgba(154,78,0,0.35) !important; }
+        [data-theme="light"] .modal-content { background: #EDF4FF !important; color: #09122B !important; border-color: #7AAAE8 !important; }
+        [data-theme="light"] .ai-analysis-section { border-color: #7AAAE8 !important; }
+        [data-theme="light"] .ai-status-badge.completed { background: rgba(13,107,46,0.14) !important; color: #0D6B2E !important; }
+        [data-theme="light"] .ai-status-badge.running   { background: rgba(24,72,200,0.12) !important; color: #1848C8 !important; }
+        [data-theme="light"] .ai-finding-val { color: #1848C8 !important; }
         [data-theme="light"] .toolbar-group > summary {
-            background: linear-gradient(135deg, rgba(24,72,200,0.18), rgba(24,72,200,0.08));
-            border: 1px solid rgba(24,72,200,0.35);
-            color: #09122B;
+            background: linear-gradient(135deg, rgba(24,72,200,0.18), rgba(24,72,200,0.08)) !important;
+            border: 1px solid rgba(24,72,200,0.35) !important;
+            color: #09122B !important;
         }
-        [data-theme="light"] .toolbar-group > summary:hover { color: #1848C8; }
-        [data-theme="light"] .toolbar-group[open] > summary { color: #1848C8; border-color: #1848C8; }
-        [data-theme="light"] .toolbar-group-items { border-left: 2px solid rgba(24,72,200,0.30); }
-        [data-theme="light"] .toolbar-divider { background: rgba(24,72,200,0.20); }
+        [data-theme="light"] .toolbar-group > summary:hover {
+            background: linear-gradient(135deg, rgba(24,72,200,0.28), rgba(24,72,200,0.14)) !important;
+            color: #1848C8 !important;
+        }
+        [data-theme="light"] .toolbar-group[open] > summary {
+            background: linear-gradient(135deg, rgba(24,72,200,0.32), rgba(24,72,200,0.18)) !important;
+            color: #1848C8 !important;
+            border-color: #1848C8 !important;
+        }
+        [data-theme="light"] .toolbar-group-items { border-left: 2px solid rgba(24,72,200,0.30) !important; }
+        [data-theme="light"] .toolbar-divider { background: rgba(24,72,200,0.20) !important; }
 
         * {
             margin: 0;
@@ -3276,13 +3407,18 @@
             const resp = await fetch(url, {
                 signal,
                 credentials: 'same-origin',
-                cache: 'force-cache',
+                cache: 'default',
             });
-            if (!resp.ok) return null;
+            if (!resp.ok) {
+                // Detect auth redirect (login page served instead of binary)
+                const ct0 = (resp.headers.get('content-type') || '').toLowerCase();
+                if (resp.status === 401 || resp.status === 403 || ct0.includes('text/html')) return null;
+                return null;
+            }
 
             const ct = (resp.headers.get('content-type') || '').toLowerCase();
-            // If the server returns JSON here (older backend / error), treat as unsupported and fall back.
-            if (ct.includes('application/json')) return null;
+            // If the server returns JSON or HTML here (auth redirect / error), treat as unsupported and fall back.
+            if (ct.includes('application/json') || ct.includes('text/html')) return null;
 
             const rows = _parseHeaderNum(resp.headers, 'X-Noctis-Rows');
             const cols = _parseHeaderNum(resp.headers, 'X-Noctis-Columns');
@@ -3324,7 +3460,7 @@
             const response = await fetch(url, {
                 signal,
                 credentials: 'same-origin',
-                cache: 'force-cache'
+                cache: 'default'
             });
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);

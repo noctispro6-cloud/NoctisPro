@@ -3004,7 +3004,18 @@
             try {
                 showLoading(true);
                 // Load the specific study
-                const response = await fetch(`/dicom-viewer/api/study/${studyId}/data/`);
+                const response = await fetch(`/dicom-viewer/api/study/${studyId}/data/`, { credentials: 'same-origin' });
+                if (!response.ok) {
+                    showLoading(false);
+                    if (response.status === 403) {
+                        showToast('Access denied: your account does not have permission to view this study. Contact your administrator to check your facility assignment.', 'error', 8000);
+                    } else if (response.status === 401) {
+                        showToast('Session expired — please refresh the page and log in again.', 'error', 6000);
+                    } else {
+                        showToast(`Failed to load study (HTTP ${response.status})`, 'error', 5000);
+                    }
+                    return;
+                }
                 const data = await response.json();
 
                 if (data && data.study && Array.isArray(data.series)) {

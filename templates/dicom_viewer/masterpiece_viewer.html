@@ -41,64 +41,76 @@
         /* ── Light mode (system preference) ── */
         @media (prefers-color-scheme: light) {
             :root {
-                --primary-bg: #e8eaed;
-                --secondary-bg: #f5f5f5;
-                --card-bg: #ffffff;
-                --header-bg: #dde1e7;
-                --border-color: #c0c4cc;
-                --accent-color: #0078d4;
-                --text-primary: #1a1a1a;
-                --text-secondary: #444444;
-                --text-muted: #777777;
-                --success-color: #107c10;
-                --warning-color: #b46a08;
-                --danger-color: #c42b1c;
+                --primary-bg: #DBE8FF;
+                --secondary-bg: #EDF4FF;
+                --card-bg: #FFFFFF;
+                --header-bg: #C8D8F8;
+                --border-color: #93B8F0;
+                --accent-color: #1848C8;
+                --text-primary: #09122B;
+                --text-secondary: #1A3464;
+                --text-muted: #3D5A8A;
+                --success-color: #0D6B2E;
+                --warning-color: #9A4E00;
+                --danger-color: #A61220;
             }
             .toolbar, .right-panel {
-                background: linear-gradient(135deg, #dde1e7, #e8eaed) !important;
-                border-color: #c0c4cc !important;
+                background: linear-gradient(135deg, #C8D8F8, #D8E8FF) !important;
+                border-color: #93B8F0 !important;
             }
             .tool-btn {
-                background: linear-gradient(135deg, #d0d3d8, #e0e2e7) !important;
-                color: #1a1a1a !important;
-                box-shadow: 0 2px 6px rgba(0,0,0,0.15) !important;
+                background: linear-gradient(135deg, #BBCEF5, #C8D8F8) !important;
+                color: #09122B !important;
+                border: 1px solid #93B8F0 !important;
+                box-shadow: 0 2px 6px rgba(24,72,200,0.12) !important;
             }
-            .tool-btn:hover { background: linear-gradient(135deg, #b8bcc4, #cacdd5) !important; }
-            .tool-btn.active { background: linear-gradient(135deg, rgba(0,120,212,0.25), rgba(0,120,212,0.1)) !important; }
-            .top-bar { background: #dde1e7 !important; border-color: #c0c4cc !important; }
-            .series-item { background: rgba(0,0,0,0.04) !important; border-color: rgba(0,0,0,0.1) !important; }
-            .series-item:hover { background: rgba(0,0,0,0.08) !important; }
-            .series-item.active { background: linear-gradient(135deg,rgba(0,120,212,0.15),rgba(0,120,212,0.07)) !important; }
-            .series-thumb-wrap { background: #ccc !important; }
-            .series-thumb-placeholder { color: #999 !important; }
-            .panel-section { border-color: #c0c4cc !important; }
-            .series-title { color: #1a1a1a !important; }
-            .btn, .btn-sm, .btn-icon, .topbar-btn { background: #d0d3d8 !important; color: #1a1a1a !important; border-color: #b0b4bc !important; }
-            .topbar-btn-primary { background: var(--accent-color) !important; color: #fff !important; border-color: var(--accent-color) !important; }
-            #writeReportBtn { background: rgba(180,106,8,0.12) !important; color: var(--warning-color) !important; border-color: rgba(180,106,8,0.3) !important; }
-            .modal-content { background: #f5f5f5 !important; color: #1a1a1a !important; border-color: #c0c4cc !important; }
-            .ai-analysis-section { border-color: #c0c4cc !important; }
+            .tool-btn:hover { background: linear-gradient(135deg, #A0BCEE, #B8CCEE) !important; }
+            .tool-btn.active {
+                background: linear-gradient(135deg, rgba(24,72,200,0.30), rgba(24,72,200,0.18)) !important;
+                color: #1848C8 !important;
+                border-color: #1848C8 !important;
+            }
+            .top-bar { background: linear-gradient(135deg, #C8D8F8, #D4E2FF) !important; border-color: #93B8F0 !important; }
+            .series-item { background: rgba(24,72,200,0.05) !important; border-color: rgba(24,72,200,0.15) !important; }
+            .series-item:hover { background: rgba(24,72,200,0.10) !important; }
+            .series-item.active {
+                background: linear-gradient(135deg, rgba(24,72,200,0.20), rgba(24,72,200,0.10)) !important;
+                border-color: #1848C8 !important;
+            }
+            .series-thumb-wrap { background: #A0BCEE !important; }
+            .series-thumb-placeholder { color: #3D5A8A !important; }
+            .panel-section { border-color: #93B8F0 !important; }
+            .series-title { color: #09122B !important; }
+            .btn, .btn-sm, .btn-icon, .topbar-btn {
+                background: linear-gradient(135deg, #BBCEF5, #C8D8F8) !important;
+                color: #09122B !important;
+                border-color: #93B8F0 !important;
+            }
+            .topbar-btn-primary { background: linear-gradient(135deg, #1848C8, #2563EB) !important; color: #fff !important; border-color: #1440A8 !important; }
+            #writeReportBtn { background: rgba(154,78,0,0.12) !important; color: #9A4E00 !important; border-color: rgba(154,78,0,0.35) !important; }
+            .modal-content { background: #EDF4FF !important; color: #09122B !important; border-color: #93B8F0 !important; }
+            .ai-analysis-section { border-color: #93B8F0 !important; }
         }
 
         /* ── Manual theme toggle ── */
         [data-theme="light"] {
-            --primary-bg: #e8eaed;
-            --secondary-bg: #f5f5f5;
-            --card-bg: #ffffff;
-            --header-bg: #dde1e7;
-            --border-color: #c0c4cc;
-            --accent-color: #0078d4;
-            --text-primary: #1a1a1a;
-            --text-secondary: #444444;
-            --text-muted: #777777;
-            --success-color: #107c10;
-            --warning-color: #b46a08;
-            --danger-color: #c42b1c;
+            --primary-bg: #DBE8FF;
+            --secondary-bg: #EDF4FF;
+            --card-bg: #FFFFFF;
+            --header-bg: #C8D8F8;
+            --border-color: #93B8F0;
+            --accent-color: #1848C8;
+            --text-primary: #09122B;
+            --text-secondary: #1A3464;
+            --text-muted: #3D5A8A;
+            --success-color: #0D6B2E;
+            --warning-color: #9A4E00;
+            --danger-color: #A61220;
         }
         [data-theme="light"] .topbar-btn {
-            background: rgba(0,0,0,0.05);
-            border-color: #c0c4cc;
-            color: #1a1a1a;
+            background: linear-gradient(135deg, #BBCEF5, #C8D8F8);
+            border-color: #93B8F0;
+            color: #09122B;
         }
         [data-theme="light"] .topbar-btn:hover {
             background: rgba(0,120,212,0.1);

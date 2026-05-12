@@ -290,36 +290,61 @@
 
         @media (prefers-color-scheme: light) {
             :root {
-                --primary-bg: #f6f7fb;
-                --secondary-bg: #ffffff;
-                --card-bg: #ffffff;
-                --border-color: #e5e7eb;
-                --accent-color: #0284c7;
-                --text-primary: #0f172a;
-                --text-secondary: #334155;
-                --text-muted: #64748b;
-                --danger-color: #dc2626;
-                --success-color: #16a34a;
+                --primary-bg: #EDF4FF;
+                --secondary-bg: #F5F9FF;
+                --card-bg: #FFFFFF;
+                --border-color: #B8D4F8;
+                --accent-color: #1848C8;
+                --text-primary: #09122B;
+                --text-secondary: #1A3464;
+                --text-muted: #3D5A8A;
+                --danger-color: #A61220;
+                --success-color: #0D6B2E;
             }
 
             body {
-                background: linear-gradient(135deg, #f6f7fb 0%, #e9edf4 100%);
+                background: linear-gradient(160deg, #D8E8FF 0%, #EDF4FF 50%, #D8F0E8 100%);
             }
 
             body::before {
-                background: radial-gradient(ellipse at center, rgba(2, 132, 199, 0.06) 0%, transparent 70%);
+                background: radial-gradient(ellipse at center, rgba(24, 72, 200, 0.12) 0%, transparent 70%);
             }
 
             .login-card {
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
+                border: 1px solid #B8D4F8;
+                box-shadow: 0 12px 48px rgba(24, 72, 200, 0.15), 0 4px 16px rgba(24, 72, 200, 0.08);
+            }
+
+            .login-card input[type="text"],
+            .login-card input[type="password"],
+            .login-card input[type="email"] {
+                border-color: #93C5FD;
+                background: #F8FAFF;
+                color: #09122B;
+            }
+
+            .login-card input:focus {
+                border-color: #1848C8;
+                box-shadow: 0 0 0 3px rgba(24,72,200,0.15);
+            }
+
+            .login-card .btn-primary,
+            .login-card button[type="submit"] {
+                background: linear-gradient(135deg, #1848C8 0%, #2563EB 100%);
+                border-color: #1440A8;
+                box-shadow: 0 4px 16px rgba(24,72,200,0.30);
             }
 
             .loading-overlay {
-                background: rgba(255, 255, 255, 0.88);
+                background: rgba(237, 244, 255, 0.92);
             }
 
             .loading-content {
                 color: var(--text-primary);
+            }
+
+            .logo, .brand {
+                color: #1848C8 !important;
             }
         }
 

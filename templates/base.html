@@ -51,26 +51,61 @@
 
         @media (prefers-color-scheme: light) {
             :root {
-                --primary-bg: #f6f7fb;
-                --secondary-bg: #ffffff;
-                --card-surface: #ffffff;
-                --header-bg: #ffffff;
-                --border-color: #e5e7eb;
-                --accent-color: #0284c7;
-                --text-primary: #0f172a;
-                --text-secondary: #334155;
-                --text-muted: #64748b;
-                --success-color: #16a34a;
-                --warning-color: #d97706;
-                --danger-color: #dc2626;
+                --primary-bg: #EDF4FF;
+                --secondary-bg: #F5F9FF;
+                --card-surface: #FFFFFF;
+                --header-bg: #FFFFFF;
+                --border-color: #B8D4F8;
+                --accent-color: #1848C8;
+                --text-primary: #09122B;
+                --text-secondary: #1A3464;
+                --text-muted: #3D5A8A;
+                --success-color: #0D6B2E;
+                --warning-color: #9A4E00;
+                --danger-color: #A61220;
+                --urgent-color: #8B0016;
+                --scheduled-color: #1848C8;
+                --in-progress-color: #9A4E00;
+                --completed-color: #0D6B2E;
+                --cancelled-color: #7A1020;
 
                 --dark-bg: var(--primary-bg);
                 --card-bg: var(--card-surface);
-                --gradient-primary: linear-gradient(135deg, #ffffff 0%, #f3f4f6 100%);
-                --gradient-accent: linear-gradient(135deg, var(--accent-color) 0%, #0ea5e9 100%);
+                --gradient-primary: linear-gradient(135deg, #FFFFFF 0%, #EDF4FF 100%);
+                --gradient-accent: linear-gradient(135deg, #1848C8 0%, #2563EB 100%);
                 --secondary-color: var(--card-surface);
-                --info-color: #0284c7;
+                --info-color: #0369A1;
             }
+
+            body {
+                background: linear-gradient(160deg, #E8F0FF 0%, #EDF4FF 60%, #E4F3EC 100%);
+            }
+
+            .top-navbar {
+                background: linear-gradient(135deg, #FFFFFF 0%, #F0F6FF 100%);
+                border-bottom: 2px solid #B8D4F8;
+                box-shadow: 0 2px 12px rgba(24,72,200,0.10);
+            }
+
+            .card, .stat-card, .info-card {
+                border: 1px solid #B8D4F8;
+                box-shadow: 0 2px 12px rgba(24,72,200,0.08);
+            }
+
+            .btn-primary, .btn-accent {
+                background: linear-gradient(135deg, #1848C8, #2563EB) !important;
+                border-color: #1440A8 !important;
+                color: #FFFFFF !important;
+            }
+
+            .btn-success {
+                background: linear-gradient(135deg, #0D6B2E, #15803D) !important;
+                border-color: #0A5220 !important;
+                color: #FFFFFF !important;
+            }
+
+            a { color: #1848C8; }
+            a:hover { color: #1440A8; }
         }
 
         * {

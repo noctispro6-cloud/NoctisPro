@@ -3252,7 +3252,6 @@
             const modality = _parseHeaderStr(resp.headers, 'X-Noctis-Modality');
             const nFrames = _parseHeaderNum(resp.headers, 'X-Noctis-Number-Of-Frames');
             const fIdx = _parseHeaderNum(resp.headers, 'X-Noctis-Frame-Index');
-            const photometric = _parseHeaderStr(resp.headers, 'X-Noctis-Photometric-Interpretation');
 
             const buf = await resp.arrayBuffer();
             const pixel_data = _decodeArrayBufferToFloat32LE(buf);
@@ -3268,7 +3267,6 @@
                 modality: modality != null ? modality : undefined,
                 number_of_frames: nFrames != null ? nFrames : undefined,
                 frame_index: fIdx != null ? fIdx : undefined,
-                photometric_interpretation: photometric != null ? photometric : undefined,
                 pixel_data,
                 pixel_data_b64: null,
                 pixel_dtype: 'float32',

@@ -1222,6 +1222,18 @@ def api_image_data(request, image_id):
         except Exception:
             pass
 
+    # MONOCHROME1: invert pixel values so display is correct (high=bright) before windowing.
+    # Doing this server-side ensures WW/WL percentiles and client rendering are both consistent.
+    if pixel_array is not None and ds is not None:
+        try:
+            _photo = str(getattr(ds, 'PhotometricInterpretation', '') or '').strip().upper()
+            if _photo == 'MONOCHROME1':
+                _bits = int(getattr(ds, 'BitsStored', None) or getattr(ds, 'BitsAllocated', None) or 16)
+                _max_val = float((1 << _bits) - 1)
+                pixel_array = _max_val - pixel_array
+        except Exception:
+            pass
+
     # Window defaults (best-effort). For DX/CR, we want sensible non-CT defaults.
     def _first_or_none(v):
         try:
@@ -1318,12 +1330,6 @@ def api_image_data(request, image_id):
                 modv = _jsonify_dicom_value(getattr(ds, 'Modality', None)) if ds is not None else None
                 if modv is not None:
                     resp['X-Noctis-Modality'] = str(modv)
-            except Exception:
-                pass
-            try:
-                photov = str(getattr(ds, 'PhotometricInterpretation', '') or '').strip() if ds is not None else ''
-                if photov:
-                    resp['X-Noctis-Photometric-Interpretation'] = photov
             except Exception:
                 pass
             # Modest caching; bytes are immutable per image. Client already uses force-cache.

@@ -3781,6 +3781,20 @@
                 _frameCacheKey = null;
             }
 
+            // Gamma correction for X-ray modalities — brightens mid-tones for better
+            // soft-tissue and bone differentiation without a server round-trip.
+            const _xrayMods = ['DX','CR','MG','XA','RF','DR'];
+            const _imgModality = String((imageData.modality || (currentSeries && currentSeries.modality) || '')).toUpperCase();
+            const _isXray = _xrayMods.includes(_imgModality);
+            const _gamma = _isXray ? 0.65 : 1.0;
+            // Pre-build gamma LUT for speed (avoids Math.pow per pixel).
+            const _gammaLUT = new Uint8Array(256);
+            if (_gamma === 1.0) {
+                for (let g = 0; g < 256; g++) _gammaLUT[g] = g;
+            } else {
+                for (let g = 0; g < 256; g++) _gammaLUT[g] = Math.min(255, Math.round(Math.pow(g / 255, _gamma) * 255));
+            }
+
             if (_frameCacheKey !== cacheKey) {
                 try {
                     const pixels = new Uint8ClampedArray(imageData.pixel_data.length * 4);
@@ -3788,6 +3802,7 @@
                         let value = imageData.pixel_data[i];
                         value = applyWindowing(value, windowWidth, windowLevel);
                         if (shouldInvert) value = 255 - value;
+                        value = _gammaLUT[value];
                         const j = i * 4;
                         pixels[j] = value;
                         pixels[j + 1] = value;

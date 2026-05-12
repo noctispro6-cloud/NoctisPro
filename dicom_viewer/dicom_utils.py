@@ -330,34 +330,23 @@ class DicomProcessor:
                 return 'soft'
         else:
             return 'soft'  # Default for non-CT
-    
+
     def auto_window_from_data(self, pixel_array, percentile_range=(1, 99), modality='CT'):
-        """Automatically calculate optimal window/level from image data with X-ray optimization"""
+        """Automatically calculate optimal window/level from image data."""
         try:
-            # Remove extreme outliers
-            p_low, p_high = np.percentile(pixel_array.flatten(), percentile_range)
-            
-            # Special handling for X-ray images (typically have different characteristics)
-            if modality.upper() in ['CR', 'DX', 'DR']:  # Digital radiography modalities
-                # X-ray images often have inverted intensity values
-                # Use wider percentile range for better contrast
-                percentile_range = (0.5, 99.5)
-                p_low, p_high = np.percentile(pixel_array.flatten(), percentile_range)
-                
-                # Calculate optimal window for X-ray
-                window_width = (p_high - p_low) * 1.5  # Wider window for X-rays
-                window_level = (p_high + p_low) / 2
-                
-                # Ensure minimum window width for X-rays
-                if window_width < 1000:
-                    window_width = 1500
-                    
+            flat = pixel_array.flatten()
+
+            if modality.upper() in ['CR', 'DX', 'DR', 'MG', 'XA', 'RF']:
+                # X-ray: use tight percentiles so full contrast is used, no 1.5 multiplier.
+                p_low  = float(np.percentile(flat, 0.5))
+                p_high = float(np.percentile(flat, 99.5))
+                window_width = max(1000.0, float(p_high - p_low))
+                window_level = (p_high + p_low) / 2.0
                 return float(window_width), float(window_level)
-            
-            # Calculate window width and level for CT and other modalities
-            window_width = max(50, p_high - p_low)  # Minimum width of 50 HU
-            window_level = (p_high + p_low) / 2
-            
+
+            p_low, p_high = np.percentile(flat, percentile_range)
+            window_width = max(50, p_high - p_low)
+            window_level = (p_high + p_low) / 2.0
             return float(window_width), float(window_level)
         except Exception as e:
             logger.debug('auto_window_from_data failed, using safe defaults: %s', e)

@@ -71,6 +71,10 @@ class User(AbstractUser):
         return self.role == 'radiologist'
 
     def is_facility_user(self):
+        # Superusers and staff are always admins, never facility-restricted,
+        # regardless of whatever role value was set by createsuperuser default.
+        if getattr(self, 'is_superuser', False) or getattr(self, 'is_staff', False):
+            return False
         return self.role == 'facility'
 
     def can_edit_reports(self):

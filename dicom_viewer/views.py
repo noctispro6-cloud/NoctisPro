@@ -1125,13 +1125,11 @@ def api_image_data(request, image_id):
     if ds is not None:
         try:
             pixel_array = ds.pixel_array
-            # Apply VOI LUT for x-ray-ish modalities when present (helps DX/CR/MG).
-            try:
-                modality = str(getattr(ds, 'Modality', '')).upper()
-                if modality in ['DX', 'CR', 'XA', 'RF', 'MG']:
-                    pixel_array = apply_voi_lut(pixel_array, ds)
-            except Exception:
-                pass
+            # NOTE: Do NOT apply apply_voi_lut here. The client renderer applies its own
+            # windowing using the DICOM WW/WL sent in the response headers. Pre-applying the
+            # VOI LUT would produce pixel values in a different space than the WW/WL tags,
+            # causing double-windowing that clips DX/CR/MG images to near-binary output.
+            # apply_voi_lut belongs only in the server-rendered PNG path (api_dicom_image_display).
             # If multi-frame, select a single frame (default first; caller can pass ?frame=)
             try:
                 pixel_array = _select_frame(pixel_array, frame_index=frame_index)

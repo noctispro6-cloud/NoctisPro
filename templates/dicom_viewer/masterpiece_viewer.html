@@ -96,11 +96,12 @@
                 border-color: rgba(24,72,200,0.35) !important;
             }
             .series-item.active {
-                background: rgba(255,255,255,0.90) !important;
-                border-color: #0D6B2E !important;
-                border-left: 3px solid #0D6B2E !important;
-                box-shadow: 0 2px 10px rgba(13,107,46,0.18) !important;
+                background: rgba(24,72,200,0.14) !important;
+                border-color: #1848C8 !important;
+                border-left: 3px solid #1848C8 !important;
+                box-shadow: 0 2px 10px rgba(24,72,200,0.18) !important;
             }
+            .series-item.active .series-title { color: #1848C8 !important; }
 
             /* Thumbnail preview area — keep dark so images are visible */
             .series-thumb-wrap { background: #0D1828 !important; border-radius: 4px !important; }
@@ -217,11 +218,12 @@
             border-color: rgba(24,72,200,0.35) !important;
         }
         [data-theme="light"] .series-item.active {
-            background: rgba(255,255,255,0.90) !important;
-            border-color: #0D6B2E !important;
-            border-left: 3px solid #0D6B2E !important;
-            box-shadow: 0 2px 10px rgba(13,107,46,0.18) !important;
+            background: rgba(24,72,200,0.14) !important;
+            border-color: #1848C8 !important;
+            border-left: 3px solid #1848C8 !important;
+            box-shadow: 0 2px 10px rgba(24,72,200,0.18) !important;
         }
+        [data-theme="light"] .series-item.active .series-title { color: #1848C8 !important; }
         [data-theme="light"] .series-thumb-wrap { background: #0D1828 !important; border-radius: 4px !important; }
         [data-theme="light"] .series-thumb-placeholder { color: #6B90C0 !important; }
         [data-theme="light"] .series-title { color: #09122B !important; font-weight: 600 !important; }
@@ -925,8 +927,13 @@
         }
 
         .series-item.active {
-            background: linear-gradient(135deg, rgba(0, 120, 212, 0.2), rgba(16, 110, 190, 0.1));
+            background: linear-gradient(135deg, rgba(0, 180, 255, 0.22), rgba(0, 140, 220, 0.12));
             border-color: var(--accent-color);
+            border-left: 3px solid var(--accent-color);
+            box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.25), inset 0 0 8px rgba(0, 212, 255, 0.06);
+        }
+        .series-item.active .series-title {
+            color: var(--accent-color);
         }
 
         .series-thumb-wrap {
@@ -3167,6 +3174,16 @@
             if (prevBtn) prevBtn.disabled = !hasList;
             if (nextBtn) nextBtn.disabled = !hasList;
 
+            function _thumbWindowQs(mod) {
+                switch ((mod || '').toUpperCase()) {
+                    case 'DX': case 'CR': case 'DR': return 'window_width=2500&window_level=1200';
+                    case 'MG':            return 'window_width=4000&window_level=2000';
+                    case 'XA': case 'RF': return 'window_width=2000&window_level=1000';
+                    case 'MR':            return 'window_width=600&window_level=300';
+                    default:              return 'window_width=400&window_level=40';
+                }
+            }
+
             series.forEach((s, index) => {
                 const item = document.createElement('div');
                 item.className = 'series-item';
@@ -3175,7 +3192,8 @@
 
                 const isLocal = String(s.id).startsWith('local_');
                 const midSlice = Math.max(0, Math.floor((Number(s.image_count) || 1) / 2));
-                const thumbUrl = isLocal ? null : `/dicom-viewer/api/mpr-slice/${encodeURIComponent(s.id)}/axial/${midSlice}/?window_width=400&window_level=40&inverted=0&quality=fast`;
+                const thumbWqs = _thumbWindowQs(s.modality);
+                const thumbUrl = isLocal ? null : `/dicom-viewer/api/mpr-slice/${encodeURIComponent(s.id)}/axial/${midSlice}/?${thumbWqs}&inverted=0&quality=fast`;
                 const desc = String(s.description || '').replace(/</g, '&lt;') || '&mdash;';
                 item.innerHTML = `
                     <div class="series-thumb-wrap">

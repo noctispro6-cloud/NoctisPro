@@ -536,6 +536,18 @@ def process_upload_session(
         if study_created:
             stats["created_studies"] += 1
             created_study_ids.append(int(study.id))
+            # Notify the frontend immediately so "View Study" appears as soon as the
+            # first study record exists — before all images have been committed.
+            try:
+                self.update_state(state="STARTED", meta={
+                    "current": stats["created_images"],
+                    "total": len(paths),
+                    "created_study_ids": list(created_study_ids),
+                    "created_images": stats["created_images"],
+                    "created_studies": stats["created_studies"],
+                })
+            except Exception:
+                pass
             # Best-effort AI start (keep errors isolated)
             try:
                 from .views import _auto_start_ai_for_study  # local import to avoid import-time side effects
@@ -681,21 +693,42 @@ def process_upload_session(
                     )
                 )
 
+            # Commit in small batches so images are visible in the viewer progressively
+            # (frontend polls for progress and can open partial series immediately).
+            _BATCH = 50
+            for _b_start in range(0, max(len(to_create), 1), _BATCH):
+                _batch = to_create[_b_start: _b_start + _BATCH]
+                if not _batch:
+                    break
+                try:
+                    with transaction.atomic():
+                        DicomImage.objects.bulk_create(_batch, ignore_conflicts=True, batch_size=_BATCH)
+                        stats["created_images"] += len(_batch)
+                except Exception:
+                    for obj in _batch:
+                        try:
+                            obj.save()
+                            stats["created_images"] += 1
+                        except Exception:
+                            pass
+                # Push live progress so the status endpoint returns meaningful data
+                try:
+                    self.update_state(state="STARTED", meta={
+                        "current": stats["created_images"],
+                        "total": len(paths),
+                        "created_study_ids": list(created_study_ids),
+                        "created_images": stats["created_images"],
+                        "created_studies": stats["created_studies"],
+                    })
+                except Exception:
+                    pass
+
             try:
-                with transaction.atomic():
-                    if to_create:
-                        DicomImage.objects.bulk_create(to_create, ignore_conflicts=True, batch_size=500)
-                        stats["created_images"] += len(to_create)
-                    if to_update:
+                if to_update:
+                    with transaction.atomic():
                         DicomImage.objects.bulk_update(to_update, ["series", "instance_number"], batch_size=500)
             except Exception:
-                # best-effort fallback
-                for obj in to_create:
-                    try:
-                        obj.save()
-                        stats["created_images"] += 1
-                    except Exception:
-                        pass
+                pass
 
     # Best-effort MPR precache (now in background, safe)
     try:

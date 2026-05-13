@@ -2859,6 +2859,21 @@ def api_upload_processing_status(request):
 				out['error'] = str(res.result)
 			except Exception:
 				out['error'] = 'Task failed'
+		elif state == 'STARTED':
+			# Return live progress so the upload UI can show "X images saved" and
+			# offer "View Study" before processing is complete.
+			try:
+				meta = res.info or {}
+				if isinstance(meta, dict):
+					out['progress'] = {
+						'current': meta.get('current', 0),
+						'total': meta.get('total', 0),
+						'created_images': meta.get('created_images', 0),
+						'created_studies': meta.get('created_studies', 0),
+						'created_study_ids': meta.get('created_study_ids', []),
+					}
+			except Exception:
+				pass
 		return JsonResponse(out)
 	except Exception as e:
 		return JsonResponse({'success': False, 'error': f'Unable to read task status: {e}'}, status=500)

@@ -1217,9 +1217,45 @@ document.addEventListener('DOMContentLoaded', function() {
                 const state = (data && data.state) ? String(data.state) : 'UNKNOWN';
                 if (state === 'SUCCESS') return (data && data.result) || {};
                 if (state === 'FAILURE') throw new Error((data && data.error) || 'Background processing failed');
-                updateProgress(99, `${uploadedCount} / ${totalFiles} images`, `Processing on server… (${state})`);
-                await new Promise(r => setTimeout(r, 1500));
+
+                // Live progress from STARTED state — images are committed in batches of 50
+                // so we can show "View Study" as soon as the first batch lands.
+                if (state === 'STARTED' && data.progress) {
+                    const p = data.progress;
+                    const savedImages = Number(p.created_images || 0);
+                    const totalImg = Number(p.total || totalFiles);
+                    const pct = totalImg > 0 ? Math.min(98, (savedImages / totalImg) * 100) : 50;
+                    updateProgress(pct, `${savedImages} / ${totalImg} images saved`, `Processing… ${p.created_studies || 0} study(s) ready`);
+
+                    // Show "View Study" button as soon as any study ID is available
+                    const studyIds = Array.isArray(p.created_study_ids) ? p.created_study_ids : [];
+                    if (studyIds.length > 0) {
+                        _showViewStudyBanner(studyIds);
+                    }
+                    createdStudyIds.push(...studyIds.filter(id => !createdStudyIds.includes(id)));
+                } else {
+                    updateProgress(99, `${uploadedCount} / ${totalFiles} images`, `Processing on server… (${state})`);
+                }
+                await new Promise(r => setTimeout(r, 2000));
             }
+        }
+
+        function _showViewStudyBanner(studyIds) {
+            let banner = document.getElementById('viewStudyBanner');
+            if (banner) {
+                // update link if more studies appeared
+                const link = banner.querySelector('a');
+                if (link && studyIds.length > 0) link.href = `/worklist/study/${studyIds[0]}/`;
+                return;
+            }
+            banner = document.createElement('div');
+            banner.id = 'viewStudyBanner';
+            banner.style.cssText = 'margin-top:14px;padding:10px 16px;background:#0d2a1a;border:1px solid #00d084;border-radius:8px;color:#00d084;font-size:0.9rem;display:flex;align-items:center;gap:12px;';
+            banner.innerHTML = `<i class="fas fa-check-circle"></i><span>Images are ready — more are still uploading in the background.</span>`
+                + `<a href="/worklist/study/${studyIds[0]}/" target="_blank" `
+                + `style="margin-left:auto;padding:5px 14px;background:#00d084;color:#000;border-radius:6px;font-weight:600;text-decoration:none;">View Study</a>`;
+            const ringArea = document.getElementById('ringArea') || document.getElementById('uploadArea');
+            if (ringArea) ringArea.appendChild(banner);
         }
 
         function uploadChunkXHR(chunkIdx, chunk, attempt = 1) {

@@ -867,6 +867,13 @@
             .stats-grid { grid-template-columns: 1fr !important; }
         }
     </style>
+    {% if accent_color_override %}
+    <style>
+        /* Admin-configured accent colour — overrides both dark and light defaults */
+        :root { --accent-color: {{ accent_color_override }} !important; }
+        @media (prefers-color-scheme: light) { :root { --accent-color: {{ accent_color_override }} !important; } }
+    </style>
+    {% endif %}
     {% block extra_css %}{% endblock %}
 </head>
 

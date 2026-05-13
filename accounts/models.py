@@ -28,7 +28,8 @@ class Facility(models.Model):
     is_active = models.BooleanField(default=True)
     
     # Subscription Management
-    has_ai_subscription = models.BooleanField(default=False, help_text="Access to AI features")
+    has_system_subscription = models.BooleanField(default=False, help_text="Access to the full NoctisPro system")
+    has_ai_subscription = models.BooleanField(default=False, help_text="Access to AI analysis features")
     subscription_expires_at = models.DateTimeField(null=True, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
@@ -40,6 +41,47 @@ class Facility(models.Model):
     def __str__(self):
         return self.name
 
+class FacilityModalityNode(models.Model):
+    """Per-modality DICOM sender configuration for a facility."""
+    MODALITY_CHOICES = [
+        ('CT', 'CT – Computed Tomography'),
+        ('MR', 'MR – Magnetic Resonance'),
+        ('CR', 'CR – Computed Radiography'),
+        ('DX', 'DX – Digital Radiography'),
+        ('DR', 'DR – Digital Radiography (alt)'),
+        ('US', 'US – Ultrasound'),
+        ('MG', 'MG – Mammography'),
+        ('PT', 'PT – PET'),
+        ('NM', 'NM – Nuclear Medicine'),
+        ('XA', 'XA – X-Ray Angiography'),
+        ('RF', 'RF – Radio Fluoroscopy'),
+        ('OT', 'OT – Other'),
+    ]
+
+    facility = models.ForeignKey(
+        Facility, on_delete=models.CASCADE, related_name='modality_nodes'
+    )
+    modality = models.CharField(max_length=16, choices=MODALITY_CHOICES)
+    ae_title = models.CharField(
+        max_length=32, blank=True, default='',
+        help_text='AE Title of this modality device (optional).'
+    )
+    host = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='IP, CIDR, or comma-separated list for this modality sender.'
+    )
+    port = models.PositiveIntegerField(
+        default=11112,
+        help_text='DICOM port this modality sends on.'
+    )
+
+    class Meta:
+        ordering = ['modality']
+
+    def __str__(self):
+        return f"{self.facility.name} – {self.modality}"
+
+
 class User(AbstractUser):
     """Custom User model with role-based access"""
     USER_ROLES = (
@@ -47,7 +89,7 @@ class User(AbstractUser):
         ('radiologist', 'Radiologist'),
         ('facility', 'Facility User'),
     )
-    
+
     role = models.CharField(max_length=20, choices=USER_ROLES, default='facility')
     facility = models.ForeignKey(Facility, on_delete=models.CASCADE, null=True, blank=True)
     phone = models.CharField(max_length=20, blank=True)
@@ -55,6 +97,16 @@ class User(AbstractUser):
     specialization = models.CharField(max_length=100, blank=True)
     is_verified = models.BooleanField(default=False)
     last_login_ip = models.GenericIPAddressField(null=True, blank=True)
+    # Facilities this radiologist is assigned to report for.
+    # Empty = freelancer sees all (is_freelancer=True) or has no assignment yet.
+    assigned_facilities = models.ManyToManyField(
+        Facility, blank=True, related_name='assigned_radiologists',
+        help_text='Facilities this radiologist reports for. Leave empty if freelancer.'
+    )
+    is_freelancer = models.BooleanField(
+        default=False,
+        help_text='Freelancer/guest radiologists can see studies from all facilities.'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

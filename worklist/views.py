@@ -220,6 +220,22 @@ def _auto_start_ai_for_study(study: Study) -> None:
 	except Exception:
 		return
 
+def _radiologist_facility_filter(user):
+	"""Return a dict suitable for Study.objects.filter(**...) that scopes a
+	radiologist to their assigned facilities (or nothing if unassigned and not
+	freelancer, or no restriction if freelancer)."""
+	if getattr(user, 'is_freelancer', False):
+		return {}
+	assigned = list(user.assigned_facilities.values_list('id', flat=True))
+	if assigned:
+		return {'facility_id__in': assigned}
+	# No assigned facilities and not a freelancer → fall back to old single-facility field
+	facility = getattr(user, 'facility', None)
+	if facility:
+		return {'facility': facility}
+	return {}
+
+
 @login_required
 def dashboard(request):
 	"""Render the exact provided dashboard UI template"""
@@ -233,8 +249,7 @@ def dashboard(request):
 
 	# Role-specific dashboard stats
 	if user.is_authenticated and user.is_radiologist():
-		facility = getattr(user, 'facility', None)
-		facility_filter = {'facility': facility} if facility else {}
+		facility_filter = _radiologist_facility_filter(user)
 		my_studies_count = Study.objects.filter(
 			radiologist=user, **facility_filter
 		).count()
@@ -1877,9 +1892,13 @@ def api_studies(request):
 		if user.is_facility_user() and getattr(user, 'facility', None):
 			studies = Study.objects.filter(facility=user.facility)
 			logger.debug(f"Facility-filtered studies for {user.facility.name}")
+		elif user.is_radiologist():
+			filt = _radiologist_facility_filter(user)
+			studies = Study.objects.filter(**filt) if filt else Study.objects.all()
+			logger.debug(f"Radiologist facility filter: {filt}")
 		else:
 			studies = Study.objects.all()
-			logger.debug("All studies access granted for admin/radiologist")
+			logger.debug("All studies access granted for admin")
 		
 		# Professional data processing with enhanced medical information
 		studies_data = []

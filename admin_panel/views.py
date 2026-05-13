@@ -275,8 +275,19 @@ def settings_view(request):
     tw_token = SystemConfiguration.objects.filter(key="twilio_auth_token").first()
     tw_from = SystemConfiguration.objects.filter(key="twilio_from_number").first()
     auto_ai = SystemConfiguration.objects.filter(key="ai_auto_analysis_on_upload").first()
+    accent_cfg = SystemConfiguration.objects.filter(key="accent_color").first()
 
     if request.method == "POST":
+        # Theme color
+        if request.POST.get("save_theme"):
+            color = (request.POST.get("accent_color") or "").strip()
+            import re as _re
+            if color and _re.match(r'^#[0-9a-fA-F]{6}$', color):
+                upsert("accent_color", color, category="theme", description="Primary accent colour for the UI")
+                accent_cfg = SystemConfiguration.objects.filter(key="accent_color").first()
+            messages.success(request, "Theme colour saved.")
+            return redirect("admin_panel:settings")
+
         # Backup server config
         if request.POST.get("save_backup_server"):
             upsert("backup_server_ip",   (request.POST.get("backup_server_ip",   "") or "").strip(), category="backup", description="Remote backup server IP or hostname")
@@ -356,6 +367,17 @@ def settings_view(request):
             "backup_server_user": bsrv['user'],
             "backup_server_path": bsrv['path'],
             "backup_server_key": bsrv['key'],
+            "accent_color": (accent_cfg.value if accent_cfg else "") or "#00d4ff",
+            "color_presets": [
+                ("#00d4ff", "Cyan (default dark)"),
+                ("#1848C8", "Blue (default light)"),
+                ("#000000", "Black"),
+                ("#222222", "Dark charcoal"),
+                ("#1a7340", "Forest green"),
+                ("#7c3aed", "Violet"),
+                ("#c0392b", "Red"),
+                ("#e67e22", "Orange"),
+            ],
         },
     )
 
@@ -1173,14 +1195,17 @@ def bulk_facility_action(request):
 @user_passes_test(can_manage_facilities)
 def facility_create(request):
     """Create new facility with enhanced form validation"""
-    from .forms import FacilityForm
-    
+    from .forms import FacilityForm, ModalityNodeFormSet
+
     if request.method == 'POST':
         form = FacilityForm(request.POST, request.FILES)
-        if form.is_valid():
+        node_formset = ModalityNodeFormSet(request.POST, prefix='nodes')
+        if form.is_valid() and node_formset.is_valid():
             try:
                 # Save the facility
                 facility = form.save()
+                node_formset.instance = facility
+                node_formset.save()
                 
                 # Handle optional facility user creation
                 if form.cleaned_data.get('create_facility_user'):
@@ -1270,11 +1295,15 @@ def facility_create(request):
                     else:
                         field_name = form.fields[field].label or field.replace('_', ' ').title()
                         messages.error(request, f'{field_name}: {error}')
+            for form_err in node_formset.non_form_errors():
+                messages.error(request, form_err)
     else:
         form = FacilityForm()
-    
+        node_formset = ModalityNodeFormSet(prefix='nodes')
+
     context = {
         'form': form,
+        'node_formset': node_formset,
         'edit_mode': False,
         'dicom_server': _get_dicom_server_info(),
     }
@@ -1285,16 +1314,19 @@ def facility_create(request):
 @user_passes_test(can_manage_facilities)
 def facility_edit(request, facility_id):
     """Edit existing facility with enhanced form validation"""
-    from .forms import FacilityForm
-    
+    from .forms import FacilityForm, ModalityNodeFormSet
+
     facility = get_object_or_404(Facility, id=facility_id)
-    
+
     if request.method == 'POST':
         form = FacilityForm(request.POST, request.FILES, instance=facility)
-        if form.is_valid():
+        node_formset = ModalityNodeFormSet(request.POST, instance=facility, prefix='nodes')
+        if form.is_valid() and node_formset.is_valid():
             try:
                 # Save the updated facility
                 updated_facility = form.save()
+                node_formset.instance = updated_facility
+                node_formset.save()
                 
                 # Handle optional facility user creation during edit
                 if form.cleaned_data.get('create_facility_user'):
@@ -1381,11 +1413,15 @@ def facility_edit(request, facility_id):
                     else:
                         field_name = form.fields[field].label or field.replace('_', ' ').title()
                         messages.error(request, f'{field_name}: {error}')
+            for form_err in node_formset.non_form_errors():
+                messages.error(request, form_err)
     else:
         form = FacilityForm(instance=facility)
-    
+        node_formset = ModalityNodeFormSet(instance=facility, prefix='nodes')
+
     context = {
         'form': form,
+        'node_formset': node_formset,
         'facility': facility,
         'edit_mode': True,
         'dicom_server': _get_dicom_server_info(),

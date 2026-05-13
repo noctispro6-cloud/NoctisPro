@@ -2,7 +2,8 @@ from django import forms
 from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import ValidationError
 from django.contrib.auth.password_validation import validate_password
-from accounts.models import User, Facility
+from django.forms import inlineformset_factory
+from accounts.models import User, Facility, FacilityModalityNode
 import re
 
 
@@ -71,6 +72,17 @@ class CustomUserCreationForm(UserCreationForm):
             'class': 'form-control form-control-medical',
             'placeholder': 'e.g., Neuroradiology, Cardiac Imaging'
         })
+    )
+    assigned_facilities = forms.ModelMultipleChoiceField(
+        queryset=Facility.objects.filter(is_active=True),
+        required=False,
+        widget=forms.CheckboxSelectMultiple(),
+        help_text='Facilities this radiologist is assigned to. Leave empty if freelancer.',
+    )
+    is_freelancer = forms.BooleanField(
+        required=False,
+        widget=forms.CheckboxInput(attrs={'class': 'form-check-input', 'id': 'id_is_freelancer'}),
+        help_text='Freelancer can see studies from all facilities.',
     )
 
     class Meta:
@@ -156,10 +168,11 @@ class CustomUserCreationForm(UserCreationForm):
         user.phone = self.cleaned_data.get('phone', '')
         user.license_number = self.cleaned_data.get('license_number', '')
         user.specialization = self.cleaned_data.get('specialization', '')
+        user.is_freelancer = self.cleaned_data.get('is_freelancer', False)
         # Auto-verify new users created via admin panel (they're already vetted by an admin)
         user.is_verified = True
         user.is_active = True
-        
+
         if commit:
             user.save()
             # Set facility after user is saved
@@ -167,7 +180,11 @@ class CustomUserCreationForm(UserCreationForm):
             if facility:
                 user.facility = facility
                 user.save()
-        
+            # Set assigned_facilities M2M
+            assigned = self.cleaned_data.get('assigned_facilities')
+            if assigned is not None:
+                user.assigned_facilities.set(assigned)
+
         return user
 
 
@@ -194,7 +211,9 @@ class CustomUserUpdateForm(forms.ModelForm):
         model = User
         fields = [
             'username', 'email', 'first_name', 'last_name', 'role', 'facility',
-            'phone', 'license_number', 'specialization', 'is_active', 'is_verified'
+            'phone', 'license_number', 'specialization',
+            'assigned_facilities', 'is_freelancer',
+            'is_active', 'is_verified',
         ]
         widgets = {
             'username': forms.TextInput(attrs={'class': 'form-control form-control-medical', 'required': True}),
@@ -206,6 +225,8 @@ class CustomUserUpdateForm(forms.ModelForm):
             'phone': forms.TextInput(attrs={'class': 'form-control form-control-medical'}),
             'license_number': forms.TextInput(attrs={'class': 'form-control form-control-medical'}),
             'specialization': forms.TextInput(attrs={'class': 'form-control form-control-medical'}),
+            'assigned_facilities': forms.CheckboxSelectMultiple(),
+            'is_freelancer': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'is_verified': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
@@ -214,6 +235,8 @@ class CustomUserUpdateForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['facility'].queryset = Facility.objects.filter(is_active=True).order_by('name')
         self.fields['facility'].required = False
+        self.fields['assigned_facilities'].queryset = Facility.objects.filter(is_active=True).order_by('name')
+        self.fields['assigned_facilities'].required = False
 
     def clean(self):
         cleaned_data = super().clean()
@@ -247,15 +270,15 @@ class CustomUserUpdateForm(forms.ModelForm):
 
     def save(self, commit=True):
         user = super().save(commit=False)
-        
-        # Update password if provided
+
         password = self.cleaned_data.get('password')
         if password:
             user.set_password(password)
-        
+
         if commit:
             user.save()
-        
+            self.save_m2m()
+
         return user
 
 
@@ -298,7 +321,8 @@ class FacilityForm(forms.ModelForm):
         fields = [
             'name', 'address', 'phone', 'email', 'license_number',
             'ae_title', 'dicom_host', 'dicom_port',
-            'letterhead', 'is_active', 'has_ai_subscription', 'subscription_expires_at',
+            'letterhead', 'is_active',
+            'has_system_subscription', 'has_ai_subscription', 'subscription_expires_at',
         ]
         widgets = {
             'name': forms.TextInput(attrs={
@@ -340,6 +364,7 @@ class FacilityForm(forms.ModelForm):
                 'accept': 'image/*'
             }),
             'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'has_system_subscription': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'has_ai_subscription': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'subscription_expires_at': forms.DateTimeInput(
                 attrs={
@@ -459,6 +484,39 @@ class FacilityForm(forms.ModelForm):
     def save(self, commit=True):
         facility = super().save(commit=commit)
         return facility
+
+
+class ModalityNodeForm(forms.ModelForm):
+    """Inline form for a single per-modality DICOM sender node."""
+    class Meta:
+        model = FacilityModalityNode
+        fields = ['modality', 'ae_title', 'host', 'port']
+        widgets = {
+            'modality': forms.Select(attrs={'class': 'form-select form-control-medical form-select-sm'}),
+            'ae_title': forms.TextInput(attrs={
+                'class': 'form-control form-control-medical form-control-sm',
+                'placeholder': 'AE Title (optional)',
+                'maxlength': 32,
+            }),
+            'host': forms.TextInput(attrs={
+                'class': 'form-control form-control-medical form-control-sm',
+                'placeholder': 'IP / CIDR (e.g. 192.168.1.5)',
+            }),
+            'port': forms.NumberInput(attrs={
+                'class': 'form-control form-control-medical form-control-sm',
+                'min': 1, 'max': 65535,
+            }),
+        }
+
+
+ModalityNodeFormSet = inlineformset_factory(
+    Facility,
+    FacilityModalityNode,
+    form=ModalityNodeForm,
+    extra=1,
+    can_delete=True,
+    max_num=12,
+)
 
 
 class BulkUserActionForm(forms.Form):

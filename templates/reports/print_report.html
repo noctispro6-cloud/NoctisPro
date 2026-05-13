@@ -219,35 +219,58 @@
 
         /* ── Footer ── */
         .footer {
-            margin-top: 24px;
-            padding-top: 12px;
-            border-top: 1px solid #b8cde8;
+            margin-top: 28px;
+            padding: 14px 16px 10px;
+            border-top: 2px solid #003d7a;
+            background: #f5f8ff;
+            border-radius: 0 0 4px 4px;
+        }
+
+        .footer-heading {
+            font-size: 9pt;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #003d7a;
+            margin: 0 0 12px 0;
+        }
+
+        .footer-qr-row {
             display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 20px;
+            gap: 32px;
             flex-wrap: wrap;
         }
 
         .qr-block {
             text-align: center;
             font-size: 9pt;
-            color: #555;
+            color: #444;
             flex: 0 0 auto;
         }
 
         .qr-block img {
-            height: 90px;
-            width: 90px;
+            height: 120px;
+            width: 120px;
             display: block;
-            margin: 0 auto 4px auto;
+            margin: 0 auto 6px auto;
+            border: 1px solid #c8d8ee;
+            padding: 4px;
+            background: #fff;
+        }
+
+        .qr-block .qr-label {
+            font-size: 9pt;
+            font-weight: 600;
+            color: #003d7a;
+            margin-bottom: 3px;
         }
 
         .qr-block .qr-url {
             font-size: 7pt;
             word-break: break-all;
-            max-width: 180px;
-            color: #777;
+            max-width: 160px;
+            color: #666;
+            display: block;
         }
 
         /* ── Print button ── */
@@ -412,20 +435,27 @@
     {% endif %}
 
     <!-- ── Footer: QR codes ── -->
+    {% if qr_viewer or qr_report %}
     <div class="footer">
-        {% if qr_viewer %}
-        <div class="qr-block">
-            <img src="{{ qr_viewer }}" alt="QR Images">
-            <div>Scan to view images</div>
+        <div class="footer-heading">Access Online</div>
+        <div class="footer-qr-row">
+            {% if qr_viewer %}
+            <div class="qr-block">
+                <img src="{{ qr_viewer }}" alt="QR – View Images">
+                <div class="qr-label">View Images</div>
+                {% if viewer_url %}<span class="qr-url">{{ viewer_url }}</span>{% endif %}
+            </div>
+            {% endif %}
+            {% if qr_report %}
+            <div class="qr-block">
+                <img src="{{ qr_report }}" alt="QR – View Report">
+                <div class="qr-label">View Report</div>
+                {% if report_url %}<span class="qr-url">{{ report_url }}</span>{% endif %}
+            </div>
+            {% endif %}
         </div>
-        {% endif %}
-        {% if qr_report %}
-        <div class="qr-block">
-            <img src="{{ qr_report }}" alt="QR Report">
-            <div>Scan to view report</div>
-        </div>
-        {% endif %}
     </div>
+    {% endif %}
 
     <!-- ── Print button (hidden when printing) ── -->
     <div class="noprint" style="text-align:center;">

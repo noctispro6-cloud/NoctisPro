@@ -33,7 +33,7 @@ except Exception:
     qrcode = None
 
 
-def _qr_png_bytes(url: str, box_size: int = 6, border: int = 2) -> bytes:
+def _qr_png_bytes(url: str, box_size: int = 8, border: int = 2) -> bytes:
     """Return PNG bytes for a QR code for the given URL."""
     if not qrcode:
         return b''
@@ -310,8 +310,12 @@ def print_report_stub(request, study_id):
     report_url = request.build_absolute_uri(reverse('reports:print_report', args=[study.id]))
 
     # Generate QR codes
-    qr_viewer_b64 = _data_url_from_png(_qr_png_bytes(viewer_url))
-    qr_report_b64 = _data_url_from_png(_qr_png_bytes(report_url))
+    try:
+        qr_viewer_b64 = _data_url_from_png(_qr_png_bytes(viewer_url))
+        qr_report_b64 = _data_url_from_png(_qr_png_bytes(report_url))
+    except Exception:
+        qr_viewer_b64 = ''
+        qr_report_b64 = ''
 
     # Embed letterhead directly to avoid relying on public /media/ URLs.
     # This keeps the printable report working even when MEDIA is not served publicly.
@@ -334,6 +338,8 @@ def print_report_stub(request, study_id):
         'facility': study.facility,
         'qr_viewer': qr_viewer_b64,
         'qr_report': qr_report_b64,
+        'viewer_url': viewer_url,
+        'report_url': report_url,
         'letterhead_b64': letterhead_url,
     })
 

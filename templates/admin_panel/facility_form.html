@@ -108,43 +108,123 @@
                         {% endif %}
                     </div>
 
-                    <!-- DICOM Network / Tunnel config -->
+                    <!-- DICOM Sender Network — single unified block -->
                     <div class="col-12">
                         <hr style="border-color:#333; margin:8px 0 14px;">
-                        <div style="font-size:11px; font-weight:700; color:#00d4ff; text-transform:uppercase; letter-spacing:1px; margin-bottom:12px;">
-                            <i class="fas fa-network-wired" style="margin-right:6px;"></i>DICOM Sender Network
+                        <div style="font-size:11px; font-weight:700; color:#00d4ff; text-transform:uppercase; letter-spacing:1px; margin-bottom:14px;">
+                            <i class="fas fa-network-wired me-2"></i>DICOM Sender Network
                         </div>
-                    </div>
 
-                    <div class="col-md-8">
-                        <label for="id_dicom_host" class="form-label text-white">
-                            Allowed IP / CIDR
-                            <span style="font-size:10px; color:#666; font-weight:400; margin-left:6px;">(Tailscale, LAN, or public)</span>
-                        </label>
-                        {{ form.dicom_host }}
-                        <div class="form-text text-secondary">
-                            <small>
-                                IP or CIDR of the machine that sends DICOM images here.
-                                For Tailscale enter the <code style="color:#00d4ff;">100.x.x.x</code> address shown in the Tailscale admin panel.
-                                Comma-separate multiple entries. Leave blank to allow any address.
-                            </small>
+                        <!-- Default / fallback IP row -->
+                        <div style="background:rgba(0,212,255,.04); border:1px solid rgba(0,212,255,.15); border-radius:8px; padding:14px 16px; margin-bottom:14px;">
+                            <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase; letter-spacing:.6px; margin-bottom:10px;">
+                                Default (fallback for all modalities not listed below)
+                            </div>
+                            <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+                                <div style="flex:3; min-width:200px;">
+                                    <label for="id_dicom_host" class="form-label text-white" style="font-size:12px; margin-bottom:4px;">
+                                        Allowed IP / CIDR
+                                        <span style="font-size:10px; color:#666; font-weight:400; margin-left:4px;">(Tailscale, LAN, or public)</span>
+                                    </label>
+                                    {{ form.dicom_host }}
+                                    <div class="form-text text-secondary mt-1"><small>
+                                        Comma-separate multiple ranges. Leave blank to accept from any address.
+                                    </small></div>
+                                    {% if form.dicom_host.errors %}{% for e in form.dicom_host.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}{% endif %}
+                                </div>
+                                <div style="flex:1; min-width:100px; max-width:130px;">
+                                    <label for="id_dicom_port" class="form-label text-white" style="font-size:12px; margin-bottom:4px;">Port</label>
+                                    {{ form.dicom_port }}
+                                    <div class="form-text text-secondary mt-1"><small>Default: 11112</small></div>
+                                    {% if form.dicom_port.errors %}{% for e in form.dicom_port.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}{% endif %}
+                                </div>
+                            </div>
                         </div>
-                        {% if form.dicom_host.errors %}
-                          {% for error in form.dicom_host.errors %}
-                            <div class="invalid-feedback d-block">{{ error }}</div>
-                          {% endfor %}
-                        {% endif %}
-                    </div>
 
-                    <div class="col-md-4">
-                        <label for="id_dicom_port" class="form-label text-white">DICOM Port</label>
-                        {{ form.dicom_port }}
-                        <div class="form-text text-secondary"><small>Standard is 11112.</small></div>
-                        {% if form.dicom_port.errors %}
-                          {% for error in form.dicom_port.errors %}
-                            <div class="invalid-feedback d-block">{{ error }}</div>
-                          {% endfor %}
+                        <!-- Per-machine IP rows -->
+                        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+                            <div style="font-size:11px; color:#aaa;">
+                                <i class="fas fa-plus-circle me-1" style="color:#00d4ff;"></i>
+                                Additional sending machines — specify IP per modality device
+                            </div>
+                            <button type="button" id="addNodeBtn" class="btn-control" style="font-size:11px; padding:4px 12px;">
+                                <i class="fas fa-plus me-1"></i>Add Machine
+                            </button>
+                        </div>
+
+                        {% if node_formset %}
+                        {{ node_formset.management_form }}
+                        <div id="nodeRows">
+                            {% for node_form in node_formset %}
+                            <div class="node-row mb-2 {% if node_form.instance.pk %}existing-node{% endif %}" style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08); border-radius:6px; padding:10px 12px;">
+                                {% if node_form.instance.pk %}
+                                <div style="display:none;">{{ node_form.id }}{{ node_form.DELETE }}</div>
+                                {% endif %}
+                                <div style="flex:3; min-width:160px;">
+                                    <label style="font-size:10px; color:#888; margin-bottom:3px; display:block;">IP Address / CIDR</label>
+                                    {{ node_form.host }}
+                                    {% for e in node_form.host.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+                                </div>
+                                <div style="flex:1; min-width:90px; max-width:115px;">
+                                    <label style="font-size:10px; color:#888; margin-bottom:3px; display:block;">Port</label>
+                                    {{ node_form.port }}
+                                    {% for e in node_form.port.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+                                </div>
+                                <div style="flex:2; min-width:120px;">
+                                    <label style="font-size:10px; color:#888; margin-bottom:3px; display:block;">Modality</label>
+                                    {{ node_form.modality }}
+                                    {% for e in node_form.modality.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+                                </div>
+                                <div style="flex:2; min-width:110px;">
+                                    <label style="font-size:10px; color:#888; margin-bottom:3px; display:block;">AE Title <span style="color:#555;">(opt)</span></label>
+                                    {{ node_form.ae_title }}
+                                    {% for e in node_form.ae_title.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+                                </div>
+                                <div style="padding-top:18px; flex-shrink:0;">
+                                    {% if node_form.instance.pk %}
+                                    <label class="del-node-label" style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;color:#f87171;white-space:nowrap;" title="Remove this machine">
+                                        {{ node_form.DELETE }}
+                                        <i class="fas fa-trash-alt"></i> Remove
+                                    </label>
+                                    {% else %}
+                                    <button type="button" class="remove-node-btn" title="Remove" style="background:none;border:none;color:#f87171;cursor:pointer;padding:0;font-size:12px;white-space:nowrap;">
+                                        <i class="fas fa-times-circle"></i> Remove
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
                         {% endif %}
+
+                        <!-- Hidden template row for JS cloning -->
+                        <template id="nodeRowTemplate">
+                            <div class="node-row mb-2" style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08); border-radius:6px; padding:10px 12px;">
+                                <div style="flex:3; min-width:160px;">
+                                    <label style="font-size:10px; color:#888; margin-bottom:3px; display:block;">IP Address / CIDR</label>
+                                    <input type="text" name="nodes-__prefix__-host" class="form-control form-control-medical form-control-sm" placeholder="e.g. 192.168.1.50">
+                                </div>
+                                <div style="flex:1; min-width:90px; max-width:115px;">
+                                    <label style="font-size:10px; color:#888; margin-bottom:3px; display:block;">Port</label>
+                                    <input type="number" name="nodes-__prefix__-port" value="11112" min="1" max="65535" class="form-control form-control-medical form-control-sm">
+                                </div>
+                                <div style="flex:2; min-width:120px;">
+                                    <label style="font-size:10px; color:#888; margin-bottom:3px; display:block;">Modality</label>
+                                    <select name="nodes-__prefix__-modality" class="form-select form-control-medical form-select-sm">
+                                        {% if node_formset %}{% for val, label in node_formset.empty_form.fields.modality.choices %}<option value="{{ val }}">{{ label }}</option>{% endfor %}{% endif %}
+                                    </select>
+                                </div>
+                                <div style="flex:2; min-width:110px;">
+                                    <label style="font-size:10px; color:#888; margin-bottom:3px; display:block;">AE Title <span style="color:#555;">(opt)</span></label>
+                                    <input type="text" name="nodes-__prefix__-ae_title" maxlength="32" class="form-control form-control-medical form-control-sm" placeholder="AE Title (optional)">
+                                </div>
+                                <div style="padding-top:18px; flex-shrink:0;">
+                                    <button type="button" class="remove-node-btn" title="Remove" style="background:none;border:none;color:#f87171;cursor:pointer;padding:0;font-size:12px;white-space:nowrap;">
+                                        <i class="fas fa-times-circle"></i> Remove
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
                     </div>
 
                     <!-- DICOM Server Connection Info (for engineer) -->
@@ -231,17 +311,24 @@
                     <!-- Subscription Management -->
                     <div class="col-12 mt-4">
                         <h5 class="text-white mb-3">
-                            <i class="fas fa-robot me-2"></i>AI Subscription
+                            <i class="fas fa-id-card me-2"></i>Subscriptions
                         </h5>
                         <hr class="border-secondary mb-4">
                     </div>
 
                     {% if facility %}
                     <div class="col-12">
-                        {% with now=request.META %}
-                        <div style="background:rgba(0,0,0,.25); border:1px solid #333; border-radius:8px; padding:14px 18px; margin-bottom:8px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+                        <div style="background:rgba(0,0,0,.25); border:1px solid #333; border-radius:8px; padding:14px 18px; margin-bottom:8px; display:flex; align-items:center; gap:24px; flex-wrap:wrap;">
                             <div>
-                                <div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px;">Current Status</div>
+                                <div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px;">System Subscription</div>
+                                {% if facility.has_system_subscription %}
+                                <span style="color:#3fb950; font-weight:700; font-size:13px;"><i class="fas fa-check-circle me-1"></i>Active</span>
+                                {% else %}
+                                <span style="color:#f85149; font-weight:700; font-size:13px;"><i class="fas fa-times-circle me-1"></i>Inactive</span>
+                                {% endif %}
+                            </div>
+                            <div>
+                                <div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px;">AI Subscription</div>
                                 {% if facility.has_ai_subscription %}
                                     {% if facility.subscription_expires_at %}
                                     <span style="color:#f0883e; font-weight:700; font-size:13px;"><i class="fas fa-clock me-1"></i>Active — expires {{ facility.subscription_expires_at|date:"M j, Y" }}</span>
@@ -253,14 +340,30 @@
                                 {% endif %}
                             </div>
                             <div style="margin-left:auto; font-size:11px; color:#666;">
-                                To renew: enable toggle + set new expiry date + save
+                                To renew AI: enable toggle + set new expiry date + save
                             </div>
                         </div>
-                        {% endwith %}
                     </div>
                     {% endif %}
 
-                    <div class="col-12">
+                    <div class="col-md-6">
+                        <div class="form-check form-switch">
+                            {{ form.has_system_subscription }}
+                            <label class="form-check-label text-white" for="id_has_system_subscription">
+                                System Subscription Active
+                            </label>
+                        </div>
+                        <div class="form-text text-secondary">
+                            <small>Grants full access to the NoctisPro PACS system.</small>
+                        </div>
+                        {% if form.has_system_subscription.errors %}
+                          {% for error in form.has_system_subscription.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                          {% endfor %}
+                        {% endif %}
+                    </div>
+
+                    <div class="col-md-6">
                         <div class="form-check form-switch">
                             {{ form.has_ai_subscription }}
                             <label class="form-check-label text-white" for="id_has_ai_subscription">
@@ -268,7 +371,7 @@
                             </label>
                         </div>
                         <div class="form-text text-secondary">
-                            <small>Enable to grant this facility access to AI analysis features. Disable to revoke immediately.</small>
+                            <small>Grants access to AI analysis features.</small>
                         </div>
                         {% if form.has_ai_subscription.errors %}
                           {% for error in form.has_ai_subscription.errors %}
@@ -481,6 +584,57 @@
                 if (!aeInput.value.trim()){
                     aeInput.value = toAeTitle(nameInput.value);
                 }
+            });
+        }
+
+        // Per-modality node formset management
+        const addBtn = document.getElementById('addNodeBtn');
+        const nodeRows = document.getElementById('nodeRows');
+        const tmpl = document.getElementById('nodeRowTemplate');
+        const mgmtTotal = document.querySelector('[name="nodes-TOTAL_FORMS"]');
+
+        function getTotalRows() {
+            return nodeRows ? nodeRows.querySelectorAll('.node-row').length : 0;
+        }
+
+        if (addBtn && tmpl && nodeRows && mgmtTotal) {
+            addBtn.addEventListener('click', function() {
+                const idx = parseInt(mgmtTotal.value) || getTotalRows();
+                const clone = tmpl.content.cloneNode(true);
+                clone.querySelectorAll('[name],[id]').forEach(el => {
+                    if (el.name) el.name = el.name.replace('__prefix__', idx);
+                    if (el.id)   el.id   = el.id.replace('__prefix__', idx);
+                });
+                nodeRows.appendChild(clone);
+                mgmtTotal.value = idx + 1;
+                const lastRow = nodeRows.lastElementChild;
+                const removeBtn = lastRow ? lastRow.querySelector('.remove-node-btn') : null;
+                if (removeBtn) removeBtn.addEventListener('click', function() {
+                    lastRow.remove();
+                });
+            });
+        }
+
+        // Attach remove/delete handlers to already-rendered rows
+        if (nodeRows) {
+            // New (unsaved) rows — just remove the DOM element
+            nodeRows.querySelectorAll('.node-row:not(.existing-node) .remove-node-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    btn.closest('.node-row').remove();
+                });
+            });
+            // Existing (saved) rows — check the hidden DELETE checkbox and dim the row
+            nodeRows.querySelectorAll('.node-row.existing-node .del-node-label').forEach(label => {
+                const chk = label.querySelector('input[type=checkbox]');
+                if (!chk) return;
+                label.addEventListener('click', function() {
+                    const row = label.closest('.node-row');
+                    if (chk.checked) {
+                        row.style.opacity = '0.35';
+                        row.style.pointerEvents = 'none';
+                        label.title = 'Will be removed on save';
+                    }
+                });
             });
         }
     });

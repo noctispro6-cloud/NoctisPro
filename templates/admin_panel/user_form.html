@@ -182,6 +182,57 @@
               </small>
             </div>
           </div>
+
+          <!-- Radiologist-only: facility assignment + freelancer flag -->
+          <div class="col-12 radiologist-only-section" id="radioSection" style="display:none;">
+            <div style="background:rgba(0,212,255,.06); border:1px solid rgba(0,212,255,.18); border-radius:8px; padding:14px 16px; margin-top:4px;">
+              <div style="font-size:11px; font-weight:700; color:#00d4ff; text-transform:uppercase; letter-spacing:.8px; margin-bottom:10px;">
+                <i class="fas fa-hospital-alt me-2"></i>Radiologist Facility Access
+              </div>
+              <div class="row g-3">
+                <div class="col-md-8">
+                  <label class="form-label text-white" style="font-size:13px;">
+                    <i class="fas fa-building me-1"></i>Assigned Facilities
+                  </label>
+                  <div style="background:var(--secondary-bg,#1a1a2e); border:1px solid rgba(255,255,255,.12); border-radius:6px; padding:10px 12px; max-height:180px; overflow-y:auto;">
+                    {% if form.assigned_facilities %}
+                      {% for choice in form.assigned_facilities %}
+                      <div class="form-check mb-1">
+                        {{ choice.tag }}
+                        <label class="form-check-label" style="font-size:12px; color:var(--text-secondary);" for="{{ choice.id_for_label }}">{{ choice.choice_label }}</label>
+                      </div>
+                      {% empty %}
+                      <div style="font-size:11px; color:#555;">No active facilities.</div>
+                      {% endfor %}
+                    {% endif %}
+                  </div>
+                  {% if form.assigned_facilities.errors %}
+                    {% for error in form.assigned_facilities.errors %}
+                      <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
+                  {% endif %}
+                  <div class="form-text text-muted"><small>Radiologist can only see studies from selected facilities. Leave all unchecked if using Freelancer mode.</small></div>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label text-white" style="font-size:13px;">
+                    <i class="fas fa-globe me-1"></i>Freelancer / Guest
+                  </label>
+                  <div class="form-check form-switch" style="margin-top:8px;">
+                    {{ form.is_freelancer }}
+                    <label class="form-check-label" for="id_is_freelancer" style="font-size:12px; color:var(--text-secondary);">
+                      Can see studies from <strong>all</strong> facilities
+                    </label>
+                  </div>
+                  {% if form.is_freelancer.errors %}
+                    {% for error in form.is_freelancer.errors %}
+                      <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
+                  {% endif %}
+                  <div class="form-text text-muted mt-2"><small>Enable for independent consultants / guest radiologists not tied to specific facilities.</small></div>
+                </div>
+              </div>
+            </div>
+          </div>
           {% if edit_mode %}
           <div class="col-md-6">
             <label class="form-label text-white" for="id_password">
@@ -628,18 +679,19 @@
           optEl.style.display = required ? 'none' : '';
         }
       } catch (e) { /* ignore */ }
-      
+
       // Show/hide role descriptions
       const roleDescriptions = document.querySelectorAll('.role-desc');
-      roleDescriptions.forEach(desc => {
-        desc.classList.remove('active');
-      });
-      
+      roleDescriptions.forEach(desc => { desc.classList.remove('active'); });
       if (selectedRole) {
         const activeDesc = document.querySelector(`.role-desc[data-role="${selectedRole}"]`);
-        if (activeDesc) {
-          activeDesc.classList.add('active');
-        }
+        if (activeDesc) activeDesc.classList.add('active');
+      }
+
+      // Show radiologist facility assignment section only for radiologist role
+      const radioSection = document.getElementById('radioSection');
+      if (radioSection) {
+        radioSection.style.display = selectedRole === 'radiologist' ? '' : 'none';
       }
     }
 
@@ -906,18 +958,28 @@
 
     // Initialize
     if (roleSelect && facilitySelect) updateFacilityRequirement();
+
+    // Auto-navigate to the first step that contains server-side validation errors.
+    // Django renders inline .invalid-feedback blocks inside each .form-step div.
+    // When visible=false (CSS display:none), those blocks are still in the DOM, so
+    // we can detect them and jump the user straight to the relevant step.
+    function detectErrorStep() {
+      for (let s = 1; s <= totalSteps; s++) {
+        const stepEl = document.querySelector(`.form-step[data-step="${s}"]`);
+        if (stepEl && stepEl.querySelector('.invalid-feedback')) return s;
+      }
+      return null;
+    }
+    const errorStep = detectErrorStep();
+    if (errorStep) {
+      currentStep = errorStep;
+    }
     showStep(currentStep);
-    
+
     // Show default role description if a role is pre-selected
     if (roleSelect && roleSelect.value) {
       const activeDesc = document.querySelector(`.role-desc[data-role="${roleSelect.value}"]`);
-      if (activeDesc) {
-        activeDesc.classList.add('active');
-      }
-    }
-    
-    // Debug facility count for troubleshooting
-    for (let i = 0; i < facilitySelect.options.length; i++) {
+      if (activeDesc) activeDesc.classList.add('active');
     }
   })
 </script>

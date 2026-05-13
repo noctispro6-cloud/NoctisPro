@@ -59,6 +59,37 @@ def _data_url_from_png(png_bytes: bytes) -> str:
     return 'data:image/png;base64,' + base64.b64encode(png_bytes).decode('ascii')
 
 
+def _qr_svg_str(url: str, size: int = 120) -> str:
+    """Return an inline-embeddable SVG string for a QR code (no data: URI needed)."""
+    if not qrcode:
+        return ''
+    try:
+        import qrcode.image.svg as qr_svg
+        qr = qrcode.QRCode(
+            version=None,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=8,
+            border=2,
+        )
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(image_factory=qr_svg.SvgPathImage)
+        buf = io.BytesIO()
+        img.save(buf)
+        svg = buf.getvalue().decode('utf-8')
+        # Strip XML declaration so it embeds cleanly inside HTML
+        if '<?xml' in svg:
+            svg = svg[svg.index('<svg'):]
+        # Override the hardcoded mm dimensions with pixel size
+        import re
+        svg = re.sub(r'<svg([^>]*?)width="[^"]*"([^>]*?)height="[^"]*"',
+                     f'<svg\\1width="{size}px"\\2height="{size}px"', svg, count=1)
+        return svg
+    except Exception as e:
+        logger.error('SVG QR generation failed: %s', e, exc_info=True)
+        return ''
+
+
 @login_required
 def report_list(request):
     """List all reports. Admins/radiologists can write; facility users can view+print only."""
@@ -269,7 +300,7 @@ def write_report(request, study_id):
     except Exception:
         letterhead_b64 = ''
 
-    # Generate QR codes for the report editor
+    # Generate QR codes for the report editor (inline SVG — no data: URI)
     try:
         viewer_url = request.build_absolute_uri(
             reverse('dicom_viewer:web_viewer') + f'?study_id={study.id}'
@@ -277,8 +308,8 @@ def write_report(request, study_id):
         report_url = request.build_absolute_uri(
             reverse('reports:print_report', args=[study.id])
         )
-        qr_viewer_b64 = _data_url_from_png(_qr_png_bytes(viewer_url))
-        qr_report_b64 = _data_url_from_png(_qr_png_bytes(report_url))
+        qr_viewer_b64 = _qr_svg_str(viewer_url, size=68)
+        qr_report_b64 = _qr_svg_str(report_url, size=68)
     except Exception:
         qr_viewer_b64 = ''
         qr_report_b64 = ''
@@ -320,14 +351,9 @@ def print_report_stub(request, study_id):
     viewer_url = request.build_absolute_uri(reverse('dicom_viewer:web_viewer')) + f"?study_id={study.id}"
     report_url = request.build_absolute_uri(reverse('reports:print_report', args=[study.id]))
 
-    # Generate QR codes
-    try:
-        qr_viewer_b64 = _data_url_from_png(_qr_png_bytes(viewer_url))
-        qr_report_b64 = _data_url_from_png(_qr_png_bytes(report_url))
-    except Exception as e:
-        logger.error('QR generation failed for study %s: %s', study_id, e, exc_info=True)
-        qr_viewer_b64 = ''
-        qr_report_b64 = ''
+    # Generate QR codes as inline SVG (no data: URI — prints reliably in all browsers)
+    qr_viewer = _qr_svg_str(viewer_url, size=120)
+    qr_report = _qr_svg_str(report_url, size=120)
 
     # Embed letterhead directly to avoid relying on public /media/ URLs.
     # This keeps the printable report working even when MEDIA is not served publicly.
@@ -348,8 +374,8 @@ def print_report_stub(request, study_id):
         'report': report,
         'patient': study.patient,
         'facility': study.facility,
-        'qr_viewer': qr_viewer_b64,
-        'qr_report': qr_report_b64,
+        'qr_viewer': qr_viewer,
+        'qr_report': qr_report,
         'viewer_url': viewer_url,
         'report_url': report_url,
         'letterhead_b64': letterhead_url,

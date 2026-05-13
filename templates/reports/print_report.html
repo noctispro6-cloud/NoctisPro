@@ -258,7 +258,7 @@
             flex: 0 0 auto;
         }
 
-        .qr-block img {
+        .qr-block img, .qr-block svg {
             height: 120px;
             width: 120px;
             display: block;
@@ -451,14 +451,14 @@
         <div class="footer-qr-row">
             {% if qr_viewer %}
             <div class="qr-block">
-                <img src="{{ qr_viewer }}" alt="QR – View Images">
+                {{ qr_viewer|safe }}
                 <div class="qr-label">View Images</div>
                 {% if viewer_url %}<span class="qr-url">{{ viewer_url }}</span>{% endif %}
             </div>
             {% endif %}
             {% if qr_report %}
             <div class="qr-block">
-                <img src="{{ qr_report }}" alt="QR – View Report">
+                {{ qr_report|safe }}
                 <div class="qr-label">View Report</div>
                 {% if report_url %}<span class="qr-url">{{ report_url }}</span>{% endif %}
             </div>

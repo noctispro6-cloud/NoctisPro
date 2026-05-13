@@ -126,7 +126,8 @@
     justify-content: space-between; gap: 12px;
 }
 .rpt-qr-block { display: flex; align-items: center; gap: 8px; }
-.rpt-qr-img   { width: 68px; height: 68px; border: 1px solid #ddd; border-radius: 2px; }
+.rpt-qr-img   { width: 68px; height: 68px; border: 1px solid #ddd; border-radius: 2px; background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.rpt-qr-img svg { width: 68px; height: 68px; display: block; }
 .rpt-qr-label { font-size: 7.5pt; color: #555; max-width: 110px; line-height: 1.4; }
 .rpt-qr-label strong { display: block; font-size: 8pt; color: #003d7a; }
 
@@ -378,7 +379,7 @@
     <div class="rpt-footer">
       {% if qr_viewer %}
       <div class="rpt-qr-block">
-        <img class="rpt-qr-img" src="{{ qr_viewer }}" alt="QR DICOM">
+        <div class="rpt-qr-img">{{ qr_viewer|safe }}</div>
         <div class="rpt-qr-label">
           <strong>View DICOM Images</strong>
           Scan to open this study in the imaging viewer
@@ -394,7 +395,7 @@
 
       {% if qr_report %}
       <div class="rpt-qr-block" style="flex-direction:row-reverse;">
-        <img class="rpt-qr-img" src="{{ qr_report }}" alt="QR Report">
+        <div class="rpt-qr-img">{{ qr_report|safe }}</div>
         <div class="rpt-qr-label" style="text-align:right;">
           <strong>This Report</strong>
           Scan to view printable report

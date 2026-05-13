@@ -107,6 +107,10 @@ class User(AbstractUser):
         default=False,
         help_text='Freelancer/guest radiologists can see studies from all facilities.'
     )
+    signature = models.TextField(
+        blank=True, default='',
+        help_text='Base64-encoded digital signature image (data URL). Auto-applied when signing reports.'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

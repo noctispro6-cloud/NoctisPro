@@ -187,7 +187,9 @@ def write_report(request, study_id):
         action = request.POST.get('action', 'save')
         
         if is_new_report:
-            # Create new report
+            sig = ''
+            if status == 'final' or action == 'submit':
+                sig = getattr(request.user, 'signature', '') or ''
             report = Report.objects.create(
                 study=study,
                 radiologist=request.user,
@@ -197,7 +199,9 @@ def write_report(request, study_id):
                 findings=findings,
                 impression=impression,
                 recommendations=recommendations,
-                status=status
+                status=status,
+                digital_signature=sig,
+                signed_date=timezone.now() if status == 'final' else None,
             )
             messages.success(request, 'Report created successfully!')
         else:
@@ -214,6 +218,11 @@ def write_report(request, study_id):
             # If finalizing the report
             if status == 'final' or (action == 'submit' and status == 'final'):
                 report.signed_date = timezone.now()
+                # Auto-apply the radiologist's stored signature if no manual override
+                if not report.digital_signature:
+                    radiologist_sig = getattr(request.user, 'signature', '') or ''
+                    if radiologist_sig:
+                        report.digital_signature = radiologist_sig
             
             report.save()
             messages.success(request, 'Report updated successfully!')

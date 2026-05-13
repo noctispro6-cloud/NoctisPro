@@ -1195,17 +1195,14 @@ def bulk_facility_action(request):
 @user_passes_test(can_manage_facilities)
 def facility_create(request):
     """Create new facility with enhanced form validation"""
-    from .forms import FacilityForm, ModalityNodeFormSet
+    from .forms import FacilityForm
 
     if request.method == 'POST':
         form = FacilityForm(request.POST, request.FILES)
-        node_formset = ModalityNodeFormSet(request.POST, prefix='nodes')
-        if form.is_valid() and node_formset.is_valid():
+        if form.is_valid():
             try:
                 # Save the facility
                 facility = form.save()
-                node_formset.instance = facility
-                node_formset.save()
                 
                 # Handle optional facility user creation
                 if form.cleaned_data.get('create_facility_user'):
@@ -1295,15 +1292,11 @@ def facility_create(request):
                     else:
                         field_name = form.fields[field].label or field.replace('_', ' ').title()
                         messages.error(request, f'{field_name}: {error}')
-            for form_err in node_formset.non_form_errors():
-                messages.error(request, form_err)
     else:
         form = FacilityForm()
-        node_formset = ModalityNodeFormSet(prefix='nodes')
 
     context = {
         'form': form,
-        'node_formset': node_formset,
         'edit_mode': False,
         'dicom_server': _get_dicom_server_info(),
     }
@@ -1314,19 +1307,16 @@ def facility_create(request):
 @user_passes_test(can_manage_facilities)
 def facility_edit(request, facility_id):
     """Edit existing facility with enhanced form validation"""
-    from .forms import FacilityForm, ModalityNodeFormSet
+    from .forms import FacilityForm
 
     facility = get_object_or_404(Facility, id=facility_id)
 
     if request.method == 'POST':
         form = FacilityForm(request.POST, request.FILES, instance=facility)
-        node_formset = ModalityNodeFormSet(request.POST, instance=facility, prefix='nodes')
-        if form.is_valid() and node_formset.is_valid():
+        if form.is_valid():
             try:
                 # Save the updated facility
                 updated_facility = form.save()
-                node_formset.instance = updated_facility
-                node_formset.save()
                 
                 # Handle optional facility user creation during edit
                 if form.cleaned_data.get('create_facility_user'):
@@ -1413,15 +1403,11 @@ def facility_edit(request, facility_id):
                     else:
                         field_name = form.fields[field].label or field.replace('_', ' ').title()
                         messages.error(request, f'{field_name}: {error}')
-            for form_err in node_formset.non_form_errors():
-                messages.error(request, form_err)
     else:
         form = FacilityForm(instance=facility)
-        node_formset = ModalityNodeFormSet(instance=facility, prefix='nodes')
 
     context = {
         'form': form,
-        'node_formset': node_formset,
         'facility': facility,
         'edit_mode': True,
         'dicom_server': _get_dicom_server_info(),

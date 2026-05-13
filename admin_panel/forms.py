@@ -84,6 +84,10 @@ class CustomUserCreationForm(UserCreationForm):
         widget=forms.CheckboxInput(attrs={'class': 'form-check-input', 'id': 'id_is_freelancer'}),
         help_text='Freelancer can see studies from all facilities.',
     )
+    signature = forms.CharField(
+        required=False,
+        widget=forms.HiddenInput(attrs={'id': 'id_signature'}),
+    )
 
     class Meta:
         model = User
@@ -169,6 +173,7 @@ class CustomUserCreationForm(UserCreationForm):
         user.license_number = self.cleaned_data.get('license_number', '')
         user.specialization = self.cleaned_data.get('specialization', '')
         user.is_freelancer = self.cleaned_data.get('is_freelancer', False)
+        user.signature = self.cleaned_data.get('signature', '') or ''
         # Auto-verify new users created via admin panel (they're already vetted by an admin)
         user.is_verified = True
         user.is_active = True
@@ -212,7 +217,7 @@ class CustomUserUpdateForm(forms.ModelForm):
         fields = [
             'username', 'email', 'first_name', 'last_name', 'role', 'facility',
             'phone', 'license_number', 'specialization',
-            'assigned_facilities', 'is_freelancer',
+            'assigned_facilities', 'is_freelancer', 'signature',
             'is_active', 'is_verified',
         ]
         widgets = {
@@ -227,6 +232,7 @@ class CustomUserUpdateForm(forms.ModelForm):
             'specialization': forms.TextInput(attrs={'class': 'form-control form-control-medical'}),
             'assigned_facilities': forms.CheckboxSelectMultiple(),
             'is_freelancer': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'signature': forms.HiddenInput(attrs={'id': 'id_signature'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'is_verified': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }

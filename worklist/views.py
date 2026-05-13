@@ -2474,7 +2474,10 @@ def api_update_study_status(request, study_id):
             'radiologist': {'scheduled', 'in_progress', 'completed', 'suspended', 'cancelled'},
             'admin': {'scheduled', 'in_progress', 'completed', 'suspended', 'cancelled'},
         }
-        user_role = getattr(user, 'role', 'facility')
+        if user._is_superadmin():
+            user_role = 'admin'
+        else:
+            user_role = getattr(user, 'role', 'facility')
         allowed = ALLOWED_STATUS_BY_ROLE.get(user_role, set())
         if new_status and new_status not in allowed:
             return JsonResponse({'error': f'Your role cannot set status to {new_status}'}, status=403)

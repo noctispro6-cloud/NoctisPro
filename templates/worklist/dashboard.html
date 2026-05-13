@@ -1103,10 +1103,12 @@
         <div id="bulkActionBar"
             style="display:none;background:rgba(0,212,255,0.1);border-bottom:1px solid var(--accent-color);padding:6px 16px;align-items:center;gap:12px;">
             <span id="selectedCount" style="font-size:11px;">0 selected</span>
+            {% if user.is_admin or user.is_radiologist %}
             <button onclick="bulkUpdateStatus('completed')" class="btn-control" style="font-size:10px;">Mark
                 Completed</button>
             <button onclick="bulkUpdateStatus('cancelled')" class="btn-control" style="font-size:10px;">Mark
                 Cancelled</button>
+            {% endif %}
             {% if user.is_admin %}
             <button onclick="bulkDelete()" class="btn-control"
                 style="font-size:10px;background:var(--danger-color);color:#fff;">Delete Selected</button>

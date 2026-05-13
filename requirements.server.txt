@@ -1,7 +1,5 @@
 # Minimal production requirements for a small VPS (Ubuntu 24.04)
-# Focus: web app + DICOM receiver/viewer. Heavy AI packages intentionally excluded.
-#
-# If you need AI later (torch/transformers/etc), install from requirements.txt.
+# Focus: web app + DICOM receiver/viewer.
 
 # Core Django
 Django==5.2.5
@@ -39,6 +37,18 @@ pylibjpeg
 pylibjpeg-libjpeg
 pylibjpeg-openjpeg
 pylibjpeg-rle
+
+# QR codes (report footer)
+qrcode[pil]
+
+# PDF export
+PyMuPDF
+
+# AI report generation
+transformers
+torch
+accelerate
+sentencepiece
 
 # Imaging / math used by viewer + recon
 numpy

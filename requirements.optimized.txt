@@ -27,6 +27,12 @@ django-cors-headers
 requests
 fastapi
 
+# QR codes (report footer)
+qrcode[pil]
+
+# PDF export
+PyMuPDF
+
 # DICOM processing
 pydicom
 pynetdicom
@@ -48,9 +54,12 @@ opencv-python
 scikit-image
 matplotlib
 
-# AI and machine learning (high memory requirement)
+# AI and machine learning
 scipy
 pandas
 torch
 torchvision
+transformers
+accelerate
+sentencepiece
 scikit-learn

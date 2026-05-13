@@ -64,7 +64,7 @@ def public_viewer_redirect(request, token):
     request.session['is_public_viewer'] = True
     request.session['public_study_id'] = study.id
 
-    return redirect(f'/dicom-viewer/web/viewer/?study_id={study.id}')
+    return redirect(f'/dicom-viewer/masterpiece/?study={study.id}')
 
 
 def public_report(request, token):

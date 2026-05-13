@@ -448,16 +448,15 @@ class Bone3DProcessor(BaseProcessor):
                     f"Bone 3D reconstruction requires CT data; series modality is '{modality}'"
                 )
             volume, spacing = self.load_series_volume(series)
-            # Default threshold 400 HU — captures cortical and dense spongy bone,
-            # avoids soft tissue (< 100 HU) and fat (< -50 HU).
-            threshold      = parameters.get("threshold", 400)
-            smoothing      = parameters.get("smoothing", True)
-            decimation     = parameters.get("decimation", 0.8)
-            window_center  = parameters.get("window_center", 400)
-            window_width   = parameters.get("window_width", 2000)
+            threshold     = parameters.get("threshold", 300)
+            smoothing     = parameters.get("smoothing", True)
+            decimation    = parameters.get("decimation", 0.7)
+            window_center = parameters.get("window_center", 400)
+            window_width  = parameters.get("window_width", 2000)
+            use_ml        = parameters.get("use_ml", True)
             bone_results = self.generate_bone_reconstruction(
                 volume, spacing, threshold, smoothing, decimation,
-                window_center, window_width,
+                window_center, window_width, use_ml=use_ml,
             )
             return self.save_result(bone_results, f"bone_3d_reconstruction_{series.id}")
         except Exception:
@@ -466,52 +465,70 @@ class Bone3DProcessor(BaseProcessor):
 
     def generate_bone_reconstruction(self, volume, spacing, threshold,
                                      smoothing, decimation,
-                                     window_center=400, window_width=2000):
+                                     window_center=400, window_width=2000,
+                                     use_ml=True):
         results = {}
 
-        # ── Step 1: Resample to isotropic voxels to eliminate elongation ──────
+        # ── Step 1: Resample to isotropic voxels ─────────────────────────────
         volume_iso, iso_spacing = self.resample_isotropic(volume, spacing)
 
-        # ── Step 2: Pre-smooth the volume to reduce noise before segmentation ──
-        # sigma proportional to the degree of anisotropy before resampling
-        pre_sigma = max(0.5, spacing[0] / max(spacing[1], spacing[2], 1e-6) * 0.5)
-        vol_smooth = ndimage.gaussian_filter(volume_iso.astype(np.float32),
-                                             sigma=pre_sigma)
+        # ── Step 2: ML or classical bone segmentation → probability volume ────
+        # The ML engine (BoneMLEngine) only segments WHERE bone is.
+        # It NEVER modifies pixel intensity values — DICOM data is unchanged.
+        # Fractures naturally appear as gaps (bone gap HU < 300 → excluded),
+        # so pathological features are preserved in the mesh as discontinuities.
+        ml_used = False
+        if use_ml:
+            try:
+                from dicom_viewer.bone_ml import BoneMLEngine
+                engine = BoneMLEngine.get()
+                prob_field = engine.segment(volume_iso, spacing=iso_spacing)
+                ml_used = engine.using_ml
+                logger.info('Bone3DProcessor: segmentation via %s',
+                            'ML model' if ml_used else 'enhanced classical')
+            except Exception as exc:
+                logger.warning('BoneMLEngine failed, using threshold fallback: %s', exc)
+                prob_field = None
+        else:
+            prob_field = None
 
-        # ── Step 3: Binary bone mask + morphological cleanup ─────────────────
-        bone_mask = vol_smooth > threshold
-        if smoothing:
-            bone_mask = morphology.binary_closing(bone_mask, morphology.ball(2))
-            bone_mask = morphology.binary_opening(bone_mask, morphology.ball(1))
+        # Classical threshold fallback if ML not used / failed
+        if prob_field is None:
+            pre_sigma = max(0.5, spacing[0] / max(spacing[1], spacing[2], 1e-6) * 0.5)
+            vol_smooth = ndimage.gaussian_filter(volume_iso.astype(np.float32),
+                                                 sigma=pre_sigma)
+            bone_mask = vol_smooth > threshold
+            if smoothing:
+                bone_mask = morphology.binary_closing(bone_mask, morphology.ball(2))
+                bone_mask = morphology.binary_opening(bone_mask, morphology.ball(1))
+            prob_field = ndimage.gaussian_filter(bone_mask.astype(np.float32), sigma=1.5)
+        else:
+            bone_mask = prob_field > 0.5
 
-        # ── Step 4: Build a SMOOTH scalar field for marching cubes ────────────
-        # Gaussian-blur the binary mask so the 0→1 transition has a gradient
-        # instead of an infinite step — this is what eliminates staircase
-        # artifacts.  The isosurface at level=0.5 is at the original boundary.
-        soft_field = ndimage.gaussian_filter(bone_mask.astype(np.float32),
-                                             sigma=1.5)
-
+        # ── Step 3: Marching cubes on probability field ───────────────────────
         try:
             verts, faces, normals, _ = measure.marching_cubes(
-                soft_field, level=0.5, spacing=iso_spacing,
-                allow_degenerate=False
+                prob_field, level=0.5, spacing=iso_spacing,
+                allow_degenerate=False,
             )
 
-            # ── Step 5: Laplacian mesh smoothing (removes residual facets) ───
-            verts = self.laplacian_smooth(verts, faces, iterations=10, lam=0.5)
+            # Conservative Laplacian smoothing — low iterations + low lambda
+            # preserves fracture edges and fine cortical detail.
+            if smoothing:
+                verts = self.laplacian_smooth(verts, faces, iterations=5, lam=0.3)
 
             if decimation < 1.0:
                 verts, faces = self._decimate_mesh(verts, faces, decimation)
             normals = self._compute_vertex_normals(verts, faces)
 
-            results["vertices.npy"] = verts
-            results["faces.npy"]    = faces
-            results["normals.npy"]  = normals
+            results["vertices.npy"]  = verts
+            results["faces.npy"]     = faces
+            results["normals.npy"]   = normals
             results["bone_mesh.vtk"] = _create_vtk_mesh(
-                verts, faces, normals, title="Bone 3D Reconstruction"
+                verts, faces, normals, title="Bone 3D Reconstruction (ML)" if ml_used else "Bone 3D Reconstruction"
             )
             results.update(self._generate_preview_images(
-                bone_mask, volume_iso, iso_spacing, window_center, window_width
+                bone_mask, volume_iso, iso_spacing, window_center, window_width,
             ))
 
         except Exception:
@@ -524,6 +541,7 @@ class Bone3DProcessor(BaseProcessor):
             "decimation":     decimation,
             "window_center":  window_center,
             "window_width":   window_width,
+            "ml_segmentation": ml_used,
             "volume_shape":   list(volume.shape),
             "iso_shape":      list(volume_iso.shape),
             "spacing":        spacing,

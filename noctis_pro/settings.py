@@ -403,6 +403,12 @@ MEDIA_ROOT = os.environ.get('MEDIA_ROOT', os.path.join(BASE_DIR, 'media'))
 # DICOM files storage
 DICOM_ROOT = os.path.join(MEDIA_ROOT, 'dicom')
 
+# ML bone segmentation model weights.
+# Accepts a TorchScript .pt file or a BoneSegNet state-dict .pth file.
+# Leave as None to use the enhanced classical fallback.
+# Production override via BONE_ML_MODEL_PATH env variable.
+BONE_ML_MODEL_PATH = os.environ.get('BONE_ML_MODEL_PATH', None)
+
 # Ensure media directories exist (uploads must persist to disk).
 # In some deployments the volume is mounted but the directory isn't created yet,
 # which causes uploads to silently fail at the storage layer.

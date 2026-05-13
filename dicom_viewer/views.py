@@ -928,7 +928,8 @@ def masterpiece_viewer(request):
         'study_id': study_id_param,
         'series_id': request.GET.get('series', ''),
         'current_date': timezone.now().strftime('%Y-%m-%d'),
-        'user': request.user
+        'user': request.user,
+        'is_public_viewer': bool(request.session.get('is_public_viewer')),
     }
     return render(request, 'dicom_viewer/masterpiece_viewer.html', context)
 
@@ -1839,18 +1840,25 @@ def api_bone_reconstruction(request, series_id):
             _sp = (float(_sp[0]) / factor, float(_sp[1]), float(_sp[2]))
             logger.info(f"Bone enhanced interpolation: {volume.shape[0]} slices (factor: {factor:.2f})")
         
-        # Threshold mask for isosurface extraction
-        iso_mask = (volume >= float(threshold))
-        
-        # Optional smoothing to avoid "lego" surfaces when downsampled.
-        # We smooth the binary mask (not the HU volume) so the surface extraction remains stable.
+        # ML bone segmentation → probability volume → binary mask.
+        # The ML engine only determines WHERE bone is; DICOM pixel values are untouched.
+        # Fractures appear as gaps in the mask (fracture gap HU < threshold → excluded).
+        _ml_used = False
+        try:
+            from dicom_viewer.bone_ml import BoneMLEngine
+            _engine = BoneMLEngine.get()
+            _prob = _engine.segment(volume, spacing=_sp)
+            iso_mask = _prob >= 0.5
+            _ml_used = _engine.using_ml
+        except Exception:
+            iso_mask = (volume >= float(threshold))
+
+        # Optional light cleanup — conservative to preserve fracture lines and fine features.
         if smooth and want_mesh:
             try:
                 from scipy import ndimage as _nd
-                # Light closing/opening to fill small holes and remove speckles
                 iso_mask = _nd.binary_closing(iso_mask, iterations=1)
                 iso_mask = _nd.binary_opening(iso_mask, iterations=1)
-                # Sub-voxel smoothing: gaussian blur then re-threshold
                 f = _nd.gaussian_filter(iso_mask.astype(np.float32), sigma=0.75)
                 iso_mask = (f >= 0.5)
             except Exception:
@@ -2050,8 +2058,9 @@ def api_bone_reconstruction(request, series_id):
             # Backwards/forwards compatible keys for multiple frontends
             'mesh': mesh_payload,
             'mesh_data': mesh_payload,
+            'ml_segmentation': bool(_ml_used),
         })
-        
+
     except Exception as e:
         return JsonResponse({'error': f'Error generating bone reconstruction: {str(e)}'}, status=500)
 

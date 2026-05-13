@@ -1504,6 +1504,15 @@
             .nav-dropdown-item { padding: 10px 14px; }
         }
     </style>
+    {% if is_public_viewer %}
+    <style>
+        /* Public viewer: hide staff-only controls */
+        .pub-hide { display: none !important; }
+    </style>
+    {% endif %}
+    <script>
+        const IS_PUBLIC_VIEWER = {{ is_public_viewer|yesno:"true,false" }};
+    </script>
 </head>
 
 <body>
@@ -1646,7 +1655,7 @@
                 <div class="topbar-actions">
 
                     <!-- Primary: Load local DICOM -->
-                    <button class="topbar-btn topbar-btn-primary" onclick="window.loadFromLocalFiles()"
+                    <button class="topbar-btn topbar-btn-primary pub-hide" onclick="window.loadFromLocalFiles()"
                         title="View DICOM from CD, DVD, or USB flash drive (no upload)">
                         <i class="fas fa-compact-disc"></i><span>Load</span>
                     </button>
@@ -1707,7 +1716,7 @@
                     <div class="topbar-sep-v"></div>
 
                     <!-- Report (role-gated, shown when study is loaded) -->
-                    {% if user.is_admin or user.is_radiologist %}
+                    {% if not is_public_viewer and user.is_admin or not is_public_viewer and user.is_radiologist %}
                     <button type="button" id="writeReportBtn" class="topbar-btn"
                         onclick="if(window.currentStudyId){ window.location.href='/reports/write/'+window.currentStudyId+'/'; } else { alert('Please load a study first'); }"
                         title="Write Report for current study" style="display:none;">
@@ -1730,7 +1739,7 @@
                     <div class="topbar-sep-v"></div>
 
                     <!-- Icon-only utility buttons -->
-                    <a class="topbar-btn topbar-btn-icon" href="{% url 'worklist:dashboard' %}" title="Home (worklist)">
+                    <a class="topbar-btn topbar-btn-icon pub-hide" href="{% url 'worklist:dashboard' %}" title="Home (worklist)">
                         <i class="fas fa-home"></i>
                     </a>
                     <button class="topbar-btn topbar-btn-icon" onclick="toggleUI()" title="Toggle UI auto-hide">

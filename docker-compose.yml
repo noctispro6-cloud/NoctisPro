@@ -80,6 +80,9 @@ services:
       # Persist uploads/static outside the image so rebuilds never delete patient data.
       MEDIA_ROOT: /data/media
       STATIC_ROOT: /data/staticfiles
+      # ML bone segmentation model (optional — classical fallback used when unset).
+      # Set BONE_ML_MODEL_PATH=/models/bone_seg.pt and mount the file below.
+      BONE_ML_MODEL_PATH: ${BONE_ML_MODEL_PATH:-}
     depends_on:
       db:
         condition: service_healthy
@@ -115,6 +118,7 @@ services:
       MEDIA_ROOT: /data/media
       STATIC_ROOT: /data/staticfiles
       DJANGO_SETTINGS_MODULE: noctis_pro.settings
+      BONE_ML_MODEL_PATH: ${BONE_ML_MODEL_PATH:-}
     command:
       [
         "bash",

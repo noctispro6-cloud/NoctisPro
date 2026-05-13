@@ -94,11 +94,20 @@ def is_ai_visible(user) -> bool:
     try:
         if not user or not user.is_authenticated:
             return False
+        # User-level cap can explicitly disable AI for an individual
         caps = get_user_caps(user.username)
         if caps.get('ai_visible', True) is False:
             return False
+        # Role-level toggle (set in permissions dashboard)
         roles = get_role_toggles()
         role_key = 'admin' if user.is_admin() else 'radiologist' if user.is_radiologist() else 'facility'
-        return bool(roles.get(role_key, {}).get('ai_visible', role_key != 'facility'))
+        if not roles.get(role_key, {}).get('ai_visible', role_key != 'facility'):
+            return False
+        # Facility-level subscription gate (non-admins only)
+        if not getattr(user, 'is_admin', lambda: False)():
+            facility = getattr(user, 'facility', None)
+            if facility is not None and not getattr(facility, 'has_ai_subscription', True):
+                return False
+        return True
     except Exception:
         return False

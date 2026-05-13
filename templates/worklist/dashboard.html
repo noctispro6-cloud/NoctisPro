@@ -1154,16 +1154,15 @@
                 <div class="logo"><i class="fas fa-hospital-symbol"></i> Noctis Pro PACS</div>
                 <button class="mob-drawer-close" onclick="closeMobDrawer()"><i class="fas fa-times"></i></button>
             </div>
+            {% user_caps as mob_caps %}
             <div class="nav-tab active">WORKLIST</div>
             <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
             <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'dicom_viewer:viewer' %}'"><i class="fas fa-images"></i> DICOM VIEWER</div>
             <div class="nav-tab" onclick="closeMobDrawer();toggleBoardView()"><i class="fas fa-th"></i> BOARD VIEW</div>
-            {% if user.is_admin or user.is_radiologist %}
-            <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI WORKLIST</div>
-            {% elif user.is_facility_user and user.facility and user.facility.has_ai_subscription %}
+            {% if mob_caps.ai_visible %}
             <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI WORKLIST</div>
             {% endif %}
-            {% if user.is_admin %}
+            {% if user.is_admin or mob_caps.manage_settings or mob_caps.manage_permissions or mob_caps.manage_users or mob_caps.manage_facilities or mob_caps.view_logs %}
             <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'admin_panel:dashboard' %}'"><i class="fas fa-user-cog"></i> ADMIN PANEL</div>
             {% endif %}
         </div>
@@ -1204,15 +1203,11 @@
                     <div class="nav-tab" id="boardViewTab" onclick="toggleBoardView()"><i class="fas fa-th"></i> BOARD
                     </div>
                     {% user_caps as caps %}
-                    {# AI WORKLIST tab: visible to admin, radiologist, and facility users with an active subscription #}
-                    {% if user.is_admin or user.is_radiologist %}
-                    <div class="nav-tab" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i
-                            class="fas fa-robot"></i> AI WORKLIST</div>
-                    {% elif user.is_facility_user and user.facility and user.facility.has_ai_subscription %}
+                    {% if caps.ai_visible %}
                     <div class="nav-tab" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i
                             class="fas fa-robot"></i> AI WORKLIST</div>
                     {% endif %}
-                    {% if user.is_admin %}
+                    {% if user.is_admin or caps.manage_settings or caps.manage_permissions or caps.manage_users or caps.manage_facilities or caps.view_logs %}
                     <div class="nav-tab" onclick="window.location.href='{% url 'admin_panel:dashboard' %}'"><i
                             class="fas fa-user-cog"></i> ADMIN PANEL</div>
                     {% endif %}
@@ -1224,14 +1219,9 @@
                     <span>ONLINE</span>
                 </div>
                 {% user_caps as caps %}
-                {% if user.is_admin or user.is_radiologist %}
+                {% if caps.ai_visible %}
                 <span
                     style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,212,255,0.12);border:1px solid var(--accent-color);color:var(--accent-color);padding:2px 6px;border-radius:10px;font-size:10px;">
-                    <i class="fas fa-robot"></i> AI
-                </span>
-                {% elif caps.ai_visible %}
-                <span
-                    style="display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.06);border:1px solid var(--border-color);color:var(--text-secondary);padding:2px 6px;border-radius:10px;font-size:10px;">
                     <i class="fas fa-robot"></i> AI
                 </span>
                 {% endif %}
@@ -1418,7 +1408,7 @@
             <button onclick="bulkUpdateStatus('cancelled')" class="btn-control" style="font-size:10px;">Mark
                 Cancelled</button>
             {% endif %}
-            {% if user.is_admin %}
+            {% if user.is_admin or caps.manage_users %}
             <button onclick="bulkDelete()" class="btn-control"
                 style="font-size:10px;background:var(--danger-color);color:#fff;">Delete Selected</button>
             {% endif %}

@@ -1,7 +1,9 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.contrib import messages
+from django.contrib.auth import login as auth_login
+from django.core import signing
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.html import escape
@@ -17,6 +19,97 @@ from django.urls import reverse
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+_PUBLIC_VIEWER_SALT = 'noctispro-public-viewer-v1'
+_PUBLIC_REPORT_SALT = 'noctispro-public-report-v1'
+
+
+def _make_public_tokens(study_id: int) -> tuple[str, str]:
+    """Return (viewer_token, report_token) signed with study_id."""
+    viewer_token = signing.dumps({'sid': study_id}, salt=_PUBLIC_VIEWER_SALT)
+    report_token = signing.dumps({'sid': study_id}, salt=_PUBLIC_REPORT_SALT)
+    return viewer_token, report_token
+
+
+def _get_or_create_public_viewer_user():
+    """Return the shared service account used for public QR-code sessions."""
+    user, created = User.objects.get_or_create(
+        username='__public_viewer__',
+        defaults={
+            'first_name': 'Public',
+            'last_name': 'Viewer',
+            'role': 'radiologist',
+            'is_active': True,
+        },
+    )
+    if created or user.has_usable_password():
+        user.set_unusable_password()
+        user.save(update_fields=['password'])
+    return user
+
+
+def public_viewer_redirect(request, token):
+    """Validate a signed viewer token, create a scoped session, open the DICOM viewer."""
+    try:
+        data = signing.loads(token, salt=_PUBLIC_VIEWER_SALT)
+        study_id = int(data['sid'])
+    except Exception:
+        return HttpResponseForbidden('This link is invalid or has expired.')
+
+    study = get_object_or_404(Study, id=study_id)
+
+    viewer_user = _get_or_create_public_viewer_user()
+    viewer_user.backend = 'django.contrib.auth.backends.ModelBackend'
+    auth_login(request, viewer_user)
+    request.session['is_public_viewer'] = True
+    request.session['public_study_id'] = study.id
+
+    return redirect(f'/dicom-viewer/web/viewer/?study_id={study.id}')
+
+
+def public_report(request, token):
+    """Validate a signed report token and render the printable report (no login needed)."""
+    try:
+        data = signing.loads(token, salt=_PUBLIC_REPORT_SALT)
+        study_id = int(data['sid'])
+    except Exception:
+        return HttpResponseForbidden('This link is invalid or has expired.')
+
+    study = get_object_or_404(Study, id=study_id)
+    report = Report.objects.filter(study=study).first()
+
+    viewer_url = request.build_absolute_uri(
+        reverse('dicom_viewer:web_viewer') + f'?study_id={study.id}'
+    )
+    report_url = request.build_absolute_uri(
+        reverse('reports:print_report', args=[study.id])
+    )
+    qr_viewer = _qr_svg_str(viewer_url, size=120)
+    qr_report = _qr_svg_str(report_url, size=120)
+
+    letterhead_url = ''
+    try:
+        lh = getattr(study.facility, 'letterhead', None)
+        if lh and getattr(lh, 'name', ''):
+            import mimetypes
+            ctype, _ = mimetypes.guess_type(lh.name)
+            ctype = ctype or 'image/png'
+            with lh.open('rb') as f:
+                letterhead_url = f"data:{ctype};base64," + base64.b64encode(f.read()).decode('ascii')
+    except Exception:
+        pass
+
+    return render(request, 'reports/print_report.html', {
+        'study': study,
+        'report': report,
+        'patient': study.patient,
+        'facility': study.facility,
+        'qr_viewer': qr_viewer,
+        'qr_report': qr_report,
+        'viewer_url': viewer_url,
+        'report_url': report_url,
+        'letterhead_b64': letterhead_url,
+    })
 
 # Optional PDF/Docx libs
 try:
@@ -301,6 +394,7 @@ def write_report(request, study_id):
         letterhead_b64 = ''
 
     # Generate QR codes for the report editor (inline SVG — no data: URI)
+    # QR codes use signed public tokens so scanning requires no login
     try:
         viewer_url = request.build_absolute_uri(
             reverse('dicom_viewer:web_viewer') + f'?study_id={study.id}'
@@ -308,8 +402,11 @@ def write_report(request, study_id):
         report_url = request.build_absolute_uri(
             reverse('reports:print_report', args=[study.id])
         )
-        qr_viewer_b64 = _qr_svg_str(viewer_url, size=68)
-        qr_report_b64 = _qr_svg_str(report_url, size=68)
+        viewer_token, report_token = _make_public_tokens(study.id)
+        qr_viewer_url = request.build_absolute_uri(reverse('reports:public_viewer', args=[viewer_token]))
+        qr_report_url = request.build_absolute_uri(reverse('reports:public_report', args=[report_token]))
+        qr_viewer_b64 = _qr_svg_str(qr_viewer_url, size=68)
+        qr_report_b64 = _qr_svg_str(qr_report_url, size=68)
     except Exception:
         qr_viewer_b64 = ''
         qr_report_b64 = ''
@@ -347,13 +444,16 @@ def print_report_stub(request, study_id):
 
     report = Report.objects.filter(study=study).first()
 
-    # Build absolute URLs
+    # Build absolute URLs — QR codes use signed public tokens (no login required to scan)
+    viewer_token, report_token = _make_public_tokens(study.id)
     viewer_url = request.build_absolute_uri(reverse('dicom_viewer:web_viewer')) + f"?study_id={study.id}"
     report_url = request.build_absolute_uri(reverse('reports:print_report', args=[study.id]))
+    qr_viewer_url = request.build_absolute_uri(reverse('reports:public_viewer', args=[viewer_token]))
+    qr_report_url = request.build_absolute_uri(reverse('reports:public_report', args=[report_token]))
 
     # Generate QR codes as inline SVG (no data: URI — prints reliably in all browsers)
-    qr_viewer = _qr_svg_str(viewer_url, size=120)
-    qr_report = _qr_svg_str(report_url, size=120)
+    qr_viewer = _qr_svg_str(qr_viewer_url, size=120)
+    qr_report = _qr_svg_str(qr_report_url, size=120)
 
     # Embed letterhead directly to avoid relying on public /media/ URLs.
     # This keeps the printable report working even when MEDIA is not served publicly.

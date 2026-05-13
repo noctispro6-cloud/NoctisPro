@@ -13,4 +13,7 @@ urlpatterns = [
     path('action/<int:report_id>/amend/',  views.report_amend,  name='report_amend'),
     path('action/<int:report_id>/cancel/', views.report_cancel, name='report_cancel'),
     path('action/<int:report_id>/delete/', views.report_delete, name='report_delete'),
+    # Public QR-code access (no login required)
+    path('public/viewer/<str:token>/', views.public_viewer_redirect, name='public_viewer'),
+    path('public/report/<str:token>/', views.public_report, name='public_report'),
 ]

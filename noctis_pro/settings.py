@@ -248,6 +248,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'noctis_pro.middleware.SubscriptionRequiredMiddleware',
+    'noctis_pro.middleware.PublicViewerMiddleware',
 ]
 
 ROOT_URLCONF = 'noctis_pro.urls'

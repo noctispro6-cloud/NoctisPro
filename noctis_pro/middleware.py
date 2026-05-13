@@ -480,6 +480,32 @@ class SubscriptionRequiredMiddleware:
         return await self.get_response(request)
 
 
+class PublicViewerMiddleware:
+    """
+    Allow QR-code public access to the DICOM viewer and printable report only.
+    Any other URL for a public-viewer session is redirected back to the viewer.
+    """
+    ALLOWED_PREFIXES = (
+        '/dicom-viewer/',
+        '/reports/public/',
+        '/static/',
+        '/media/',
+        '/notifications/',
+        '/ws/',
+    )
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if request.session.get('is_public_viewer'):
+            path = request.path
+            if not any(path.startswith(p) for p in self.ALLOWED_PREFIXES):
+                study_id = request.session.get('public_study_id', '')
+                return redirect(f'/dicom-viewer/web/viewer/?study_id={study_id}')
+        return self.get_response(request)
+
+
 class SessionTimeoutWarningMiddleware(MiddlewareMixin):
     # NOTE: This middleware is defined but NOT registered in settings.MIDDLEWARE.
     # To activate it, add 'noctis_pro.middleware.SessionTimeoutWarningMiddleware' to MIDDLEWARE

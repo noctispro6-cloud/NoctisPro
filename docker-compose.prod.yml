@@ -74,6 +74,8 @@ services:
       SSL_ENABLED: "true"
       USE_X_FORWARDED_HOST: "true"
       USE_X_FORWARDED_PORT: "true"
+      # ML bone segmentation model (optional — classical fallback used when unset)
+      BONE_ML_MODEL_PATH: ${BONE_ML_MODEL_PATH:-}
     depends_on:
       db:
         condition: service_healthy
@@ -107,6 +109,7 @@ services:
       MEDIA_ROOT: /data/media
       STATIC_ROOT: /data/staticfiles
       DJANGO_SETTINGS_MODULE: noctis_pro.settings
+      BONE_ML_MODEL_PATH: ${BONE_ML_MODEL_PATH:-}
     command:
       [
         "bash",

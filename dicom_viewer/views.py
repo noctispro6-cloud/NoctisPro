@@ -949,7 +949,13 @@ def api_study_data(request, study_id):
     try:
         study = get_object_or_404(Study, id=study_id)
         user = request.user
-        
+
+        # Public viewer sessions are locked to the study from the signed token
+        if request.session.get('is_public_viewer'):
+            allowed_study_id = request.session.get('public_study_id')
+            if allowed_study_id and int(allowed_study_id) != int(study_id):
+                return JsonResponse({'error': 'Access denied'}, status=403)
+
         # Check permissions
         if hasattr(user, 'is_facility_user') and user.is_facility_user() and hasattr(study, 'facility') and study.facility != user.facility:
             return JsonResponse({'error': 'Permission denied'}, status=403)
@@ -2337,11 +2343,16 @@ def api_dicom_image_display(request, image_id):
     """
     image = get_object_or_404(DicomImage, id=image_id)
     user = request.user
-    
+
+    if request.session.get('is_public_viewer'):
+        allowed_study_id = request.session.get('public_study_id')
+        if allowed_study_id and int(allowed_study_id) != image.series.study_id:
+            return JsonResponse({'error': 'Access denied'}, status=403)
+
     # Check permissions
     if user.is_facility_user() and getattr(user, 'facility', None) and image.series.study.facility != user.facility:
         return JsonResponse({'error': 'Permission denied'}, status=403)
-    
+
     # Always attempt to return a response (avoid 500 for robustness)
     warnings = {}
     try:
@@ -4510,21 +4521,24 @@ def web_index(request):
 @login_required
 def web_viewer(request):
     """Render the web viewer page. Expects ?study_id in query."""
-    # If an admin/radiologist opens a specific study, mark it in_progress
-    try:
-        study_id_param = request.GET.get('study_id')
-        if study_id_param and hasattr(request.user, 'can_edit_reports') and request.user.can_edit_reports():
-            try:
+    study_id_param = request.GET.get('study_id', '')
+    is_public_viewer = bool(request.session.get('is_public_viewer'))
+
+    # Only mark in_progress for authenticated staff (not public viewer)
+    if study_id_param and not is_public_viewer:
+        try:
+            if hasattr(request.user, 'can_edit_reports') and request.user.can_edit_reports():
                 study = get_object_or_404(Study, id=int(study_id_param))
-                # Only update if not already completed/cancelled
                 if study.status in ['scheduled', 'suspended']:
                     study.status = 'in_progress'
                     study.save(update_fields=['status'])
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return render(request, 'dicom_viewer/base.html')
+        except Exception:
+            pass
+
+    return render(request, 'dicom_viewer/base.html', {
+        'study_id': study_id_param,
+        'is_public_viewer': is_public_viewer,
+    })
 
 
 
@@ -4562,6 +4576,10 @@ def web_study_detail(request, study_id):
 @login_required
 def web_series_images(request, series_id):
     series = get_object_or_404(Series, id=series_id)
+    if request.session.get('is_public_viewer'):
+        allowed_study_id = request.session.get('public_study_id')
+        if allowed_study_id and int(allowed_study_id) != series.study_id:
+            return JsonResponse({'error': 'Access denied'}, status=403)
     if hasattr(request.user, 'is_facility_user') and request.user.is_facility_user() and getattr(request.user, 'facility', None) and series.study.facility != request.user.facility:
         return JsonResponse({'error': 'Permission denied'}, status=403)
     images = series.images.all().order_by('instance_number')
@@ -4593,6 +4611,10 @@ def web_series_images(request, series_id):
 @login_required
 def web_dicom_image(request, image_id):
     image = get_object_or_404(DicomImage, id=image_id)
+    if request.session.get('is_public_viewer'):
+        allowed_study_id = request.session.get('public_study_id')
+        if allowed_study_id and int(allowed_study_id) != image.series.study_id:
+            return HttpResponse(status=403)
     if hasattr(request.user, 'is_facility_user') and request.user.is_facility_user() and getattr(request.user, 'facility', None) and image.series.study.facility != request.user.facility:
         return HttpResponse(status=403)
     window_width = float(request.GET.get('ww', 400))

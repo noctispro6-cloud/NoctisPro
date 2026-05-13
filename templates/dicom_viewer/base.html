@@ -1492,6 +1492,15 @@
         }
         /* ─────────────────────────────────────────────────────────── */
     </style>
+    {% if is_public_viewer %}
+    <style>
+        /* Public viewer mode — hide system-internal controls */
+        #studySelect, .btn-public-hide { display: none !important; }
+    </style>
+    {% endif %}
+    <script>
+        const IS_PUBLIC_VIEWER = {{ is_public_viewer|yesno:"true,false" }};
+    </script>
 </head>
 <body>
     <div class="viewer-container">
@@ -1507,19 +1516,19 @@
                 </div>
             </div>
             <div class="nav-right">
-                <select class="select" id="studySelect">
+                <select class="select btn-public-hide" id="studySelect">
                     <option value="">Select Study from System</option>
                 </select>
-                <button class="btn-dicom-viewer" onclick="loadFromExternalMedia()" title="Load DICOM from USB/DVD">
+                <button class="btn-dicom-viewer btn-public-hide" onclick="loadFromExternalMedia()" title="Load DICOM from USB/DVD">
                     <i class="fas fa-compact-disc"></i>
                 </button>
-                <button class="btn-dicom-viewer btn-secondary" onclick="saveMeasurements()" title="Save Measurements">
+                <button class="btn-dicom-viewer btn-secondary btn-public-hide" onclick="saveMeasurements()" title="Save Measurements">
                     <i class="fas fa-save"></i>
                 </button>
                 <button class="btn-dicom-viewer btn-secondary" onclick="exportImage()" title="Export Image">
                     <i class="fas fa-download"></i>
                 </button>
-                <a href="/worklist/" class="btn-dicom-viewer btn-secondary" title="Home">
+                <a href="/worklist/" class="btn-dicom-viewer btn-secondary btn-public-hide" title="Home">
                     <i class="fas fa-home"></i>
                 </a>
             </div>
@@ -2368,21 +2377,24 @@
         // Professional initialization
         document.addEventListener('DOMContentLoaded', function() {
             initializeViewer();
-            
-            // Show help tooltip for window/level control
-            setTimeout(() => {
-                showToast('💡 Tip: Right-click or Shift+click and drag on image to adjust brightness/contrast', 'info', 6000);
-            }, 2000);
-            
-            // Show keyboard shortcuts help
-            setTimeout(() => {
-                showToast('⌨️ Keyboard shortcuts: H=Flip horizontal, V=Flip vertical, T=Rotate, Ctrl+R=Reset transforms', 'info', 8000);
-            }, 10000);
-            loadAvailableStudies();
-            
-            // Check for study ID in URL
+
+            if (!IS_PUBLIC_VIEWER) {
+                // Show help tooltip for window/level control
+                setTimeout(() => {
+                    showToast('💡 Tip: Right-click or Shift+click and drag on image to adjust brightness/contrast', 'info', 6000);
+                }, 2000);
+
+                // Show keyboard shortcuts help
+                setTimeout(() => {
+                    showToast('⌨️ Keyboard shortcuts: H=Flip horizontal, V=Flip vertical, T=Rotate, Ctrl+R=Reset transforms', 'info', 8000);
+                }, 10000);
+
+                loadAvailableStudies();
+            }
+
+            // Check for study ID in URL (support both ?study_id= and legacy ?study=)
             const urlParams = new URLSearchParams(window.location.search);
-            const studyId = urlParams.get('study') || '{{ study_id|default:"" }}';
+            const studyId = urlParams.get('study_id') || urlParams.get('study') || '{{ study_id|default:"" }}';
             if (studyId) {
                 loadStudy(studyId);
             }

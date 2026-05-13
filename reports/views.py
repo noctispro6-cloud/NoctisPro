@@ -9,12 +9,14 @@ from .models import Report, ReportTemplate
 from worklist.models import Study
 from accounts.models import User
 import io
+import base64
+import logging
 from django.core.files.base import ContentFile
 from django.utils.text import slugify
 from django.urls import reverse
 from django.conf import settings
-import io
-import base64
+
+logger = logging.getLogger(__name__)
 
 # Optional PDF/Docx libs
 try:
@@ -322,7 +324,8 @@ def print_report_stub(request, study_id):
     try:
         qr_viewer_b64 = _data_url_from_png(_qr_png_bytes(viewer_url))
         qr_report_b64 = _data_url_from_png(_qr_png_bytes(report_url))
-    except Exception:
+    except Exception as e:
+        logger.error('QR generation failed for study %s: %s', study_id, e, exc_info=True)
         qr_viewer_b64 = ''
         qr_report_b64 = ''
 
@@ -497,6 +500,17 @@ def export_report_pdf(request, study_id):
             if qr2:
                 page.insert_image(right_rect, stream=qr2, keep_proportion=True)
                 page.insert_text((right_rect.x0, right_rect.y1 + 2), 'Scan to view report', fontsize=8, fontname='helv', fill=(0,0,0))
+        except Exception:
+            pass
+
+        # Powered by line at very bottom
+        try:
+            pw_y = page.rect.height - 14
+            pw_text = 'Powered by NoctisPro'
+            page.insert_text(
+                (page.rect.width / 2 - len(pw_text) * 2.5, pw_y),
+                pw_text, fontsize=7, fontname='helv', fill=(0.6, 0.6, 0.6)
+            )
         except Exception:
             pass
 

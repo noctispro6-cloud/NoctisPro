@@ -148,6 +148,11 @@
     .rpt-canvas { background: #fff !important; padding: 0 !important; }
     .rpt-paper  { box-shadow: none !important; min-height: unset; }
     .rpt-sig-canvas { display: none !important; }
+    .rpt-qr-img {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+    }
 }
 </style>
 {% endblock %}
@@ -383,7 +388,8 @@
 
       <div style="text-align:center;font-size:7.5pt;color:#888;flex:1;">
         {{ study.accession_number|default:"" }}{% if study.accession_number %} &nbsp;·&nbsp; {% endif %}{{ study.study_date|date:"d M Y"|default:"" }}<br>
-        {{ facility.name|default:"" }}
+        {{ facility.name|default:"" }}<br>
+        <span style="color:#bbb;font-size:6.5pt;letter-spacing:0.04em;">Powered by <strong style="color:#999;">NoctisPro</strong></span>
       </div>
 
       {% if qr_report %}

@@ -14,6 +14,16 @@
             .noprint { display: none !important; }
             .section { page-break-inside: avoid; }
             body { margin: 0; }
+            .footer { page-break-inside: avoid; }
+            .qr-block img {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+                color-adjust: exact !important;
+            }
+            img {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
         }
 
         * { box-sizing: border-box; }
@@ -403,7 +413,7 @@
         {% endif %}
         {% if report.digital_signature %}
             <div style="margin-top:8px;">
-                <img src="data:image/png;base64,{{ report.digital_signature }}" alt="Signature" style="max-height:60px;">
+                <img src="{{ report.digital_signature }}" alt="Signature" style="max-height:60px; -webkit-print-color-adjust:exact; print-color-adjust:exact;">
             </div>
         {% endif %}
         {% if report.signature_timestamp %}
@@ -456,6 +466,11 @@
         </div>
     </div>
     {% endif %}
+
+    <!-- ── Powered by ── -->
+    <div style="margin-top:14px;text-align:center;font-size:7.5pt;color:#aaa;letter-spacing:0.04em;">
+        Powered by <strong style="color:#888;">NoctisPro</strong>
+    </div>
 
     <!-- ── Print button (hidden when printing) ── -->
     <div class="noprint" style="text-align:center;">

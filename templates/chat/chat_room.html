@@ -4,20 +4,7 @@
 
 {% block extra_css %}
 <style>
-        :root {
-            --primary-bg: #0a0a0a;
-            --secondary-bg: #1a1a1a;
-            --card-surface: #252525;
-            --header-bg: #333333;
-            --border-color: #404040;
-            --accent-color: #00d4ff;
-            --text-primary: #ffffff;
-            --text-secondary: #b3b3b3;
-            --text-muted: #666666;
-            --success-color: #00ff88;
-            --warning-color: #ffaa00;
-            --danger-color: #ff4444;
-        }
+    /* ── No :root override — inherits dark/light from base.html ── */
 
     .chat-room-container {
         background: var(--dark-bg);
@@ -111,6 +98,9 @@
         margin-bottom: 0.5rem;
         background: rgba(255, 255, 255, 0.05);
     }
+    @media (prefers-color-scheme: light) {
+        .participant-item { background: rgba(24,72,200,0.05); }
+    }
 
     .participant-avatar {
         background: var(--gradient-accent);
@@ -179,7 +169,7 @@
     }
 
     .composer {
-        background: rgba(255, 255, 255, 0.02);
+        background: var(--secondary-bg);
         border-top: 1px solid var(--border-color);
         padding: 12px;
         position: sticky;
@@ -195,13 +185,13 @@
 
     .composer textarea {
         resize: none;
-        min-height: 40px;
+        min-height: 44px;
         max-height: 140px;
         width: 100%;
         padding: 10px 12px;
         border-radius: 10px;
-        border: 1px solid rgba(64, 64, 64, 0.5);
-        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border-color);
+        background: var(--primary-bg);
         color: var(--text-primary);
         font-size: 12px;
         line-height: 1.35;
@@ -223,6 +213,32 @@
     @media (max-width: 992px) {
         .participants-sidebar { display: none; }
         .messages-container { max-height: calc(100vh - 220px); }
+    }
+    @media (max-width: 767px) {
+        .chat-header { padding: 10px 12px; }
+        .room-info-badge { display: none; }
+        .messages-container {
+            max-height: calc(100dvh - 240px);
+            padding: 8px;
+        }
+        .message-item { padding: 10px 12px; }
+        .composer { padding: 8px 10px; }
+        .composer textarea { font-size: 14px; }
+        .messages-container .btn-control { min-height: 40px; min-width: 40px; }
+    }
+    @media (prefers-color-scheme: light) {
+        .message-item.own {
+            background: rgba(24,72,200,0.06);
+            border-color: rgba(24,72,200,0.25);
+        }
+        .room-info-badge {
+            background: rgba(24,72,200,0.12);
+            color: #1848C8;
+        }
+        .composer textarea:focus {
+            border-color: rgba(24,72,200,0.6);
+            box-shadow: 0 0 0 3px rgba(24,72,200,0.12);
+        }
     }
 
     .message-item:hover .msg-actions { display: flex !important; }

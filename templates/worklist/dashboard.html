@@ -868,77 +868,331 @@
             cursor: not-allowed;
         }
 
-        /* Responsive adjustments */
-        @media (max-width: 1200px) {
+        /* ── Mobile hamburger + filter toggle ─────────────────────── */
+        .mob-menu-btn, .mob-filter-btn {
+            display: none;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 6px 10px;
+            font-size: 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+            min-width: 36px;
+            min-height: 36px;
+            flex-shrink: 0;
+        }
+        .mob-menu-btn:active, .mob-filter-btn:active { background: var(--accent-color); color: var(--primary-bg); }
 
-            .data-table th,
-            .data-table td {
-                padding: 4px 8px;
-                font-size: 10px;
-            }
+        /* Mobile nav drawer */
+        .mob-nav-drawer {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            background: var(--secondary-bg);
+            border-bottom: 2px solid var(--accent-color);
+            z-index: 2000;
+            padding: 12px 16px;
+            flex-direction: column;
+            gap: 6px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        .mob-nav-drawer.open { display: flex; }
+        .mob-nav-drawer .mob-drawer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .mob-nav-drawer .mob-drawer-header .logo { font-size: 15px; }
+        .mob-nav-drawer .nav-tab {
+            width: 100%;
+            text-align: left;
+            border-radius: 4px;
+            padding: 10px 14px;
+            font-size: 12px;
+        }
+        .mob-drawer-close {
+            background: none; border: none; color: var(--text-secondary);
+            font-size: 18px; cursor: pointer; padding: 4px 8px;
+        }
+        .mob-drawer-overlay {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 1999;
+        }
+        .mob-drawer-overlay.open { display: block; }
 
-            .controls-bar {
-                flex-wrap: wrap;
-                height: auto;
-                min-height: 40px;
-            }
-
-            .viewer-buttons {
-                flex-direction: column;
-                gap: 2px;
-            }
-
-            .btn-viewer {
-                font-size: 8px;
-                padding: 3px 6px;
-            }
+        /* Mobile filter panel */
+        .mob-filter-panel {
+            display: none;
+            background: var(--secondary-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 10px 12px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .mob-filter-panel.open { display: flex; }
+        .mob-filter-panel .control-group {
+            flex: 1 1 calc(50% - 4px);
+            min-width: 130px;
+        }
+        .mob-filter-panel .control-input,
+        .mob-filter-panel .control-select {
+            width: 100%;
+            min-width: 0;
+            font-size: 13px;
+            padding: 7px 10px;
+        }
+        .mob-filter-panel .mob-filter-actions {
+            flex: 1 1 100%;
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
         }
 
-        @media (max-width: 768px) {
-            .data-table {
-                font-size: 10px;
-            }
+        /* Mobile bottom action sheet */
+        .mob-action-sheet-overlay {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 8000;
+        }
+        .mob-action-sheet-overlay.open { display: block; }
+        .mob-action-sheet {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            background: var(--card-bg);
+            border-top: 2px solid var(--accent-color);
+            border-radius: 16px 16px 0 0;
+            z-index: 8001;
+            padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
+            transform: translateY(100%);
+            transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+            max-height: 70dvh;
+            overflow-y: auto;
+        }
+        .mob-action-sheet.open { transform: translateY(0); }
+        .mob-sheet-handle {
+            width: 36px; height: 4px;
+            background: var(--border-color);
+            border-radius: 2px;
+            margin: 0 auto 10px;
+        }
+        .mob-sheet-title {
+            padding: 0 16px 8px;
+            font-size: 11px;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .mob-sheet-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 20px;
+            font-size: 14px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: background 0.15s;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+        }
+        .mob-sheet-item:active { background: rgba(0,212,255,0.1); }
+        .mob-sheet-item i { width: 20px; text-align: center; color: var(--accent-color); font-size: 15px; }
+        .mob-sheet-item.danger { color: var(--danger-color); }
+        .mob-sheet-item.danger i { color: var(--danger-color); }
+        .mob-sheet-cancel {
+            margin: 8px 16px 0;
+            width: calc(100% - 32px);
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--secondary-bg);
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: center;
+        }
 
-            .data-table th,
-            .data-table td {
-                padding: 3px 6px;
-            }
+        /* ── Responsive breakpoints ─────────────────────────────── */
 
-            .controls-bar {
-                flex-wrap: wrap;
-                gap: 6px;
-                padding: 6px 8px;
-                height: auto;
-            }
+        /* Large desktop — minor table padding only */
+        @media (max-width: 1200px) {
+            .data-table th, .data-table td { padding: 4px 8px; font-size: 10px; }
+            .controls-bar { flex-wrap: wrap; height: auto; min-height: 40px; }
+            .viewer-buttons { flex-direction: column; gap: 2px; }
+            .btn-viewer { font-size: 8px; padding: 3px 6px; }
+        }
 
+        /* Tablet (portrait + landscape) */
+        @media (max-width: 1023px) {
+            .top-navbar { padding: 6px 10px; height: auto; flex-wrap: wrap; gap: 6px; }
+            .nav-tab { font-size: 10px; padding: 5px 9px; }
+            .controls-bar { flex-wrap: wrap; gap: 6px; height: auto; padding: 6px 10px; }
+            .control-input, .control-select { min-width: 80px; font-size: 11px; }
+
+            /* Hide least-important columns on tablet */
+            .data-table th:nth-child(10),  /* SCHEDULED */
+            .data-table td:nth-child(10),
+            .data-table th:nth-child(13),  /* UPLOADED BY */
+            .data-table td:nth-child(13) { display: none; }
+
+            .footer-status { flex-wrap: wrap; height: auto; gap: 4px; padding: 6px 10px; }
+        }
+
+        /* Phone — shared portrait + landscape */
+        @media (max-width: 767px) {
+            body { overflow: auto; }
+            .dashboard-container { height: auto; min-height: 100dvh; }
+
+            /* Navbar: logo + hamburger only */
             .top-navbar {
-                padding: 6px 8px;
+                padding: 8px 12px;
+                height: 52px;
+                flex-wrap: nowrap;
+                overflow: hidden;
             }
+            .nav-tabs { display: none; }
+            .mob-menu-btn { display: inline-flex; }
 
-            .nav-tabs {
-                overflow-x: auto;
-            }
+            /* Right nav: icons only, no text labels */
+            .nav-right { gap: 6px; }
+            .nav-right > span:not(.study-count) { display: none; }
+            .user-info > div:last-child { display: none; }
+            .status-indicator { display: none; }
+            .admin-btn { display: none; }
 
-            .nav-tab {
-                font-size: 9px;
-                padding: 4px 8px;
-                white-space: nowrap;
-            }
+            /* Controls: hide full bar, show only search + filter toggle */
+            .controls-bar { display: none !important; }
+            .mob-filter-btn { display: inline-flex; }
 
-            /* Hide less important columns on small screens */
-            .data-table th:nth-child(n+9),
-            .data-table td:nth-child(n+9) {
-                display: none;
+            /* Table: show only essential columns */
+            /* Columns: 1=checkbox 2=TIME 3=PID 4=NAME 5=ACCESSION 6=MODALITY 7=STATUS 8=PRIORITY 9=REPORT 10=SCHEDULED 11=IMAGES 12=FACILITY 13=UPLOADED */
+            .data-table th:nth-child(2),  /* TIME */
+            .data-table td:nth-child(2),
+            .data-table th:nth-child(3),  /* PATIENT ID */
+            .data-table td:nth-child(3),
+            .data-table th:nth-child(5),  /* ACCESSION */
+            .data-table td:nth-child(5),
+            .data-table th:nth-child(9),  /* REPORT */
+            .data-table td:nth-child(9),
+            .data-table th:nth-child(10), /* SCHEDULED */
+            .data-table td:nth-child(10),
+            .data-table th:nth-child(11), /* IMAGES */
+            .data-table td:nth-child(11),
+            .data-table th:nth-child(12), /* FACILITY */
+            .data-table td:nth-child(12),
+            .data-table th:nth-child(13), /* UPLOADED BY */
+            .data-table td:nth-child(13) { display: none; }
+
+            .data-table th, .data-table td { padding: 10px 8px; font-size: 12px; }
+            .data-table tbody tr { min-height: 52px; }
+            .status-badge { font-size: 10px; padding: 3px 8px; }
+            .modality-badge { font-size: 10px; padding: 3px 7px; }
+
+            /* Footer: compact */
+            .footer-status {
+                height: auto; flex-wrap: wrap; padding: 4px 10px;
+                gap: 6px; font-size: 10px;
             }
+            .status-right { display: none; }
+
+            /* Bulk action bar: wrap */
+            #bulkActionBar { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
+        }
+
+        /* Phone portrait only */
+        @media (max-width: 480px) {
+            /* Even more aggressive column hiding — NAME + MODALITY + STATUS + PRIORITY only */
+            .data-table th:nth-child(8),  /* PRIORITY */
+            .data-table td:nth-child(8) { display: none; }
+
+            .data-table td { padding: 10px 6px; }
+            .patient-name { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+
+            /* Delete modal full-width */
+            .delete-modal { padding: 20px 16px; }
+            .mob-filter-panel .control-group { flex: 1 1 100%; }
+        }
+
+        /* Phone landscape (wider) — show a few more columns */
+        @media (min-width: 481px) and (max-width: 767px) {
+            .data-table th:nth-child(3),  /* PATIENT ID */
+            .data-table td:nth-child(3) { display: table-cell; }
+        }
+
+        /* Touch: larger tap targets and no hover effects */
+        @media (hover: none) and (pointer: coarse) {
+            .btn-control, .btn-viewer { min-height: 40px; min-width: 36px; }
+            .nav-tab { min-height: 40px; }
+            .ctx-menu { display: none !important; }  /* replaced by action sheet */
+            .data-table tbody tr { cursor: pointer; }
         }
     </style>
 </head>
 
 <body>
     <div class="dashboard-container">
+        <!-- Mobile nav drawer overlay -->
+        <div class="mob-drawer-overlay" id="mobDrawerOverlay" onclick="closeMobDrawer()"></div>
+
+        <!-- Mobile nav drawer -->
+        <div class="mob-nav-drawer" id="mobNavDrawer">
+            <div class="mob-drawer-header">
+                <div class="logo"><i class="fas fa-hospital-symbol"></i> Noctis Pro PACS</div>
+                <button class="mob-drawer-close" onclick="closeMobDrawer()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="nav-tab active">WORKLIST</div>
+            <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'reports:report_list' %}'">REPORTS</div>
+            <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'dicom_viewer:viewer' %}'"><i class="fas fa-images"></i> DICOM VIEWER</div>
+            <div class="nav-tab" onclick="closeMobDrawer();toggleBoardView()"><i class="fas fa-th"></i> BOARD VIEW</div>
+            {% if user.is_admin or user.is_radiologist %}
+            <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI WORKLIST</div>
+            {% elif user.is_facility_user and user.facility and user.facility.has_ai_subscription %}
+            <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI WORKLIST</div>
+            {% endif %}
+            {% if user.is_admin %}
+            <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'admin_panel:dashboard' %}'"><i class="fas fa-user-cog"></i> ADMIN PANEL</div>
+            {% endif %}
+        </div>
+
+        <!-- Mobile action sheet -->
+        <div class="mob-action-sheet-overlay" id="mobSheetOverlay" onclick="closeMobSheet()"></div>
+        <div class="mob-action-sheet" id="mobActionSheet">
+            <div class="mob-sheet-handle"></div>
+            <div class="mob-sheet-title" id="mobSheetTitle">Study Actions</div>
+            <button class="mob-sheet-item" id="mobSheetView"><i class="fas fa-eye"></i> View in DICOM Viewer</button>
+            <button class="mob-sheet-item" id="mobSheetDetails"><i class="fas fa-folder-open"></i> Study Details</button>
+            {% if user.is_admin or user.is_radiologist %}
+            <button class="mob-sheet-item" id="mobSheetReport"><i class="fas fa-file-signature"></i> Write / Edit Report</button>
+            {% endif %}
+            {% if user.is_facility_user %}
+            <button class="mob-sheet-item" id="mobSheetPrint"><i class="fas fa-print"></i> Print Report</button>
+            {% endif %}
+            <button class="mob-sheet-item" id="mobSheetAttach"><i class="fas fa-paperclip"></i> Attach Files</button>
+            <button class="mob-sheet-item" id="mobSheetChat"><i class="fas fa-comments"></i> Study Discussion</button>
+            {% if user.is_admin or user.is_radiologist %}
+            <button class="mob-sheet-item danger" id="mobSheetDelete"><i class="fas fa-trash"></i> Delete Study</button>
+            {% endif %}
+            <button class="mob-sheet-cancel" onclick="closeMobSheet()">Cancel</button>
+        </div>
+
         <!-- Top Navigation -->
         <nav class="top-navbar">
             <div class="nav-left">
+                <button class="mob-menu-btn" id="mobMenuBtn" onclick="openMobDrawer()" title="Menu"><i class="fas fa-bars"></i></button>
                 <div class="logo">
                     <i class="fas fa-hospital-symbol"></i> Noctis Pro PACS
                 </div>
@@ -1097,6 +1351,61 @@
                 style="background: linear-gradient(135deg, #059669, #047857); color: white; font-weight: bold;">
                 <i class="fas fa-upload"></i> UPLOAD DICOM
             </button>
+        </div>
+
+        <!-- Mobile controls bar (shown on phones, hidden on desktop) -->
+        <div class="controls-bar" id="mobTopBar" style="display:none;padding:6px 12px;gap:8px;height:auto;">
+            <input type="text" class="control-input" id="mobSearchFilter" placeholder="Search patient, ID..." style="flex:1;min-width:0;font-size:13px;padding:7px 10px;">
+            <button class="mob-filter-btn" id="mobFilterBtn" onclick="toggleMobFilter()" title="Filters" style="display:inline-flex;">
+                <i class="fas fa-sliders-h"></i>
+            </button>
+            <button type="button" class="btn-control" onclick="refreshData()" style="padding:7px 10px;"><i class="fas fa-sync-alt"></i></button>
+            <button type="button" class="btn-dicom-viewer" onclick="launchDicomViewer()" style="background:linear-gradient(135deg,#6b46c1,#553c9a);color:#fff;font-weight:bold;padding:7px 10px;"><i class="fas fa-cube"></i></button>
+            <button type="button" onclick="uploadStudies()" style="background:linear-gradient(135deg,#059669,#047857);color:#fff;font-weight:bold;padding:7px 10px;border:none;border-radius:2px;cursor:pointer;font-size:11px;"><i class="fas fa-upload"></i></button>
+        </div>
+
+        <!-- Mobile filter panel (slides open) -->
+        <div class="mob-filter-panel" id="mobFilterPanel">
+            <div class="control-group">
+                <label class="control-label">Date:</label>
+                <input type="date" class="control-input" id="mobDateFilter" value="">
+            </div>
+            <div class="control-group">
+                <label class="control-label">Status:</label>
+                <select class="control-select" id="mobStatusFilter">
+                    <option value="">All Status</option>
+                    <option value="scheduled">Scheduled</option>
+                    <option value="in-progress">In Progress</option>
+                    <option value="completed">Completed</option>
+                    <option value="suspended">Suspended</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label class="control-label">Modality:</label>
+                <select class="control-select" id="mobModalityFilter">
+                    <option value="">All Modalities</option>
+                    <option value="CT">CT</option>
+                    <option value="MR">MRI</option>
+                    <option value="XR">X-Ray</option>
+                    <option value="US">Ultrasound</option>
+                    <option value="NM">Nuclear Medicine</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label class="control-label">Priority:</label>
+                <select class="control-select" id="mobPriorityFilter">
+                    <option value="">All Priorities</option>
+                    <option value="urgent">Urgent</option>
+                    <option value="high">High</option>
+                    <option value="normal">Normal</option>
+                    <option value="low">Low</option>
+                </select>
+            </div>
+            <div class="mob-filter-actions">
+                <button class="btn-control" onclick="resetMobFilters()"><i class="fas fa-times"></i> Clear</button>
+                <button class="btn-control reset" onclick="applyMobFilters();toggleMobFilter()"><i class="fas fa-check"></i> Apply</button>
+            </div>
         </div>
 
         <!-- Bulk Action Bar (hidden until selections made) -->
@@ -2166,6 +2475,159 @@
 
     <!-- Enhanced Delete Button Fix -->
     <script src="{% static 'js/delete-button-fix.js' %}"></script>
+
+    <script>
+    // ── Mobile responsive JS ────────────────────────────────────────
+    (function () {
+        const MOBILE_BP = 767;
+        let isMobile = window.innerWidth <= MOBILE_BP;
+
+        // Show/hide mobile vs desktop controls based on width
+        function applyLayout() {
+            isMobile = window.innerWidth <= MOBILE_BP;
+            const desktopBar = document.querySelector('.controls-bar:not(#mobTopBar)');
+            const mobBar = document.getElementById('mobTopBar');
+            if (desktopBar) desktopBar.style.display = isMobile ? 'none' : '';
+            if (mobBar) mobBar.style.display = isMobile ? 'flex' : 'none';
+        }
+        applyLayout();
+        window.addEventListener('resize', applyLayout);
+        window.addEventListener('orientationchange', function () { setTimeout(applyLayout, 150); });
+
+        // ── Hamburger / drawer ──────────────────────────────────────
+        window.openMobDrawer = function () {
+            document.getElementById('mobNavDrawer').classList.add('open');
+            document.getElementById('mobDrawerOverlay').classList.add('open');
+            document.body.style.overflow = 'hidden';
+        };
+        window.closeMobDrawer = function () {
+            document.getElementById('mobNavDrawer').classList.remove('open');
+            document.getElementById('mobDrawerOverlay').classList.remove('open');
+            document.body.style.overflow = '';
+        };
+
+        // ── Mobile filter panel ────────────────────────────────────
+        window.toggleMobFilter = function () {
+            document.getElementById('mobFilterPanel').classList.toggle('open');
+        };
+
+        // Sync mobile search input → applyFilters
+        const mobSearch = document.getElementById('mobSearchFilter');
+        if (mobSearch) {
+            mobSearch.addEventListener('input', function () {
+                const desktop = document.getElementById('searchFilter');
+                if (desktop) { desktop.value = mobSearch.value; applyFilters(); }
+            });
+        }
+
+        window.applyMobFilters = function () {
+            const sync = (mobId, deskId) => {
+                const m = document.getElementById(mobId);
+                const d = document.getElementById(deskId);
+                if (m && d) d.value = m.value;
+            };
+            sync('mobDateFilter', 'dateFilter');
+            sync('mobStatusFilter', 'statusFilter');
+            sync('mobModalityFilter', 'modalityFilter');
+            sync('mobPriorityFilter', 'priorityFilter');
+            applyFilters();
+        };
+
+        window.resetMobFilters = function () {
+            ['mobDateFilter','mobStatusFilter','mobModalityFilter','mobPriorityFilter','mobSearchFilter'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            resetFilters();
+            document.getElementById('mobFilterPanel').classList.remove('open');
+        };
+
+        // ── Long-press action sheet ────────────────────────────────
+        let _lpTimer = null;
+        let _lpStudyId = null;
+        let _lpAccession = null;
+        let _lpPatientName = null;
+
+        function openMobSheet(studyId, accession, patientName) {
+            _lpStudyId = studyId;
+            document.getElementById('mobSheetTitle').textContent =
+                (patientName || accession || 'Study') + (accession ? ' — ' + accession : '');
+            document.getElementById('mobSheetOverlay').classList.add('open');
+            document.getElementById('mobActionSheet').classList.add('open');
+            document.body.style.overflow = 'hidden';
+        }
+        window.closeMobSheet = function () {
+            document.getElementById('mobSheetOverlay').classList.remove('open');
+            document.getElementById('mobActionSheet').classList.remove('open');
+            document.body.style.overflow = '';
+            _lpStudyId = null;
+        };
+
+        // Wire sheet item buttons
+        function sheetBtn(id, fn) {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('click', function () { if (_lpStudyId) fn(_lpStudyId); closeMobSheet(); });
+        }
+        sheetBtn('mobSheetView', function (id) { openStudyInViewer(id); });
+        sheetBtn('mobSheetDetails', function (id) { window.location.href = '/worklist/study/' + id + '/'; });
+        {% if user.is_admin or user.is_radiologist %}
+        sheetBtn('mobSheetReport', function (id) { openReport(id); });
+        {% endif %}
+        {% if user.is_facility_user %}
+        sheetBtn('mobSheetPrint', function (id) { printStudy(id); });
+        {% endif %}
+        sheetBtn('mobSheetAttach', function (id) { window.location.href = '/worklist/study/' + id + '/attach/'; });
+        sheetBtn('mobSheetChat', function (id) {
+            const csrf = getCSRFToken();
+            fetch('/worklist/api/study/' + id + '/chat-room/', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/json' }
+            }).then(r => r.json()).then(d => { if (d.room_id) window.location.href = '/chat/room/' + d.room_id + '/'; });
+        });
+        {% if user.is_admin or user.is_radiologist %}
+        sheetBtn('mobSheetDelete', function (id) {
+            const row = document.querySelector('tr[data-study-id="' + id + '"]');
+            const acc = (row && row.querySelector('.accession')) ? row.querySelector('.accession').textContent : '';
+            deleteStudy(id, acc);
+        });
+        {% endif %}
+
+        // Attach long-press / touch listeners to table rows
+        const tbody = document.getElementById('studiesTableBody');
+        if (tbody) {
+            tbody.addEventListener('touchstart', function (e) {
+                const row = e.target.closest('tr[data-study-id]');
+                if (!row || !isMobile) return;
+                const studyId = row.getAttribute('data-study-id');
+                const acc = (row.querySelector('.accession') || {}).textContent || '';
+                const name = (row.querySelector('.patient-name') || {}).textContent || '';
+                _lpTimer = setTimeout(function () {
+                    _lpTimer = null;
+                    openMobSheet(studyId, acc.trim(), name.trim());
+                }, 480);
+            }, { passive: true });
+
+            tbody.addEventListener('touchend', function () {
+                if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
+            }, { passive: true });
+
+            tbody.addEventListener('touchmove', function () {
+                if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
+            }, { passive: true });
+
+            // Single tap on mobile opens detail page (not viewer)
+            tbody.addEventListener('click', function (e) {
+                if (!isMobile) return;
+                const cb = e.target.closest('.study-checkbox');
+                if (cb) return; // let checkbox work normally
+                const row = e.target.closest('tr[data-study-id]');
+                if (!row) return;
+                const studyId = row.getAttribute('data-study-id');
+                window.location.href = '/worklist/study/' + studyId + '/';
+            });
+        }
+    })();
+    </script>
 </body>
 
 </html>

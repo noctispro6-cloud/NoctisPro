@@ -4,70 +4,21 @@
 
 {% block extra_css %}
 <style>
-	:root {
-		--primary-bg: #0a0a0a;
-		--secondary-bg: #1a1a1a;
-		--card-surface: #252525;
-		--header-bg: #333333;
-		--border-color: #404040;
-		--accent-color: #00d4ff;
-		--text-primary: #ffffff;
-		--text-secondary: #b3b3b3;
-		--text-muted: #666666;
-		--success-color: #00ff88;
-		--warning-color: #ffaa00;
-		--danger-color: #ff4444;
-	}
+	/* ── No :root override — inherits dark/light from base.html ── */
 
-	.detail-container {
-		padding: 16px;
-	}
-
-	.card {
-		background: var(--card-bg);
-		border: 1px solid var(--border-color);
-		border-radius: 12px;
-	}
-
-	.card-header {
-		padding: 16px;
-		border-bottom: 1px solid var(--border-color);
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-
-	.card-body {
-		padding: 16px;
-	}
+	.detail-container { padding: 16px; }
 
 	.grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 		gap: 12px;
 	}
 
-	.label {
-		color: var(--text-secondary);
-		font-size: 12px;
-	}
+	.label { color: var(--text-secondary); font-size: 12px; }
+	.value { font-weight: 600; }
+	.section-title { font-weight: 600; margin-top: 12px; margin-bottom: 8px; }
 
-	.value {
-		font-weight: 600;
-	}
-
-	.section-title {
-		font-weight: 600;
-		margin-top: 12px;
-		margin-bottom: 8px;
-	}
-
-	.chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-	}
-
+	.chips { display: flex; flex-wrap: wrap; gap: 6px; }
 	.chip {
 		border: 1px solid var(--border-color);
 		border-radius: 999px;
@@ -76,24 +27,50 @@
 		color: var(--text-secondary);
 	}
 
-	.btn-control {
-		background: var(--card-bg);
-		border: 1px solid var(--border-color);
-		color: var(--text-primary);
-		padding: 4px 12px;
-		font-size: 11px;
-		cursor: pointer;
-		border-radius: 2px;
-		transition: all 0.2s ease;
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-		text-decoration: none;
+	/* ── Mobile ── */
+	@media (max-width: 767px) {
+		.detail-container { padding: 8px; }
+
+		/* Header: stack title and buttons */
+		.card-header {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 10px;
+		}
+		.card-header .d-flex {
+			flex-wrap: wrap;
+			gap: 6px;
+			width: 100%;
+		}
+		/* Make action buttons easier to tap */
+		.card-header .btn-control,
+		.card-header .btn-dicom-viewer,
+		.card-header a.btn-control {
+			padding: 8px 12px;
+			font-size: 12px;
+			flex: 1 1 auto;
+			justify-content: center;
+			min-height: 38px;
+		}
+
+		/* Info grid: 2 columns on phone */
+		.grid { grid-template-columns: 1fr 1fr; }
+
+		/* Tables: horizontal scroll */
+		.card > .card-body .table-responsive,
+		.data-table-container { overflow-x: auto; }
+
+		/* Prior studies / series tables */
+		.table { font-size: 11px; }
+		.table td, .table th { padding: 6px 8px; white-space: nowrap; }
 	}
 
-	.btn-control:hover {
-		background: var(--accent-color);
-		color: var(--primary-bg);
+	@media (max-width: 480px) {
+		.grid { grid-template-columns: 1fr; }
+		.card-header .d-flex { flex-direction: column; }
+		.card-header .btn-control,
+		.card-header .btn-dicom-viewer,
+		.card-header a.btn-control { width: 100%; }
 	}
 </style>
 {% endblock %}

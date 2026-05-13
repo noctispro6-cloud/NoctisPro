@@ -106,6 +106,68 @@
 
             a { color: #1848C8; }
             a:hover { color: #1440A8; }
+
+            /* Fix hardcoded dark gradient stops in controls/buttons/forms */
+            .controls-bar {
+                background: linear-gradient(135deg, #F0F6FF 0%, #EDF4FF 50%, #F0F6FF 100%);
+                border-bottom-color: #B8D4F8;
+                box-shadow: 0 2px 8px rgba(24,72,200,0.08), inset 0 1px 0 rgba(255,255,255,0.9);
+            }
+            .control-input, .control-select {
+                background: #FFFFFF;
+                border-color: #B8D4F8;
+                color: #09122B;
+                box-shadow: inset 0 1px 2px rgba(24,72,200,0.05);
+            }
+            .control-input:focus, .control-select:focus {
+                border-color: #1848C8;
+                box-shadow: 0 0 0 3px rgba(24,72,200,0.15), inset 0 1px 2px rgba(24,72,200,0.05);
+                background: #F0F6FF;
+                color: #09122B;
+            }
+            .btn-control {
+                background: #FFFFFF;
+                border-color: #B8D4F8;
+                color: #09122B;
+                box-shadow: 0 2px 4px rgba(24,72,200,0.08), inset 0 1px 0 rgba(255,255,255,0.9);
+            }
+            .btn-control:hover {
+                background: linear-gradient(135deg, #1848C8 0%, #2563EB 100%);
+                color: #FFFFFF;
+                border-color: #1440A8;
+                box-shadow: 0 4px 12px rgba(24,72,200,0.3), inset 0 1px 0 rgba(255,255,255,0.15);
+            }
+            .btn-control.reset {
+                background: linear-gradient(135deg, #1848C8 0%, #2563EB 100%);
+                color: #FFFFFF;
+                border-color: #1440A8;
+            }
+            .form-control-medical, .form-control {
+                background: #FFFFFF;
+                border-color: #B8D4F8;
+                color: #09122B;
+            }
+            .form-control-medical:focus, .form-control:focus {
+                background: #F0F6FF;
+                border-color: #1848C8;
+                box-shadow: 0 0 0 3px rgba(24,72,200,0.15);
+                color: #09122B;
+            }
+            .form-control-medical::placeholder, .form-control::placeholder {
+                color: #3D5A8A;
+                opacity: 1;
+            }
+            .np-dropdown-menu {
+                background: #FFFFFF;
+                border-color: #B8D4F8;
+                box-shadow: 0 4px 20px rgba(24,72,200,0.12);
+            }
+            .np-dropdown-menu .dropdown-item { color: #1A3464; }
+            .np-dropdown-menu .dropdown-item:hover {
+                background: rgba(24,72,200,0.08);
+                color: #1848C8;
+            }
+            .np-dropdown-menu .dropdown-divider { border-color: #B8D4F8; }
         }
 
         * {
@@ -769,20 +831,40 @@
         }
 
         @media (max-width: 600px) {
-            .control-group {
-                flex: 1 1 100%;
-                flex-wrap: wrap;
-            }
-
-            .control-input,
-            .control-select {
-                width: 100%;
-                min-width: 0;
-            }
-
+            .control-group { flex: 1 1 100%; flex-wrap: wrap; }
+            .control-input, .control-select { width: 100%; min-width: 0; }
             .status-indicator { display: none; }
-
             .nav-tabs { display: none; }
+        }
+
+        /* ── Inner page mobile layout ─────────────────────────────── */
+        @media (max-width: 767px) {
+            /* Content pages (report list, profile, notifications, etc.) */
+            .container-fluid { padding: 8px !important; }
+
+            /* Bootstrap card headers that hold title + buttons */
+            .card-header.d-flex,
+            .card-header { flex-wrap: wrap; gap: 8px; height: auto; }
+
+            /* Tables inside content cards */
+            .table-responsive { overflow-x: auto; }
+            .table td, .table th { white-space: nowrap; font-size: 11px; padding: 6px 8px; }
+
+            /* Stat cards: 2 per row */
+            .stats-grid {
+                grid-template-columns: 1fr 1fr !important;
+                gap: 8px !important;
+                padding: 8px 0 !important;
+            }
+
+            /* Larger tap targets for all btn-control across all inner pages */
+            .btn-control { min-height: 38px; padding: 6px 12px; font-size: 11px; }
+
+            /* Modals: full-width on phone */
+            .modal-dialog { margin: 8px; max-width: calc(100vw - 16px); }
+        }
+        @media (max-width: 480px) {
+            .stats-grid { grid-template-columns: 1fr !important; }
         }
     </style>
     {% block extra_css %}{% endblock %}

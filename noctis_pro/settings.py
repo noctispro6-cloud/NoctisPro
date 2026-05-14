@@ -612,8 +612,8 @@ LOGOUT_REDIRECT_URL = '/login/'
 
 # Session configuration - Use database sessions instead of Redis
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
-# 30 minutes inactivity timeout
-SESSION_COOKIE_AGE = 1800
+# Inactivity timeout in seconds (default 30 min; override with SESSION_TIMEOUT_SECONDS)
+SESSION_COOKIE_AGE = int(os.environ.get('SESSION_TIMEOUT_SECONDS', 600))
 # Refresh expiry on each request to implement inactivity-based expiry
 SESSION_SAVE_EVERY_REQUEST = True
 # Expire session at browser close to require fresh login on new window

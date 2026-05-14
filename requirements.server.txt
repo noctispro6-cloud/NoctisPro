@@ -47,6 +47,7 @@ PyMuPDF
 # AI report generation
 transformers
 torch
+torchvision
 accelerate
 sentencepiece
 

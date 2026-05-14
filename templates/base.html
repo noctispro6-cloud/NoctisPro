@@ -1063,78 +1063,21 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         (function () {
-            // ── Session inactivity timeout ────────────────────────────────────────
-            // Mirrors server-side SESSION_COOKIE_AGE. Shows a 60-second warning
-            // modal before logging out so users don't lose unsaved work.
+            // ── Session inactivity timeout (10 minutes) ───────────────────────────
             try {
-                var IDLE_MS   = 600 * 1000; // 10 minutes — matches SESSION_COOKIE_AGE
-                var WARN_MS   = 120 * 1000;  // warn 2 minutes before logout
-                var logoutUrl = '{% url "accounts:logout" %}';
-                var keepAliveUrl = '{% url "notifications:api_unread_count" %}';
-
-                var idleTimer, warnTimer, countdownInterval;
-                var warnModal = null;
-
-                function _buildModal() {
-                    if (document.getElementById('_idleWarnModal')) return;
-                    var el = document.createElement('div');
-                    el.id = '_idleWarnModal';
-                    el.style.cssText = 'display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.65);align-items:center;justify-content:center;';
-                    el.innerHTML = '<div style="background:#1a1a2e;border:1px solid #00d4ff;border-radius:12px;padding:32px 36px;max-width:380px;text-align:center;color:#e0e0e0;">'
-                        + '<div style="font-size:2.2rem;margin-bottom:12px;">⏱️</div>'
-                        + '<h5 style="color:#00d4ff;margin-bottom:8px;">Session expiring</h5>'
-                        + '<p style="margin-bottom:18px;font-size:.95rem;">You will be logged out due to inactivity in <strong id="_idleCountdown" style="color:#ff6b6b;">120</strong> seconds.</p>'
-                        + '<button id="_idleStayBtn" style="background:#00d4ff;color:#000;border:none;border-radius:8px;padding:10px 28px;font-weight:600;cursor:pointer;font-size:1rem;">Stay logged in</button>'
-                        + '</div>';
-                    document.body.appendChild(el);
-                    document.getElementById('_idleStayBtn').addEventListener('click', function () {
-                        resetIdleTimer();
-                        // Ping server to refresh the server-side session too
-                        fetch(keepAliveUrl, { credentials: 'same-origin', cache: 'no-store' }).catch(function(){});
-                    });
-                    warnModal = el;
+                var _idleTimer;
+                var _IDLE_MS = 600 * 1000;
+                var _logoutUrl = '{% url "accounts:logout" %}';
+                function _resetIdle() {
+                    clearTimeout(_idleTimer);
+                    _idleTimer = setTimeout(function () {
+                        window.location.href = _logoutUrl;
+                    }, _IDLE_MS);
                 }
-
-                function _showWarning() {
-                    if (!warnModal) _buildModal();
-                    var secs = Math.ceil(WARN_MS / 1000); // 120
-                    var el = document.getElementById('_idleCountdown');
-                    if (el) el.textContent = secs;
-                    warnModal.style.display = 'flex';
-                    clearInterval(countdownInterval);
-                    countdownInterval = setInterval(function () {
-                        secs--;
-                        var el = document.getElementById('_idleCountdown');
-                        if (el) el.textContent = Math.max(0, secs);
-                    }, 1000);
-                }
-
-                function _hideWarning() {
-                    clearInterval(countdownInterval);
-                    if (warnModal) warnModal.style.display = 'none';
-                }
-
-                function resetIdleTimer() {
-                    _hideWarning();
-                    clearTimeout(idleTimer);
-                    clearTimeout(warnTimer);
-                    // Show warning WARN_MS before the session expires
-                    warnTimer = setTimeout(_showWarning, Math.max(0, IDLE_MS - WARN_MS));
-                    // Hard logout when session expires
-                    idleTimer = setTimeout(function () {
-                        window.location.href = logoutUrl;
-                    }, IDLE_MS);
-                }
-
-                ['mousemove', 'keydown', 'scroll', 'click', 'touchstart'].forEach(function (evt) {
-                    window.addEventListener(evt, resetIdleTimer, { passive: true });
+                ['mousemove', 'keydown', 'scroll', 'click', 'touchstart'].forEach(function (e) {
+                    window.addEventListener(e, _resetIdle, { passive: true });
                 });
-                // Initialise after DOM is ready
-                if (document.readyState === 'loading') {
-                    document.addEventListener('DOMContentLoaded', function() { _buildModal(); resetIdleTimer(); });
-                } else {
-                    _buildModal(); resetIdleTimer();
-                }
+                _resetIdle();
             } catch (e) { }
 
             // Fresh window / new tab redirect

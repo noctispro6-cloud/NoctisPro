@@ -47,7 +47,7 @@ def _load_series_volume(series):
     )
     slices = []
     for img in images:
-        fpath = os.path.join(media_root, img.file_path)
+        fpath = os.path.join(media_root, str(img.file_path))
         if not os.path.exists(fpath):
             continue
         try:

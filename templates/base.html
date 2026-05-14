@@ -1067,8 +1067,8 @@
             // Mirrors server-side SESSION_COOKIE_AGE. Shows a 60-second warning
             // modal before logging out so users don't lose unsaved work.
             try {
-                var IDLE_MS   = {{ request.session.get_expiry_age|default:600 }} * 1000;
-                var WARN_MS   = 60 * 1000;   // warn 60 s before logout
+                var IDLE_MS   = 600 * 1000; // 10 minutes — matches SESSION_COOKIE_AGE
+                var WARN_MS   = 120 * 1000;  // warn 2 minutes before logout
                 var logoutUrl = '{% url "accounts:logout" %}';
                 var keepAliveUrl = '{% url "notifications:api_unread_count" %}';
 
@@ -1083,7 +1083,7 @@
                     el.innerHTML = '<div style="background:#1a1a2e;border:1px solid #00d4ff;border-radius:12px;padding:32px 36px;max-width:380px;text-align:center;color:#e0e0e0;">'
                         + '<div style="font-size:2.2rem;margin-bottom:12px;">⏱️</div>'
                         + '<h5 style="color:#00d4ff;margin-bottom:8px;">Session expiring</h5>'
-                        + '<p style="margin-bottom:18px;font-size:.95rem;">You will be logged out due to inactivity in <strong id="_idleCountdown" style="color:#ff6b6b;">60</strong> seconds.</p>'
+                        + '<p style="margin-bottom:18px;font-size:.95rem;">You will be logged out due to inactivity in <strong id="_idleCountdown" style="color:#ff6b6b;">120</strong> seconds.</p>'
                         + '<button id="_idleStayBtn" style="background:#00d4ff;color:#000;border:none;border-radius:8px;padding:10px 28px;font-weight:600;cursor:pointer;font-size:1rem;">Stay logged in</button>'
                         + '</div>';
                     document.body.appendChild(el);
@@ -1097,8 +1097,9 @@
 
                 function _showWarning() {
                     if (!warnModal) _buildModal();
-                    var secs = Math.ceil(WARN_MS / 1000);
-                    document.getElementById('_idleCountdown').textContent = secs;
+                    var secs = Math.ceil(WARN_MS / 1000); // 120
+                    var el = document.getElementById('_idleCountdown');
+                    if (el) el.textContent = secs;
                     warnModal.style.display = 'flex';
                     clearInterval(countdownInterval);
                     countdownInterval = setInterval(function () {

@@ -89,7 +89,8 @@
 /* ── Admin Layout ─────────────────────────────────────────────────────────── */
 .adm-layout {
     display: flex;
-    min-height: calc(100vh - 56px); /* subtract base navbar height */
+    height: calc(100vh - 56px); /* fixed height: two panels scroll independently */
+    overflow: hidden;            /* prevent the page body from becoming the scroller */
     background: var(--primary-bg);
 }
 
@@ -101,9 +102,7 @@
     border-right: 1px solid #1f1f1f;
     display: flex;
     flex-direction: column;
-    position: sticky;
-    top: 56px;
-    height: calc(100vh - 56px);
+    height: 100%;       /* fills the fixed-height .adm-layout */
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: thin;
@@ -202,8 +201,10 @@
 .adm-main {
     flex: 1;
     min-width: 0;
+    height: 100%;
     display: flex;
     flex-direction: column;
+    overflow: hidden; /* topbar fixed, content scrolls */
 }
 
 .adm-topbar {
@@ -213,8 +214,7 @@
     padding: 10px 20px;
     background: var(--secondary-bg);
     border-bottom: 1px solid var(--border-color);
-    position: sticky;
-    top: 56px;
+    flex-shrink: 0; /* stays pinned at top; .adm-content scrolls below it */
     z-index: 100;
 }
 
@@ -262,7 +262,8 @@
 .adm-content {
     flex: 1;
     padding: 24px;
-    overflow-y: auto;
+    overflow-y: auto;   /* only this panel scrolls; sidebar stays put */
+    overflow-x: hidden;
 }
 
 /* Overlay */

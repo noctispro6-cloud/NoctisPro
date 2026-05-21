@@ -2,6 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.http import JsonResponse, HttpResponse, FileResponse
 from django.views.decorators.csrf import csrf_exempt
+from functools import lru_cache
 from django.contrib import messages
 from worklist.models import Study, Series, DicomImage, Patient, Modality
 from accounts.models import User, Facility
@@ -2823,6 +2824,125 @@ def api_dicom_image_display(request, image_id):
         return JsonResponse(minimal)  # 200 OK to avoid frontend failure
 
 
+# ---------------------------------------------------------------------------
+# In-process pixel decode cache
+# DICOM files in PACS are write-once.  Caching the decoded float32 pixel
+# array per (image_id, frame_index) avoids repeated file I/O and DICOM
+# decompression when the user changes window/level or MPR re-accesses a slice.
+# 64 entries × ~1 MB each ≈ 64 MB/gunicorn worker (safe for a small VPS).
+# ---------------------------------------------------------------------------
+@lru_cache(maxsize=64)
+def _decode_dicom_pixels_cached(image_id: int, frame_index: int):
+    """
+    Decode one DICOM frame, apply rescale, and return
+    (pixel_array_f32, default_ww, default_wl, is_color).
+    Raises RuntimeError on failure so the failed entry is never stored in cache.
+    """
+    _image = DicomImage.objects.get(id=image_id)
+    _ds = None
+    if _image.file_path:
+        try:
+            with _image.file_path.open('rb') as _f:
+                try:
+                    _ds = pydicom.dcmread(_f, force=False)
+                except Exception:
+                    try:
+                        _f.seek(0)
+                    except Exception:
+                        pass
+                    _ds = pydicom.dcmread(_f, force=True)
+        except Exception:
+            _ds = None
+    if _ds is None and _image.file_path and hasattr(_image.file_path, 'path'):
+        try:
+            _ds = pydicom.dcmread(_image.file_path.path, force=True)
+        except Exception:
+            pass
+    if _ds is None:
+        raise RuntimeError(f"Cannot read DICOM file for image {image_id}")
+
+    # Decode pixel array
+    _px = None
+    try:
+        _px = _ds.pixel_array
+        _px = _select_frame(_px, frame_index=frame_index)
+        _mod = str(getattr(_ds, 'Modality', '')).upper()
+        if _mod in ('DX', 'CR', 'XA', 'RF', 'MG'):
+            try:
+                _px = apply_voi_lut(_px, _ds)
+            except Exception:
+                pass
+    except Exception as _e1:
+        try:
+            import SimpleITK as _sitk
+            if _image.file_path and hasattr(_image.file_path, 'path'):
+                _simg = _sitk.ReadImage(_image.file_path.path)
+                _px = _sitk.GetArrayFromImage(_simg)
+                if _px.ndim == 3 and _px.shape[0] == 1:
+                    _px = _px[0]
+                _px = _select_frame(_px, frame_index=frame_index)
+            else:
+                raise RuntimeError("no local path for SimpleITK fallback")
+        except Exception as _e2:
+            raise RuntimeError(f"pixel decode failed: {_e1}; {_e2}")
+
+    if _px is None:
+        raise RuntimeError(f"null pixel array for image {image_id}")
+
+    _is_col = _is_color_pixel_array(_px)
+
+    if not _is_col:
+        # Apply rescale and normalise to 2D float32
+        try:
+            _slope = _safe_float(getattr(_ds, 'RescaleSlope', None), 1.0)
+            _intercept = _safe_float(getattr(_ds, 'RescaleIntercept', None), 0.0)
+            _px = _px.astype(np.float32) * _slope + _intercept
+        except Exception:
+            try:
+                _px = _px.astype(np.float32)
+            except Exception:
+                pass
+        try:
+            _a = _px
+            if getattr(_a, 'ndim', 0) == 3 and _a.shape[-1] not in (3, 4):
+                _a = _a[0] if _a.shape[0] == 1 else _a[0]
+            if getattr(_a, 'ndim', 0) == 3 and _a.shape[-1] == 1:
+                _a = _a[..., 0]
+            _px = np.asarray(_a, dtype=np.float32)
+        except Exception:
+            pass
+
+    # Default window from DICOM header, or derive from data
+    _dww = _dwl = None
+    try:
+        _v = getattr(_ds, 'WindowWidth', None)
+        if hasattr(_v, '__iter__') and not isinstance(_v, str):
+            _v = _v[0]
+        _dww = float(_v) if _v is not None else None
+    except Exception:
+        pass
+    try:
+        _v = getattr(_ds, 'WindowCenter', None)
+        if hasattr(_v, '__iter__') and not isinstance(_v, str):
+            _v = _v[0]
+        _dwl = float(_v) if _v is not None else None
+    except Exception:
+        pass
+    if _dww is None or _dwl is None:
+        try:
+            if not _is_col:
+                _flat = _px.flatten()
+                _p2, _p98 = float(np.percentile(_flat, 2)), float(np.percentile(_flat, 98))
+                _dww = _dww or max(1.0, _p98 - _p2)
+                _dwl = _dwl or ((_p98 + _p2) / 2.0)
+        except Exception:
+            pass
+        _dww = _dww or 400.0
+        _dwl = _dwl or 40.0
+
+    return (_px, float(_dww), float(_dwl), _is_col)
+
+
 @login_required
 @csrf_exempt
 def api_dicom_image_png(request, image_id):
@@ -2845,7 +2965,54 @@ def api_dicom_image_png(request, image_id):
         if inverted_param is None:
             inverted_param = request.GET.get('invert')
         inverted = (inverted_param or 'false').lower() == 'true'
+        frame_index = _get_requested_frame_index(request, default_index=0)
 
+        # ETag: computed purely from URL params — no file I/O needed for 304 responses
+        _etag = None
+        if ww_param is not None and wl_param is not None:
+            try:
+                _etag = '"{}-{}-{}-{}-{}"'.format(
+                    image_id, frame_index,
+                    int(round(float(ww_param))), int(round(float(wl_param))),
+                    'i' if inverted else 'n',
+                )
+                if request.META.get('HTTP_IF_NONE_MATCH', '') == _etag:
+                    _r = HttpResponse(status=304)
+                    _r['ETag'] = _etag
+                    _r['Cache-Control'] = 'private, max-age=3600'
+                    return _r
+            except Exception:
+                _etag = None
+
+        # Fast path: cached pixel array (avoids DICOM file read + decompression)
+        try:
+            _px, _dww, _dwl, _is_col = _decode_dicom_pixels_cached(image.id, frame_index)
+            if _is_col:
+                _rgb = _convert_color_to_rgb_uint8(_px)
+                if _rgb is None:
+                    return HttpResponse(status=404)
+                _img = Image.fromarray(_rgb, mode='RGB')
+                _buf = BytesIO()
+                _img.save(_buf, format='PNG', optimize=False, compress_level=1)
+                _resp = HttpResponse(_buf.getvalue(), content_type='image/png')
+            else:
+                try:
+                    _ww = float(ww_param) if ww_param is not None else _dww
+                    _wl = float(wl_param) if wl_param is not None else _dwl
+                except Exception:
+                    _ww, _wl = _dww, _dwl
+                _png = _array_to_png_bytes(_px, _ww, _wl, inverted)
+                if not _png:
+                    return HttpResponse(status=404)
+                _resp = HttpResponse(_png, content_type='image/png')
+            _resp['Cache-Control'] = 'private, max-age=3600'
+            if _etag:
+                _resp['ETag'] = _etag
+            return _resp
+        except Exception:
+            pass  # fall through to slow path (full file read)
+
+        # Slow path: full DICOM file read + decode
         # Read DICOM dataset (same robust strategy as JSON endpoint).
         ds = None
         if not image.file_path:
@@ -2878,8 +3045,6 @@ def api_dicom_image_png(request, image_id):
         if ds is None:
             return HttpResponse(status=404)
 
-        frame_index = _get_requested_frame_index(request, default_index=0)
-
         # Decode pixels (best-effort)
         pixel_array = None
         try:
@@ -2901,6 +3066,8 @@ def api_dicom_image_png(request, image_id):
                 img.save(buffer, format="PNG", optimize=False, compress_level=1)
                 resp = HttpResponse(buffer.getvalue(), content_type="image/png")
                 resp["Cache-Control"] = "private, max-age=3600"
+                if _etag:
+                    resp["ETag"] = _etag
                 return resp
 
             pixel_array = pixel_array.astype(np.float32)
@@ -2923,6 +3090,8 @@ def api_dicom_image_png(request, image_id):
                         img.save(buffer, format="PNG", optimize=False, compress_level=1)
                         resp = HttpResponse(buffer.getvalue(), content_type="image/png")
                         resp["Cache-Control"] = "private, max-age=3600"
+                        if _etag:
+                            resp["ETag"] = _etag
                         return resp
                     pixel_array = px.astype(np.float32)
                 else:
@@ -2993,8 +3162,9 @@ def api_dicom_image_png(request, image_id):
             return HttpResponse(status=404)
 
         resp = HttpResponse(png_bytes, content_type='image/png')
-        # Authenticated content: keep it private-cacheable
         resp['Cache-Control'] = 'private, max-age=3600'
+        if _etag:
+            resp['ETag'] = _etag
         return resp
     except Exception:
         return HttpResponse(status=500)

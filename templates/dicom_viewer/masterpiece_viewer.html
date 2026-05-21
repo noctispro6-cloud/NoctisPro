@@ -3295,6 +3295,8 @@
             try {
                 showLoading(true);
                 _resetServerRendered();
+                // Cancel any background preload from the previous series.
+                if (_seriesPreloadAbort) { try { _seriesPreloadAbort.abort(); } catch (_e) {} _seriesPreloadAbort = null; }
                 // Switching series during MPR should not leave stale requests running.
                 _abortMPRRequestsAndTimers();
                 roiDraft = null;
@@ -3343,6 +3345,12 @@
                     return;
                 }
                 await loadCurrentImage();
+
+                // Background series preload: fetch + decode all slices off-thread so scrolling is instant.
+                // Fires after the first image renders, yields to user via requestIdleCallback.
+                if (currentSeries && currentSeries.id != null) {
+                    _startSeriesPreload(currentSeries.id, imageData, 0);
+                }
 
                 // Background prewarm: build + cache MPR volume while user views 2D slices.
                 // By the time they click MPR the volume is ready, making first open nearly instant.
@@ -3396,7 +3404,7 @@
         let lastLoadedImageId = null;
         let redrawRaf = null;
         // Performance: in-memory LRU cache + abortable/coalesced loading for smooth scrolling.
-        const _IMAGE_PAYLOAD_CACHE_MAX = 24; // keep modest; pixel buffers are large
+        const _IMAGE_PAYLOAD_CACHE_MAX = 60; // enlarged for CT series with many slices
         const _imagePayloadCache = new Map(); // imageId -> payload (with pixel_data as TypedArray)
         const _imagePayloadCacheOrder = []; // LRU order of imageIds
         let _imageLoadAbortController = null;
@@ -3419,6 +3427,95 @@
         // Detect touchpad event: deltaMode=0 (pixels) with small per-event delta
         function _isTouchpad(e) {
             return e.deltaMode === 0 && Math.abs(e.deltaY || 0) < 50 && Math.abs(e.deltaX || 0) < 100;
+        }
+
+        // Decoded ImageBitmap LRU cache — keyed by "id|ww|wl|inv" so WW/WL changes auto-invalidate.
+        // ImageBitmap is decoded off the main thread, making scrolling non-blocking.
+        const _BITMAP_CACHE_MAX = 80;
+        const _bitmapCache = new Map();
+        const _bitmapCacheOrder = [];
+        let _seriesPreloadAbort = null; // AbortController for background series preload
+
+        function _bitmapCacheKey(id, ww, wl, inv) {
+            return `${id}|${Math.round(Number(ww) || 0)}|${Math.round(Number(wl) || 0)}|${inv ? 1 : 0}`;
+        }
+        function _bitmapCacheGet(key) {
+            const v = _bitmapCache.get(key);
+            if (!v) return null;
+            const i = _bitmapCacheOrder.indexOf(key);
+            if (i >= 0) { _bitmapCacheOrder.splice(i, 1); _bitmapCacheOrder.push(key); }
+            return v;
+        }
+        function _bitmapCacheSet(key, bitmap) {
+            while (_bitmapCacheOrder.length >= _BITMAP_CACHE_MAX) {
+                const evict = _bitmapCacheOrder.shift();
+                const old = _bitmapCache.get(evict);
+                if (old && typeof old.close === 'function') old.close();
+                _bitmapCache.delete(evict);
+            }
+            if (_bitmapCache.has(key)) {
+                const old = _bitmapCache.get(key);
+                if (old && typeof old.close === 'function') old.close();
+                const i = _bitmapCacheOrder.indexOf(key);
+                if (i >= 0) _bitmapCacheOrder.splice(i, 1);
+            }
+            _bitmapCache.set(key, bitmap);
+            _bitmapCacheOrder.push(key);
+        }
+
+        // Background series preload: after loading the first slice, fetch + decode all remaining
+        // slices at up to 6 concurrent requests so scrolling becomes instant once preloaded.
+        function _startSeriesPreload(seriesId, images, startIdx) {
+            if (_seriesPreloadAbort) { try { _seriesPreloadAbort.abort(); } catch (_e) {} }
+            const ctrl = new AbortController();
+            _seriesPreloadAbort = ctrl;
+            if (!images || !images.length) return;
+
+            const n = images.length;
+            const ww = Number(windowWidth) || 400;
+            const wl = Number(windowLevel) || 40;
+            const inv = !!inverted;
+            const CONCURRENCY = 6;
+            // Build order: forward slices first (user typically scrolls down), then backward
+            const order = [];
+            for (let d = 1; d <= n; d++) {
+                if (startIdx + d < n) order.push(startIdx + d);
+                if (startIdx - d >= 0) order.push(startIdx - d);
+            }
+            let qi = 0, active = 0;
+
+            function launch() {
+                if (ctrl.signal.aborted) return;
+                while (active < CONCURRENCY && qi < order.length) {
+                    const idx = order[qi++];
+                    const img = images[idx];
+                    if (!img || !img.id || String(img.id).startsWith('local_')) continue;
+                    const id = String(img.id);
+                    const ckey = _bitmapCacheKey(id, ww, wl, inv);
+                    if (_bitmapCache.has(ckey)) continue;
+                    active++;
+                    const pngUrl = `/dicom-viewer/api/image/${encodeURIComponent(id)}/render.png?ww=${ww}&wl=${wl}&invert=${inv}`;
+                    fetch(pngUrl, { signal: ctrl.signal, credentials: 'same-origin', cache: 'default' })
+                        .then(r => r.ok ? r.blob() : null)
+                        .then(blob => (blob && typeof createImageBitmap !== 'undefined') ? createImageBitmap(blob) : null)
+                        .then(bitmap => { if (bitmap && !ctrl.signal.aborted) _bitmapCacheSet(ckey, bitmap); })
+                        .catch(() => {})
+                        .finally(() => {
+                            active--;
+                            if (typeof requestIdleCallback !== 'undefined') {
+                                requestIdleCallback(launch, { timeout: 300 });
+                            } else {
+                                setTimeout(launch, 0);
+                            }
+                        });
+                }
+            }
+            // Yield to let the initial image render before starting background fetch
+            if (typeof requestIdleCallback !== 'undefined') {
+                requestIdleCallback(launch, { timeout: 600 });
+            } else {
+                setTimeout(launch, 120);
+            }
         }
 
         function _cacheGetPayload(imageId) {
@@ -3631,28 +3728,43 @@
             } catch (e) { }
 
             const srcUrl = `/dicom-viewer/api/image/${encodeURIComponent(id)}/render.png?${params.toString()}`;
-            const img = new Image();
-            try { img.decoding = 'async'; } catch (e) { }
-            img.src = srcUrl;
-            await new Promise((resolve, reject) => {
-                img.onload = resolve;
-                img.onerror = reject;
-            });
+
+            // Fast path: use cached ImageBitmap — already decoded off-thread, zero network cost.
+            const ckey = _bitmapCacheKey(id, ww || 0, wl || 0, !!inverted);
+            let rawBitmap = _bitmapCacheGet(ckey);
+
+            if (!rawBitmap) {
+                if (typeof createImageBitmap !== 'undefined') {
+                    // Decode PNG off the main thread via createImageBitmap for smooth scrolling.
+                    const resp = await fetch(srcUrl, { credentials: 'same-origin', cache: 'default' });
+                    if (!resp.ok) throw new Error('render.png fetch failed');
+                    const blob = await resp.blob();
+                    rawBitmap = await createImageBitmap(blob);
+                    _bitmapCacheSet(ckey, rawBitmap);
+                } else {
+                    // Fallback for browsers without createImageBitmap
+                    const img = new Image();
+                    try { img.decoding = 'async'; } catch (_e) { }
+                    img.src = srcUrl;
+                    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; });
+                    rawBitmap = img;
+                }
+            }
 
             // Apply modality gamma for visual consistency with binary render path.
-            let gammaImg = img;
+            let gammaImg = rawBitmap;
             try {
                 const srMod = String((currentSeries && currentSeries.modality) || '').toUpperCase();
                 const srGamma = _getGammaForModality(srMod);
                 if (srGamma !== 1.0) {
-                    const iw = img.naturalWidth || img.width;
-                    const ih = img.naturalHeight || img.height;
+                    const iw = rawBitmap.width || rawBitmap.naturalWidth || 0;
+                    const ih = rawBitmap.height || rawBitmap.naturalHeight || 0;
                     if (iw > 0 && ih > 0) {
                         const offsc = document.createElement('canvas');
                         offsc.width = iw;
                         offsc.height = ih;
                         const offCtx = offsc.getContext('2d', { willReadFrequently: true });
-                        offCtx.drawImage(img, 0, 0);
+                        offCtx.drawImage(rawBitmap, 0, 0);
                         const idata = offCtx.getImageData(0, 0, iw, ih);
                         const px = idata.data;
                         const lut = _buildGammaLUT(srGamma);
@@ -3665,7 +3777,7 @@
                         gammaImg = offsc;
                     }
                 }
-            } catch (_ge) { /* gamma pass failed — use original PNG */ }
+            } catch (_ge) { /* gamma pass failed — use original */ }
 
             _serverRendered.enabled = true;
             _serverRendered.imageId = id;
@@ -4042,20 +4154,29 @@
                 const dir = direction || _scrollDirection || 1;
                 // Bias prefetch ahead in scroll direction: [+1,+2,+3,+4,-1] or [-1,-2,-3,-4,+1]
                 const offsets = [dir, dir*2, dir*3, dir*4, -dir];
+                const ww = Number(windowWidth) || 400;
+                const wl = Number(windowLevel) || 40;
+                const inv = !!inverted;
                 offsets.forEach((d) => {
                     const idx = centerIdx + d;
                     if (idx < 0 || idx >= imageData.length) return;
                     const id = imageData[idx]?.id;
                     if (!id) return;
                     if (typeof id === 'string' && id.startsWith('local_')) return;
-                    // Prefetch PNG into browser cache so fastPreview path gets an instant hit.
-                    const pngParams = new URLSearchParams();
-                    pngParams.set('ww', String(Number(windowWidth) || 400));
-                    pngParams.set('wl', String(Number(windowLevel) || 40));
-                    pngParams.set('invert', inverted ? 'true' : 'false');
-                    const pngUrl = `/dicom-viewer/api/image/${encodeURIComponent(id)}/render.png?${pngParams}`;
-                    const _img = new Image();
-                    _img.src = pngUrl; // browser caches this; _loadServerRenderedFrameFast gets a cache hit
+                    const ckey = _bitmapCacheKey(String(id), ww, wl, inv);
+                    // If not already decoded, fetch + createImageBitmap (off-thread, non-blocking).
+                    if (!_bitmapCache.has(ckey)) {
+                        const pngUrl = `/dicom-viewer/api/image/${encodeURIComponent(id)}/render.png?ww=${ww}&wl=${wl}&invert=${inv}`;
+                        if (typeof createImageBitmap !== 'undefined') {
+                            fetch(pngUrl, { credentials: 'same-origin', cache: 'default' })
+                                .then(r => r.ok ? r.blob() : null)
+                                .then(blob => blob ? createImageBitmap(blob) : null)
+                                .then(bitmap => { if (bitmap) _bitmapCacheSet(ckey, bitmap); })
+                                .catch(() => {});
+                        } else {
+                            const _img = new Image(); _img.src = pngUrl;
+                        }
+                    }
                     // Also prefetch binary payload for accurate HU/measurements.
                     if (!_imagePayloadCache.has(String(id))) {
                         _fetchImagePayloadBinary(id, undefined)

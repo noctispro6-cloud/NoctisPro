@@ -2829,9 +2829,9 @@ def api_dicom_image_display(request, image_id):
 # DICOM files in PACS are write-once.  Caching the decoded float32 pixel
 # array per (image_id, frame_index) avoids repeated file I/O and DICOM
 # decompression when the user changes window/level or MPR re-accesses a slice.
-# 64 entries × ~1 MB each ≈ 64 MB/gunicorn worker (safe for a small VPS).
+# 256 entries × ~1 MB each ≈ 256 MB/gunicorn worker — covers a full CT series per worker.
 # ---------------------------------------------------------------------------
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=256)
 def _decode_dicom_pixels_cached(image_id: int, frame_index: int):
     """
     Decode one DICOM frame, apply rescale, and return

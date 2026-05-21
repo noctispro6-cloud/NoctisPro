@@ -595,6 +595,21 @@
 
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
+    /* Restore natural page scroll on mobile — fixed-height layout locks content */
+    .adm-layout {
+        height: auto;
+        min-height: calc(100vh - 56px);
+        overflow: visible;
+    }
+    .adm-main {
+        height: auto;
+        overflow: visible;
+    }
+    .adm-content {
+        overflow-y: visible;
+        padding: 16px;
+    }
+    /* Sidebar slides in as a fixed overlay */
     .adm-sidebar {
         position: fixed;
         top: 0;
@@ -609,7 +624,6 @@
     .adm-sidebar-close { display: block; }
     .adm-overlay.show { display: block; }
     .adm-menu-btn { display: block; }
-    .adm-content { padding: 16px; }
     .adm-topbar { padding: 10px 16px; }
 }
 </style>

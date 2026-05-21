@@ -1690,7 +1690,7 @@
                             </div>
                             <div style="padding:4px 14px 10px;">
                                 <label style="font-size:10px;color:var(--text-muted);">Zoom</label>
-                                <input type="range" id="zoomSlider2" min="0.1" max="5" step="0.1" value="1"
+                                <input type="range" id="zoomSlider2" min="0.1" max="10" step="0.1" value="1"
                                     oninput="updateZoom(this.value)" style="width:100%;margin-top:3px;">
                             </div>
                         </div>
@@ -1927,7 +1927,7 @@
                 <span id="wlValue">40</span>
                 <input type="range" id="sliceSlider" min="0" max="0" value="0" oninput="updateSlice(this.value)">
                 <span id="sliceValue">1</span>
-                <input type="range" id="zoomSlider" min="25" max="500" value="100" oninput="updateZoom(this.value)">
+                <input type="range" id="zoomSlider" min="10" max="1000" value="100" oninput="updateZoom(this.value)">
                 <span id="zoomValue">100%</span>
                 <div id="frameControls">
                     <input type="range" id="frameSlider" min="0" max="0" value="0" oninput="updateFrame(this.value)">
@@ -2655,7 +2655,7 @@
                 onDragMove:  (x, y)      => handleMouseMove({ clientX: x, clientY: y, buttons: 1, preventDefault: () => {} }),
                 onDragEnd:   (x, y)      => handleMouseUp({ clientX: x, clientY: y, button: 0, preventDefault: () => {} }),
                 onPinchZoom: (delta, cx, cy) => {
-                    zoom = Math.max(0.1, Math.min(5.0, zoom * (1 + delta * 0.01)));
+                    zoom = Math.max(0.1, Math.min(10.0, zoom * (1 + delta * 0.01)));
                     updateZoomSlider();
                     redrawCurrentImage();
                 },
@@ -2877,6 +2877,11 @@
                 mprView.classList.add('active');
                 if (controls3D) controls3D.style.display = 'flex';
                 viewMode = 'mpr';
+                // Auto-enable crosshair when entering MPR so the intersection
+                // lines are visible immediately. User can click Crosshair to toggle off.
+                crosshair = true;
+                const crosshairBtn = document.querySelector('[data-tool="crosshair"]');
+                if (crosshairBtn) crosshairBtn.classList.add('active');
                 // Ensure canvases have non-zero size now that MPR is visible.
                 // Use rAF so layout has applied the new grid before reading client sizes.
                 requestAnimationFrame(() => {
@@ -2890,6 +2895,9 @@
                 mprView.classList.remove('active');
                 if (controls3D) controls3D.style.display = 'none';
                 viewMode = 'single';
+                crosshair = false;
+                const _chBtn = document.querySelector('[data-tool="crosshair"]');
+                if (_chBtn) _chBtn.classList.remove('active');
                 autoRotate = false;
                 stopBoneAnimationLoop();
                 // Coming back from MPR can leave the single-view canvas sized to 0 if the container
@@ -4070,7 +4078,8 @@
                 const sinR = Math.abs(Math.sin(rotRad));
                 const rotFitW = imgW * cosR + imgH * sinR;
                 const rotFitH = imgW * sinR + imgH * cosR;
-                const baseScale = Math.min(1, Math.min(canvas.width / rotFitW, canvas.height / rotFitH));
+                // Fill the viewport — no 1.0 cap so images scale up to fit the canvas.
+                const baseScale = Math.min(canvas.width / rotFitW, canvas.height / rotFitH);
                 _lastRenderMeta = { imgW, imgH, baseScale, rotDeg: rotation };
             }
             const baseScale = _lastRenderMeta.baseScale;
@@ -4174,7 +4183,8 @@
                 const sinR = Math.abs(Math.sin(rotRad));
                 const rotFitW = imgW * cosR + imgH * sinR;
                 const rotFitH = imgW * sinR + imgH * cosR;
-                const baseScale = Math.min(1, Math.min(canvas.width / rotFitW, canvas.height / rotFitH));
+                // Fill the viewport — no 1.0 cap so images scale up to fit the canvas.
+                const baseScale = Math.min(canvas.width / rotFitW, canvas.height / rotFitH);
                 _lastRenderMeta = { imgW, imgH, baseScale, rotDeg: rotation };
             }
             const baseScale = _lastRenderMeta.baseScale;
@@ -4377,7 +4387,7 @@
                     break;
                 case 'zoom':
                     const zoomDelta = 1 + (deltaY * 0.01);
-                    zoom = Math.max(0.1, Math.min(5.0, zoom * zoomDelta));
+                    zoom = Math.max(0.1, Math.min(10.0, zoom * zoomDelta));
                     updateZoomSlider();
                     redrawCurrentImage();
                     break;
@@ -4549,7 +4559,7 @@
             if (event.ctrlKey) {
                 // Zoom
                 const zoomDelta = event.deltaY > 0 ? 0.9 : 1.1;
-                zoom = Math.max(0.1, Math.min(5.0, zoom * zoomDelta));
+                zoom = Math.max(0.1, Math.min(10.0, zoom * zoomDelta));
                 updateZoomSlider();
                 redrawCurrentImage();
             } else {
@@ -5023,6 +5033,10 @@
             saveMeasurement(finalized);
             updateMeasurementsList();
             currentMeasurement = null;
+            // Return to windowing after each measurement so the user must
+            // deliberately re-select the tool for the next measurement.
+            activeTool = 'windowing';
+            refreshToolButtonStates(activeTool);
             redrawCurrentImage();
             showToast('Measurement saved', 'success');
         }

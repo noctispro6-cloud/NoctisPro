@@ -3410,6 +3410,16 @@
         let _lastWheelAt = 0;
         let _scrubIdleTimer = null;
         let _scrollDirection = 0; // +1 = forward, -1 = backward, tracks last scroll direction for prefetch
+        // Touchpad (trackpad) delta accumulation — prevents one swipe from jumping many slices.
+        let _tpAccumY  = 0;   // vertical pixel accumulator for slice scrolling
+        let _tpAccumX  = 0;   // horizontal pixel accumulator for series navigation
+        let _mprTpAccum = { axial: 0, sagittal: 0, coronal: 0 };
+        const _TP_SLICE_PX  = 50;  // px of trackpad travel to advance 1 slice
+        const _TP_SERIES_PX = 140; // px of horizontal trackpad travel to switch series
+        // Detect touchpad event: deltaMode=0 (pixels) with small per-event delta
+        function _isTouchpad(e) {
+            return e.deltaMode === 0 && Math.abs(e.deltaY || 0) < 50 && Math.abs(e.deltaX || 0) < 100;
+        }
 
         function _cacheGetPayload(imageId) {
             const key = String(imageId);
@@ -4580,50 +4590,63 @@
             }
         }
 
+        function _fireSliceStep(delta) {
+            const now = Date.now();
+            const scrubbing = (now - _lastWheelAt) < 250;
+            _lastWheelAt = now;
+            const direction = delta > 0 ? 1 : -1;
+            _scrollDirection = direction;
+            const target = currentImageIndex + delta;
+            scheduleLoadCurrentImage(target, { fastPreview: scrubbing });
+            _schedulePrefetchAround(target, direction);
+            if (_scrubIdleTimer) clearTimeout(_scrubIdleTimer);
+            _scrubIdleTimer = setTimeout(() => {
+                _scrubIdleTimer = null;
+                const id = imageData && imageData[currentImageIndex] ? imageData[currentImageIndex].id : null;
+                if (!id) return;
+                loadCurrentImage(currentImageIndex, { forceFull: true }).catch(() => { });
+            }, 120);
+        }
+
         function handleWheel(event) {
             event.preventDefault();
+            const dy = Number(event.deltaY) || 0;
+            const dx = Number(event.deltaX) || 0;
+            const tp = _isTouchpad(event);
 
             if (event.ctrlKey) {
-                // Zoom
-                const zoomDelta = event.deltaY > 0 ? 0.9 : 1.1;
-                zoom = Math.max(0.1, Math.min(10.0, zoom * zoomDelta));
+                // Pinch-to-zoom (touchpad) or Ctrl+scroll (mouse).
+                // Touchpad pinch: smooth proportional zoom; mouse: fixed 10% steps.
+                const factor = tp
+                    ? Math.max(0.8, Math.min(1.2, 1 - dy * 0.008))
+                    : (dy > 0 ? 0.9 : 1.1);
+                zoom = Math.max(0.1, Math.min(10.0, zoom * factor));
                 updateZoomSlider();
                 redrawCurrentImage();
-            } else {
-                // Slice navigation (throttled + multi-step).
-                const now = Date.now();
-                const timeSinceLast = now - _lastWheelAt;
-                // Use fast preview whenever events arrive within 250ms — catches the first event
-                // in a scroll gesture so the viewer feels instant from the very first wheel tick.
-                const scrubbing = timeSinceLast < 250;
-                _lastWheelAt = now;
+                return;
+            }
 
-                // Convert large wheel deltas into multi-slice steps (trackpads can be very "chatty").
-                const d = Number(event.deltaY) || 0;
-                // Faster default axial scrolling: fewer wheel "pixels" per slice => more slices per gesture.
-                // Trackpads can send small deltas, so keep a minimum of 1 slice per wheel event.
-                const steps = Math.max(1, Math.round(Math.abs(d) / 30));
-                const direction = d > 0 ? 1 : -1;
-                _scrollDirection = direction;
-                const target = currentImageIndex + (direction * steps);
-
-                scheduleLoadCurrentImage(target, { fastPreview: scrubbing });
-
-                // Prefetch ahead in scroll direction so the next frame is already in browser cache.
-                _schedulePrefetchAround(target, direction);
-
-                // When the user stops scrolling, load the raw pixel payload for the final resting slice
-                // (enables accurate measurements/HU without making scrolling feel heavy).
-                if (_scrubIdleTimer) {
-                    try { clearTimeout(_scrubIdleTimer); } catch (e) { }
+            if (tp) {
+                // Touchpad: accumulate deltas and fire only when threshold crossed.
+                // Primarily horizontal swipe → series navigation; vertical → slice scroll.
+                if (Math.abs(dx) > Math.abs(dy) * 1.5) {
+                    _tpAccumX += dx;
+                    _tpAccumY = 0;
+                    if (_tpAccumX >= _TP_SERIES_PX)       { _tpAccumX = 0; nextSeries().catch(() => {}); }
+                    else if (_tpAccumX <= -_TP_SERIES_PX) { _tpAccumX = 0; prevSeries().catch(() => {}); }
+                    return;
                 }
-                _scrubIdleTimer = setTimeout(() => {
-                    _scrubIdleTimer = null;
-                    const id = imageData && imageData[currentImageIndex] ? imageData[currentImageIndex].id : null;
-                    if (!id) return;
-                    // Force full load for the current slice.
-                    loadCurrentImage(currentImageIndex, { forceFull: true }).catch(() => { });
-                }, 120);
+                _tpAccumX = 0;
+                _tpAccumY += dy;
+                const steps = Math.trunc(_tpAccumY / _TP_SLICE_PX);
+                if (steps === 0) return;
+                _tpAccumY -= steps * _TP_SLICE_PX;
+                _fireSliceStep(steps);
+            } else {
+                // Mouse wheel: immediate multi-step response.
+                _tpAccumY = 0; _tpAccumX = 0;
+                const steps = Math.max(1, Math.round(Math.abs(dy) / 30));
+                _fireSliceStep(dy > 0 ? steps : -steps);
             }
         }
 
@@ -7393,12 +7416,15 @@
             event.preventDefault();
             if (!currentSeries) return;
             setActiveMPRPlane(plane);
-            // Ctrl+wheel zooms the active MPR plane (matches single-view behavior).
+            const dy = Number(event.deltaY) || 0;
+            const tp = _isTouchpad(event);
+            // Ctrl+wheel / pinch zooms the active MPR plane.
             if (event.ctrlKey) {
                 const t = mprViewTransform[plane] || (mprViewTransform[plane] = { zoom: 1.0, panX: 0, panY: 0 });
-                const d = Math.sign(event.deltaY || 0);
-                const z = Number(t.zoom) || 1.0;
-                t.zoom = Math.max(0.2, Math.min(10.0, z * (d > 0 ? 0.9 : 1.1)));
+                const factor = tp
+                    ? Math.max(0.8, Math.min(1.2, 1 - dy * 0.008))
+                    : (dy > 0 ? 0.9 : 1.1);
+                t.zoom = Math.max(0.2, Math.min(10.0, (Number(t.zoom) || 1.0) * factor));
                 redrawMPRPlane(plane);
                 return;
             }
@@ -7408,10 +7434,18 @@
                 _fetchAndRenderAllMPRPlanes();
                 return;
             }
-            const delta = Math.sign(event.deltaY || 0);
-            let step = delta === 0 ? 0 : (delta > 0 ? 1 : -1);
-            // Axial: users expect wheel-up to move "toward the top" (superior). In our display convention
-            // (Z increases upward in sagittal/coronal due to flip), that corresponds to increasing Z.
+            // Touchpad: accumulate per-plane; mouse: immediate single step.
+            let step;
+            if (tp) {
+                _mprTpAccum[plane] = (_mprTpAccum[plane] || 0) + dy;
+                if (Math.abs(_mprTpAccum[plane]) < _TP_SLICE_PX) return;
+                step = _mprTpAccum[plane] > 0 ? 1 : -1;
+                _mprTpAccum[plane] = 0;
+            } else {
+                const delta = Math.sign(dy);
+                step = delta === 0 ? 0 : (delta > 0 ? 1 : -1);
+            }
+            // Axial: wheel-up = superior = increasing Z.
             if (plane === 'axial') step = -step;
             const count = mprState.counts[plane] || 0;
             if (!count) return;

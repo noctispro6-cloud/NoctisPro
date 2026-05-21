@@ -3337,6 +3337,16 @@
                 }
                 await loadCurrentImage();
 
+                // Background prewarm: build + cache MPR volume while user views 2D slices.
+                // By the time they click MPR the volume is ready, making first open nearly instant.
+                if (currentSeries && currentSeries.id != null && !String(currentSeries.id).startsWith('local_')) {
+                    const _pwId = currentSeries.id;
+                    setTimeout(() => {
+                        if (!currentSeries || currentSeries.id !== _pwId) return;
+                        fetch(`/dicom-viewer/api/series/${encodeURIComponent(_pwId)}/mpr/?quality=fast&meta_only=1`, { credentials: 'same-origin' }).catch(() => {});
+                    }, 1500);
+                }
+
                 // If already in MPR mode, refresh MPR views for the new series automatically.
                 if (viewMode === 'mpr') {
                     try { resizeCanvas(); } catch (e) { }
@@ -3392,6 +3402,7 @@
         // and only load raw pixel payload for the final resting slice.
         let _lastWheelAt = 0;
         let _scrubIdleTimer = null;
+        let _scrollDirection = 0; // +1 = forward, -1 = backward, tracks last scroll direction for prefetch
 
         function _cacheGetPayload(imageId) {
             const key = String(imageId);
@@ -4006,28 +4017,37 @@
             }
         }
 
-        function _schedulePrefetchAround(centerIdx) {
+        function _schedulePrefetchAround(centerIdx, direction) {
             if (_prefetchTimer) clearTimeout(_prefetchTimer);
             _prefetchTimer = setTimeout(() => {
                 _prefetchTimer = null;
-                // If a new load is already scheduled, don't compete with it.
                 if (_scheduledLoadRaf) return;
-                const offsets = [1, -1, 2, -2];
+                const dir = direction || _scrollDirection || 1;
+                // Bias prefetch ahead in scroll direction: [+1,+2,+3,+4,-1] or [-1,-2,-3,-4,+1]
+                const offsets = [dir, dir*2, dir*3, dir*4, -dir];
                 offsets.forEach((d) => {
                     const idx = centerIdx + d;
                     if (idx < 0 || idx >= imageData.length) return;
                     const id = imageData[idx]?.id;
                     if (!id) return;
-                    // Local files are always in-memory — nothing to prefetch from the server.
                     if (typeof id === 'string' && id.startsWith('local_')) return;
-                    if (_imagePayloadCache.has(String(id))) return;
-                    // Fire-and-forget prefetch; browser cache + our LRU cache will make the next scroll instant.
-                    _fetchImagePayloadBinary(id, undefined)
-                        .then((d) => d ? d : _fetchImagePayloadJsonPacked(id, undefined))
-                        .then((d) => { if (d) _cacheSetPayload(id, d); })
-                        .catch(() => { });
+                    // Prefetch PNG into browser cache so fastPreview path gets an instant hit.
+                    const pngParams = new URLSearchParams();
+                    pngParams.set('ww', String(Number(windowWidth) || 400));
+                    pngParams.set('wl', String(Number(windowLevel) || 40));
+                    pngParams.set('invert', inverted ? 'true' : 'false');
+                    const pngUrl = `/dicom-viewer/api/image/${encodeURIComponent(id)}/render.png?${pngParams}`;
+                    const _img = new Image();
+                    _img.src = pngUrl; // browser caches this; _loadServerRenderedFrameFast gets a cache hit
+                    // Also prefetch binary payload for accurate HU/measurements.
+                    if (!_imagePayloadCache.has(String(id))) {
+                        _fetchImagePayloadBinary(id, undefined)
+                            .then((d) => d ? d : _fetchImagePayloadJsonPacked(id, undefined))
+                            .then((d) => { if (d) _cacheSetPayload(id, d); })
+                            .catch(() => { });
+                    }
                 });
-            }, 140);
+            }, 80);
         }
 
         function renderDicomImage(imageData) {
@@ -4565,7 +4585,10 @@
             } else {
                 // Slice navigation (throttled + multi-step).
                 const now = Date.now();
-                const scrubbing = (now - _lastWheelAt) < 120;
+                const timeSinceLast = now - _lastWheelAt;
+                // Use fast preview whenever events arrive within 250ms — catches the first event
+                // in a scroll gesture so the viewer feels instant from the very first wheel tick.
+                const scrubbing = timeSinceLast < 250;
                 _lastWheelAt = now;
 
                 // Convert large wheel deltas into multi-slice steps (trackpads can be very "chatty").
@@ -4574,9 +4597,13 @@
                 // Trackpads can send small deltas, so keep a minimum of 1 slice per wheel event.
                 const steps = Math.max(1, Math.round(Math.abs(d) / 30));
                 const direction = d > 0 ? 1 : -1;
+                _scrollDirection = direction;
                 const target = currentImageIndex + (direction * steps);
 
                 scheduleLoadCurrentImage(target, { fastPreview: scrubbing });
+
+                // Prefetch ahead in scroll direction so the next frame is already in browser cache.
+                _schedulePrefetchAround(target, direction);
 
                 // When the user stops scrolling, load the raw pixel payload for the final resting slice
                 // (enables accurate measurements/HU without making scrolling feel heavy).
@@ -4589,7 +4616,7 @@
                     if (!id) return;
                     // Force full load for the current slice.
                     loadCurrentImage(currentImageIndex, { forceFull: true }).catch(() => { });
-                }, 180);
+                }, 120);
             }
         }
 
@@ -5902,8 +5929,8 @@
 
                 mipMode = false; // MPR replaces any active MIP projection
                 const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
-                // Always use high quality for crisp MPR rendering.
-                mprQuality = 'high';
+                // Start fast so panes appear immediately; _upgradeMPRQualityToHigh upgrades silently.
+                mprQuality = 'fast';
 
                 // Preserve the per-plane slice index whenever possible (wheel scrolling per plane).
                 const canPreserve =
@@ -7037,7 +7064,7 @@
             // Prefer the binary PNG slice endpoint (much smaller than JSON+base64).
             // If counts are known, we can avoid a metadata fetch entirely.
             const knownCount = Number(mprState?.counts?.[plane] || 0);
-            const q = 'high';
+            const q = mprQuality || 'fast';
             if (knownCount > 0) {
                 const clamped = Math.max(0, Math.min(knownCount - 1, Math.round(idx)));
                 return {
@@ -7048,7 +7075,7 @@
             }
 
             // Fallback: ask the JSON endpoint (also returns counts).
-            const url = `/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(idx)}&${qsBase}&quality=${encodeURIComponent(q)}`;
+            const url = `/dicom-viewer/api/series/${currentSeries.id}/mpr/?plane=${encodeURIComponent(plane)}&slice=${encodeURIComponent(idx)}&${qsBase}&quality=${encodeURIComponent(mprQuality || 'fast')}`;
             const resp = await fetch(url, { credentials: 'same-origin', signal: ac.signal });
             const data = await resp.json();
             if (!resp.ok) {

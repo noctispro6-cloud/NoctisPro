@@ -53,6 +53,7 @@ torch
 torchvision
 scikit-learn
 transformers
+datasets
 
 # Document processing
 PyMuPDF

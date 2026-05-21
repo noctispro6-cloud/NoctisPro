@@ -373,9 +373,12 @@
     {% if can_write %}<div class="ctx-item" id="ctxEdit"><i class="fas fa-edit"></i> Edit Report</div>{% endif %}
     <div class="ctx-item" id="ctxPrint"><i class="fas fa-print"></i> Print / Letterhead</div>
     {% if can_write %}<div class="ctx-item" id="ctxPdf"><i class="fas fa-file-pdf"></i> Download PDF</div>{% endif %}
-    {% if can_write %}
+    {% if can_amend %}
     <div class="ctx-sep"></div>
     <div class="ctx-item" id="ctxAmend"><i class="fas fa-pen-nib"></i> Amend Report</div>
+    {% endif %}
+    {% if can_write %}
+    {% if not can_amend %}<div class="ctx-sep"></div>{% endif %}
     <div class="ctx-item" id="ctxSuspend"><i class="fas fa-pause-circle"></i> Suspend / Cancel</div>
     {% endif %}
     {% if user.role == 'admin' %}

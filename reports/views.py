@@ -188,6 +188,15 @@ def report_list(request):
     """List all reports. Admins/radiologists can write; facility users can view+print only."""
     user = request.user
     can_write = bool(getattr(user, 'can_edit_reports', None) and user.can_edit_reports())
+    can_amend = False
+    if user.is_admin() or getattr(user, 'role', '') == 'admin':
+        can_amend = True
+    elif getattr(user, 'role', '') == 'radiologist':
+        try:
+            from admin_panel.utils import get_user_caps
+            can_amend = bool(get_user_caps(user.username).get('can_amend_reports', True))
+        except Exception:
+            can_amend = True
     # Get filter parameters
     search_query = request.GET.get('search', '')
     status_filter = request.GET.get('status', '')
@@ -254,6 +263,7 @@ def report_list(request):
     context = {
         'reports': reports,
         'can_write': can_write,
+        'can_amend': can_amend,
         'total_reports': total_reports,
         'draft_reports': draft_reports,
         'pending_reports': pending_reports,
@@ -723,14 +733,25 @@ def export_report_docx(request, study_id):
 # ── Report management actions (admin + radiologist only) ───────────────────
 
 def _can_manage_report(user, report):
-    """Admin can always manage; radiologist can manage their own reports."""
+    """
+    Admin can always amend any report.
+    Radiologists can amend their own reports, or any report if the admin has
+    explicitly granted them 'can_amend_reports' in the permissions dashboard.
+    """
     if getattr(user, 'is_admin', lambda: False)():
         return True
     role = getattr(user, 'role', '')
     if role == 'admin':
         return True
-    if role == 'radiologist' and report.radiologist_id == user.id:
-        return True
+    if role == 'radiologist':
+        if report.radiologist_id == user.id:
+            return True
+        try:
+            from admin_panel.utils import get_user_caps
+            if get_user_caps(user.username).get('can_amend_reports', True):
+                return True
+        except Exception:
+            pass
     return False
 
 

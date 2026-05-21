@@ -11,6 +11,7 @@ DEFAULT_CAPS = {
     'manage_permissions': False,
     'ai_visible': True,
     'manage_ai': False,
+    'can_amend_reports': True,
 }
 
 _DEFAULT_ROLE_TOGGLES = {

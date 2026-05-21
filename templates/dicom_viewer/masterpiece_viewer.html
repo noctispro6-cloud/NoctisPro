@@ -3295,8 +3295,11 @@
             try {
                 showLoading(true);
                 _resetServerRendered();
-                // Cancel any background preload from the previous series.
+                // Cancel any background preload and clear slice/MPR caches from the previous series.
                 if (_seriesPreloadAbort) { try { _seriesPreloadAbort.abort(); } catch (_e) {} _seriesPreloadAbort = null; }
+                _mprBitmapCacheOrder.length = 0;
+                _mprBitmapCache.forEach((b) => { if (b && typeof b.close === 'function') b.close(); });
+                _mprBitmapCache.clear();
                 // Switching series during MPR should not leave stale requests running.
                 _abortMPRRequestsAndTimers();
                 roiDraft = null;
@@ -3435,6 +3438,53 @@
         const _bitmapCache = new Map();
         const _bitmapCacheOrder = [];
         let _seriesPreloadAbort = null; // AbortController for background series preload
+
+        // Separate bitmap cache for MPR slices — keyed by full URL (already unique per plane/slice/WW/WL).
+        const _MPR_BITMAP_CACHE_MAX = 60; // 3 planes × ~20 slices each
+        const _mprBitmapCache = new Map();
+        const _mprBitmapCacheOrder = [];
+        function _mprBitmapCacheGet(url) {
+            const v = _mprBitmapCache.get(url);
+            if (!v) return null;
+            const i = _mprBitmapCacheOrder.indexOf(url);
+            if (i >= 0) { _mprBitmapCacheOrder.splice(i, 1); _mprBitmapCacheOrder.push(url); }
+            return v;
+        }
+        function _mprBitmapCacheSet(url, bitmap) {
+            while (_mprBitmapCacheOrder.length >= _MPR_BITMAP_CACHE_MAX) {
+                const evict = _mprBitmapCacheOrder.shift();
+                const old = _mprBitmapCache.get(evict);
+                if (old && typeof old.close === 'function') old.close();
+                _mprBitmapCache.delete(evict);
+            }
+            if (_mprBitmapCache.has(url)) {
+                const old = _mprBitmapCache.get(url);
+                if (old && typeof old.close === 'function') old.close();
+                const i = _mprBitmapCacheOrder.indexOf(url);
+                if (i >= 0) _mprBitmapCacheOrder.splice(i, 1);
+            }
+            _mprBitmapCache.set(url, bitmap);
+            _mprBitmapCacheOrder.push(url);
+        }
+        // Prefetch MPR slices adjacent to the current position into the bitmap cache.
+        function _prefetchMPRSlicesAhead(plane, currentIdx, step, count, qsBase) {
+            if (!currentSeries || String(currentSeries.id).startsWith('local_')) return;
+            const q = mprQuality || 'fast';
+            const sid = encodeURIComponent(currentSeries.id);
+            for (let d = 1; d <= 3; d++) {
+                const idx = currentIdx + step * d;
+                if (idx < 0 || idx >= count) continue;
+                const url = `/dicom-viewer/api/mpr-slice/${sid}/${encodeURIComponent(plane)}/${encodeURIComponent(idx)}/?${qsBase}&quality=${encodeURIComponent(q)}`;
+                if (_mprBitmapCache.has(url)) continue;
+                if (typeof createImageBitmap !== 'undefined') {
+                    fetch(url, { credentials: 'same-origin', cache: 'default' })
+                        .then(r => r.ok ? r.blob() : null)
+                        .then(blob => blob ? createImageBitmap(blob) : null)
+                        .then(bitmap => { if (bitmap) _mprBitmapCacheSet(url, bitmap); })
+                        .catch(() => {});
+                }
+            }
+        }
 
         function _bitmapCacheKey(id, ww, wl, inv) {
             return `${id}|${Math.round(Number(ww) || 0)}|${Math.round(Number(wl) || 0)}|${inv ? 1 : 0}`;
@@ -6323,8 +6373,6 @@
             if (!ctx) {
                 throw new Error(`Unable to acquire 2D context for MPR canvas (${viewType})`);
             }
-            const img = new Image();
-            try { img.decoding = 'async'; } catch (_) { }
             // Backend may return:
             // - a full data URL: "data:image/png;base64,..."
             // - raw base64: "<base64...>"
@@ -6335,39 +6383,74 @@
             const isDataUrl = v.startsWith('data:image');
             const isHttpUrl = v.startsWith('http://') || v.startsWith('https://');
             const isRelativeUrl = v.startsWith('/') || v.startsWith('./') || v.startsWith('../');
-            const baseSrc = isDataUrl ? v : (isHttpUrl || isRelativeUrl) ? v : `data:image/png;base64,${v}`;
+            const isUrl = isHttpUrl || isRelativeUrl;
+            const baseSrc = isDataUrl ? v : isUrl ? v : `data:image/png;base64,${v}`;
 
-            // Robust MPR image loading: retry transient failures and add cache-bust only for URL endpoints.
-            let lastErr = null;
-            for (let attempt = 0; attempt < 3; attempt++) {
-                try {
-                    let attemptSrc = baseSrc;
-                    if (!baseSrc.startsWith('data:image') && attempt > 0) {
-                        const sep = attemptSrc.includes('?') ? '&' : '?';
-                        attemptSrc = `${attemptSrc}${sep}_cb=${Date.now()}_${attempt}`;
+            // drawable is either an ImageBitmap (URL path) or HTMLImageElement (data URL fallback).
+            // Both support ctx.drawImage() and have .width/.height.
+            let drawable;
+
+            if (isUrl && typeof createImageBitmap !== 'undefined') {
+                // Fast path: use cached decoded bitmap to avoid re-fetching on every scroll step.
+                const cached = _mprBitmapCacheGet(baseSrc);
+                if (cached) {
+                    drawable = cached;
+                } else {
+                    let lastErr = null;
+                    for (let attempt = 0; attempt < 3; attempt++) {
+                        try {
+                            let fetchUrl = baseSrc;
+                            if (attempt > 0) {
+                                const sep = fetchUrl.includes('?') ? '&' : '?';
+                                fetchUrl = `${fetchUrl}${sep}_cb=${Date.now()}_${attempt}`;
+                            }
+                            const resp = await fetch(fetchUrl, { credentials: 'same-origin', cache: 'default' });
+                            if (!resp.ok) throw new Error(`MPR slice HTTP ${resp.status} (${viewType})`);
+                            const blob = await resp.blob();
+                            drawable = await createImageBitmap(blob);
+                            _mprBitmapCacheSet(baseSrc, drawable);
+                            lastErr = null;
+                            break;
+                        } catch (e) {
+                            lastErr = e;
+                            if (attempt < 2) { await _delay(180 * Math.pow(2, attempt)); continue; }
+                        }
                     }
-                    img.src = attemptSrc;
-                    await Promise.race([
-                        new Promise((resolve, reject) => {
-                            img.onload = resolve;
-                            img.onerror = () => reject(new Error(`MPR image load failed (${viewType})`));
-                        }),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error(`MPR image load timeout (${viewType})`)), 20000))
-                    ]);
-                    lastErr = null;
-                    break;
-                } catch (e) {
-                    lastErr = e;
-                    if (attempt < 2) {
-                        await _delay(180 * Math.pow(2, attempt));
-                        continue;
+                    if (lastErr) throw lastErr;
+                }
+            } else {
+                // Fallback: data URLs or browsers without createImageBitmap support.
+                const img = new Image();
+                try { img.decoding = 'async'; } catch (_) { }
+                let lastErr = null;
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    try {
+                        let attemptSrc = baseSrc;
+                        if (!isDataUrl && attempt > 0) {
+                            const sep = attemptSrc.includes('?') ? '&' : '?';
+                            attemptSrc = `${attemptSrc}${sep}_cb=${Date.now()}_${attempt}`;
+                        }
+                        img.src = attemptSrc;
+                        await Promise.race([
+                            new Promise((resolve, reject) => {
+                                img.onload = resolve;
+                                img.onerror = () => reject(new Error(`MPR image load failed (${viewType})`));
+                            }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error(`MPR image load timeout (${viewType})`)), 20000))
+                        ]);
+                        lastErr = null;
+                        break;
+                    } catch (e) {
+                        lastErr = e;
+                        if (attempt < 2) { await _delay(180 * Math.pow(2, attempt)); continue; }
                     }
                 }
+                if (lastErr) throw lastErr;
+                drawable = img;
             }
-            if (lastErr) throw lastErr;
 
-            const w = img.naturalWidth || img.width;
-            const h = img.naturalHeight || img.height;
+            const w = drawable.width || drawable.naturalWidth || 0;
+            const h = drawable.height || drawable.naturalHeight || 0;
             if (!w || !h) {
                 throw new Error(`MPR image decoded with invalid dimensions (${viewType}): ${w}x${h}`);
             }
@@ -6389,7 +6472,7 @@
 
                 // baseMeta is the fit-to-pane rect (prior to user pan/zoom); redrawMPRPlane applies transforms.
                 mprState.baseMeta[viewType] = { w, h, dx, dy, dw, dh };
-                mprState.lastImage[viewType] = img;
+                mprState.lastImage[viewType] = drawable;
             }
 
             // Always draw *something* to the canvas, even if overlay code errors.
@@ -7577,6 +7660,8 @@
             roiDraft = null;
             mprCurrentMeasurement = null;
             const qsBase = `window_width=${encodeURIComponent(windowWidth)}&window_level=${encodeURIComponent(windowLevel)}&inverted=${encodeURIComponent(inverted)}`;
+            // Prefetch adjacent slices in scroll direction so they're decoded before the user reaches them.
+            _prefetchMPRSlicesAhead(plane, next, step, count, qsBase);
             fetchMPRPlaneSlice(plane, next, qsBase)
                 .then((r) => {
                     mprState.index[plane] = r.index;

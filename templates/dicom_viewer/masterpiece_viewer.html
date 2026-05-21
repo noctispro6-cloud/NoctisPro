@@ -2647,7 +2647,11 @@
             canvas.addEventListener('mousemove', handleMouseMove);
             canvas.addEventListener('mouseup', handleMouseUp);
             canvas.addEventListener('wheel', handleWheel, { passive: false });
-            canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); _showViewerCtxMenu(e, canvas); });
+            canvas.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                // If handleMouseDown already showed the measurement context menu, don't overlay the viewer menu.
+                if (!document.getElementById('measurementContextMenu')) _showViewerCtxMenu(e, canvas);
+            });
 
             // Touch / pointer support for main canvas (tablets + phones)
             _attachCanvasTouch(canvas, {
@@ -2674,7 +2678,10 @@
                 c.addEventListener('mousemove', (e) => handleMPRMouseMove(e, plane));
                 c.addEventListener('mouseup', (e) => handleMPRMouseUp(e, plane));
                 c.addEventListener('wheel', (e) => handleMPRWheel(e, plane), { passive: false });
-                c.addEventListener('contextmenu', (e) => { e.preventDefault(); _showViewerCtxMenu(e, c); });
+                c.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    if (!document.getElementById('measurementContextMenu')) _showViewerCtxMenu(e, c);
+                });
                 c.addEventListener('click', (e) => handleMPRClick(e, plane));
                 c.addEventListener('dblclick', (e) => handleMPRDoubleClick(e, plane));
                 _attachCanvasTouch(c, {
@@ -9701,65 +9708,62 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             return c.toDataURL('image/png');
         }
 
-        document.getElementById('vctxSaveImage')?.addEventListener('click', async () => {
+        // Context menu clicks delegated to document so the handler works even though
+        // the menu HTML is injected after this script block.
+        document.addEventListener('click', async (e) => {
+            const menu = document.getElementById('viewerCtxMenu');
+            if (!menu) return;
+
+            // Dismiss if clicking outside the menu
+            if (!menu.contains(e.target)) { _hideViewerCtxMenu(); return; }
+
+            const item = e.target.closest('.vctx-item');
+            if (!item) return;
             _hideViewerCtxMenu();
-            if (!currentSeries && !currentStudy) { showToast('No image loaded', 'warning'); return; }
-            try {
-                const dataUrl = await _captureCanvasPng();
-                if (!dataUrl) { showToast('Could not capture image', 'error'); return; }
-                const studyId = currentStudy?.id || currentSeries?.study_id;
-                if (!studyId) { showToast('No study context', 'warning'); return; }
-                const label = prompt('Label for this image (optional):') ?? '';
-                const resp = await fetch('/dicom-viewer/api/viewer-images/save/', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({
-                        study_id: studyId,
-                        series_id: currentSeries?.id ?? null,
-                        slice_index: currentImageIndex ?? null,
-                        label: label,
-                        image_data: dataUrl,
-                    }),
-                });
-                if (resp.ok) {
-                    showToast('Image saved to folder', 'success');
-                } else {
-                    showToast('Failed to save image', 'error');
+
+            if (item.id === 'vctxSaveImage') {
+                if (!currentSeries && !currentStudy) { showToast('No image loaded', 'warning'); return; }
+                try {
+                    const dataUrl = await _captureCanvasPng();
+                    if (!dataUrl) { showToast('Could not capture image', 'error'); return; }
+                    const studyId = (currentStudy && currentStudy.id) || (currentSeries && currentSeries.study_id);
+                    if (!studyId) { showToast('No study context', 'warning'); return; }
+                    const label = prompt('Label for this image (optional):') ?? '';
+                    const resp = await fetch('/dicom-viewer/api/viewer-images/save/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            study_id: studyId,
+                            series_id: currentSeries ? currentSeries.id : null,
+                            slice_index: currentImageIndex ?? null,
+                            label: label,
+                            image_data: dataUrl,
+                        }),
+                    });
+                    showToast(resp.ok ? 'Image saved to folder' : 'Failed to save image', resp.ok ? 'success' : 'error');
+                } catch (err) {
+                    showToast('Error saving image', 'error');
                 }
-            } catch (err) {
-                showToast('Error saving image', 'error');
-            }
-        });
-
-        document.getElementById('vctxDownloadImage')?.addEventListener('click', async () => {
-            _hideViewerCtxMenu();
-            const dataUrl = await _captureCanvasPng();
-            if (!dataUrl) return;
-            const a = document.createElement('a');
-            a.href = dataUrl;
-            a.download = `dicom_${currentSeries?.id || 'image'}_slice${(currentImageIndex || 0) + 1}.png`;
-            a.click();
-        });
-
-        document.getElementById('vctxCopyImage')?.addEventListener('click', async () => {
-            _hideViewerCtxMenu();
-            try {
+            } else if (item.id === 'vctxDownloadImage') {
                 const dataUrl = await _captureCanvasPng();
                 if (!dataUrl) return;
-                const res = await fetch(dataUrl);
-                const blob = await res.blob();
-                await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-                showToast('Image copied to clipboard', 'success');
-            } catch (err) {
-                showToast('Clipboard copy failed', 'warning');
+                const a = document.createElement('a');
+                a.href = dataUrl;
+                a.download = `dicom_${(currentSeries && currentSeries.id) || 'image'}_slice${(currentImageIndex || 0) + 1}.png`;
+                a.click();
+            } else if (item.id === 'vctxCopyImage') {
+                try {
+                    const dataUrl = await _captureCanvasPng();
+                    if (!dataUrl) return;
+                    const res = await fetch(dataUrl);
+                    const blob = await res.blob();
+                    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                    showToast('Image copied to clipboard', 'success');
+                } catch (err) {
+                    showToast('Clipboard copy failed (browser may require HTTPS)', 'warning');
+                }
             }
-        });
-
-        // Dismiss menu on any click outside
-        document.addEventListener('click', (e) => {
-            const menu = document.getElementById('viewerCtxMenu');
-            if (menu && !menu.contains(e.target)) _hideViewerCtxMenu();
         });
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _hideViewerCtxMenu(); });
 

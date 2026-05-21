@@ -14,6 +14,7 @@ from .models import SystemConfiguration, AuditLog, SystemUsageStatistics
 import json
 import re
 import os
+import gzip
 import shutil
 import subprocess
 import socket
@@ -1527,6 +1528,31 @@ def _send_backup_to_remote(filename: str) -> tuple[bool, str]:
         return False, f'Transfer error: {exc}'
 
 
+def _get_backup_retention() -> int:
+    """Return configured keep-last-N value (default 10)."""
+    try:
+        obj = SystemConfiguration.objects.filter(key='backup_retention').first()
+        if obj:
+            return max(1, int(obj.value))
+    except Exception:
+        pass
+    return 10
+
+
+def _prune_backups(keep_n: int) -> int:
+    """Delete backups older than the keep_n most recent. Returns count deleted."""
+    backups = _list_backups()
+    to_delete = backups[keep_n:]
+    count = 0
+    for b in to_delete:
+        try:
+            b['path'].unlink()
+            count += 1
+        except Exception:
+            pass
+    return count
+
+
 def _create_backup(request) -> tuple[bool, str]:
     from django.conf import settings as dj_settings
     bdir = _ensure_backup_dir()
@@ -1538,7 +1564,7 @@ def _create_backup(request) -> tuple[bool, str]:
         db_path = db_cfg.get('NAME', '')
         if not db_path or not os.path.exists(db_path):
             return False, 'SQLite database file not found.'
-        dest = bdir / f'backup_{ts}.sql'
+        dest_gz = bdir / f'backup_{ts}.sql.gz'
         try:
             result = subprocess.run(
                 ['sqlite3', str(db_path), '.dump'],
@@ -1546,35 +1572,38 @@ def _create_backup(request) -> tuple[bool, str]:
             )
             if result.returncode != 0:
                 return False, f'sqlite3 dump failed: {result.stderr[:200]}'
-            dest.write_text(result.stdout, encoding='utf-8')
-            return True, f'Backup created: {dest.name}'
+            with gzip.open(dest_gz, 'wt', encoding='utf-8', compresslevel=6) as gz:
+                gz.write(result.stdout)
+            return True, f'Backup created: {dest_gz.name}'
         except FileNotFoundError:
             # sqlite3 CLI not available – copy the raw DB file
-            dest2 = bdir / f'backup_{ts}.db'
-            shutil.copy2(db_path, dest2)
-            return True, f'Backup created (raw copy): {dest2.name}'
+            dest_db = bdir / f'backup_{ts}.db'
+            shutil.copy2(db_path, dest_db)
+            return True, f'Backup created (raw copy): {dest_db.name}'
         except subprocess.TimeoutExpired:
             return False, 'Backup timed out.'
         except Exception as exc:
             return False, f'Backup error: {exc}'
 
     elif 'postgresql' in engine:
-        dest = bdir / f'backup_{ts}.sql'
+        dest_gz = bdir / f'backup_{ts}.sql.gz'
         env = os.environ.copy()
         pw = db_cfg.get('PASSWORD', '')
         if pw:
             env['PGPASSWORD'] = pw
+        # pg_dump to stdout, compress in Python
         cmd = ['pg_dump',
                '-h', db_cfg.get('HOST', 'localhost'),
                '-p', str(db_cfg.get('PORT', 5432)),
                '-U', db_cfg.get('USER', 'postgres'),
-               '-d', db_cfg.get('NAME', ''),
-               '-f', str(dest)]
+               '-d', db_cfg.get('NAME', '')]
         try:
-            result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=300)
+            result = subprocess.run(cmd, env=env, capture_output=True, timeout=300)
             if result.returncode != 0:
-                return False, f'pg_dump failed: {result.stderr[:200]}'
-            return True, f'Backup created: {dest.name}'
+                return False, f'pg_dump failed: {result.stderr[:200].decode(errors="replace")}'
+            with gzip.open(dest_gz, 'wb', compresslevel=6) as gz:
+                gz.write(result.stdout)
+            return True, f'Backup created: {dest_gz.name}'
         except FileNotFoundError:
             return False, 'pg_dump not found. Install postgresql-client.'
         except subprocess.TimeoutExpired:
@@ -1585,10 +1614,67 @@ def _create_backup(request) -> tuple[bool, str]:
     return False, f'Backup not supported for engine: {engine}'
 
 
+def _restore_sqlite_backup(filename: str) -> tuple[bool, str]:
+    """Restore a SQLite backup. Creates a safety copy first."""
+    from django.conf import settings as dj_settings
+    bdir = _ensure_backup_dir()
+    src = bdir / filename
+    if not src.exists():
+        return False, 'Backup file not found.'
+    db_cfg = dj_settings.DATABASES.get('default', {})
+    if 'sqlite3' not in db_cfg.get('ENGINE', ''):
+        return False, 'Restore is only supported for SQLite databases.'
+    db_path = db_cfg.get('NAME', '')
+    if not db_path:
+        return False, 'Database path not configured.'
+    # Safety copy of the current database
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    safety_dest = bdir / f'pre_restore_{ts}.db'
+    try:
+        if os.path.exists(db_path):
+            shutil.copy2(db_path, safety_dest)
+    except Exception as exc:
+        return False, f'Could not create safety backup: {exc}'
+    # Restore
+    try:
+        if filename.endswith('.gz'):
+            sql_text = gzip.open(src, 'rt', encoding='utf-8').read()
+        else:
+            sql_text = src.read_text(encoding='utf-8')
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        result = subprocess.run(
+            ['sqlite3', db_path],
+            input=sql_text, text=True, capture_output=True, timeout=120
+        )
+        if result.returncode != 0:
+            # Restore failed — bring back safety copy
+            shutil.copy2(safety_dest, db_path)
+            return False, f'Restore failed (original kept): {result.stderr[:200]}'
+        return True, f'Database restored from {filename}. Safety copy saved as {safety_dest.name}.'
+    except Exception as exc:
+        try:
+            shutil.copy2(safety_dest, db_path)
+        except Exception:
+            pass
+        return False, f'Restore error (original kept): {exc}'
+
+
 @login_required
 @user_passes_test(is_admin)
 def backups_view(request):
     bdir = _ensure_backup_dir()
+
+    def _upsert_cfg(key, val, desc, sensitive=False):
+        obj, _ = SystemConfiguration.objects.get_or_create(
+            key=key,
+            defaults={'value': val, 'data_type': 'string', 'category': 'backup',
+                      'description': desc, 'is_sensitive': sensitive, 'updated_by': request.user}
+        )
+        if obj.value != val:
+            obj.value = val
+            obj.updated_by = request.user
+            obj.save()
 
     if request.method == 'POST':
         action = request.POST.get('action', '')
@@ -1596,6 +1682,10 @@ def backups_view(request):
             ok, msg = _create_backup(request)
             if ok:
                 messages.success(request, msg)
+                # Auto-prune old backups according to retention policy
+                pruned = _prune_backups(_get_backup_retention())
+                if pruned:
+                    messages.info(request, f'Auto-pruned {pruned} old backup(s) (retention policy).')
             else:
                 messages.error(request, msg)
             return redirect('admin_panel:backups')
@@ -1614,8 +1704,11 @@ def backups_view(request):
         elif action == 'delete_all':
             count = 0
             for f in bdir.glob('backup_*'):
-                f.unlink()
-                count += 1
+                try:
+                    f.unlink()
+                    count += 1
+                except Exception:
+                    pass
             messages.success(request, f'Deleted {count} backup(s).')
             return redirect('admin_panel:backups')
 
@@ -1629,14 +1722,26 @@ def backups_view(request):
                     messages.error(request, msg)
             return redirect('admin_panel:backups')
 
+        elif action == 'restore':
+            filename = request.POST.get('filename', '').strip()
+            if filename and '/' not in filename and '..' not in filename:
+                ok, msg = _restore_sqlite_backup(filename)
+                if ok:
+                    messages.success(request, msg)
+                else:
+                    messages.error(request, msg)
+            return redirect('admin_panel:backups')
+
+        elif action == 'save_retention':
+            try:
+                keep_n = max(1, int(request.POST.get('retention', 10)))
+            except Exception:
+                keep_n = 10
+            _upsert_cfg('backup_retention', str(keep_n), 'Number of backups to keep (auto-pruned)')
+            messages.success(request, f'Retention policy saved: keep last {keep_n} backup(s).')
+            return redirect('admin_panel:backups')
+
         elif action == 'save_server':
-            def _upsert_cfg(key, val, desc, sensitive=False):
-                obj, _ = SystemConfiguration.objects.get_or_create(
-                    key=key,
-                    defaults={'value': val, 'data_type': 'string', 'category': 'backup',
-                              'description': desc, 'is_sensitive': sensitive, 'updated_by': request.user}
-                )
-                obj.value = val; obj.updated_by = request.user; obj.save()
             _upsert_cfg('backup_server_ip',   request.POST.get('server_ip', '').strip(),   'Remote backup server IP/hostname')
             _upsert_cfg('backup_server_user', request.POST.get('server_user', 'root').strip() or 'root', 'SSH username')
             _upsert_cfg('backup_server_path', request.POST.get('server_path', '/backups').strip() or '/backups', 'Remote path')
@@ -1649,22 +1754,54 @@ def backups_view(request):
     engine_raw = db_cfg.get('ENGINE', '')
     if 'sqlite3' in engine_raw:
         db_engine = 'SQLite3'
+        is_sqlite = True
     elif 'postgresql' in engine_raw:
         db_engine = 'PostgreSQL'
+        is_sqlite = False
     else:
         db_engine = engine_raw.split('.')[-1]
+        is_sqlite = False
+
+    # DICOM media info
+    media_info = {'count': 0, 'size_human': '—'}
+    try:
+        media_root = dj_settings.MEDIA_ROOT
+        total_size = 0
+        count = 0
+        for dirpath, _dirs, files in os.walk(media_root):
+            for fname in files:
+                fp = os.path.join(dirpath, fname)
+                try:
+                    total_size += os.path.getsize(fp)
+                    count += 1
+                except Exception:
+                    pass
+        media_info['count'] = count
+        media_info['size_human'] = _backup_size_human(Path(media_root)) if count else '0 B'
+        # Use direct total for accurate reporting
+        _s = total_size
+        for _u in ('B', 'KB', 'MB', 'GB', 'TB'):
+            if _s < 1024:
+                media_info['size_human'] = f'{_s:.1f} {_u}'
+                break
+            _s /= 1024
+    except Exception:
+        pass
 
     srv = _get_backup_server_cfg()
     return render(request, 'admin_panel/backups.html', {
         'backups': _list_backups(),
         'backup_dir': str(bdir),
         'db_engine': db_engine,
+        'is_sqlite': is_sqlite,
         'adm_active': 'backups',
         'server_ip': srv['ip'],
         'server_user': srv['user'],
         'server_path': srv['path'],
         'server_key': srv['key'],
         'server_configured': bool(srv['ip']),
+        'retention': _get_backup_retention(),
+        'media_info': media_info,
     })
 
 

@@ -21,6 +21,10 @@
                 <i class="fas fa-plus me-1"></i>Create Backup Now
             </button>
         </form>
+        <a href="{% url 'admin_panel:backup_download' %}?file={{ backups.0.filename|default:'' }}" class="btn-control"
+           {% if not backups %}style="pointer-events:none;opacity:0.4;"{% endif %}>
+            <i class="fas fa-download me-1"></i>Download Latest
+        </a>
     </div>
 </div>
 
@@ -122,16 +126,59 @@
             </div>
         </div>
 
+        <!-- Retention Policy -->
+        <div class="adm-card mb-3">
+            <div class="adm-card-header"><div><i class="fas fa-history"></i>Retention Policy</div></div>
+            <div class="adm-card-body">
+                <form method="post" action="{% url 'admin_panel:backups' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="save_retention">
+                    <div style="display:flex;flex-direction:column;gap:10px;">
+                        <div>
+                            <label style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Keep last N backups</label>
+                            <input type="number" name="retention" value="{{ retention }}" min="1" max="100"
+                                   class="form-control form-control-sm" style="font-size:12px;width:80px;">
+                            <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Older backups are automatically deleted after each new backup is created.</div>
+                        </div>
+                        <button type="submit" class="btn-control" style="width:100%;justify-content:center;">
+                            <i class="fas fa-save me-1"></i>Save
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- DICOM Media Info -->
+        <div class="adm-card mb-3">
+            <div class="adm-card-header"><div><i class="fas fa-folder-open"></i>DICOM Media Files</div></div>
+            <div class="adm-card-body">
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <div style="display:flex;justify-content:space-between;font-size:12px;">
+                        <span style="color:var(--text-muted);">Total files</span>
+                        <span style="font-weight:600;">{{ media_info.count }}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;font-size:12px;">
+                        <span style="color:var(--text-muted);">Total size</span>
+                        <span style="font-weight:600;">{{ media_info.size_human }}</span>
+                    </div>
+                    <div style="font-size:10px;color:var(--warning-color);padding:8px;background:rgba(255,170,0,0.07);border:1px solid rgba(255,170,0,0.2);border-radius:6px;margin-top:4px;">
+                        <i class="fas fa-exclamation-triangle me-1"></i>
+                        DICOM images are <strong>not</strong> included in database backups. Use "Push to Server" with rsync or a separate file sync to back up <code>{{ backup_dir|cut:"backups" }}media/</code>.
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Tips -->
         <div class="adm-card">
             <div class="adm-card-header"><div><i class="fas fa-lightbulb"></i>Tips</div></div>
             <div class="adm-card-body">
                 <ul style="font-size:12px;color:var(--text-secondary);padding-left:16px;margin:0;line-height:1.8;">
                     <li>Create a backup before updates or migrations</li>
+                    <li>Database backups are stored compressed (.sql.gz)</li>
                     <li>Push backups to remote server for off-site storage</li>
                     <li>Set up SSH key auth so rsync can connect without a password</li>
-                    <li>Keep at least 7 days of backup history</li>
-                    <li>Test restores periodically</li>
+                    <li>Test restores periodically using the Restore button</li>
                 </ul>
             </div>
         </div>
@@ -169,7 +216,12 @@
                             <td>
                                 <div style="display:flex;align-items:center;gap:8px;">
                                     <i class="fas fa-file-archive" style="color:var(--accent-color);"></i>
-                                    <span style="font-size:12px;font-weight:500;">{{ backup.filename }}</span>
+                                    <div>
+                                        <span style="font-size:12px;font-weight:500;">{{ backup.filename }}</span>
+                                        {% if backup.filename|slice:"-3:" == ".gz" %}
+                                        <span style="font-size:9px;color:var(--success-color);border:1px solid rgba(0,255,136,0.3);border-radius:3px;padding:1px 4px;margin-left:4px;">GZ</span>
+                                        {% endif %}
+                                    </div>
                                 </div>
                             </td>
                             <td style="color:var(--text-secondary);font-size:12px;">{{ backup.size_human }}</td>
@@ -186,9 +238,21 @@
                                         <input type="hidden" name="filename" value="{{ backup.filename }}">
                                         <button type="submit" class="btn-control" style="font-size:11px;padding:4px 10px;"
                                                 {% if not server_configured %}title="Configure backup server first" disabled{% endif %}>
-                                            <i class="fas fa-cloud-upload-alt me-1"></i>Push to Server
+                                            <i class="fas fa-cloud-upload-alt me-1"></i>Push
                                         </button>
                                     </form>
+                                    {% if is_sqlite %}
+                                    <form method="post" action="{% url 'admin_panel:backups' %}" style="display:inline;"
+                                          onsubmit="return confirm('Restore from {{ backup.filename }}?\n\nThe current database will be backed up first as a safety measure. The server may need to be restarted after restore.')">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="restore">
+                                        <input type="hidden" name="filename" value="{{ backup.filename }}">
+                                        <button type="submit" class="btn-control" style="font-size:11px;padding:4px 10px;color:var(--warning-color);"
+                                                title="Restore database from this backup">
+                                            <i class="fas fa-undo"></i>
+                                        </button>
+                                    </form>
+                                    {% endif %}
                                     <form method="post" action="{% url 'admin_panel:backups' %}" style="display:inline;"
                                           onsubmit="return confirm('Delete this backup?')">
                                         {% csrf_token %}

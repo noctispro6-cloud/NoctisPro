@@ -2647,7 +2647,7 @@
             canvas.addEventListener('mousemove', handleMouseMove);
             canvas.addEventListener('mouseup', handleMouseUp);
             canvas.addEventListener('wheel', handleWheel, { passive: false });
-            canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+            canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); _showViewerCtxMenu(e, canvas); });
 
             // Touch / pointer support for main canvas (tablets + phones)
             _attachCanvasTouch(canvas, {
@@ -2674,7 +2674,7 @@
                 c.addEventListener('mousemove', (e) => handleMPRMouseMove(e, plane));
                 c.addEventListener('mouseup', (e) => handleMPRMouseUp(e, plane));
                 c.addEventListener('wheel', (e) => handleMPRWheel(e, plane), { passive: false });
-                c.addEventListener('contextmenu', (e) => e.preventDefault());
+                c.addEventListener('contextmenu', (e) => { e.preventDefault(); _showViewerCtxMenu(e, c); });
                 c.addEventListener('click', (e) => handleMPRClick(e, plane));
                 c.addEventListener('dblclick', (e) => handleMPRDoubleClick(e, plane));
                 _attachCanvasTouch(c, {
@@ -9545,27 +9545,38 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
         function _attachCanvasTouch(el, { onDragStart, onDragMove, onDragEnd, onPinchZoom, onScroll }) {
             let _ptrs = new Map();
             let _pinchDist  = null;
-            let _pinchCY    = null; // center-Y of the 2 pointers — tracks vertical swipe
+            let _pinchCY    = null;
             let _dragging   = false;
+            // 1-finger swipe direction detection
+            let _startX = 0, _startY = 0;
+            let _swipeMode = null; // null = undecided, 'scroll' = slice scroll, 'drag' = normal
+            let _swipeAccum = 0;   // accumulated vertical pixels for scroll stepping
+            const _SWIPE_DECIDE_PX = 10; // pixels before we decide scroll vs drag
+            const _SWIPE_STEP_PX   = 18; // vertical pixels per slice step
 
             function _dist2(a, b) {
                 return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
             }
 
             el.addEventListener('pointerdown', (e) => {
-                if (e.button > 1) return; // ignore right-click / stylus buttons
+                if (e.button > 1) return;
                 try { el.setPointerCapture(e.pointerId); } catch (_) {}
                 _ptrs.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 
                 if (_ptrs.size === 1) {
                     _dragging   = true;
+                    _swipeMode  = null;
+                    _swipeAccum = 0;
+                    _startX = e.clientX;
+                    _startY = e.clientY;
                     _pinchDist  = null;
                     _pinchCY    = null;
-                    if (onDragStart) onDragStart(e.clientX, e.clientY, e.button);
+                    // Defer onDragStart until we know the gesture direction
                 } else if (_ptrs.size === 2) {
-                    // Second finger — switch to 2-finger mode; cancel active drag.
-                    _dragging = false;
-                    if (onDragEnd) onDragEnd(e.clientX, e.clientY);
+                    // Second finger — switch to 2-finger mode; cancel active drag/swipe.
+                    if (_swipeMode === 'drag' && onDragEnd) onDragEnd(e.clientX, e.clientY);
+                    _dragging  = false;
+                    _swipeMode = null;
                     const pts = Array.from(_ptrs.values());
                     _pinchDist = _dist2(pts[0], pts[1]);
                     _pinchCY   = (pts[0].clientY + pts[1].clientY) / 2;
@@ -9575,6 +9586,7 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
 
             el.addEventListener('pointermove', (e) => {
                 if (!_ptrs.has(e.pointerId)) return;
+                const prev = _ptrs.get(e.pointerId);
                 _ptrs.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 
                 if (_ptrs.size === 2) {
@@ -9582,26 +9594,47 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                     const newDist = _dist2(pts[0], pts[1]);
                     const newCX  = (pts[0].clientX + pts[1].clientX) / 2;
                     const newCY  = (pts[0].clientY + pts[1].clientY) / 2;
-
-                    // Pinch zoom — fire when finger-distance changes
                     if (_pinchDist !== null && onPinchZoom) {
                         const delta = newDist - _pinchDist;
                         if (Math.abs(delta) > 1) onPinchZoom(delta, newCX, newCY);
                     }
                     _pinchDist = newDist;
-
-                    // 2-finger vertical swipe → slice scroll (14 px threshold per step)
+                    // 2-finger vertical swipe → slice scroll
                     if (_pinchCY !== null && onScroll) {
                         const dy = newCY - _pinchCY;
                         if (Math.abs(dy) >= 14) {
-                            onScroll(dy > 0 ? -1 : 1); // swipe-up = next slice, swipe-down = prev slice
+                            onScroll(dy > 0 ? -1 : 1);
                             _pinchCY = newCY;
                         }
                     } else {
                         _pinchCY = newCY;
                     }
                 } else if (_ptrs.size === 1 && _dragging) {
-                    if (onDragMove) onDragMove(e.clientX, e.clientY);
+                    const dx = e.clientX - _startX;
+                    const dy = e.clientY - _startY;
+
+                    if (_swipeMode === null) {
+                        // Decide gesture direction once we have enough movement
+                        if (Math.hypot(dx, dy) >= _SWIPE_DECIDE_PX) {
+                            if (Math.abs(dy) > Math.abs(dx) * 1.2) {
+                                // Primarily vertical — scroll slices
+                                _swipeMode  = 'scroll';
+                                _swipeAccum = dy;
+                            } else {
+                                // Diagonal / horizontal — normal drag
+                                _swipeMode = 'drag';
+                                if (onDragStart) onDragStart(_startX, _startY, 0);
+                                if (onDragMove) onDragMove(e.clientX, e.clientY);
+                            }
+                        }
+                    } else if (_swipeMode === 'scroll') {
+                        // Accumulate and fire scroll steps
+                        _swipeAccum += (e.clientY - prev.clientY);
+                        while (_swipeAccum >= _SWIPE_STEP_PX) { if (onScroll) onScroll(1); _swipeAccum -= _SWIPE_STEP_PX; }
+                        while (_swipeAccum <= -_SWIPE_STEP_PX) { if (onScroll) onScroll(-1); _swipeAccum += _SWIPE_STEP_PX; }
+                    } else if (_swipeMode === 'drag') {
+                        if (onDragMove) onDragMove(e.clientX, e.clientY);
+                    }
                 }
                 e.preventDefault();
             }, { passive: false });
@@ -9609,8 +9642,9 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             el.addEventListener('pointerup', (e) => {
                 _ptrs.delete(e.pointerId);
                 if (_ptrs.size === 0) {
-                    if (_dragging && onDragEnd) onDragEnd(e.clientX, e.clientY);
+                    if (_swipeMode === 'drag' && _dragging && onDragEnd) onDragEnd(e.clientX, e.clientY);
                     _dragging  = false;
+                    _swipeMode = null;
                     _pinchDist = null;
                     _pinchCY   = null;
                 } else {
@@ -9621,14 +9655,113 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
 
             el.addEventListener('pointercancel', (e) => {
                 _ptrs.delete(e.pointerId);
-                if (_ptrs.size === 0) { _dragging = false; _pinchDist = null; _pinchCY = null; }
+                if (_ptrs.size === 0) { _dragging = false; _swipeMode = null; _pinchDist = null; _pinchCY = null; }
             });
 
-            // Prevent browser scroll/pan when 2+ fingers are on the canvas
             el.addEventListener('touchmove', (e) => {
                 if (e.touches.length >= 2) e.preventDefault();
             }, { passive: false });
         }
+
+        // ── Right-click context menu ──────────────────────────────────────────
+        let _ctxTargetCanvas = null;
+
+        function _showViewerCtxMenu(e, targetCanvas) {
+            _ctxTargetCanvas = targetCanvas;
+            const menu = document.getElementById('viewerCtxMenu');
+            if (!menu) return;
+            menu.style.display = 'block';
+            const mw = menu.offsetWidth || 200;
+            const mh = menu.offsetHeight || 120;
+            let x = e.clientX, y = e.clientY;
+            if (x + mw > window.innerWidth)  x = window.innerWidth  - mw - 4;
+            if (y + mh > window.innerHeight) y = window.innerHeight - mh - 4;
+            menu.style.left = x + 'px';
+            menu.style.top  = y + 'px';
+        }
+
+        function _hideViewerCtxMenu() {
+            const menu = document.getElementById('viewerCtxMenu');
+            if (menu) menu.style.display = 'none';
+            _ctxTargetCanvas = null;
+        }
+
+        function _getActiveCanvas() {
+            if (_ctxTargetCanvas) return _ctxTargetCanvas;
+            if (viewMode === 'mpr') {
+                const ap = document.querySelector('.mpr-view.is-active canvas');
+                if (ap) return ap;
+            }
+            return canvas;
+        }
+
+        async function _captureCanvasPng() {
+            const c = _getActiveCanvas();
+            if (!c) return null;
+            return c.toDataURL('image/png');
+        }
+
+        document.getElementById('vctxSaveImage')?.addEventListener('click', async () => {
+            _hideViewerCtxMenu();
+            if (!currentSeries && !currentStudy) { showToast('No image loaded', 'warning'); return; }
+            try {
+                const dataUrl = await _captureCanvasPng();
+                if (!dataUrl) { showToast('Could not capture image', 'error'); return; }
+                const studyId = currentStudy?.id || currentSeries?.study_id;
+                if (!studyId) { showToast('No study context', 'warning'); return; }
+                const label = prompt('Label for this image (optional):') ?? '';
+                const resp = await fetch('/dicom-viewer/api/viewer-images/save/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        study_id: studyId,
+                        series_id: currentSeries?.id ?? null,
+                        slice_index: currentImageIndex ?? null,
+                        label: label,
+                        image_data: dataUrl,
+                    }),
+                });
+                if (resp.ok) {
+                    showToast('Image saved to folder', 'success');
+                } else {
+                    showToast('Failed to save image', 'error');
+                }
+            } catch (err) {
+                showToast('Error saving image', 'error');
+            }
+        });
+
+        document.getElementById('vctxDownloadImage')?.addEventListener('click', async () => {
+            _hideViewerCtxMenu();
+            const dataUrl = await _captureCanvasPng();
+            if (!dataUrl) return;
+            const a = document.createElement('a');
+            a.href = dataUrl;
+            a.download = `dicom_${currentSeries?.id || 'image'}_slice${(currentImageIndex || 0) + 1}.png`;
+            a.click();
+        });
+
+        document.getElementById('vctxCopyImage')?.addEventListener('click', async () => {
+            _hideViewerCtxMenu();
+            try {
+                const dataUrl = await _captureCanvasPng();
+                if (!dataUrl) return;
+                const res = await fetch(dataUrl);
+                const blob = await res.blob();
+                await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                showToast('Image copied to clipboard', 'success');
+            } catch (err) {
+                showToast('Clipboard copy failed', 'warning');
+            }
+        });
+
+        // Dismiss menu on any click outside
+        document.addEventListener('click', (e) => {
+            const menu = document.getElementById('viewerCtxMenu');
+            if (menu && !menu.contains(e.target)) _hideViewerCtxMenu();
+        });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _hideViewerCtxMenu(); });
 
         // Auto-save session state periodically
         setInterval(async function () {
@@ -10185,6 +10318,34 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             </div>
         </div>
     </div>
+
+    <!-- ── Canvas right-click context menu ─────────────────────────────── -->
+    <div id="viewerCtxMenu" style="
+        display:none; position:fixed; z-index:9990;
+        background:#1e2530; border:1px solid #3a4556; border-radius:6px;
+        box-shadow:0 4px 16px rgba(0,0,0,0.55); min-width:200px;
+        font-family:inherit; font-size:13px; overflow:hidden;">
+        <div class="vctx-item" id="vctxSaveImage" style="
+            display:flex; align-items:center; gap:10px;
+            padding:10px 16px; color:#e0e8f0; cursor:pointer; user-select:none;">
+            <i class="fas fa-camera" style="width:16px;text-align:center;color:#00c8ff;"></i>
+            Save Image to Folder
+        </div>
+        <div class="vctx-item" id="vctxDownloadImage" style="
+            display:flex; align-items:center; gap:10px;
+            padding:10px 16px; color:#e0e8f0; cursor:pointer; user-select:none;">
+            <i class="fas fa-download" style="width:16px;text-align:center;color:#7ec8a0;"></i>
+            Download Image (PNG)
+        </div>
+        <hr style="margin:4px 0;border-color:#3a4556;">
+        <div class="vctx-item" id="vctxCopyImage" style="
+            display:flex; align-items:center; gap:10px;
+            padding:10px 16px; color:#e0e8f0; cursor:pointer; user-select:none;">
+            <i class="fas fa-copy" style="width:16px;text-align:center;color:#a0b8d0;"></i>
+            Copy to Clipboard
+        </div>
+    </div>
+    <style>.vctx-item:hover { background:rgba(0,200,255,0.1); }</style>
 
     <div id="idleWarning"
         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;align-items:center;justify-content:center;flex-direction:column;color:#fff;font-family:sans-serif;">

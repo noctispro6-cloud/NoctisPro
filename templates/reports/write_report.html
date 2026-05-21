@@ -408,6 +408,31 @@
 </div><!-- .rpt-paper -->
 </div><!-- .rpt-canvas -->
 
+<!-- ── Saved Images Folder ─────────────────────────────────────────────── -->
+<div id="savedImagesPanel" style="
+    max-width:886px; margin:16px auto 0; background:#1a2030; border:1px solid #2e3d54;
+    border-radius:8px; overflow:hidden;">
+  <div style="display:flex;align-items:center;justify-content:space-between;
+      padding:10px 16px; background:#1e2a3c; cursor:pointer;"
+      onclick="toggleSavedImagesPanel()">
+    <span style="color:#7ec8e3;font-weight:600;font-size:13px;">
+      <i class="fas fa-folder-open" style="margin-right:8px;"></i>
+      Saved Images Folder
+      <span id="savedImgCount" style="font-size:11px;color:#99b0c8;margin-left:6px;"></span>
+    </span>
+    <i id="savedImgChevron" class="fas fa-chevron-down" style="color:#7ec8e3;font-size:12px;"></i>
+  </div>
+  <div id="savedImgBody" style="display:none; padding:12px 16px;">
+    <p style="color:#8a9bb0;font-size:12px;margin:0 0 10px;">
+      Images saved from the DICOM viewer. Click <strong style="color:#7ec8e3;">Attach</strong> to include in this report.
+    </p>
+    <div id="savedImgGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;"></div>
+    <p id="savedImgEmpty" style="color:#5a6b7a;font-size:12px;font-style:italic;margin:0;display:none;">
+      No images saved yet. Right-click any image in the DICOM viewer and choose "Save Image to Folder".
+    </p>
+  </div>
+</div>
+
 <!-- Hidden fields -->
 <input type="hidden" name="report_html"      id="reportHtmlField">
 <textarea name="clinical_history" id="hf_clinical_history" style="display:none;"></textarea>
@@ -645,5 +670,106 @@ async function loadTemplate(id){
     window.addEventListener('scroll', sync, { passive: true });
     window.addEventListener('resize', sync);
 })();
+
+// ── Saved Images Folder ───────────────────────────────────────────────────────
+const _STUDY_ID  = {{ study.id }};
+const _REPORT_ID = {% if report %}{{ report.id }}{% else %}null{% endif %};
+
+function toggleSavedImagesPanel() {
+    const body    = document.getElementById('savedImgBody');
+    const chevron = document.getElementById('savedImgChevron');
+    if (!body) return;
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    if (chevron) chevron.className = open ? 'fas fa-chevron-down' : 'fas fa-chevron-up';
+    if (!open) _loadSavedImages();
+}
+
+async function _loadSavedImages() {
+    const grid  = document.getElementById('savedImgGrid');
+    const empty = document.getElementById('savedImgEmpty');
+    const count = document.getElementById('savedImgCount');
+    if (!grid) return;
+    grid.innerHTML = '<span style="color:#7ec8e3;font-size:12px;">Loading…</span>';
+    try {
+        const url = `/reports/api/study/${_STUDY_ID}/viewer-images/${_REPORT_ID ? '?report_id=' + _REPORT_ID : ''}`;
+        const r = await fetch(url, { credentials: 'same-origin' });
+        const data = await r.json();
+        const imgs = data.images || [];
+        if (count) count.textContent = imgs.length ? `(${imgs.length})` : '';
+        grid.innerHTML = '';
+        if (!imgs.length) { if (empty) empty.style.display = 'block'; return; }
+        if (empty) empty.style.display = 'none';
+        imgs.forEach(img => {
+            const card = document.createElement('div');
+            card.id = `simgcard_${img.id}`;
+            card.style.cssText = 'background:#0e1520;border:1px solid #2e3d54;border-radius:6px;overflow:hidden;';
+            const attached = !!img.attached;
+            card.innerHTML = `
+                <img src="${img.url}" alt="" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;cursor:pointer;"
+                     onclick="window.open('${img.url}','_blank')" title="${img.label||''}">
+                <div style="padding:6px 8px;">
+                    <div style="color:#c0ccd8;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:4px;"
+                         title="${img.label||''}">${img.label||'Image #'+img.id}</div>
+                    <div style="display:flex;gap:4px;">
+                        <button onclick="_toggleAttach(${img.id},${img.attachment_id||'null'},this)"
+                            style="flex:1;font-size:10px;padding:3px 0;border-radius:3px;border:none;cursor:pointer;
+                            background:${attached?'#2e5c3a':'#1a3a5c'};color:${attached?'#7aea9a':'#7ec8e3'};">
+                            ${attached?'<i class="fas fa-check"></i> Attached':'<i class="fas fa-paperclip"></i> Attach'}
+                        </button>
+                        <button onclick="_deleteSavedImg(${img.id})"
+                            style="width:26px;font-size:10px;padding:3px 0;border-radius:3px;border:none;cursor:pointer;background:#3a1a1a;color:#e07070;">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>`;
+            grid.appendChild(card);
+        });
+    } catch (e) {
+        grid.innerHTML = '<span style="color:#e07070;font-size:12px;">Failed to load images.</span>';
+    }
+}
+
+async function _toggleAttach(imgId, attachmentId, btn) {
+    if (!_REPORT_ID) { alert('Save the report first before attaching images.'); return; }
+    const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+    try {
+        if (attachmentId) {
+            // Detach
+            const r = await fetch(`/reports/api/study/${_STUDY_ID}/detach-image/${attachmentId}/`,
+                { method: 'POST', headers: { 'X-CSRFToken': csrf }, credentials: 'same-origin' });
+            if (r.ok) {
+                btn.setAttribute('onclick', `_toggleAttach(${imgId},null,this)`);
+                btn.innerHTML = '<i class="fas fa-paperclip"></i> Attach';
+                btn.style.background = '#1a3a5c'; btn.style.color = '#7ec8e3';
+            }
+        } else {
+            // Attach
+            const r = await fetch(`/reports/api/study/${_STUDY_ID}/attach-image/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+                credentials: 'same-origin',
+                body: JSON.stringify({ image_id: imgId, report_id: _REPORT_ID }),
+            });
+            const data = await r.json();
+            if (r.ok) {
+                btn.setAttribute('onclick', `_toggleAttach(${imgId},${data.attachment_id},this)`);
+                btn.innerHTML = '<i class="fas fa-check"></i> Attached';
+                btn.style.background = '#2e5c3a'; btn.style.color = '#7aea9a';
+            }
+        }
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function _deleteSavedImg(imgId) {
+    if (!confirm('Delete this saved image?')) return;
+    const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+    const r = await fetch(`/dicom-viewer/api/viewer-images/${imgId}/delete/`,
+        { method: 'POST', headers: { 'X-CSRFToken': csrf }, credentials: 'same-origin' });
+    if (r.ok) {
+        const card = document.getElementById(`simgcard_${imgId}`);
+        if (card) card.remove();
+    }
+}
 </script>
 {% endblock %}

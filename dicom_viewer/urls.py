@@ -133,4 +133,9 @@ urlpatterns += [
 
     # Photo attachment serving (for XC/clinical-photo studies)
     path('api/attachment/<int:attachment_id>/image/', views.serve_photo_attachment, name='serve_photo_attachment'),
+
+    # Saved viewer image captures (canvas screenshots with measurements)
+    path('api/viewer-images/save/', views.api_save_viewer_image, name='api_save_viewer_image'),
+    path('api/viewer-images/', views.api_list_viewer_images, name='api_list_viewer_images'),
+    path('api/viewer-images/<int:image_id>/delete/', views.api_delete_viewer_image, name='api_delete_viewer_image'),
 ]

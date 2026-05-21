@@ -197,6 +197,23 @@ class HounsfieldCalibration(models.Model):
             self.air_deviation = abs(self.air_hu - (-1000.0))  # Air reference is -1000 HU
 
 
+class SavedViewerImage(models.Model):
+    """Canvas screenshot saved from the DICOM viewer, optionally attached to a report."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='saved_viewer_images')
+    study = models.ForeignKey(Study, on_delete=models.CASCADE, related_name='viewer_images')
+    series = models.ForeignKey(Series, on_delete=models.SET_NULL, null=True, blank=True)
+    slice_index = models.IntegerField(null=True, blank=True)
+    image_file = models.ImageField(upload_to='viewer_captures/%Y/%m/')
+    label = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Capture by {self.user_id} — study {self.study_id} ({self.created_at:%Y-%m-%d})"
+
+
 class HounsfieldQAPhantom(models.Model):
     """Define QA phantoms for Hounsfield unit calibration"""
     name = models.CharField(max_length=100)

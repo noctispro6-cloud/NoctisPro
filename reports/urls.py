@@ -13,6 +13,9 @@ urlpatterns = [
     path('action/<int:report_id>/amend/',  views.report_amend,  name='report_amend'),
     path('action/<int:report_id>/cancel/', views.report_cancel, name='report_cancel'),
     path('action/<int:report_id>/delete/', views.report_delete, name='report_delete'),
+    path('api/study/<int:study_id>/viewer-images/', views.api_report_viewer_images, name='api_report_viewer_images'),
+    path('api/study/<int:study_id>/attach-image/', views.api_attach_viewer_image, name='api_attach_viewer_image'),
+    path('api/study/<int:study_id>/detach-image/<int:attachment_id>/', views.api_detach_viewer_image, name='api_detach_viewer_image'),
     # Public QR-code access (no login required)
     path('public/viewer/<str:token>/', views.public_viewer_redirect, name='public_viewer'),
     path('public/report/<str:token>/', views.public_report, name='public_report'),

@@ -809,3 +809,96 @@ def report_delete(request, report_id):
     study_id = report.study_id
     report.delete()
     return JsonResponse({'success': True, 'deleted': True, 'study_id': study_id})
+
+
+@login_required
+def api_attach_viewer_image(request, study_id):
+    """Attach a SavedViewerImage to the report for this study (creates ReportAttachment)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    import json as _json
+    from django.core.files.base import ContentFile
+    from .models import ReportAttachment
+    from dicom_viewer.models import SavedViewerImage
+    try:
+        data = _json.loads(request.body)
+        image_id = data.get('image_id')
+        report_id = data.get('report_id')
+    except Exception:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    img = get_object_or_404(SavedViewerImage, id=image_id)
+    report = get_object_or_404(Report, id=report_id, study_id=study_id)
+
+    if not _can_manage_report(request.user, report):
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+
+    # Avoid duplicate attachments for the same captured image
+    existing = ReportAttachment.objects.filter(
+        report=report, name=f'capture_{img.id}'
+    ).first()
+    if existing:
+        return JsonResponse({'attachment_id': existing.id, 'already_attached': True})
+
+    with img.image_file.open('rb') as fh:
+        content = fh.read()
+    label = img.label or f'Image #{img.id}'
+    att = ReportAttachment(
+        report=report,
+        attachment_type='image',
+        name=f'capture_{img.id}',
+        description=label,
+    )
+    att.file.save(f'capture_{img.id}.png', ContentFile(content), save=True)
+    return JsonResponse({'attachment_id': att.id, 'attached': True})
+
+
+@login_required
+def api_detach_viewer_image(request, study_id, attachment_id):
+    """Remove a ReportAttachment image."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    from .models import ReportAttachment
+    att = get_object_or_404(ReportAttachment, id=attachment_id, report__study_id=study_id)
+    if not _can_manage_report(request.user, att.report):
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+    try:
+        att.file.delete(save=False)
+    except Exception:
+        pass
+    att.delete()
+    return JsonResponse({'detached': True})
+
+
+@login_required
+def api_report_viewer_images(request, study_id):
+    """List saved viewer images for a study and which ones are attached to a given report."""
+    from dicom_viewer.models import SavedViewerImage
+    from .models import ReportAttachment
+    report_id = request.GET.get('report_id')
+    images = SavedViewerImage.objects.filter(study_id=study_id).order_by('-created_at')
+
+    attached_names = set()
+    attachment_map = {}
+    if report_id:
+        atts = ReportAttachment.objects.filter(report_id=report_id, attachment_type='image')
+        for a in atts:
+            attached_names.add(a.name)
+            # name is 'capture_<img_id>'
+            try:
+                img_id = int(a.name.replace('capture_', ''))
+                attachment_map[img_id] = a.id
+            except Exception:
+                pass
+
+    result = []
+    for img in images:
+        result.append({
+            'id': img.id,
+            'label': img.label or f'Image #{img.id}',
+            'url': request.build_absolute_uri(img.image_file.url),
+            'created_at': img.created_at.isoformat(),
+            'attached': img.id in attachment_map,
+            'attachment_id': attachment_map.get(img.id),
+        })
+    return JsonResponse({'images': result})

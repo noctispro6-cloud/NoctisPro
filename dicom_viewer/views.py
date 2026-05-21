@@ -4898,6 +4898,91 @@ def web_dicom_image(request, image_id):
 
 @login_required
 @require_http_methods(["POST"])
+@csrf_exempt
+def api_save_viewer_image(request):
+    """Save a canvas PNG capture (with measurements overlaid) to SavedViewerImage."""
+    import base64, uuid
+    from django.core.files.base import ContentFile
+    from .models import SavedViewerImage
+    try:
+        data = json.loads(request.body)
+        study_id = data.get('study_id')
+        series_id = data.get('series_id')
+        slice_index = data.get('slice_index')
+        label = (data.get('label') or '').strip()[:200]
+        image_b64 = data.get('image_data', '')  # data:image/png;base64,....
+        if not study_id or not image_b64:
+            return JsonResponse({'error': 'study_id and image_data are required'}, status=400)
+        # Strip data-url prefix if present
+        if ',' in image_b64:
+            image_b64 = image_b64.split(',', 1)[1]
+        raw = base64.b64decode(image_b64)
+        study = get_object_or_404(Study, id=int(study_id))
+        series = None
+        if series_id:
+            try:
+                series = Series.objects.get(id=int(series_id))
+            except Series.DoesNotExist:
+                pass
+        obj = SavedViewerImage(
+            user=request.user,
+            study=study,
+            series=series,
+            slice_index=int(slice_index) if slice_index is not None else None,
+            label=label,
+        )
+        fname = f"capture_{uuid.uuid4().hex[:12]}.png"
+        obj.image_file.save(fname, ContentFile(raw), save=True)
+        return JsonResponse({
+            'id': obj.id,
+            'label': obj.label,
+            'url': request.build_absolute_uri(obj.image_file.url),
+            'created_at': obj.created_at.isoformat(),
+        })
+    except Exception as e:
+        logger.exception('api_save_viewer_image error')
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+def api_list_viewer_images(request):
+    """Return saved viewer images for a study."""
+    from .models import SavedViewerImage
+    study_id = request.GET.get('study_id')
+    if not study_id:
+        return JsonResponse({'error': 'study_id required'}, status=400)
+    study = get_object_or_404(Study, id=int(study_id))
+    qs = SavedViewerImage.objects.filter(study=study).order_by('-created_at')
+    items = []
+    for img in qs:
+        items.append({
+            'id': img.id,
+            'label': img.label,
+            'url': request.build_absolute_uri(img.image_file.url),
+            'series_id': img.series_id,
+            'slice_index': img.slice_index,
+            'created_at': img.created_at.isoformat(),
+        })
+    return JsonResponse({'images': items})
+
+
+@login_required
+@require_http_methods(["DELETE", "POST"])
+def api_delete_viewer_image(request, image_id):
+    """Delete a saved viewer image."""
+    from .models import SavedViewerImage
+    img = get_object_or_404(SavedViewerImage, id=image_id, user=request.user)
+    try:
+        img.image_file.delete(save=False)
+    except Exception:
+        pass
+    img.delete()
+    return JsonResponse({'deleted': True})
+
+
+@login_required
+@require_http_methods(["POST"])
 def web_save_measurement(request):
     try:
         data = json.loads(request.body)

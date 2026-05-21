@@ -160,6 +160,91 @@ def _bce_dice_loss(pred, target, eps=1e-6):
 
 
 # ---------------------------------------------------------------------------
+# Internet dataset downloader for bone CT volumes
+# ---------------------------------------------------------------------------
+
+def _download_bone_volumes(tmpdir: str):
+    """
+    Download publicly available CT volumes with bone content from HuggingFace Hub
+    to supplement locally uploaded PACS data.
+
+    Current sources:
+      - TOTALSEGMENTATOR_DATASET (sampled subset via HF datasets)
+        provides abdomen/thorax CT scans from which bone masks are derived
+        using the classical HU pipeline (same pseudo-label strategy).
+      - Falls back to synthetic random bone phantoms when no network access.
+
+    Returns list of float32 ndarrays (Z, H, W) representing HU volumes.
+    """
+    import os
+    import tempfile
+    import numpy as np
+
+    downloaded = []
+
+    # Try TotalSegmentator subset on HuggingFace (no auth required)
+    try:
+        from datasets import load_dataset
+        print("  Downloading CT bone volumes from HuggingFace (streaming) …")
+        ds = load_dataset(
+            "drguilhermedossantos/BodyCT-segmentation",
+            split="train",
+            streaming=True,
+            trust_remote_code=True,
+        )
+        added = 0
+        for row in ds:
+            if added >= 5:   # limit to 5 volumes per download run
+                break
+            try:
+                import SimpleITK as sitk
+                from io import BytesIO
+                # Dataset may provide image bytes or PIL images
+                img_bytes = row.get("image") or row.get("ct") or row.get("nifti")
+                if img_bytes is None:
+                    continue
+                if hasattr(img_bytes, "tobytes"):
+                    raw = img_bytes.tobytes()
+                elif isinstance(img_bytes, (bytes, bytearray)):
+                    raw = bytes(img_bytes)
+                else:
+                    continue
+                tmp_path = os.path.join(tmpdir, f"dl_{added}.nii.gz")
+                with open(tmp_path, "wb") as f:
+                    f.write(raw)
+                sitk_img = sitk.ReadImage(tmp_path)
+                vol = sitk.GetArrayFromImage(sitk_img).astype(np.float32)
+                if vol.ndim == 3 and vol.shape[0] >= 16:
+                    downloaded.append(vol)
+                    added += 1
+            except Exception as inner:
+                logger.debug("HF row error: %s", inner)
+        print(f"  Downloaded {len(downloaded)} CT volume(s) from HuggingFace.")
+    except Exception as exc:
+        logger.warning("HuggingFace bone download failed (%s); using synthetic phantoms.", exc)
+
+    # Synthetic fallback: build simple bone phantom for minimal testing
+    if not downloaded:
+        print("  Generating synthetic bone phantoms (fallback) …")
+        for _ in range(3):
+            vol = np.random.uniform(-500, 200, (32, 256, 256)).astype(np.float32)
+            # Insert synthetic cortical bone cylinder
+            cy, cx = 128, 128
+            r = 40
+            for z in range(32):
+                for y in range(256):
+                    for x in range(256):
+                        d = np.sqrt((y - cy) ** 2 + (x - cx) ** 2)
+                        if r - 4 < d < r:
+                            vol[z, y, x] = 700.0   # cortical bone HU
+                        elif d < r - 4:
+                            vol[z, y, x] = 100.0   # marrow
+        downloaded.append(vol)
+
+    return downloaded
+
+
+# ---------------------------------------------------------------------------
 # Management command
 # ---------------------------------------------------------------------------
 
@@ -199,6 +284,14 @@ class Command(BaseCommand):
             '--val-split', type=float, default=0.15,
             help='Fraction of slices held out for validation.  Default: 0.15.'
         )
+        parser.add_argument(
+            '--download', action='store_true',
+            help='Download public CT bone datasets from HuggingFace/web to supplement PACS data.'
+        )
+        parser.add_argument(
+            '--resume', default=None,
+            help='Path to an existing .pth checkpoint to resume/fine-tune from (continuous learning).'
+        )
 
     def handle(self, *args, **options):
         try:
@@ -215,6 +308,20 @@ class Command(BaseCommand):
 
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.stdout.write(f'Device: {device}')
+
+        # ── 0. Resume / continuous-learning checkpoint ────────────────────
+        resume_path = options.get('resume')
+        if resume_path and os.path.exists(resume_path):
+            self.stdout.write(f'Resuming from checkpoint: {resume_path}')
+        elif resume_path:
+            self.stderr.write(f'Warning: resume path not found ({resume_path}); starting fresh.')
+            resume_path = None
+        else:
+            # Auto-detect latest checkpoint for continuous learning
+            auto_ckpt = output_path
+            if os.path.exists(auto_ckpt):
+                resume_path = auto_ckpt
+                self.stdout.write(f'Continuous learning: resuming from existing {auto_ckpt}')
 
         # ── 1. Gather series ──────────────────────────────────────────────
         from worklist.models import Series, DicomImage
@@ -262,6 +369,30 @@ class Command(BaseCommand):
             )
             volumes_masks.append((vol, mask_bin))
 
+        # ── 2b. Download public bone CT data from internet ────────────────
+        if options.get('download'):
+            import tempfile
+            self.stdout.write('\nDownloading public CT bone volumes from internet …')
+            tmpdir = tempfile.mkdtemp(prefix='bone_dl_')
+            try:
+                dl_vols = _download_bone_volumes(tmpdir)
+                self.stdout.write(f'  Received {len(dl_vols)} extra volume(s); pseudo-labelling …')
+                for vol in dl_vols:
+                    try:
+                        if vol is None or vol.ndim != 3 or vol.shape[0] < options['min_slices']:
+                            continue
+                        mask_prob = BoneMLEngine._segment_classical(vol, spacing=None)
+                        mask_bin  = (mask_prob >= 0.5).astype(np.float32)
+                        volumes_masks.append((vol, mask_bin))
+                        self.stdout.write(
+                            f'    Added downloaded volume shape={vol.shape}  '
+                            f'bone={mask_bin.mean():.1%}'
+                        )
+                    except Exception as exc:
+                        self.stdout.write(f'    Skip: {exc}')
+            except Exception as exc:
+                self.stdout.write(self.style.WARNING(f'  Download step failed: {exc}'))
+
         if not volumes_masks:
             raise CommandError('All series failed to load.  Check MEDIA_ROOT and file paths.')
 
@@ -296,10 +427,23 @@ class Command(BaseCommand):
             f'Batch: {options["batch"]}'
         )
 
-        # ── 4. Build model ────────────────────────────────────────────────
+        # ── 4. Build model (with optional resume for continuous learning) ─
         from dicom_viewer.bone_ml import build_for_training
         self.stdout.write('\nBuilding BoneSegNet (ConvNeXt-Small + UNet decoder)...')
-        model = build_for_training(pretrained=True).to(device)
+        model = build_for_training(pretrained=(resume_path is None)).to(device)
+        if resume_path and os.path.exists(resume_path):
+            try:
+                ckpt = torch.load(resume_path, map_location=device)
+                if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
+                    ckpt = ckpt['model_state_dict']
+                model.load_state_dict(ckpt, strict=False)
+                self.stdout.write(
+                    self.style.SUCCESS(f'  Weights loaded from {resume_path} (continuous learning)')
+                )
+            except Exception as exc:
+                self.stdout.write(
+                    self.style.WARNING(f'  Could not load checkpoint ({exc}); training from scratch.')
+                )
 
         # Freeze encoder for first N epochs (warm-up decoder)
         freeze_epochs = min(options['freeze_epochs'], options['epochs'])

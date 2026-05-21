@@ -2374,12 +2374,20 @@ def delete_attachment(request, attachment_id):
     attachment = get_object_or_404(StudyAttachment, id=attachment_id)
     user = request.user
     
-    # Check permissions - only admin/radiologist or facility users from same facility can delete attachments
-    if user.is_facility_user() and getattr(user, 'facility', None):
+    # Only admins or users with can_delete_studies may delete attachments
+    is_admin = (hasattr(user, 'is_admin') and user.is_admin()) or getattr(user, 'is_superuser', False)
+    if not is_admin:
+        try:
+            from admin_panel.utils import get_user_caps
+            has_perm = get_user_caps(user.username).get('can_delete_studies', False)
+        except Exception:
+            has_perm = False
+        if not has_perm:
+            return JsonResponse({'error': 'Permission denied. Only administrators can delete attachments.'}, status=403)
+    # Facility-scoped users may only delete within their facility
+    if not is_admin and user.is_facility_user() and getattr(user, 'facility', None):
         if attachment.study.facility != user.facility:
             return JsonResponse({'error': 'Permission denied. You can only delete attachments from your facility.'}, status=403)
-    elif not (user.is_admin() or user.is_radiologist()):
-        return JsonResponse({'error': 'Permission denied. Only administrators, radiologists, or facility users can delete attachments.'}, status=403)
     
     if request.method == 'POST':
         wants_json = 'application/json' in (request.headers.get('Accept') or '') or (request.headers.get('X-Requested-With') == 'XMLHttpRequest')
@@ -2603,13 +2611,16 @@ def api_delete_study(request, study_id):
     if request.method not in ['DELETE', 'POST']:
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     
-    # Check if user is admin, radiologist, or superuser
+    # Only admins, superusers, or users with can_delete_studies capability may delete
     try:
-        is_admin = hasattr(request.user, 'is_admin') and request.user.is_admin()
-        is_radiologist = hasattr(request.user, 'is_radiologist') and request.user.is_radiologist()
-        is_superuser = getattr(request.user, 'is_superuser', False)
-        if not (is_admin or is_radiologist or is_superuser):
-            return JsonResponse({'error': 'Permission denied. Only administrators or radiologists can delete studies.'}, status=403)
+        is_admin = (hasattr(request.user, 'is_admin') and request.user.is_admin()) or getattr(request.user, 'is_superuser', False)
+        if not is_admin:
+            try:
+                from admin_panel.utils import get_user_caps
+                if not get_user_caps(request.user.username).get('can_delete_studies', False):
+                    return JsonResponse({'error': 'Permission denied. Only administrators can delete studies.'}, status=403)
+            except Exception:
+                return JsonResponse({'error': 'Permission denied.'}, status=403)
     except Exception as e:
         try:
             logger.error(f"Error checking user permissions: {str(e)}")

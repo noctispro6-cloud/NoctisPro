@@ -12,6 +12,7 @@ DEFAULT_CAPS = {
     'ai_visible': True,
     'manage_ai': False,
     'can_amend_reports': True,
+    'can_delete_studies': False,
 }
 
 _DEFAULT_ROLE_TOGGLES = {

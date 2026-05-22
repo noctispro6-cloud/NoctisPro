@@ -2685,6 +2685,14 @@
                 c.addEventListener('click', (e) => handleMPRClick(e, plane));
                 c.addEventListener('dblclick', (e) => handleMPRDoubleClick(e, plane));
                 _attachCanvasTouch(c, {
+                    onPointerDown: (cx, cy) => {
+                        // If the touch lands on the crosshair rotate handle, bypass swipe direction detection
+                        // so that a circular drag immediately starts instead of being classified as scroll.
+                        if (!crosshair) return false;
+                        const pxy = _canvasClientToCanvasPx(c, cx, cy);
+                        setActiveMPRPlane(plane);
+                        return _hitTestMPRCrosshairRotateHandle(plane, pxy.x, pxy.y);
+                    },
                     onDragStart: (x, y) => handleMPRMouseDown({ clientX: x, clientY: y, button: 0, preventDefault: () => {} }, plane),
                     onDragMove:  (x, y) => handleMPRMouseMove({ clientX: x, clientY: y, buttons: 1, preventDefault: () => {} }, plane),
                     onDragEnd:   (x, y) => handleMPRMouseUp({ clientX: x, clientY: y, button: 0, preventDefault: () => {} }, plane),
@@ -6492,7 +6500,7 @@
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     ctx.imageSmoothingEnabled = true;
                     try { ctx.imageSmoothingQuality = 'high'; } catch (err) { }
-                    ctx.drawImage(img, dx, dy, dw, dh);
+                    ctx.drawImage(drawable, dx, dy, dw, dh);
                 } catch (e2) {
                     throw e; // surface the original error
                 }
@@ -7871,26 +7879,33 @@
                 redrawMPRPlane(plane);
             }
 
+            // Crosshair rotation drag: continues on ANY canvas, not just the originating one.
+            // This prevents the drag from freezing when the cursor moves into an adjacent MPR pane.
+            if (_mprCrosshairRotateDrag && _mprCrosshairRotateDrag.active && _mprDragState.tool === 'crosshair-rotate') {
+                const rotatePlane = _mprCrosshairRotateDrag.plane || _mprDragState.plane;
+                const rotCanvas = mprCanvases[rotatePlane];
+                const center = rotCanvas ? _mprCrosshairCenterCanvasPoint(rotatePlane) : null;
+                if (center) {
+                    // Convert this event's client coords to the originating plane's canvas coords
+                    const rxy = rotCanvas ? _canvasClientToCanvasPx(rotCanvas, event.clientX, event.clientY) : { x, y };
+                    const a = Math.atan2(rxy.y - center.cy, rxy.x - center.cx);
+                    let delta = a - (_mprCrosshairRotateDrag.lastAngle || 0);
+                    if (delta > Math.PI) delta -= 2 * Math.PI;
+                    if (delta < -Math.PI) delta += 2 * Math.PI;
+                    _mprCrosshairRotateDrag.accumDeg = Number(_mprCrosshairRotateDrag.accumDeg || 0) + (delta * (180 / Math.PI));
+                    _mprCrosshairRotateDrag.lastAngle = a;
+                    crosshairRotation = _normalizeDeg((Number(_mprCrosshairRotateDrag.baseDeg) || 0) + Number(_mprCrosshairRotateDrag.accumDeg || 0));
+                    redrawAllMPRPlanes();
+                }
+                return;
+            }
+
             if (!_mprDragState.down || _mprDragState.plane !== plane) return;
             const dx = x - _mprDragState.lastX;
             const dy = y - _mprDragState.lastY;
             _mprDragState.lastX = x;
             _mprDragState.lastY = y;
             if (Math.abs(dx) + Math.abs(dy) > 1.5) _mprDragState.wasDragged = true;
-
-            if (_mprDragState.tool === 'crosshair-rotate' && _mprCrosshairRotateDrag && _mprCrosshairRotateDrag.active) {
-                const center = _mprCrosshairCenterCanvasPoint(plane);
-                if (!center) return;
-                const a = Math.atan2(y - center.cy, x - center.cx);
-                let delta = a - (_mprCrosshairRotateDrag.lastAngle || 0);
-                if (delta > Math.PI) delta -= 2 * Math.PI;
-                if (delta < -Math.PI) delta += 2 * Math.PI;
-                _mprCrosshairRotateDrag.accumDeg = Number(_mprCrosshairRotateDrag.accumDeg || 0) + (delta * (180 / Math.PI));
-                _mprCrosshairRotateDrag.lastAngle = a;
-                crosshairRotation = _normalizeDeg((Number(_mprCrosshairRotateDrag.baseDeg) || 0) + Number(_mprCrosshairRotateDrag.accumDeg || 0));
-                redrawAllMPRPlanes();
-                return;
-            }
 
             if (_mprDragState.tool === 'crosshair') {
                 _scheduleMPRCrosshairDragUpdate(plane, x, y);
@@ -7942,8 +7957,9 @@
 
         async function handleMPRMouseUp(event, plane) {
             if (viewMode !== 'mpr') return;
-            // End crosshair rotation drag (MPR) — refetch all planes with new oblique angle
-            if (_mprDragState.down && _mprDragState.plane === plane && _mprDragState.tool === 'crosshair-rotate') {
+            // End crosshair rotation drag — finalize even if mouseup fires on a different canvas
+            // (user may have dragged past the pane boundary before releasing)
+            if (_mprCrosshairRotateDrag && _mprCrosshairRotateDrag.active && _mprDragState.tool === 'crosshair-rotate') {
                 _mprCrosshairRotateDrag.active = false;
                 _mprCrosshairRotateDrag.plane = null;
                 _mprDragState.down = false;
@@ -9789,7 +9805,7 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
          * Supports: 1-finger drag, 2-finger pinch-zoom, 2-finger vertical-swipe for slice scroll.
          * Callbacks mirror mouse event handlers so the caller doesn't need to branch on device.
          */
-        function _attachCanvasTouch(el, { onDragStart, onDragMove, onDragEnd, onPinchZoom, onScroll }) {
+        function _attachCanvasTouch(el, { onDragStart, onDragMove, onDragEnd, onPinchZoom, onScroll, onPointerDown }) {
             let _ptrs = new Map();
             let _pinchDist  = null;
             let _pinchCY    = null;
@@ -9812,13 +9828,21 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
 
                 if (_ptrs.size === 1) {
                     _dragging   = true;
-                    _swipeMode  = null;
                     _swipeAccum = 0;
                     _startX = e.clientX;
                     _startY = e.clientY;
                     _pinchDist  = null;
                     _pinchCY    = null;
-                    // Defer onDragStart until we know the gesture direction
+                    // If the caller identifies this as a definite drag (e.g., hit test on a drag handle),
+                    // bypass direction detection and fire onDragStart immediately.
+                    const forceDrag = onPointerDown ? onPointerDown(e.clientX, e.clientY) : false;
+                    if (forceDrag) {
+                        _swipeMode = 'drag';
+                        if (onDragStart) onDragStart(e.clientX, e.clientY);
+                    } else {
+                        _swipeMode = null;
+                        // Defer onDragStart until we know the gesture direction
+                    }
                 } else if (_ptrs.size === 2) {
                     // Second finger — switch to 2-finger mode; cancel active drag/swipe.
                     if (_swipeMode === 'drag' && onDragEnd) onDragEnd(e.clientX, e.clientY);

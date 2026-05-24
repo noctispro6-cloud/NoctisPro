@@ -372,7 +372,8 @@ def _build_model(device):
 # ---------------------------------------------------------------------------
 
 def _train(model, train_ds, val_ds, epochs: int, lr: float, batch: int,
-           device, output_path: str, freeze_epochs: int = 5):
+           device, output_path: str, freeze_epochs: int = 5,
+           early_stop_patience: int = 7):
     import torch
     import torch.nn as nn
 
@@ -397,6 +398,17 @@ def _train(model, train_ds, val_ds, epochs: int, lr: float, batch: int,
 
     best_val_loss = float('inf')
     best_state = None
+    no_improve = 0  # epochs since last val_loss improvement (early stopping)
+
+    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+
+    def _save_checkpoint(state):
+        torch.save({
+            'model_state_dict': state,
+            'labels': CXR_LABELS,
+            'num_classes': NUM_CLASSES,
+            'input_size': TARGET_SIZE,
+        }, output_path)
 
     for epoch in range(1, epochs + 1):
         # Freeze encoder for first `freeze_epochs`
@@ -418,6 +430,7 @@ def _train(model, train_ds, val_ds, epochs: int, lr: float, batch: int,
         avg_train = total_loss / max(len(train_ds), 1)
 
         val_str = ""
+        improved = False
         if val_loader is not None:
             model.eval()
             vl = 0.0
@@ -430,20 +443,24 @@ def _train(model, train_ds, val_ds, epochs: int, lr: float, batch: int,
             if avg_val < best_val_loss:
                 best_val_loss = avg_val
                 best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                _save_checkpoint(best_state)  # save immediately — safe against Ctrl+C
+                val_str += "  ✓ saved"
+                no_improve = 0
+                improved = True
+            else:
+                no_improve += 1
         else:
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            _save_checkpoint(best_state)
 
         print(f"Epoch {epoch:3d}/{epochs}  train_loss={avg_train:.4f}{val_str}")
 
-    # Save checkpoint
-    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
-    torch.save({
-        'model_state_dict': best_state,
-        'labels': CXR_LABELS,
-        'num_classes': NUM_CLASSES,
-        'input_size': TARGET_SIZE,
-    }, output_path)
-    print(f"Checkpoint saved → {output_path}")
+        # Early stopping: halt if val_loss hasn't improved for patience epochs
+        if val_loader is not None and no_improve >= early_stop_patience:
+            print(f"Early stopping: val_loss flat for {no_improve} epochs.")
+            break
+
+    print(f"Best val_loss: {best_val_loss:.4f}  →  {output_path}")
 
     # TorchScript export
     ts_path = output_path.replace('.pth', '_scripted.pt')

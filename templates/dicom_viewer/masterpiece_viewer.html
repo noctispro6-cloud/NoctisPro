@@ -1835,7 +1835,7 @@
                             </div>
                             <div style="padding:4px 14px 10px;">
                                 <label style="font-size:10px;color:var(--text-muted);">Zoom</label>
-                                <input type="range" id="zoomSlider2" min="0.1" max="10" step="0.1" value="1"
+                                <input type="range" id="zoomSlider2" min="10" max="1000" step="5" value="100"
                                     oninput="updateZoom(this.value)" style="width:100%;margin-top:3px;">
                             </div>
                         </div>
@@ -3015,6 +3015,9 @@
             cineInterval = setInterval(() => {
                 currentImageIndex = (currentImageIndex + 1) % imageData.length;
                 document.getElementById('sliceSlider').value = currentImageIndex;
+                const ss2 = document.getElementById('sliceSlider2');
+                if (ss2) ss2.value = currentImageIndex;
+                if (typeof window._updateSliceScrollbar === 'function') window._updateSliceScrollbar();
                 updateSlice(currentImageIndex);
             }, intervalMs);
         }
@@ -5206,6 +5209,8 @@
         function updateZoomSlider() {
             const zoomPercent = Math.round(zoom * 100);
             document.getElementById('zoomSlider').value = zoomPercent;
+            const zs2 = document.getElementById('zoomSlider2');
+            if (zs2) zs2.value = zoomPercent;
             document.getElementById('zoomValue').textContent = zoomPercent + '%';
             document.getElementById('zoomLevel').textContent = zoomPercent + '%';
         }
@@ -6762,6 +6767,22 @@
             if (crosshair && mprCrosshairVoxel) {
                 drawMPRCrosshair(plane, ctx);
             }
+
+            // Slice position indicator (bottom-right corner of each MPR pane)
+            try {
+                const idx   = mprState.index[plane] || 0;
+                const total = mprState.counts[plane] || 0;
+                if (total > 1) {
+                    const label = `${idx + 1} / ${total}`;
+                    ctx.save();
+                    ctx.font = '11px Consolas, Menlo, monospace';
+                    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+                    ctx.textAlign = 'right';
+                    ctx.textBaseline = 'bottom';
+                    ctx.fillText(label, c.width - 8, c.height - 8);
+                    ctx.restore();
+                }
+            } catch (e) {}
         }
 
         function _mprSlicePxToCanvasPoint(plane, px, py) {
@@ -10891,6 +10912,9 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             if (sliceSlider)  { sliceSlider.min = '0'; sliceSlider.max = String(payloads.length - 1); sliceSlider.value = '0'; sliceSlider.disabled = payloads.length <= 1; }
             if (totalSlices)  totalSlices.textContent  = String(payloads.length);
             if (currentSlice) currentSlice.textContent = '1';
+            var sliceSlider2 = document.getElementById('sliceSlider2');
+            if (sliceSlider2) { sliceSlider2.min = '0'; sliceSlider2.max = String(payloads.length - 1); sliceSlider2.value = '0'; sliceSlider2.disabled = payloads.length <= 1; }
+            if (typeof window._updateSliceScrollbar === 'function') window._updateSliceScrollbar();
 
             try { _resetServerRendered(); } catch (e) {}
             var welcome = document.getElementById('welcomeScreen');

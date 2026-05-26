@@ -10404,6 +10404,19 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             th.style.top = Math.round(ratio * (trackH - thumbH)) + 'px';
         }
 
+        function _cmpApplyDraw(drawable, cv, ctx) {
+            const dw = drawable.width || drawable.naturalWidth || 512;
+            const dh = drawable.height || drawable.naturalHeight || 512;
+            cv.width  = cv.offsetWidth  || 512;
+            cv.height = cv.offsetHeight || 512;
+            ctx.clearRect(0, 0, cv.width, cv.height);
+            const baseScale = Math.min(cv.width / dw, cv.height / dh);
+            const scale = baseScale * _cmpZoom;
+            const dx = (cv.width  - dw * scale) / 2 + _cmpPanX;
+            const dy = (cv.height - dh * scale) / 2 + _cmpPanY;
+            ctx.drawImage(drawable, dx, dy, dw * scale, dh * scale);
+        }
+
         function _cmpRenderSlice(idx) {
             if (!_cmpImageData.length) return;
             idx = Math.max(0, Math.min(_cmpImageData.length - 1, idx));
@@ -10433,21 +10446,16 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             if (bl) bl.textContent = 'WW ' + ww + '  WL ' + wl;
             const src = `/dicom-viewer/api/image/${encodeURIComponent(entry.id)}/render.png?window_width=${ww}&window_level=${wl}&inverted=${inv}`;
             const ctx2 = cmpCanvas.getContext('2d');
-            const _cmpSeqId = entry.id + '|' + idx;
+            const _cmpSeqId = entry.id + '|' + idx + '|' + ww + '|' + wl;
             _cmpRenderSlice._seq = _cmpSeqId;
 
             function _draw(drawable) {
                 if (_cmpRenderSlice._seq !== _cmpSeqId) return; // stale
-                const dw = drawable.width || drawable.naturalWidth || 512;
-                const dh = drawable.height || drawable.naturalHeight || 512;
-                cmpCanvas.width  = cmpCanvas.offsetWidth  || 512;
-                cmpCanvas.height = cmpCanvas.offsetHeight || 512;
-                ctx2.clearRect(0, 0, cmpCanvas.width, cmpCanvas.height);
-                const scale = Math.min(cmpCanvas.width / dw, cmpCanvas.height / dh);
-                const dx = (cmpCanvas.width  - dw * scale) / 2;
-                const dy = (cmpCanvas.height - dh * scale) / 2;
-                ctx2.drawImage(drawable, dx, dy, dw * scale, dh * scale);
-                if (drawable.close) drawable.close();
+                if (_cmpLastBitmap && _cmpLastBitmap !== drawable && typeof _cmpLastBitmap.close === 'function') {
+                    _cmpLastBitmap.close();
+                }
+                _cmpLastBitmap = drawable;
+                _cmpApplyDraw(drawable, cmpCanvas, ctx2);
             }
 
             if (typeof createImageBitmap !== 'undefined') {
@@ -10467,8 +10475,18 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             }
         }
 
+        function _cmpRedraw() {
+            if (!_cmpLastBitmap) return;
+            const cv = document.getElementById('compareCanvas');
+            if (!cv) return;
+            _cmpApplyDraw(_cmpLastBitmap, cv, cv.getContext('2d'));
+        }
+
         // Per-compare-series WW/WL (auto-detected from series metadata, not locked to main viewer)
         let _cmpWW = null, _cmpWL = null;
+        // Compare pane independent zoom / pan / cached bitmap
+        let _cmpZoom = 1, _cmpPanX = 0, _cmpPanY = 0;
+        let _cmpLastBitmap = null; // cached drawable for instant pan/zoom redraws
 
         // Compare scrollbar drag state (shared, not re-created on each load)
         let _cmpSbDrag = false;
@@ -10505,15 +10523,85 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                     if (th) th.classList.remove('dragging');
                 }
             });
-            // Wheel on compare pane (once)
+            // Wheel on compare pane: Ctrl+scroll → zoom, plain scroll → slice
             const cp = document.getElementById('comparePane');
             if (cp) {
                 cp.addEventListener('wheel', function (e) {
                     e.preventDefault();
                     if (!_cmpActive || !_cmpImageData.length) return;
-                    const step = e.deltaY > 0 ? 1 : -1;
-                    _cmpRenderSlice(_cmpIndex + step);
+                    if (e.ctrlKey) {
+                        const factor = e.deltaY > 0 ? 0.9 : 1.1;
+                        _cmpZoom = Math.max(0.1, Math.min(10.0, _cmpZoom * factor));
+                        _cmpRedraw();
+                    } else {
+                        const step = e.deltaY > 0 ? 1 : -1;
+                        _cmpRenderSlice(_cmpIndex + step);
+                    }
                 }, { passive: false });
+            }
+
+            // Compare canvas mouse: left-drag → pan, right-drag → windowing
+            const cmpCv = document.getElementById('compareCanvas');
+            if (cmpCv) {
+                let _cmpDrag = null; // { mode, startX, startY, startPanX, startPanY, startWW, startWL }
+                let _cmpWinDebounce = null;
+
+                cmpCv.addEventListener('mousedown', function (e) {
+                    if (!_cmpActive || !_cmpImageData.length) return;
+                    e.preventDefault();
+                    if (e.button === 0) {
+                        _cmpDrag = { mode: 'pan', startX: e.clientX, startY: e.clientY,
+                                     startPanX: _cmpPanX, startPanY: _cmpPanY };
+                        cmpCv.style.cursor = 'grabbing';
+                    } else if (e.button === 2) {
+                        _cmpDrag = { mode: 'window', startX: e.clientX, startY: e.clientY,
+                                     startWW: _cmpWW || windowWidth || 400,
+                                     startWL: _cmpWL || windowLevel || 40 };
+                        cmpCv.style.cursor = 'ew-resize';
+                    }
+                });
+
+                cmpCv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+                document.addEventListener('mousemove', function (e) {
+                    if (!_cmpDrag) return;
+                    const dx = e.clientX - _cmpDrag.startX;
+                    const dy = e.clientY - _cmpDrag.startY;
+                    if (_cmpDrag.mode === 'pan') {
+                        _cmpPanX = _cmpDrag.startPanX + dx;
+                        _cmpPanY = _cmpDrag.startPanY + dy;
+                        _cmpRedraw();
+                    } else if (_cmpDrag.mode === 'window') {
+                        const baseWW = _cmpDrag.startWW;
+                        const step = Math.max(0.5, baseWW / 512);
+                        _cmpWW = Math.max(1, Math.round(baseWW + dx * step));
+                        _cmpWL = Math.round(_cmpDrag.startWL + dy * step);
+                        // Update overlay immediately for responsiveness
+                        const bl = document.getElementById('cmpOverlayBL');
+                        if (bl) bl.textContent = 'WW ' + _cmpWW + '  WL ' + _cmpWL;
+                        clearTimeout(_cmpWinDebounce);
+                        _cmpWinDebounce = setTimeout(function () {
+                            _cmpRenderSlice(_cmpIndex);
+                        }, 80);
+                    }
+                });
+
+                document.addEventListener('mouseup', function () {
+                    if (_cmpDrag) {
+                        if (_cmpDrag.mode === 'window') {
+                            clearTimeout(_cmpWinDebounce);
+                            _cmpRenderSlice(_cmpIndex);
+                        }
+                        cmpCv.style.cursor = '';
+                        _cmpDrag = null;
+                    }
+                });
+
+                // Double-click resets zoom/pan
+                cmpCv.addEventListener('dblclick', function () {
+                    _cmpZoom = 1; _cmpPanX = 0; _cmpPanY = 0;
+                    _cmpRedraw();
+                });
             }
         });
 
@@ -10526,6 +10614,9 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                 _cmpImageData = Array.isArray(data && data.images) ? data.images : [];
                 _cmpMeta = data && data.series ? data.series : null;
                 _cmpWW = null; _cmpWL = null;
+                _cmpZoom = 1; _cmpPanX = 0; _cmpPanY = 0;
+                if (_cmpLastBitmap && typeof _cmpLastBitmap.close === 'function') { _cmpLastBitmap.close(); }
+                _cmpLastBitmap = null;
 
                 // Use main viewer's WW/WL as the starting window for the comparison pane.
                 // The user can adjust windowing in the main viewer and compare will sync.

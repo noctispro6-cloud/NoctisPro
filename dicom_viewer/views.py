@@ -7831,3 +7831,50 @@ def serve_photo_attachment(request, attachment_id):
     except Exception as e:
         logger.error(f'serve_photo_attachment error for attachment {attachment_id}: {e}')
         return HttpResponse(status=500)
+
+
+@login_required
+def api_study_related(request, study_id):
+    """Return other studies for the same patient — used by the 2-up comparison picker."""
+    study = get_object_or_404(Study, id=study_id)
+    user = request.user
+
+    if request.session.get('is_public_viewer'):
+        return JsonResponse({'studies': []})
+
+    if hasattr(user, 'is_facility_user') and user.is_facility_user():
+        if getattr(user, 'facility', None) and study.facility != user.facility:
+            return JsonResponse({'error': 'Permission denied'}, status=403)
+
+    patient = getattr(study, 'patient', None)
+    if not patient:
+        return JsonResponse({'studies': []})
+
+    qs = Study.objects.filter(patient=patient).exclude(id=study.id)
+    if hasattr(user, 'is_facility_user') and user.is_facility_user() and getattr(user, 'facility', None):
+        qs = qs.filter(facility=user.facility)
+
+    qs = qs.order_by('-study_date').prefetch_related('series_set')[:10]
+
+    studies_data = []
+    for st in qs:
+        series_list = []
+        for s in st.series_set.all():
+            series_list.append({
+                'id': s.id,
+                'series_number': s.series_number,
+                'series_description': s.series_description or '',
+                'description': s.series_description or '',
+                'modality': s.modality or '',
+                'image_count': s.images.count(),
+            })
+        if series_list:
+            studies_data.append({
+                'id': st.id,
+                'study_date': str(st.study_date) if st.study_date else '',
+                'modality': str(st.modality) if st.modality else '',
+                'description': st.study_description or '',
+                'series': series_list,
+            })
+
+    return JsonResponse({'studies': studies_data})

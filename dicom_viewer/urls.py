@@ -121,6 +121,7 @@ urlpatterns += [
     path('print/settings/', views.print_settings_view, name='print_settings'),
 
     # Anonymization
+    path('api/study/<int:study_id>/related/', views.api_study_related, name='api_study_related'),
     path('api/study/<int:study_id>/anonymize/', views.api_anonymize_study, name='api_anonymize_study'),
     
     # AI and Advanced Features

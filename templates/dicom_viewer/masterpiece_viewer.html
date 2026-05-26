@@ -790,7 +790,9 @@
             font-family: 'Consolas','Menlo',monospace;
             text-shadow: 0 0 3px #000; pointer-events: none;
             z-index: 10; line-height: 1.5; text-align: right;
+            display: flex; align-items: center; gap: 6px;
         }
+        .compare-overlay-tr > button { pointer-events: all; }
         .compare-label {
             position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
             background: rgba(0,212,255,0.18); color: var(--accent-color);
@@ -1965,7 +1967,15 @@
                 <div id="comparePane">
                     <canvas id="compareCanvas"></canvas>
                     <div class="compare-overlay-tl" id="cmpOverlayTL"></div>
-                    <div class="compare-overlay-tr" id="cmpOverlayTR"></div>
+                    <div class="compare-overlay-tr" id="cmpOverlayTR" style="display:flex;align-items:center;gap:6px;">
+                        <span id="cmpSliceLabel" style="font-size:10px;color:rgba(255,255,255,0.85);font-family:'Consolas','Menlo',monospace;text-shadow:0 0 3px #000;"></span>
+                        <button id="cmpChangeBtn" onclick="_cmpOpenPicker()" title="Change comparison series"
+                            style="padding:2px 7px;font-size:10px;border-radius:4px;border:1px solid rgba(0,212,255,0.45);
+                                   background:rgba(0,0,0,0.55);color:rgba(0,212,255,0.9);cursor:pointer;
+                                   backdrop-filter:blur(4px);line-height:1.4;pointer-events:all;">
+                            <i class="fas fa-exchange-alt" style="font-size:9px;"></i> Change
+                        </button>
+                    </div>
                     <!-- BL: WW/WL display mirroring main canvas -->
                     <div style="position:absolute;bottom:8px;left:8px;color:rgba(255,255,255,0.6);
                          font-size:10px;font-family:'Consolas','Menlo',monospace;
@@ -10412,8 +10422,8 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                 const mod = _cmpMeta.modality || '';
                 tl.innerHTML = (mod ? mod + ' — ' : '') + desc;
             }
-            const tr = document.getElementById('cmpOverlayTR');
-            if (tr) tr.textContent = (idx + 1) + ' / ' + _cmpImageData.length;
+            const sliceLabel = document.getElementById('cmpSliceLabel');
+            if (sliceLabel) sliceLabel.textContent = (idx + 1) + ' / ' + _cmpImageData.length;
             const bl = document.getElementById('cmpOverlayBL');
             if (bl) bl.textContent = 'WW ' + ww + '  WL ' + wl;
             const src = `/dicom-viewer/api/image/${encodeURIComponent(entry.id)}/render.png?window_width=${ww}&window_level=${wl}&inverted=${inv}`;
@@ -10529,30 +10539,67 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             }
         }
 
-        function _populateCompareSeriesList() {
+        function _cmpSeriesRow(s, groupLabel) {
+            const row = document.createElement('div');
+            row.style.cssText = 'padding:8px 10px;border-radius:6px;cursor:pointer;border:1px solid rgba(255,255,255,0.07);margin-bottom:4px;display:flex;align-items:center;gap:10px;';
+            const desc = (s.description || s.series_description || '').replace(/</g,'&lt;') || '—';
+            row.innerHTML = `<i class="fas fa-x-ray" style="color:var(--accent-color);width:16px;text-align:center;flex-shrink:0;"></i>
+                <div style="min-width:0;">
+                    <div style="font-size:12px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">S${s.series_number || '?'}: ${desc}</div>
+                    <div style="font-size:10px;color:var(--text-muted);">${s.modality || '?'} &bull; ${s.image_count || '?'} images${groupLabel ? ' &bull; <span style="color:rgba(0,212,255,0.7);">' + groupLabel + '</span>' : ''}</div>
+                </div>`;
+            row.addEventListener('mouseenter', function () { row.style.background = 'rgba(0,212,255,0.08)'; });
+            row.addEventListener('mouseleave', function () { row.style.background = ''; });
+            row.addEventListener('click', function () {
+                document.getElementById('comparePickerModal').style.display = 'none';
+                _loadCompareSeriesImages(s.id);
+            });
+            return row;
+        }
+
+        async function _populateCompareSeriesList() {
             const container = document.getElementById('compareSeriesList');
             if (!container) return;
-            container.innerHTML = '';
+            container.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:8px;text-align:center;"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+
             if (!studySeriesList || !studySeriesList.length) {
                 container.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:8px;">No series available — load a study first.</div>';
                 return;
             }
-            studySeriesList.forEach(function (s) {
-                const row = document.createElement('div');
-                row.style.cssText = 'padding:8px 10px;border-radius:6px;cursor:pointer;border:1px solid rgba(255,255,255,0.07);margin-bottom:5px;display:flex;align-items:center;gap:10px;';
-                row.innerHTML = `<i class="fas fa-x-ray" style="color:var(--accent-color);width:16px;text-align:center;"></i>
-                    <div>
-                        <div style="font-size:12px;color:var(--text-primary);">S${s.series_number}: ${(s.description || '').replace(/</g,'&lt;') || '—'}</div>
-                        <div style="font-size:10px;color:var(--text-muted);">${s.modality} &bull; ${s.image_count} images</div>
-                    </div>`;
-                row.addEventListener('mouseenter', function () { row.style.background = 'rgba(0,212,255,0.1)'; });
-                row.addEventListener('mouseleave', function () { row.style.background = ''; });
-                row.addEventListener('click', function () {
-                    document.getElementById('comparePickerModal').style.display = 'none';
-                    _loadCompareSeriesImages(s.id);
-                });
-                container.appendChild(row);
-            });
+
+            container.innerHTML = '';
+
+            // ── Current study series ──────────────────────────────────────────
+            const curHdr = document.createElement('div');
+            curHdr.style.cssText = 'font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;padding:4px 2px 4px;margin-bottom:2px;';
+            curHdr.textContent = 'Current Study';
+            container.appendChild(curHdr);
+            studySeriesList.forEach(function (s) { container.appendChild(_cmpSeriesRow(s, '')); });
+
+            // ── Prior / related studies (same patient) ────────────────────────
+            if (currentStudy && currentStudy.id) {
+                try {
+                    const resp = await fetch(`/dicom-viewer/api/study/${encodeURIComponent(currentStudy.id)}/related/`, { credentials: 'same-origin' });
+                    if (resp.ok) {
+                        const rd = await resp.json();
+                        const relatedStudies = Array.isArray(rd.studies) ? rd.studies : [];
+                        relatedStudies.forEach(function (st) {
+                            if (!Array.isArray(st.series) || !st.series.length) return;
+                            const stHdr = document.createElement('div');
+                            stHdr.style.cssText = 'font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;padding:8px 2px 4px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.07);';
+                            stHdr.textContent = (st.study_date || st.date || '') + (st.modality ? ' — ' + st.modality : '') + (st.description ? ': ' + st.description : '');
+                            container.appendChild(stHdr);
+                            st.series.forEach(function (s) { container.appendChild(_cmpSeriesRow(s, 'prior')); });
+                        });
+                    }
+                } catch (e) { /* related studies fetch failed — ignore */ }
+            }
+        }
+
+        function _cmpOpenPicker() {
+            _populateCompareSeriesList();
+            const modal = document.getElementById('comparePickerModal');
+            if (modal) modal.style.display = 'flex';
         }
 
         function toggleCompareMode() {
@@ -10561,6 +10608,12 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             const curLabel  = document.getElementById('currentLabel');
             const btn       = document.querySelector('[data-tool="compare"]');
             if (_cmpActive) {
+                // If a series is already loaded, re-open the picker to change it.
+                // The user must use the X/Close Compare button to exit compare mode.
+                if (_cmpImageData.length) {
+                    _cmpOpenPicker();
+                    return;
+                }
                 stopCompareMode();
                 return;
             }
@@ -10578,9 +10631,7 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             if (curLabel) curLabel.style.display = '';
             if (btn) btn.classList.add('active');
             // Show series picker
-            _populateCompareSeriesList();
-            const modal = document.getElementById('comparePickerModal');
-            if (modal) modal.style.display = 'flex';
+            _cmpOpenPicker();
             resizeCanvas();
         }
 
@@ -11196,7 +11247,7 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
     </div>
 
     <!-- Compare study picker modal -->
-    <div id="comparePickerModal" onclick="if(event.target===this)document.getElementById('comparePickerModal').classList.remove('open')"
+    <div id="comparePickerModal" onclick="if(event.target===this)this.style.display='none'"
         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:800;align-items:center;justify-content:center;">
         <div style="background:#1e1e1e;border:1px solid #404040;border-radius:10px;padding:20px 24px;width:460px;max-width:96vw;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">

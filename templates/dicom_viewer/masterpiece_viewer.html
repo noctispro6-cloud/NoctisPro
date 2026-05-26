@@ -717,6 +717,139 @@
         .dcm-corner .dcm-val   { font-weight: 600; }
 
 
+        /* ── Slice scrollbar (right edge of canvas) ────────────────────────── */
+        .slice-scrollbar {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 14px;
+            z-index: 15;
+            cursor: ns-resize;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .slice-scrollbar-track {
+            position: absolute;
+            top: 6px;
+            bottom: 6px;
+            left: 3px;
+            right: 3px;
+            background: rgba(255,255,255,0.07);
+            border-radius: 4px;
+        }
+        .slice-scrollbar-thumb {
+            position: absolute;
+            left: 0;
+            right: 0;
+            background: rgba(0,212,255,0.65);
+            border-radius: 4px;
+            min-height: 12px;
+            transition: background 0.1s;
+            cursor: ns-resize;
+        }
+        .slice-scrollbar-thumb:hover,
+        .slice-scrollbar-thumb.dragging {
+            background: rgba(0,212,255,0.92);
+        }
+        .slice-scrollbar:hover .slice-scrollbar-track {
+            background: rgba(255,255,255,0.13);
+        }
+
+        /* ── 2-up comparison layout ─────────────────────────────────────────── */
+        #comparePane {
+            display: none;
+            position: absolute;
+            top: 0; right: 0; bottom: 0;
+            width: 50%;
+            background: #000;
+            border-left: 2px solid var(--accent-color);
+            overflow: hidden;
+        }
+        #comparePane.active { display: block; }
+        #singleView.compare-mode {
+            position: absolute; top: 0; left: 0; bottom: 0;
+            width: 50%;
+        }
+        #compareCanvas {
+            width: 100%; height: 100%;
+            background: #000;
+            touch-action: none;
+        }
+        .compare-overlay-tl {
+            position: absolute; top: 8px; left: 8px;
+            color: rgba(255,255,255,0.85); font-size: 10px;
+            font-family: 'Consolas','Menlo',monospace;
+            text-shadow: 0 0 3px #000; pointer-events: none;
+            z-index: 10; line-height: 1.5;
+        }
+        .compare-overlay-tr {
+            position: absolute; top: 8px; right: 8px;
+            color: rgba(255,255,255,0.85); font-size: 10px;
+            font-family: 'Consolas','Menlo',monospace;
+            text-shadow: 0 0 3px #000; pointer-events: none;
+            z-index: 10; line-height: 1.5; text-align: right;
+        }
+        .compare-label {
+            position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,212,255,0.18); color: var(--accent-color);
+            font-size: 9px; font-weight: 700; letter-spacing: 0.06em;
+            padding: 2px 8px; border-radius: 3px; pointer-events: none;
+            z-index: 10; border: 1px solid rgba(0,212,255,0.35);
+        }
+        #currentLabel {
+            bottom: 8px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,212,255,0.18); color: var(--accent-color);
+        }
+
+        /* ── Keyboard help modal ────────────────────────────────────────────── */
+        #kbHelpModal {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.72);
+            z-index: 900;
+            align-items: center;
+            justify-content: center;
+        }
+        #kbHelpModal.open { display: flex; }
+        .kbh-box {
+            background: #1e1e1e;
+            border: 1px solid #404040;
+            border-radius: 10px;
+            padding: 24px 28px;
+            width: 520px; max-width: 96vw;
+            max-height: 80vh; overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+        }
+        .kbh-title {
+            font-size: 14px; font-weight: 700; color: var(--accent-color);
+            margin-bottom: 16px; letter-spacing: 0.04em;
+        }
+        .kbh-row {
+            display: flex; justify-content: space-between;
+            padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+            font-size: 12px; color: var(--text-secondary);
+        }
+        .kbh-row:last-child { border-bottom: none; }
+        .kbh-key {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 4px; padding: 1px 7px;
+            font-family: 'Consolas','Menlo',monospace;
+            color: var(--text-primary); font-size: 11px;
+        }
+        .kbh-section {
+            font-size: 10px; font-weight: 700; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.06em;
+            margin: 12px 0 4px;
+        }
+        .kbh-close {
+            float: right; cursor: pointer;
+            color: var(--text-muted); font-size: 18px; line-height: 1;
+        }
+        .kbh-close:hover { color: var(--text-primary); }
+
         /* Right Panel */
         .right-panel {
             width: clamp(240px, 22vw, 320px);
@@ -1623,6 +1756,12 @@
             <div class="toolbar-divider"></div>
 
             <!-- Output tools -->
+            <button class="tool-btn" data-tool="compare" title="Compare / Prior Study (2-up)" onclick="toggleCompareMode()">
+                <i class="fas fa-columns"></i><span>Compare</span>
+            </button>
+
+            <div class="toolbar-divider"></div>
+
             <button class="tool-btn" data-tool="ai" title="AI Analysis" onclick="toggleAIPanel()">
                 <i class="fas fa-brain"></i><span>AI</span>
             </button>
@@ -1631,6 +1770,12 @@
             </button>
             <button class="tool-btn" data-tool="export" title="Export">
                 <i class="fas fa-download"></i><span>Export</span>
+            </button>
+
+            <div class="toolbar-divider"></div>
+
+            <button class="tool-btn" title="Keyboard shortcuts (?)" onclick="document.getElementById('kbHelpModal').classList.add('open')">
+                <i class="fas fa-keyboard"></i><span>Keys</span>
             </button>
 
         </div>
@@ -1777,6 +1922,17 @@
                             display:flex; align-items:center; justify-content:center;">&#8250;</button>
                     </div>
                     <canvas id="dicomCanvas"></canvas>
+
+                    <!-- Slice position scrollbar (right edge, drag to navigate) -->
+                    <div class="slice-scrollbar" id="sliceScrollbar" title="Drag to navigate slices; click to jump">
+                        <div class="slice-scrollbar-track">
+                            <div class="slice-scrollbar-thumb" id="sliceScrollbarThumb"></div>
+                        </div>
+                    </div>
+
+                    <!-- CURRENT label when in compare mode -->
+                    <div class="compare-label" id="currentLabel" style="display:none;">CURRENT</div>
+
                     <!-- Top-left: patient -->
                     <div class="dcm-corner dcm-tl" id="overlayTL">
                         <div class="dcm-val" id="olPatientName">—</div>
@@ -1803,6 +1959,19 @@
                         <div id="olSeriesDesc"></div>
                         <div id="imageDimensions"></div>
                     </div>
+                </div>
+
+                <!-- 2-up Comparison Pane -->
+                <div id="comparePane">
+                    <canvas id="compareCanvas"></canvas>
+                    <div class="compare-overlay-tl" id="cmpOverlayTL"></div>
+                    <div class="compare-overlay-tr" id="cmpOverlayTR"></div>
+                    <div class="slice-scrollbar" id="cmpSliceScrollbar" title="Drag to navigate prior study slices">
+                        <div class="slice-scrollbar-track">
+                            <div class="slice-scrollbar-thumb" id="cmpSliceScrollbarThumb"></div>
+                        </div>
+                    </div>
+                    <div class="compare-label">PRIOR / COMPARE</div>
                 </div>
 
                 <!-- MPR Four Window View -->
@@ -2882,6 +3051,9 @@
             const mprView = document.getElementById('mprView');
             const controls3D = document.getElementById('controls3D');
 
+            // Exit compare mode before switching to MPR
+            if (_cmpActive) stopCompareMode();
+
             if (viewMode === 'single') {
                 // Don't switch to MPR if there's no series loaded (otherwise panes look "blank").
                 if (!currentSeries || currentSeries.id == null) {
@@ -3346,8 +3518,16 @@
                     sliceSlider.value = '0';
                     sliceSlider.disabled = imageData.length <= 1;
                 }
+                const sliceSlider2b = document.getElementById('sliceSlider2');
+                if (sliceSlider2b) {
+                    sliceSlider2b.min = '0';
+                    sliceSlider2b.max = String(Math.max(0, imageData.length - 1));
+                    sliceSlider2b.value = '0';
+                    sliceSlider2b.disabled = imageData.length <= 1;
+                }
                 if (totalSlicesEl) totalSlicesEl.textContent = String(imageData.length);
                 if (currentSliceEl) currentSliceEl.textContent = imageData.length ? '1' : '0';
+                if (typeof window._updateSliceScrollbar === 'function') window._updateSliceScrollbar();
 
                 updateImageInfo(currentSeries);
                 if (!imageData.length) {
@@ -4061,10 +4241,14 @@
             currentImageIndex = clamped;
             const sliceSlider = document.getElementById('sliceSlider');
             if (sliceSlider) sliceSlider.value = clamped;
+            const sliceSlider2 = document.getElementById('sliceSlider2');
+            if (sliceSlider2) { sliceSlider2.min = '0'; sliceSlider2.max = String((imageData ? imageData.length : 1) - 1); sliceSlider2.value = clamped; }
             const sliceValue = document.getElementById('sliceValue');
             if (sliceValue) sliceValue.textContent = clamped + 1;
             const currentSliceEl = document.getElementById('currentSlice');
             if (currentSliceEl) currentSliceEl.textContent = clamped + 1;
+
+            if (typeof window._updateSliceScrollbar === 'function') window._updateSliceScrollbar();
 
             if (_scheduledLoadRaf) return;
             _scheduledLoadRaf = requestAnimationFrame(async () => {
@@ -10071,6 +10255,287 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
         function hideDirectoryLoader() {}
         function loadFromDirectory()   {}
 
+        // ── Slice scrollbar (draggable, right edge of canvas) ──────────────────
+        (function () {
+            const scrollbar = document.getElementById('sliceScrollbar');
+            const thumb     = document.getElementById('sliceScrollbarThumb');
+            if (!scrollbar || !thumb) return;
+
+            let _dragging = false, _startY = 0, _startIdx = 0;
+
+            function _updateThumb() {
+                const total = imageData ? imageData.length : 0;
+                if (total <= 1) { scrollbar.style.display = 'none'; return; }
+                scrollbar.style.display = '';
+                const track = scrollbar.querySelector('.slice-scrollbar-track');
+                const trackH = track ? track.getBoundingClientRect().height : scrollbar.clientHeight - 12;
+                const ratio = currentImageIndex / (total - 1);
+                const thumbH = Math.max(12, Math.round(trackH / total * 3));
+                thumb.style.height = thumbH + 'px';
+                thumb.style.top = Math.round(ratio * (trackH - thumbH)) + 'px';
+            }
+
+            function _yToIndex(clientY) {
+                const track = scrollbar.querySelector('.slice-scrollbar-track');
+                if (!track) return 0;
+                const rect = track.getBoundingClientRect();
+                const trackH = rect.height;
+                const thumbH = thumb.getBoundingClientRect().height;
+                const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / (trackH - thumbH)));
+                return Math.round(ratio * ((imageData ? imageData.length : 1) - 1));
+            }
+
+            scrollbar.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+                _dragging = true;
+                thumb.classList.add('dragging');
+                document.body.style.userSelect = 'none';
+                const idx = _yToIndex(e.clientY);
+                scheduleLoadCurrentImage(idx, { fastPreview: true });
+            });
+
+            document.addEventListener('mousemove', function (e) {
+                if (!_dragging) return;
+                const idx = _yToIndex(e.clientY);
+                scheduleLoadCurrentImage(idx, { fastPreview: true });
+                _updateThumb();
+            });
+
+            document.addEventListener('mouseup', function () {
+                if (!_dragging) return;
+                _dragging = false;
+                thumb.classList.remove('dragging');
+                document.body.style.userSelect = '';
+                loadCurrentImage(currentImageIndex, { forceFull: true }).catch(() => {});
+            });
+
+            scrollbar.addEventListener('touchstart', function (e) {
+                e.preventDefault();
+                _dragging = true;
+                thumb.classList.add('dragging');
+                const idx = _yToIndex(e.touches[0].clientY);
+                scheduleLoadCurrentImage(idx, { fastPreview: true });
+            }, { passive: false });
+
+            document.addEventListener('touchmove', function (e) {
+                if (!_dragging) return;
+                const idx = _yToIndex(e.touches[0].clientY);
+                scheduleLoadCurrentImage(idx, { fastPreview: true });
+                _updateThumb();
+            }, { passive: false });
+
+            document.addEventListener('touchend', function () {
+                if (!_dragging) return;
+                _dragging = false;
+                thumb.classList.remove('dragging');
+                loadCurrentImage(currentImageIndex, { forceFull: true }).catch(() => {});
+            });
+
+            // Expose so slice-load code can call _updateSliceScrollbar()
+            window._updateSliceScrollbar = _updateThumb;
+
+            // Update initially and on resize
+            window.addEventListener('resize', _updateThumb);
+        })();
+
+        // ── 2-up Comparison view ────────────────────────────────────────────────
+        let _cmpActive = false;
+        let _cmpImageData = [];
+        let _cmpIndex = 0;
+        let _cmpMeta = null;
+        let _cmpPayloads = new Map(); // id -> payload
+        let _cmpScrollbar = null, _cmpThumb = null;
+
+        function _cmpUpdateThumb() {
+            const sb = document.getElementById('cmpSliceScrollbar');
+            const th = document.getElementById('cmpSliceScrollbarThumb');
+            if (!sb || !th) return;
+            const total = _cmpImageData.length;
+            if (total <= 1) { sb.style.display = 'none'; return; }
+            sb.style.display = '';
+            const track = sb.querySelector('.slice-scrollbar-track');
+            const trackH = track ? track.getBoundingClientRect().height : sb.clientHeight - 12;
+            const ratio = _cmpIndex / (total - 1);
+            const thumbH = Math.max(12, Math.round(trackH / total * 3));
+            th.style.height = thumbH + 'px';
+            th.style.top = Math.round(ratio * (trackH - thumbH)) + 'px';
+        }
+
+        function _cmpRenderSlice(idx) {
+            if (!_cmpImageData.length) return;
+            idx = Math.max(0, Math.min(_cmpImageData.length - 1, idx));
+            _cmpIndex = idx;
+            _cmpUpdateThumb();
+            const cmpCanvas = document.getElementById('compareCanvas');
+            if (!cmpCanvas) return;
+            const entry = _cmpImageData[idx];
+            if (!entry) return;
+
+            // Update overlay
+            const tl = document.getElementById('cmpOverlayTL');
+            if (tl && _cmpMeta) {
+                tl.innerHTML = (_cmpMeta.patient_name || '—') + '<br>' + (_cmpMeta.modality || '') + ' &bull; ' + (_cmpMeta.study_date || '');
+            }
+            const tr = document.getElementById('cmpOverlayTR');
+            if (tr) tr.textContent = (idx + 1) + ' / ' + _cmpImageData.length;
+
+            // Fetch + render as PNG (off-thread decode via createImageBitmap when available)
+            const ww = windowWidth || 400;
+            const wl = windowLevel || 40;
+            const src = `/dicom-viewer/api/image/${encodeURIComponent(entry.id)}/render.png?window_width=${ww}&window_center=${wl}&inverted=0`;
+            const ctx2 = cmpCanvas.getContext('2d');
+            const _cmpSeqId = entry.id + '|' + idx;
+            _cmpRenderSlice._seq = _cmpSeqId;
+
+            function _draw(drawable) {
+                if (_cmpRenderSlice._seq !== _cmpSeqId) return; // stale
+                const dw = drawable.width || drawable.naturalWidth || 512;
+                const dh = drawable.height || drawable.naturalHeight || 512;
+                cmpCanvas.width  = cmpCanvas.offsetWidth  || 512;
+                cmpCanvas.height = cmpCanvas.offsetHeight || 512;
+                ctx2.clearRect(0, 0, cmpCanvas.width, cmpCanvas.height);
+                const scale = Math.min(cmpCanvas.width / dw, cmpCanvas.height / dh);
+                const dx = (cmpCanvas.width  - dw * scale) / 2;
+                const dy = (cmpCanvas.height - dh * scale) / 2;
+                ctx2.drawImage(drawable, dx, dy, dw * scale, dh * scale);
+                if (drawable.close) drawable.close();
+            }
+
+            if (typeof createImageBitmap !== 'undefined') {
+                fetch(src, { credentials: 'same-origin' })
+                    .then(r => r.ok ? r.blob() : null)
+                    .then(b => b ? createImageBitmap(b) : null)
+                    .then(bmp => { if (bmp) _draw(bmp); })
+                    .catch(() => {
+                        const img = new Image();
+                        img.onload = () => _draw(img);
+                        img.src = src;
+                    });
+            } else {
+                const img = new Image();
+                img.onload = () => _draw(img);
+                img.src = src;
+            }
+        }
+
+        async function _loadCompareSeriesImages(seriesId) {
+            try {
+                const resp = await fetch(`/dicom-viewer/series/${encodeURIComponent(seriesId)}/images/`);
+                const data = await resp.json();
+                _cmpImageData = Array.isArray(data && data.images) ? data.images : [];
+                _cmpMeta = data && data.series ? data.series : null;
+                _cmpIndex = 0;
+                _cmpRenderSlice(0);
+                // Wire up compare scrollbar
+                const sb = document.getElementById('cmpSliceScrollbar');
+                if (sb) {
+                    let _cmpDrag = false;
+                    function _cmpYToIdx(clientY) {
+                        const track = sb.querySelector('.slice-scrollbar-track');
+                        if (!track) return 0;
+                        const rect = track.getBoundingClientRect();
+                        const th = document.getElementById('cmpSliceScrollbarThumb');
+                        const thumbH = th ? th.getBoundingClientRect().height : 12;
+                        const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / (rect.height - thumbH)));
+                        return Math.round(ratio * (_cmpImageData.length - 1));
+                    }
+                    sb.addEventListener('mousedown', function (e) {
+                        e.preventDefault(); _cmpDrag = true;
+                        document.getElementById('cmpSliceScrollbarThumb').classList.add('dragging');
+                        _cmpRenderSlice(_cmpYToIdx(e.clientY));
+                    });
+                    document.addEventListener('mousemove', function (e) {
+                        if (_cmpDrag) _cmpRenderSlice(_cmpYToIdx(e.clientY));
+                    });
+                    document.addEventListener('mouseup', function () {
+                        if (_cmpDrag) { _cmpDrag = false; document.getElementById('cmpSliceScrollbarThumb').classList.remove('dragging'); }
+                    });
+                }
+                // Mousewheel on compare pane
+                const cp = document.getElementById('comparePane');
+                if (cp) {
+                    cp.addEventListener('wheel', function (e) {
+                        e.preventDefault();
+                        const step = e.deltaY > 0 ? 1 : -1;
+                        _cmpRenderSlice(_cmpIndex + step);
+                    }, { passive: false });
+                }
+            } catch (ex) {
+                showToast('Failed to load comparison series', 'error');
+            }
+        }
+
+        function _populateCompareSeriesList() {
+            const container = document.getElementById('compareSeriesList');
+            if (!container) return;
+            container.innerHTML = '';
+            if (!studySeriesList || !studySeriesList.length) {
+                container.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:8px;">No series available — load a study first.</div>';
+                return;
+            }
+            studySeriesList.forEach(function (s) {
+                const row = document.createElement('div');
+                row.style.cssText = 'padding:8px 10px;border-radius:6px;cursor:pointer;border:1px solid rgba(255,255,255,0.07);margin-bottom:5px;display:flex;align-items:center;gap:10px;';
+                row.innerHTML = `<i class="fas fa-x-ray" style="color:var(--accent-color);width:16px;text-align:center;"></i>
+                    <div>
+                        <div style="font-size:12px;color:var(--text-primary);">S${s.series_number}: ${(s.description || '').replace(/</g,'&lt;') || '—'}</div>
+                        <div style="font-size:10px;color:var(--text-muted);">${s.modality} &bull; ${s.image_count} images</div>
+                    </div>`;
+                row.addEventListener('mouseenter', function () { row.style.background = 'rgba(0,212,255,0.1)'; });
+                row.addEventListener('mouseleave', function () { row.style.background = ''; });
+                row.addEventListener('click', function () {
+                    document.getElementById('comparePickerModal').style.display = 'none';
+                    _loadCompareSeriesImages(s.id);
+                });
+                container.appendChild(row);
+            });
+        }
+
+        function toggleCompareMode() {
+            const pane      = document.getElementById('comparePane');
+            const svPane    = document.getElementById('singleView');
+            const curLabel  = document.getElementById('currentLabel');
+            const btn       = document.querySelector('[data-tool="compare"]');
+            if (_cmpActive) {
+                stopCompareMode();
+                return;
+            }
+            if (viewMode !== 'single') {
+                showToast('Exit MPR/3D view first to use Compare', 'warning');
+                return;
+            }
+            if (!imageData || !imageData.length) {
+                showToast('Load a study first before using Compare', 'warning');
+                return;
+            }
+            _cmpActive = true;
+            pane.classList.add('active');
+            svPane.classList.add('compare-mode');
+            if (curLabel) curLabel.style.display = '';
+            if (btn) btn.classList.add('active');
+            // Show series picker
+            _populateCompareSeriesList();
+            const modal = document.getElementById('comparePickerModal');
+            if (modal) modal.style.display = 'flex';
+            resizeCanvas();
+        }
+
+        function stopCompareMode() {
+            const pane      = document.getElementById('comparePane');
+            const svPane    = document.getElementById('singleView');
+            const curLabel  = document.getElementById('currentLabel');
+            const btn       = document.querySelector('[data-tool="compare"]');
+            _cmpActive = false;
+            _cmpImageData = [];
+            pane.classList.remove('active');
+            svPane.classList.remove('compare-mode');
+            if (curLabel) curLabel.style.display = 'none';
+            if (btn) btn.classList.remove('active');
+            document.getElementById('comparePickerModal').style.display = 'none';
+            resizeCanvas();
+        }
+
+        // ── Keyboard shortcuts — add ? → help, extend existing handler ─────────
         // Add keyboard shortcut for directory loader
         // Use capture + stopImmediatePropagation so browser/system shortcuts (e.g. Ctrl+O)
         // don't win over our in-app shortcut.
@@ -10082,9 +10547,19 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                 try { e.stopImmediatePropagation(); } catch (_) { }
                 if (typeof window.loadFromLocalFiles === 'function') window.loadFromLocalFiles();
             }
+            if (e.key === '?' || e.key === '/') {
+                // Only open help if not typing into an input/textarea
+                if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+                const modal = document.getElementById('kbHelpModal');
+                if (modal) { e.preventDefault(); modal.classList.toggle('open'); }
+            }
             if (e.key === 'Escape') {
                 window._closeLocalDicomViewer();
                 try { _closeModal('printExportModal'); } catch (e) { }
+                const kbModal = document.getElementById('kbHelpModal');
+                if (kbModal) kbModal.classList.remove('open');
+                const cmpModal = document.getElementById('comparePickerModal');
+                if (cmpModal) cmpModal.style.display = 'none';
             }
         }, true);
 
@@ -10623,6 +11098,55 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
         <button onclick="location.reload()"
             style="background:#00d4ff;color:#000;border:none;padding:10px 24px;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer;margin-top:12px;">I'm
             Still Here</button>
+    </div>
+
+    <!-- Keyboard Shortcuts Help Modal -->
+    <div id="kbHelpModal" onclick="if(event.target===this)document.getElementById('kbHelpModal').classList.remove('open')">
+        <div class="kbh-box">
+            <div class="kbh-title">
+                <span class="kbh-close" onclick="document.getElementById('kbHelpModal').classList.remove('open')">&times;</span>
+                Keyboard Shortcuts
+            </div>
+            <div class="kbh-section">Navigation</div>
+            <div class="kbh-row"><span>Next / prev slice</span><span><span class="kbh-key">↑↓</span> or <span class="kbh-key">Scroll</span></span></div>
+            <div class="kbh-row"><span>+10 slices</span><span><span class="kbh-key">Shift</span> + <span class="kbh-key">↑↓</span></span></div>
+            <div class="kbh-row"><span>+50 slices</span><span><span class="kbh-key">Ctrl</span> + <span class="kbh-key">↑↓</span></span></div>
+            <div class="kbh-row"><span>Jump ±10 slices</span><span><span class="kbh-key">PgUp</span> / <span class="kbh-key">PgDn</span></span></div>
+            <div class="kbh-row"><span>First / last slice</span><span><span class="kbh-key">Home</span> / <span class="kbh-key">End</span></span></div>
+            <div class="kbh-row"><span>Next / prev series</span><span><span class="kbh-key">[</span> / <span class="kbh-key">]</span></span></div>
+            <div class="kbh-section">View</div>
+            <div class="kbh-row"><span>Zoom</span><span><span class="kbh-key">Ctrl</span> + <span class="kbh-key">Scroll</span></span></div>
+            <div class="kbh-row"><span>Reset view</span><span><span class="kbh-key">R</span></span></div>
+            <div class="kbh-row"><span>Invert image</span><span><span class="kbh-key">I</span></span></div>
+            <div class="kbh-row"><span>Toggle crosshair</span><span><span class="kbh-key">C</span></span></div>
+            <div class="kbh-row"><span>Cine play/pause</span><span><span class="kbh-key">Space</span></span></div>
+            <div class="kbh-section">Tools</div>
+            <div class="kbh-row"><span>Load local DICOM</span><span><span class="kbh-key">Ctrl</span> + <span class="kbh-key">O</span></span></div>
+            <div class="kbh-row"><span>Clear measurements</span><span><span class="kbh-key">Del</span> / <span class="kbh-key">Backspace</span></span></div>
+            <div class="kbh-row"><span>Close dialogs</span><span><span class="kbh-key">Esc</span></span></div>
+            <div class="kbh-row"><span>This help</span><span><span class="kbh-key">?</span></span></div>
+        </div>
+    </div>
+
+    <!-- Compare study picker modal -->
+    <div id="comparePickerModal" onclick="if(event.target===this)document.getElementById('comparePickerModal').classList.remove('open')"
+        style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:800;align-items:center;justify-content:center;">
+        <div style="background:#1e1e1e;border:1px solid #404040;border-radius:10px;padding:20px 24px;width:460px;max-width:96vw;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                <div style="font-size:13px;font-weight:700;color:var(--accent-color);">Compare Study</div>
+                <span onclick="document.getElementById('comparePickerModal').style.display='none'" style="cursor:pointer;color:var(--text-muted);font-size:18px;">&times;</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;">Select a series from any loaded study to display alongside the current view.</div>
+            <div id="compareSeriesList" style="max-height:320px;overflow-y:auto;"></div>
+            <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+                <button onclick="stopCompareMode()" style="padding:6px 14px;border-radius:6px;border:1px solid var(--border-color);background:rgba(255,68,68,0.12);color:var(--danger-color);cursor:pointer;font-size:12px;">
+                    <i class="fas fa-times"></i> Close Compare
+                </button>
+                <button onclick="document.getElementById('comparePickerModal').style.display='none'" style="padding:6px 14px;border-radius:6px;border:1px solid var(--border-color);background:var(--secondary-bg);color:var(--text-secondary);cursor:pointer;font-size:12px;">
+                    Cancel
+                </button>
+            </div>
+        </div>
     </div>
 </body>
 

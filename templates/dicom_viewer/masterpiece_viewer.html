@@ -10408,7 +10408,9 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             // Update overlays
             const tl = document.getElementById('cmpOverlayTL');
             if (tl && _cmpMeta) {
-                tl.innerHTML = (_cmpMeta.patient_name || '—') + '<br>' + (_cmpMeta.modality || '') + ' &bull; ' + (_cmpMeta.study_date || '');
+                const desc = _cmpMeta.series_description || _cmpMeta.description || ('Series ' + (_cmpMeta.series_number || ''));
+                const mod = _cmpMeta.modality || '';
+                tl.innerHTML = (mod ? mod + ' — ' : '') + desc;
             }
             const tr = document.getElementById('cmpOverlayTR');
             if (tr) tr.textContent = (idx + 1) + ' / ' + _cmpImageData.length;
@@ -10453,66 +10455,77 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
         // Per-compare-series WW/WL (auto-detected from series metadata, not locked to main viewer)
         let _cmpWW = null, _cmpWL = null;
 
+        // Compare scrollbar drag state (shared, not re-created on each load)
+        let _cmpSbDrag = false;
+
+        function _cmpYToIdx(clientY) {
+            const sb = document.getElementById('cmpSliceScrollbar');
+            if (!sb) return 0;
+            const track = sb.querySelector('.slice-scrollbar-track');
+            if (!track) return 0;
+            const rect = track.getBoundingClientRect();
+            const th = document.getElementById('cmpSliceScrollbarThumb');
+            const thumbH = th ? th.getBoundingClientRect().height : 12;
+            const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / (rect.height - thumbH)));
+            return Math.round(ratio * Math.max(0, _cmpImageData.length - 1));
+        }
+
+        // Wire compare scrollbar once at startup (not per-load)
+        document.addEventListener('DOMContentLoaded', function () {
+            const sb = document.getElementById('cmpSliceScrollbar');
+            if (!sb) return;
+            sb.addEventListener('mousedown', function (e) {
+                e.preventDefault(); _cmpSbDrag = true;
+                const th = document.getElementById('cmpSliceScrollbarThumb');
+                if (th) th.classList.add('dragging');
+                _cmpRenderSlice(_cmpYToIdx(e.clientY));
+            });
+            document.addEventListener('mousemove', function (e) {
+                if (_cmpSbDrag) _cmpRenderSlice(_cmpYToIdx(e.clientY));
+            });
+            document.addEventListener('mouseup', function () {
+                if (_cmpSbDrag) {
+                    _cmpSbDrag = false;
+                    const th = document.getElementById('cmpSliceScrollbarThumb');
+                    if (th) th.classList.remove('dragging');
+                }
+            });
+            // Wheel on compare pane (once)
+            const cp = document.getElementById('comparePane');
+            if (cp) {
+                cp.addEventListener('wheel', function (e) {
+                    e.preventDefault();
+                    if (!_cmpActive || !_cmpImageData.length) return;
+                    const step = e.deltaY > 0 ? 1 : -1;
+                    _cmpRenderSlice(_cmpIndex + step);
+                }, { passive: false });
+            }
+        });
+
         async function _loadCompareSeriesImages(seriesId) {
             try {
                 showToast('Loading comparison series…', 'info', 2000);
-                const resp = await fetch(`/dicom-viewer/series/${encodeURIComponent(seriesId)}/images/`);
+                const resp = await fetch(`/dicom-viewer/series/${encodeURIComponent(seriesId)}/images/`, { credentials: 'same-origin' });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
                 _cmpImageData = Array.isArray(data && data.images) ? data.images : [];
                 _cmpMeta = data && data.series ? data.series : null;
                 _cmpWW = null; _cmpWL = null;
 
-                // Auto-detect WW/WL: fetch the first image payload for windowing info
-                if (_cmpImageData.length) {
-                    try {
-                        const firstId = _cmpImageData[Math.floor(_cmpImageData.length / 2)].id;
-                        const pr = await fetch(`/dicom-viewer/api/image/${encodeURIComponent(firstId)}/data/?format=json`, { credentials: 'same-origin' });
-                        if (pr.ok) {
-                            const pd = await pr.json();
-                            if (pd.window_width) _cmpWW = Number(pd.window_width);
-                            if (pd.window_center || pd.window_level) _cmpWL = Number(pd.window_center || pd.window_level);
-                        }
-                    } catch (e) {}
-                }
+                // Use main viewer's WW/WL as the starting window for the comparison pane.
+                // The user can adjust windowing in the main viewer and compare will sync.
+                // _cmpWW / _cmpWL stay null → falls back to windowWidth/windowLevel in _cmpRenderSlice.
 
                 _cmpIndex = 0;
                 _cmpRenderSlice(0);
-                // Wire up compare scrollbar
-                const sb = document.getElementById('cmpSliceScrollbar');
-                if (sb) {
-                    let _cmpDrag = false;
-                    function _cmpYToIdx(clientY) {
-                        const track = sb.querySelector('.slice-scrollbar-track');
-                        if (!track) return 0;
-                        const rect = track.getBoundingClientRect();
-                        const th = document.getElementById('cmpSliceScrollbarThumb');
-                        const thumbH = th ? th.getBoundingClientRect().height : 12;
-                        const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / (rect.height - thumbH)));
-                        return Math.round(ratio * (_cmpImageData.length - 1));
-                    }
-                    sb.addEventListener('mousedown', function (e) {
-                        e.preventDefault(); _cmpDrag = true;
-                        document.getElementById('cmpSliceScrollbarThumb').classList.add('dragging');
-                        _cmpRenderSlice(_cmpYToIdx(e.clientY));
-                    });
-                    document.addEventListener('mousemove', function (e) {
-                        if (_cmpDrag) _cmpRenderSlice(_cmpYToIdx(e.clientY));
-                    });
-                    document.addEventListener('mouseup', function () {
-                        if (_cmpDrag) { _cmpDrag = false; document.getElementById('cmpSliceScrollbarThumb').classList.remove('dragging'); }
-                    });
-                }
-                // Mousewheel on compare pane
-                const cp = document.getElementById('comparePane');
-                if (cp) {
-                    cp.addEventListener('wheel', function (e) {
-                        e.preventDefault();
-                        const step = e.deltaY > 0 ? 1 : -1;
-                        _cmpRenderSlice(_cmpIndex + step);
-                    }, { passive: false });
+                if (!_cmpImageData.length) {
+                    showToast('Comparison series has no images', 'warning');
+                } else {
+                    showToast(`Loaded ${_cmpImageData.length} images for comparison`, 'success');
                 }
             } catch (ex) {
-                showToast('Failed to load comparison series', 'error');
+                console.error('Compare load error:', ex);
+                showToast('Failed to load comparison series: ' + (ex.message || ex), 'error');
             }
         }
 

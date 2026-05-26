@@ -1966,6 +1966,11 @@
                     <canvas id="compareCanvas"></canvas>
                     <div class="compare-overlay-tl" id="cmpOverlayTL"></div>
                     <div class="compare-overlay-tr" id="cmpOverlayTR"></div>
+                    <!-- BL: WW/WL display mirroring main canvas -->
+                    <div style="position:absolute;bottom:8px;left:8px;color:rgba(255,255,255,0.6);
+                         font-size:10px;font-family:'Consolas','Menlo',monospace;
+                         text-shadow:0 0 3px #000;pointer-events:none;z-index:10;line-height:1.5;"
+                         id="cmpOverlayBL"></div>
                     <div class="slice-scrollbar" id="cmpSliceScrollbar" title="Drag to navigate prior study slices">
                         <div class="slice-scrollbar-track">
                             <div class="slice-scrollbar-thumb" id="cmpSliceScrollbarThumb"></div>
@@ -5114,6 +5119,7 @@
             _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
             redrawCurrentImage();
             _scheduleMPRRefresh();
+            if (_cmpActive && _cmpImageData.length) _cmpRenderSlice(_cmpIndex);
         }
 
         function updateWindowLevel(value) {
@@ -5125,6 +5131,7 @@
             _setSeriesWindowing(currentSeries && currentSeries.id, windowWidth, windowLevel, inverted);
             redrawCurrentImage();
             _scheduleMPRRefresh();
+            if (_cmpActive && _cmpImageData.length) _cmpRenderSlice(_cmpIndex);
         }
 
         function updateSlice(value) {
@@ -10392,18 +10399,22 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             const entry = _cmpImageData[idx];
             if (!entry) return;
 
-            // Update overlay
+            // Fetch + render as PNG — use the compare series' own WW/WL when known,
+            // otherwise fall back to the main viewer's current windowing.
+            const ww  = _cmpWW || windowWidth  || 400;
+            const wl  = _cmpWL || windowLevel  || 40;
+            const inv = inverted ? 'true' : 'false';
+
+            // Update overlays
             const tl = document.getElementById('cmpOverlayTL');
             if (tl && _cmpMeta) {
                 tl.innerHTML = (_cmpMeta.patient_name || '—') + '<br>' + (_cmpMeta.modality || '') + ' &bull; ' + (_cmpMeta.study_date || '');
             }
             const tr = document.getElementById('cmpOverlayTR');
             if (tr) tr.textContent = (idx + 1) + ' / ' + _cmpImageData.length;
-
-            // Fetch + render as PNG (off-thread decode via createImageBitmap when available)
-            const ww = windowWidth || 400;
-            const wl = windowLevel || 40;
-            const src = `/dicom-viewer/api/image/${encodeURIComponent(entry.id)}/render.png?window_width=${ww}&window_center=${wl}&inverted=0`;
+            const bl = document.getElementById('cmpOverlayBL');
+            if (bl) bl.textContent = 'WW ' + ww + '  WL ' + wl;
+            const src = `/dicom-viewer/api/image/${encodeURIComponent(entry.id)}/render.png?window_width=${ww}&window_level=${wl}&inverted=${inv}`;
             const ctx2 = cmpCanvas.getContext('2d');
             const _cmpSeqId = entry.id + '|' + idx;
             _cmpRenderSlice._seq = _cmpSeqId;
@@ -10439,12 +10450,31 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             }
         }
 
+        // Per-compare-series WW/WL (auto-detected from series metadata, not locked to main viewer)
+        let _cmpWW = null, _cmpWL = null;
+
         async function _loadCompareSeriesImages(seriesId) {
             try {
+                showToast('Loading comparison series…', 'info', 2000);
                 const resp = await fetch(`/dicom-viewer/series/${encodeURIComponent(seriesId)}/images/`);
                 const data = await resp.json();
                 _cmpImageData = Array.isArray(data && data.images) ? data.images : [];
                 _cmpMeta = data && data.series ? data.series : null;
+                _cmpWW = null; _cmpWL = null;
+
+                // Auto-detect WW/WL: fetch the first image payload for windowing info
+                if (_cmpImageData.length) {
+                    try {
+                        const firstId = _cmpImageData[Math.floor(_cmpImageData.length / 2)].id;
+                        const pr = await fetch(`/dicom-viewer/api/image/${encodeURIComponent(firstId)}/data/?format=json`, { credentials: 'same-origin' });
+                        if (pr.ok) {
+                            const pd = await pr.json();
+                            if (pd.window_width) _cmpWW = Number(pd.window_width);
+                            if (pd.window_center || pd.window_level) _cmpWL = Number(pd.window_center || pd.window_level);
+                        }
+                    } catch (e) {}
+                }
+
                 _cmpIndex = 0;
                 _cmpRenderSlice(0);
                 // Wire up compare scrollbar

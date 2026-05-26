@@ -349,22 +349,9 @@
     <div id="rptEditor">
 
       <div class="rpt-sec-h2">Clinical Information</div>
-      <div class="rpt-sec-body" data-section="clinical_information" contenteditable="true">{% if report.clinical_history %}{{ report.clinical_history|safe }}{% elif study.clinical_info %}<p>{{ study.clinical_info }}</p>{% else %}<p><br></p>{% endif %}</div>
+      <div class="rpt-sec-body" data-section="clinical_information" contenteditable="true">{% if report.clinical_history %}{{ report.clinical_history|safe }}{% elif study.clinical_info %}<p>{{ study.clinical_info }}</p>{% endif %}</div>
 
-      <div class="rpt-sec-h2">Technique</div>
-      <div class="rpt-sec-body" data-section="technique" contenteditable="true" style="min-height:20mm;">{% if report.technique %}{{ report.technique|safe }}{% else %}<p><br></p>{% endif %}</div>
-
-      <div class="rpt-sec-h2">Comparison</div>
-      <div class="rpt-sec-body" data-section="comparison" contenteditable="true" style="min-height:12mm;">{% if report.comparison %}{{ report.comparison|safe }}{% else %}<p>No prior studies available for comparison.</p>{% endif %}</div>
-
-      <div class="rpt-sec-h2">Findings</div>
-      <div class="rpt-sec-body" data-section="report_body" contenteditable="true" style="min-height:60mm;">{% if report.findings %}{{ report.findings|safe }}{% else %}<p><br></p>{% endif %}</div>
-
-      <div class="rpt-sec-h2">Impression</div>
-      <div class="rpt-sec-body" data-section="impression" contenteditable="true" style="min-height:25mm;">{% if report.impression %}{{ report.impression|safe }}{% else %}<p><br></p>{% endif %}</div>
-
-      <div class="rpt-sec-h2">Recommendations</div>
-      <div class="rpt-sec-body" data-section="recommendations" contenteditable="true" style="min-height:15mm;">{% if report.recommendations %}{{ report.recommendations|safe }}{% else %}<p><br></p>{% endif %}</div>
+      <div class="rpt-sec-body" data-section="report_body" contenteditable="true" style="min-height:80mm;">{% if report.findings %}{{ report.findings|safe }}{% endif %}</div>
 
     </div>
 
@@ -578,11 +565,7 @@ document.addEventListener('click', () => {
 // ── Section helpers ───────────────────────────────────────────────────────────
 const _SECMAP = {
     'clinical_information': 'hf_clinical_history',
-    'technique':            'hf_technique',
-    'comparison':           'hf_comparison',
     'report_body':          'hf_findings',
-    'impression':           'hf_impression',
-    'recommendations':      'hf_recommendations',
 };
 function _secEl(key) {
     return _editor.querySelector('[data-section="' + key + '"]');

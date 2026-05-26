@@ -1420,15 +1420,16 @@ def run_model_test(request, model_id):
 @login_required
 @csrf_exempt
 def api_medical_references(request):
-    """Get medical references for given keywords"""
-    keywords = request.GET.get('keywords', '').split(',')
-    keywords = [k.strip() for k in keywords if k.strip()]
-    
+    """Get medical references for given keywords or free-text query."""
+    # Accept both ?q= (viewer) and ?keywords= (legacy) parameter forms
+    raw = request.GET.get('q', '') or request.GET.get('keywords', '')
+    keywords = [k.strip() for k in raw.replace(',', ' ').split() if k.strip()]
+
     if not keywords:
-        return JsonResponse({'references': []})
-        
+        return JsonResponse({'success': True, 'references': []})
+
     references = _get_online_references(keywords)
-    return JsonResponse({'references': references})
+    return JsonResponse({'success': True, 'references': references})
 
 
 @login_required

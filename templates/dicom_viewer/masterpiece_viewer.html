@@ -2602,16 +2602,21 @@
                 const data = await resp.json();
                 const list = document.getElementById('referencesList');
                 if (list) {
-                    if (data.success && data.references && data.references.length) {
-                        list.innerHTML = data.references.map(r => `
-                            <div style="margin-bottom:6px;">
-                                <a href="${r.url}" target="_blank" style="color: var(--accent-color); text-decoration: none;">
-                                    <i class="fas fa-external-link-alt"></i> ${r.title}
-                                </a>
-                            </div>
-                        `).join('');
+                    const refs = data.references || [];
+                    if (refs.length) {
+                        list.innerHTML = refs.map(r => {
+                            const url = (r.url || '').replace(/"/g, '%22');
+                            const title = (r.title || 'Reference').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                            const src = (r.source || '').replace(/</g, '&lt;');
+                            return `<div style="margin-bottom:6px;font-size:11px;">
+                                <a href="${url}" target="_blank" rel="noopener noreferrer"
+                                   style="color:var(--accent-color);text-decoration:none;line-height:1.4;">
+                                    <i class="fas fa-external-link-alt" style="font-size:9px;margin-right:4px;"></i>${title}
+                                </a>${src ? `<span style="color:var(--text-muted);margin-left:4px;">(${src})</span>` : ''}
+                            </div>`;
+                        }).join('');
                     } else {
-                        list.innerHTML = 'No references found. Try refining your query.';
+                        list.innerHTML = '<span style="color:var(--text-muted);font-size:11px;">No references found.</span>';
                     }
                 }
             } catch (e) {

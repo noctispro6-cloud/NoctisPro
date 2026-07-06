@@ -27,6 +27,7 @@ from django.contrib.auth.models import AnonymousUser
 from django.db import close_old_connections
 
 from worklist.models import DicomImage
+from noctis_pro.resource_budget import scaled as _budget_scaled
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,15 @@ class _BytesLRUCache:
                 self._size -= len(evicted)
 
 
-_PNG_MEM_CACHE = _BytesLRUCache(max_items=128, max_bytes=256 * 1024 * 1024)
+# This ASGI app runs inside the same gunicorn/uvicorn worker process as the rest of Django (see
+# noctis_pro/asgi.py) — its cache shares one per-worker memory budget with dicom_viewer/views.py's
+# caches, which already claim most of it (see the comment block in views.py near _MAX_MPR_CACHE).
+# Sized to what's left, auto-detected from cgroup/host memory (noctis_pro.resource_budget) instead
+# of a fixed 256MB regardless of instance size.
+_PNG_MEM_CACHE = _BytesLRUCache(
+    max_items=256,
+    max_bytes=_budget_scaled(0.15, min_bytes=32 * 1024 * 1024, max_bytes=256 * 1024 * 1024),
+)
 _RENDER_LOCKS: dict[str, threading.Lock] = {}
 _RENDER_LOCKS_GUARD = threading.Lock()
 
@@ -116,6 +125,83 @@ def _cache_path(image_id: int, ww: float, wl: float, inverted: bool) -> str:
     # Use the key as filename; keep per-image subdir to avoid huge single directories.
     safe_name = key.replace(":", "_").replace("|", "__")
     return os.path.join(_render_cache_root(), f"image_{int(image_id)}", f"{safe_name}.png")
+
+
+# ---------------------------------------------------------------------------
+# Disk render-cache cleanup
+#
+# Every distinct (image_id, ww, wl, inverted) combination a viewer ever asks for gets its own
+# permanent PNG file (see dicom_image_render_png below) — routine window/level dragging across a
+# study generates dozens of these per image, forever, with nothing to evict them. On a small
+# cloud instance disk (often 20-40GB) this is a slow-motion "disk full". A background thread
+# periodically prunes by age first, then by total size if still over budget, oldest-accessed first.
+# ---------------------------------------------------------------------------
+_RENDER_CACHE_MAX_BYTES = int(os.environ.get("DICOM_RENDER_CACHE_MAX_BYTES", str(2 * 1024 * 1024 * 1024)))
+_RENDER_CACHE_MAX_AGE_DAYS = float(os.environ.get("DICOM_RENDER_CACHE_MAX_AGE_DAYS", "14"))
+_RENDER_CACHE_SWEEP_INTERVAL_SECONDS = float(os.environ.get("DICOM_RENDER_CACHE_SWEEP_SECONDS", str(30 * 60)))
+
+
+def _cleanup_render_cache_once() -> None:
+    root = _render_cache_root()
+    if not os.path.isdir(root):
+        return
+
+    import time
+    now = time.time()
+    max_age_seconds = _RENDER_CACHE_MAX_AGE_DAYS * 86400
+
+    entries = []  # (mtime, size, path)
+    total = 0
+    try:
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for fn in filenames:
+                path = os.path.join(dirpath, fn)
+                try:
+                    st = os.stat(path)
+                except OSError:
+                    continue
+                # Age-based eviction happens immediately regardless of total size.
+                if (now - st.st_mtime) > max_age_seconds:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                    continue
+                entries.append((st.st_mtime, st.st_size, path))
+                total += st.st_size
+    except Exception:
+        logger.debug("Render cache sweep: directory walk failed", exc_info=True)
+        return
+
+    if total <= _RENDER_CACHE_MAX_BYTES:
+        return
+
+    # Still over budget after age-pruning — remove oldest first until back under budget.
+    entries.sort(key=lambda e: e[0])
+    for _mtime, size, path in entries:
+        if total <= _RENDER_CACHE_MAX_BYTES:
+            break
+        try:
+            os.remove(path)
+            total -= size
+        except OSError:
+            pass
+
+
+def _render_cache_sweep_loop() -> None:
+    import time
+    while True:
+        try:
+            _cleanup_render_cache_once()
+        except Exception:
+            logger.debug("Render cache sweep failed", exc_info=True)
+        time.sleep(_RENDER_CACHE_SWEEP_INTERVAL_SECONDS)
+
+
+# Started at import time (once per worker process) rather than a FastAPI startup event — this
+# sub-app is invoked directly from a custom ASGI router (see noctis_pro/asgi.py), not mounted via
+# Starlette's usual `.mount()`, so FastAPI's own lifespan/startup events are not guaranteed to fire.
+threading.Thread(target=_render_cache_sweep_loop, name="render-cache-sweep", daemon=True).start()
 
 
 def _get_django_user_from_session_cookie(request: Request):

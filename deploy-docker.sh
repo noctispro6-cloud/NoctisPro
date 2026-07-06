@@ -265,6 +265,45 @@ pick_free_port_in_range() {
   return 1
 }
 
+detect_host_mem_mb() {
+  # Total host RAM in MB (this script runs on the host, not in a container, so /proc/meminfo
+  # is the real machine total — e.g. whatever your EC2 instance size actually provides).
+  awk '/MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo "1024"
+}
+
+compute_mem_limits() {
+  # Auto-size a Docker `mem_limit` per service from detected host RAM, so a small instance
+  # doesn't get the same fixed limits as a large one and vice versa. This also closes the loop
+  # for tools/auto_concurrency.py (invoked by the Dockerfile CMD): once `web`/`celery` actually
+  # have a cgroup memory limit set, that script (and noctis_pro/resource_budget.py, which sizes
+  # in-process image/MPR caches) detect it correctly instead of seeing the whole host's RAM and
+  # assuming they own all of it.
+  #
+  # Proportions leave ~15% of host RAM unallocated for the OS/Docker daemon itself. Floors keep
+  # every service viable even on a very small instance; ${VAR:-fallback} in docker-compose.yml
+  # covers the case this function is skipped entirely (e.g. compose run directly, not via this
+  # script).
+  local total_mb allocatable_mb
+  total_mb="$(detect_host_mem_mb)"
+  allocatable_mb=$(( total_mb * 85 / 100 ))
+
+  # name  percent  floor_mb
+  DB_MEM_LIMIT="$(( allocatable_mb * 20 / 100 ))"; (( DB_MEM_LIMIT < 256 )) && DB_MEM_LIMIT=256
+  PGBOUNCER_MEM_LIMIT="$(( allocatable_mb * 3 / 100 ))"; (( PGBOUNCER_MEM_LIMIT < 32 )) && PGBOUNCER_MEM_LIMIT=32
+  REDIS_MEM_LIMIT="$(( allocatable_mb * 7 / 100 ))"; (( REDIS_MEM_LIMIT < 64 )) && REDIS_MEM_LIMIT=64
+  WEB_MEM_LIMIT="$(( allocatable_mb * 45 / 100 ))"; (( WEB_MEM_LIMIT < 256 )) && WEB_MEM_LIMIT=256
+  CELERY_MEM_LIMIT="$(( allocatable_mb * 20 / 100 ))"; (( CELERY_MEM_LIMIT < 192 )) && CELERY_MEM_LIMIT=192
+  DICOM_MEM_LIMIT="$(( allocatable_mb * 3 / 100 ))"; (( DICOM_MEM_LIMIT < 64 )) && DICOM_MEM_LIMIT=64
+  NGROK_MEM_LIMIT="$(( allocatable_mb * 2 / 100 ))"; (( NGROK_MEM_LIMIT < 32 )) && NGROK_MEM_LIMIT=32
+
+  export DB_MEM_LIMIT="${DB_MEM_LIMIT}m" PGBOUNCER_MEM_LIMIT="${PGBOUNCER_MEM_LIMIT}m" \
+         REDIS_MEM_LIMIT="${REDIS_MEM_LIMIT}m" WEB_MEM_LIMIT="${WEB_MEM_LIMIT}m" \
+         CELERY_MEM_LIMIT="${CELERY_MEM_LIMIT}m" DICOM_MEM_LIMIT="${DICOM_MEM_LIMIT}m" \
+         NGROK_MEM_LIMIT="${NGROK_MEM_LIMIT}m"
+
+  info "Detected ${total_mb}MB host RAM -> mem_limit db=${DB_MEM_LIMIT} pgbouncer=${PGBOUNCER_MEM_LIMIT} redis=${REDIS_MEM_LIMIT} web=${WEB_MEM_LIMIT} celery=${CELERY_MEM_LIMIT} dicom=${DICOM_MEM_LIMIT} ngrok=${NGROK_MEM_LIMIT}"
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -345,6 +384,8 @@ if [[ ! "${dicom_port}" =~ ^[0-9]+$ ]] || (( dicom_port < 1 || dicom_port > 6553
   err "Invalid DICOM_PORT in .env.docker: '${dicom_port}' (expected 1-65535, no quotes)."
   exit 2
 fi
+
+compute_mem_limits
 
 info "Cleaning up old compose resources (safe; volumes persist)..."
 docker compose down --remove-orphans >/dev/null 2>&1 || true

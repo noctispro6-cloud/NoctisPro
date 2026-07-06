@@ -402,13 +402,13 @@ from threading import Lock
 from threading import Thread
 import gc
 from django.db import close_old_connections
+from noctis_pro.resource_budget import scaled as _budget_scaled, per_worker_memory_budget_bytes as _per_worker_budget
 
 _MPR_CACHE_LOCK = Lock()
 # Cache key includes quality mode to avoid mixing fast vs high-quality volumes.
 # key: (series_id, quality) -> { 'volume': np.ndarray, 'spacing': tuple }
 _MPR_CACHE = {}
 _MPR_CACHE_ORDER = []
-_MAX_MPR_CACHE = 6  # Increased cache size for better performance
 
 # Prevent duplicate expensive volume builds when the frontend requests all 3 planes in parallel.
 # Without this, the first axial/sagittal/coronal requests can each rebuild the volume concurrently.
@@ -441,18 +441,41 @@ def _get_mpr_build_lock(series_id: int) -> Lock:
 _MPR_IMG_CACHE_LOCK = Lock()
 _MPR_IMG_CACHE = {}  # key -> base64 data URL
 _MPR_IMG_CACHE_ORDER = []  # list of keys in LRU order
-_MAX_MPR_IMG_CACHE = 800
 
 # Encoded MPR slice cache (PNG bytes) for the `mpr_slice_api` endpoint.
 # This avoids the wasteful base64 encode -> base64 decode roundtrip on every request.
 _MPR_PNG_CACHE_LOCK = Lock()
 _MPR_PNG_CACHE = {}  # key -> bytes (PNG)
 _MPR_PNG_CACHE_ORDER = []
-_MAX_MPR_PNG_CACHE = 500
 
-# Safety budget for in-memory MPR volumes (per-request/build). Large CT stacks can otherwise
-# allocate multiple GB and stall/hang the request under ASGI.
-_MAX_MPR_VOLUME_BYTES = 256 * 1024 * 1024  # 256MB
+# ---------------------------------------------------------------------------
+# Cache sizes below are derived from this process's auto-detected memory budget
+# (noctis_pro.resource_budget — cgroup limit / worker count, or host total if no
+# limit is set) instead of fixed constants. On a small cloud instance shared by
+# Postgres/Redis/Celery, a handful of fixed 256MB-800-item caches per gunicorn
+# worker can OOM the box; on a large one, fixed small constants waste headroom
+# that would make MPR/scrolling faster. Resize the instance (or set a Docker
+# `mem_limit`) and these recompute on the next process start — no manual tuning.
+# ---------------------------------------------------------------------------
+
+# Safety budget for a single in-memory MPR volume (per-request/build). Large CT stacks can
+# otherwise allocate multiple GB and stall/hang the request under ASGI. Deliberately capped at
+# a modest ceiling (not scaled up hugely on big boxes) — a single volume this size is already
+# very good quality, and keeping the ceiling modest is what lets the slot count below actually
+# grow on bigger boxes instead of being crushed by dividing a large pool by a huge per-item cap.
+_MAX_MPR_VOLUME_BYTES = _budget_scaled(0.25, min_bytes=64 * 1024 * 1024, max_bytes=320 * 1024 * 1024)
+
+# How many such volumes to keep cached at once, sized from a separate (larger) pool budget so
+# it actually grows on bigger boxes: never less than 1 (a tiny box gets no caching benefit, but
+# stays safe) or more than 8 (diminishing returns; most sessions only view 1-2 series in MPR at
+# a time).
+_MPR_VOLUME_POOL_BYTES = _budget_scaled(0.45, min_bytes=128 * 1024 * 1024)
+_MAX_MPR_CACHE = max(1, min(8, _MPR_VOLUME_POOL_BYTES // _MAX_MPR_VOLUME_BYTES))
+
+# Encoded-slice caches: many small items rather than a few large ones. Budget ~10% of the
+# per-worker memory each, assuming ~150KB per cached slice (base64 data URL / PNG bytes).
+_MAX_MPR_IMG_CACHE = max(50, min(800, _budget_scaled(0.10, min_bytes=1) // (150 * 1024)))
+_MAX_MPR_PNG_CACHE = max(50, min(500, _budget_scaled(0.10, min_bytes=1) // (150 * 1024)))
 
 # Background prewarm so "fast" initial MPR can upgrade to high-quality without user waiting.
 _MPR_PREWARM_LOCK = Lock()
@@ -897,15 +920,15 @@ def _get_mpr_volume_for_series(series):
 @login_required
 def viewer(request):
     """Complete professional DICOM viewer with MPR, 3D reconstruction, and all medical imaging tools."""
-    # Performance: prebuild MPR volumes in the background so reconstruction is fast when the user
-    # clicks MPR/3D, and reopening the same series reuses disk cache instead of re-decoding pixels.
+    # Performance: prebuild a fast-quality MPR volume in the background so reconstruction feels
+    # instant if the user clicks MPR/3D. Deliberately NOT also building 'high' here — that's the
+    # CPU-expensive tier, and most series viewed are never opened in MPR at all; it builds on
+    # first actual MPR/3D demand instead (see mpr_slice_api/generateMPRViews upgrade path).
     try:
         series_id = request.GET.get('series', '') or ''
         sid = int(series_id) if str(series_id).strip().isdigit() else None
         if sid:
-            # Build a fast volume for immediate interaction + a high-quality volume for later upgrades.
             _schedule_mpr_disk_cache_build(sid, quality='fast')
-            _schedule_mpr_disk_cache_build(sid, quality='high')
     except Exception:
         pass
 
@@ -919,14 +942,14 @@ def viewer(request):
 @login_required
 def masterpiece_viewer(request):
     """Masterpiece DICOM viewer - THE MAIN DICOM VIEWER with enhanced features."""
-    # Performance: prebuild MPR volumes in the background so MPR/3D feels instant when the user clicks it.
-    # This is best-effort and should never block page render.
+    # Performance: prebuild a fast-quality MPR volume in the background so MPR/3D feels instant if
+    # the user clicks it. Deliberately not also building 'high' speculatively here — see the same
+    # note in viewer() above; it builds on first actual MPR/3D demand instead.
     try:
         series_id = request.GET.get('series', '') or ''
         sid = int(series_id) if str(series_id).strip().isdigit() else None
         if sid:
             _schedule_mpr_disk_cache_build(sid, quality='fast')
-            _schedule_mpr_disk_cache_build(sid, quality='high')
     except Exception:
         pass
 
@@ -2856,9 +2879,13 @@ def api_dicom_image_display(request, image_id):
 # DICOM files in PACS are write-once.  Caching the decoded float32 pixel
 # array per (image_id, frame_index) avoids repeated file I/O and DICOM
 # decompression when the user changes window/level or MPR re-accesses a slice.
-# 256 entries × ~1 MB each ≈ 256 MB/gunicorn worker — covers a full CT series per worker.
+# Sized to ~20% of this worker's auto-detected memory budget, assuming ~1MB/entry
+# (a typical 512x512 float32 slice) — see noctis_pro.resource_budget.
 # ---------------------------------------------------------------------------
-@lru_cache(maxsize=256)
+_DECODE_CACHE_MAXSIZE = max(16, min(256, _budget_scaled(0.20, min_bytes=1) // (1024 * 1024)))
+
+
+@lru_cache(maxsize=_DECODE_CACHE_MAXSIZE)
 def _decode_dicom_pixels_cached(image_id: int, frame_index: int):
     """
     Decode one DICOM frame, apply rescale, and return
@@ -4514,14 +4541,6 @@ def upload_dicom(request):
                     except Exception as e:
                         print(f"Error processing instance in series {series_uid}: {str(e)}")
                         continue
-
-                # After upload: decode pixels + prebuild MPR volume and write compressed disk cache.
-                # Keep it best-effort and async so uploads return fast.
-                try:
-                    if series_obj and series_obj.id:
-                        _schedule_mpr_disk_cache_build(series_obj.id, quality='high')
-                except Exception:
-                    pass
 
             if processed_files == 0:
                 return JsonResponse({'success': False, 'error': 'No valid DICOM files found'})

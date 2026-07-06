@@ -15,6 +15,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    # Auto-sized from host RAM by deploy-docker.sh (compute_mem_limits); fallback used if this
+    # compose file is invoked directly. Keeps one container from starving the rest on small
+    # instances (e.g. a budget-tier EC2 box) — see noctis_pro/resource_budget.py for the same
+    # idea applied to the app's own in-process caches.
+    mem_limit: ${DB_MEM_LIMIT:-512m}
     restart: unless-stopped
 
   # Connection pooler to prevent Postgres "too many clients already".
@@ -47,6 +52,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    mem_limit: ${PGBOUNCER_MEM_LIMIT:-128m}
     restart: unless-stopped
 
   redis:
@@ -54,6 +60,7 @@ services:
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
     volumes:
       - noctis_redis:/data
+    mem_limit: ${REDIS_MEM_LIMIT:-256m}
     restart: unless-stopped
 
   web:
@@ -97,6 +104,11 @@ services:
     volumes:
       - noctis_media:/data/media
       - noctis_static:/data/staticfiles
+    # Setting this actually lets tools/auto_concurrency.py (Dockerfile CMD) and
+    # noctis_pro/resource_budget.py (in-process image/MPR caches) detect a real per-container
+    # cgroup limit instead of the whole host's RAM, so worker count and cache sizes auto-tune
+    # to this container's real fair share rather than assuming they own the entire instance.
+    mem_limit: ${WEB_MEM_LIMIT:-1024m}
     restart: unless-stopped
 
   celery:
@@ -135,6 +147,7 @@ services:
     volumes:
       - noctis_media:/data/media
       - noctis_static:/data/staticfiles
+    mem_limit: ${CELERY_MEM_LIMIT:-512m}
     restart: unless-stopped
 
   dicom:
@@ -152,6 +165,7 @@ services:
       - "${DICOM_PORT:-11112}:11112"
     volumes:
       - noctis_media:/data/media
+    mem_limit: ${DICOM_MEM_LIMIT:-192m}
     restart: unless-stopped
 
   ngrok:
@@ -169,6 +183,7 @@ services:
     ports:
       # Local ngrok API (optional; helpful for debugging)
       - "${NGROK_WEB_PORT:-4040}:4040"
+    mem_limit: ${NGROK_MEM_LIMIT:-64m}
     restart: unless-stopped
 
 volumes:

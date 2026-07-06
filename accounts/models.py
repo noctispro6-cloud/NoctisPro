@@ -111,6 +111,10 @@ class User(AbstractUser):
         blank=True, default='',
         help_text='Base64-encoded digital signature image (data URL). Auto-applied when signing reports.'
     )
+    theme_color = models.CharField(
+        max_length=7, blank=True, default='',
+        help_text='Personal UI accent colour override (hex, e.g. #00d4ff). Facility users only; overrides the system default for this account.'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

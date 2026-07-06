@@ -867,13 +867,15 @@
             .stats-grid { grid-template-columns: 1fr !important; }
         }
     </style>
-    {% if accent_color_override %}
+    {% with effective_accent=user.theme_color|default:accent_color_override %}
+    {% if effective_accent %}
     <style>
-        /* Admin-configured accent colour — overrides both dark and light defaults */
-        :root { --accent-color: {{ accent_color_override }} !important; }
-        @media (prefers-color-scheme: light) { :root { --accent-color: {{ accent_color_override }} !important; } }
+        /* Personal accent colour (if set) wins over the admin-configured default — overrides both dark and light defaults */
+        :root { --accent-color: {{ effective_accent }} !important; }
+        @media (prefers-color-scheme: light) { :root { --accent-color: {{ effective_accent }} !important; } }
     </style>
     {% endif %}
+    {% endwith %}
     {% block extra_css %}{% endblock %}
 </head>
 
@@ -930,14 +932,8 @@
         </div>
 
         {# ── Desktop action buttons (hidden below 1280 px) ── #}
+        {# NOTE: Profile lives only on the worklist dashboard nav, not here — see dashboard.html #}
         <div class="np-nav-actions-desktop">
-            {% if user.is_authenticated %}
-            <button type="button" class="btn-control"
-                onclick="window.location.href='{% url 'accounts:profile' %}'" title="Profile">
-                <i class="fas fa-user"></i> PROFILE
-            </button>
-            {% endif %}
-
             {% if user.role == 'admin' or caps.manage_settings or caps.manage_permissions or caps.manage_users or caps.manage_facilities or caps.view_logs %}
             <button type="button" class="admin-btn"
                 onclick="window.location.href='{% url 'admin_panel:dashboard' %}'" title="Admin Dashboard">
@@ -992,15 +988,6 @@
                 <i class="fas fa-bars"></i>
             </button>
             <ul class="dropdown-menu dropdown-menu-end np-dropdown-menu">
-                {% if user.is_authenticated %}
-                <li>
-                    <a class="dropdown-item" href="{% url 'accounts:profile' %}">
-                        <i class="fas fa-user me-2"></i>Profile
-                    </a>
-                </li>
-                <li><hr class="dropdown-divider"></li>
-                {% endif %}
-
                 {% if user.role == 'admin' or caps.manage_settings or caps.manage_permissions or caps.manage_users or caps.manage_facilities or caps.view_logs %}
                 <li>
                     <a class="dropdown-item" href="{% url 'admin_panel:dashboard' %}">

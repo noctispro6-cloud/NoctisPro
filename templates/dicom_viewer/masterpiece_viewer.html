@@ -624,6 +624,7 @@
             position: relative;
             overflow: hidden;
         }
+        .canvas-container.drag-over { box-shadow: inset 0 0 0 3px var(--accent-color); background: rgba(0,212,255,0.06); }
 
         #dicomCanvas {
             border: none;
@@ -768,6 +769,7 @@
             overflow: hidden;
         }
         #comparePane.active { display: block; }
+        #comparePane.drag-over { box-shadow: inset 0 0 0 3px var(--accent-color); background: rgba(0,212,255,0.06); }
         #singleView.compare-mode {
             position: absolute; top: 0; left: 0; bottom: 0;
             width: 50%;
@@ -1088,6 +1090,9 @@
             max-height: 100%;
             object-fit: contain;
             display: block;
+            /* Let the parent .series-item's own draggable/dragstart handle drag-to-compare;
+               without this the browser drags the <img> itself instead of the series row. */
+            -webkit-user-drag: none;
         }
         .series-thumb-placeholder {
             color: #333;
@@ -1820,6 +1825,7 @@
                             <div class="nav-dropdown-item" onclick="applyPreset('soft')"><i class="fas fa-circle"></i>Soft Tissue</div>
                             <div class="nav-dropdown-item" onclick="applyPreset('brain')"><i class="fas fa-brain"></i>Brain</div>
                             <div class="nav-dropdown-item" onclick="applyPreset('liver')"><i class="fas fa-circle"></i>Liver</div>
+                            <div class="nav-dropdown-item" onclick="applyPreset('xray')"><i class="fas fa-x-ray"></i>X-Ray</div>
                             <div class="nav-dropdown-item" onclick="applyPreset('default')"><i class="fas fa-undo"></i>Reset W/L</div>
                         </div>
                     </div>
@@ -2418,12 +2424,14 @@
         let smoothSurface = true;
         let autoRotate = false;
 
-        // Window presets
+        // Window presets (CT HU-based, plus one wide preset for plain X-ray/CR/DX display)
         const windowPresets = {
             lung: { ww: 1500, wl: -600 },
             bone: { ww: 2000, wl: 300 },
             soft: { ww: 400, wl: 40 },
-            brain: { ww: 100, wl: 50 }
+            brain: { ww: 100, wl: 50 },
+            liver: { ww: 150, wl: 60 },
+            xray: { ww: 2500, wl: 1200 }
         };
 
         function _normalizePixelSpacing(ps) {
@@ -3316,13 +3324,15 @@
                     }
                     // ─────────────────────────────────────────────────────────────
 
-                    // Auto-load the "best" series (largest diagnostic stack) so local uploads
-                    // look identical to worklist-opened studies. First series is often a low-res scout/localizer.
+                    // Auto-load the actual first series, in the order the server returns them
+                    // (by series_number) — e.g. a CT scanogram/scout genuinely is series #1 and
+                    // should open first, matching how the study is ordered. Only skip over a
+                    // series if it has zero images (in-flight upload/corrupted metadata), since
+                    // opening an empty series would just show a blank viewer.
                     if (data.series.length > 0) {
                         const withImages = (data.series || []).filter(s => Number(s && s.image_count) > 0);
                         const candidateList = withImages.length ? withImages : data.series;
-                        const best = pickBestSeriesForDisplay(candidateList);
-                        await loadSeries((best && best.id) ? best.id : candidateList[0].id);
+                        await loadSeries(candidateList[0].id);
                     } else {
                         showToast('No images found for this study', 'warning');
                     }
@@ -3337,49 +3347,6 @@
                 console.error('Error loading specific study:', error);
                 showToast('Failed to load study', 'error');
                 showLoading(false);
-            }
-        }
-
-        function pickBestSeriesForDisplay(seriesList) {
-            try {
-                const list = Array.isArray(seriesList) ? seriesList : [];
-                if (list.length === 0) return null;
-
-                const badWords = [
-                    'LOCALIZER', 'SCOUT', 'SURVEY', 'TOPO', 'TOP0', 'SCANOGRAM',
-                    'MPR', '3D', 'VRT', 'VR', 'DERIVED', 'SECONDARY', 'TEST', 'QA'
-                ];
-
-                const score = (s) => {
-                    const count = Number(s && s.image_count) || 0;
-                    const modality = String((s && s.modality) || '').toUpperCase();
-                    const desc = String((s && (s.description || s.series_description)) || '').toUpperCase();
-
-                    // Never auto-select an empty series (common during in-flight uploads or corrupted metadata).
-                    if (count <= 0) return -1e12;
-
-                    // Base on stack size (main diagnostic series is usually largest)
-                    let v = count;
-
-                    // Prefer cross-sectional modalities for default display
-                    if (modality === 'CT') v += 5000;
-                    else if (modality === 'MR') v += 4000;
-                    else if (modality === 'PT') v += 2000;
-                    else if (modality === 'NM') v += 1500;
-
-                    // Penalize obvious non-diagnostic / planning series
-                    if (badWords.some(w => desc.includes(w))) v -= 6000;
-
-                    // Prefer thicker stacks over single images (e.g., avoid thumbnails)
-                    if (count <= 1) v -= 3000;
-                    if (count < 10) v -= 800;
-
-                    return v;
-                };
-
-                return list.slice().sort((a, b) => score(b) - score(a))[0] || list[0];
-            } catch (e) {
-                return (Array.isArray(seriesList) && seriesList[0]) ? seriesList[0] : null;
             }
         }
 
@@ -3401,16 +3368,6 @@
             if (prevBtn) prevBtn.disabled = !hasList;
             if (nextBtn) nextBtn.disabled = !hasList;
 
-            function _thumbWindowQs(mod) {
-                switch ((mod || '').toUpperCase()) {
-                    case 'DX': case 'CR': case 'DR': return 'window_width=2500&window_level=1200';
-                    case 'MG':            return 'window_width=4000&window_level=2000';
-                    case 'XA': case 'RF': return 'window_width=2000&window_level=1000';
-                    case 'MR':            return 'window_width=600&window_level=300';
-                    default:              return 'window_width=400&window_level=40';
-                }
-            }
-
             series.forEach((s, index) => {
                 const item = document.createElement('div');
                 item.className = 'series-item';
@@ -3418,9 +3375,21 @@
                 if (index === 0) item.classList.add('active');
 
                 const isLocal = String(s.id).startsWith('local_');
+                // Render the actual middle IMAGE directly (same single-image pipeline the main
+                // viewer uses, with the same modality-aware default windowing) instead of an MPR
+                // axial reslice — MPR volume-building is the wrong tool for a thumbnail (slow, and
+                // for single-frame modalities like DX/CR there's no real "volume" to reslice from,
+                // which produced thumbnails that didn't match the actual series display).
+                const _thumbImages = Array.isArray(s.images) ? s.images : null;
+                const _thumbImgId = _thumbImages && _thumbImages.length
+                    ? _thumbImages[Math.floor(_thumbImages.length / 2)].id
+                    : null;
                 const midSlice = Math.max(0, Math.floor((Number(s.image_count) || 1) / 2));
-                const thumbWqs = _thumbWindowQs(s.modality);
-                const thumbUrl = isLocal ? null : `/dicom-viewer/api/mpr-slice/${encodeURIComponent(s.id)}/axial/${midSlice}/?${thumbWqs}&inverted=0&quality=fast`;
+                const thumbUrl = isLocal
+                    ? null
+                    : (_thumbImgId != null
+                        ? `/dicom-viewer/api/image/${encodeURIComponent(_thumbImgId)}/render.png`
+                        : `/dicom-viewer/api/mpr-slice/${encodeURIComponent(s.id)}/axial/${midSlice}/?window_width=400&window_level=40&inverted=0&quality=fast`);
                 const desc = String(s.description || '').replace(/</g, '&lt;') || '&mdash;';
                 item.innerHTML = `
                     <div class="series-thumb-wrap">
@@ -3447,6 +3416,18 @@
                     }
                     loadSeries(s.id);
                 });
+
+                // Drag this series onto the compare pane to load it there directly — e.g. drag
+                // a lateral view onto compare while an AP view is the main display, or drag any
+                // series to start a comparison without opening the picker modal first.
+                if (!isLocal) {
+                    item.draggable = true;
+                    item.addEventListener('dragstart', (e) => {
+                        e.dataTransfer.setData('application/x-noctis-series-id', String(s.id));
+                        e.dataTransfer.setData('text/plain', String(s.id));
+                        e.dataTransfer.effectAllowed = 'copy';
+                    });
+                }
 
                 container.appendChild(item);
             });
@@ -3495,6 +3476,7 @@
         }
 
         async function loadSeries(seriesId) {
+            const seriesSeq = ++_seriesLoadSeq;
             try {
                 showLoading(true);
                 _resetServerRendered();
@@ -3518,6 +3500,10 @@
                 }
                 const response = await fetch(`/dicom-viewer/series/${seriesId}/images/`);
                 const data = await response.json();
+
+                // A newer loadSeries() call started while we were fetching — discard this stale
+                // response so it can't overwrite the newer series' data or paint over its first image.
+                if (seriesSeq !== _seriesLoadSeq) return;
 
                 currentSeries = data && data.series ? data.series : null;
                 imageData = Array.isArray(data && data.images) ? data.images : [];
@@ -3623,6 +3609,7 @@
         const _imagePayloadCacheOrder = []; // LRU order of imageIds
         let _imageLoadAbortController = null;
         let _imageLoadSeq = 0;
+        let _seriesLoadSeq = 0; // guards against a slower, superseded loadSeries() call overwriting a newer one
         let _scheduledLoadRaf = null;
         let _scheduledLoadIndex = null;
         let _scheduledLoadOpts = null;
@@ -4527,16 +4514,28 @@
 
             if (_frameCacheKey !== cacheKey) {
                 try {
-                    const pixels = new Uint8ClampedArray(imageData.pixel_data.length * 4);
-                    for (let i = 0; i < imageData.pixel_data.length; i++) {
-                        let value = imageData.pixel_data[i];
-                        value = applyWindowing(value, windowWidth, windowLevel);
-                        if (shouldInvert) value = 255 - value;
-                        value = _gammaLUT[value];
+                    // PERF: inline the windowing math instead of calling applyWindowing() per pixel.
+                    // Same formula as applyWindowing(), just with the ww/wl-derived constants hoisted
+                    // out of the loop — this is the hot path on every slice render/scroll step, and a
+                    // per-pixel function call + repeated Math.max/Number conversions was the dominant
+                    // cost for large (e.g. 512x512+) frames.
+                    const pd = imageData.pixel_data;
+                    const _w = Math.max(1, Number(windowWidth));
+                    const _minVal = Number(windowLevel) - _w / 2;
+                    const _scale = 255 / _w;
+                    const gammaLUT = _gammaLUT;
+                    const pixels = new Uint8ClampedArray(pd.length * 4);
+                    for (let i = 0; i < pd.length; i++) {
+                        let v = (pd[i] - _minVal) * _scale;
+                        if (v <= 0) v = 0;
+                        else if (v >= 255) v = 255;
+                        else v = (v + 0.5) | 0;
+                        if (shouldInvert) v = 255 - v;
+                        v = gammaLUT[v];
                         const j = i * 4;
-                        pixels[j] = value;
-                        pixels[j + 1] = value;
-                        pixels[j + 2] = value;
+                        pixels[j] = v;
+                        pixels[j + 1] = v;
+                        pixels[j + 2] = v;
                         pixels[j + 3] = 255;
                     }
                     const imgData = new ImageData(pixels, imgW, imgH);
@@ -5238,6 +5237,30 @@
         }
 
         function applyPreset(preset) {
+            if (preset === 'default') {
+                // Re-derive this image's own DICOM/modality-appropriate window/level rather than
+                // a hardcoded value — windowPresets has no 'default' entry by design.
+                windowWidth = 400;
+                windowLevel = 40;
+                try {
+                    const _curEntry = imageData && imageData[currentImageIndex];
+                    const _cachedPayload = _curEntry ? _cacheGetPayload(_curEntry.id) : null;
+                    if (_cachedPayload && Number.isFinite(Number(_cachedPayload.window_width)) && Number.isFinite(Number(_cachedPayload.window_center))) {
+                        windowWidth = Number(_cachedPayload.window_width);
+                        windowLevel = Number(_cachedPayload.window_center);
+                    }
+                } catch (e) { }
+                updateSliders();
+                windowingLockedByUser = false;
+                try { _clearSeriesWindowing(currentSeries && currentSeries.id); } catch (e) { }
+                if (viewMode === 'mpr') {
+                    if (mipMode) { generateMIP(); } else { _fetchAndRenderAllMPRPlanes(); }
+                } else {
+                    redrawCurrentImage();
+                }
+                showToast('Window/level reset to default', 'success');
+                return;
+            }
             if (windowPresets[preset]) {
                 windowWidth = windowPresets[preset].ww;
                 windowLevel = windowPresets[preset].wl;
@@ -5321,9 +5344,19 @@
             flipH = false;
             flipV = false;
 
-            // Reset window/level to app defaults
+            // Reset window/level to this image's own DICOM-derived default (modality-aware —
+            // the backend already computes appropriate values per modality/VOI LUT), falling
+            // back to the CT soft-tissue default only if nothing is cached yet.
             windowWidth = 400;
             windowLevel = 40;
+            try {
+                const _curEntry = imageData && imageData[currentImageIndex];
+                const _cachedPayload = _curEntry ? _cacheGetPayload(_curEntry.id) : null;
+                if (_cachedPayload && Number.isFinite(Number(_cachedPayload.window_width)) && Number.isFinite(Number(_cachedPayload.window_center))) {
+                    windowWidth = Number(_cachedPayload.window_width);
+                    windowLevel = Number(_cachedPayload.window_center);
+                }
+            } catch (e) { }
             currentImageStats = null;
             try { updateSliders(); } catch (e) { }
             try { updateZoomSlider(); } catch (e) { }
@@ -10389,6 +10422,16 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
         let _cmpPayloads = new Map(); // id -> payload
         let _cmpScrollbar = null, _cmpThumb = null;
 
+        // Measurement/annotation state — independent of the main viewer's `measurements`/
+        // `annotations` arrays so comparing a prior doesn't disturb the primary series' overlays.
+        let _cmpMeasurements = [];
+        let _cmpAnnotations = [];
+        let _cmpCurrentMeasurement = null;
+        let _cmpRoiDraft = null;
+        // Cached transform of the last drawn frame so mouse events can map canvas<->image pixels
+        // (compare has no rotation/flip, so this is a plain scale+offset, unlike the main canvas).
+        let _cmpDrawW = 0, _cmpDrawH = 0, _cmpBaseScale = 1, _cmpDrawX = 0, _cmpDrawY = 0;
+
         function _cmpUpdateThumb() {
             const sb = document.getElementById('cmpSliceScrollbar');
             const th = document.getElementById('cmpSliceScrollbarThumb');
@@ -10415,6 +10458,339 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             const dx = (cv.width  - dw * scale) / 2 + _cmpPanX;
             const dy = (cv.height - dh * scale) / 2 + _cmpPanY;
             ctx.drawImage(drawable, dx, dy, dw * scale, dh * scale);
+
+            // Cache the transform so mouse handlers can map canvas<->image pixel coordinates.
+            _cmpDrawW = dw; _cmpDrawH = dh; _cmpBaseScale = baseScale; _cmpDrawX = dx; _cmpDrawY = dy;
+
+            _cmpDrawMeasurements(ctx);
+            _cmpDrawAnnotations(ctx);
+            _cmpDrawCurrentMeasurement(ctx);
+        }
+
+        function _cmpGetPixelSpacing() {
+            return _normalizePixelSpacing(_cmpMeta && _cmpMeta.pixel_spacing);
+        }
+
+        function _cmpCanvasPointToImagePx(x, y) {
+            const scale = _cmpBaseScale * _cmpZoom;
+            if (!scale) return null;
+            return { x: (x - _cmpDrawX) / scale, y: (y - _cmpDrawY) / scale };
+        }
+
+        function _cmpImagePxToCanvasPoint(pt) {
+            if (!pt) return null;
+            const scale = _cmpBaseScale * _cmpZoom;
+            return { x: _cmpDrawX + pt.x * scale, y: _cmpDrawY + pt.y * scale };
+        }
+
+        function _cmpCurrentImageId() {
+            const e = _cmpImageData[_cmpIndex];
+            return e ? e.id : null;
+        }
+
+        function _cmpCalculateDistance(m) {
+            const deltaX = m.endX - m.startX, deltaY = m.endY - m.startY;
+            const pixelDistance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+            const spacing = _cmpGetPixelSpacing();
+            if (spacing) {
+                const dxMm = deltaX * spacing.col, dyMm = deltaY * spacing.row;
+                const mm = Math.sqrt(dxMm * dxMm + dyMm * dyMm);
+                return { pixels: Math.round(pixelDistance), mm: Math.round(mm * 100) / 100, text: formatLengthFromMm(mm).text };
+            }
+            return { pixels: Math.round(pixelDistance), mm: null, text: `${Math.round(pixelDistance)} px` };
+        }
+
+        function _cmpCalculateArea(points) {
+            const px2 = calculatePolygonAreaPx2(points);
+            const spacing = _cmpGetPixelSpacing();
+            if (spacing) {
+                const mm2 = px2 * spacing.row * spacing.col;
+                return { px2: Math.round(px2 * 100) / 100, mm2: Math.round(mm2 * 100) / 100, text: formatAreaFromMm2(mm2).text };
+            }
+            return { px2: Math.round(px2 * 100) / 100, mm2: null, text: `${Math.round(px2 * 100) / 100} px²` };
+        }
+
+        function _cmpStartMeasurement(x, y) {
+            const p = _cmpCanvasPointToImagePx(x, y);
+            if (!p) return;
+            _cmpCurrentMeasurement = { type: 'distance', startX: p.x, startY: p.y, endX: p.x, endY: p.y };
+        }
+        function _cmpStartAngleMeasurement(x, y) {
+            const p = _cmpCanvasPointToImagePx(x, y);
+            if (!p) return;
+            _cmpCurrentMeasurement = { type: 'angle', points: [{ x: p.x, y: p.y }] };
+        }
+        function _cmpStartAreaMeasurement(x, y) {
+            const p = _cmpCanvasPointToImagePx(x, y);
+            if (!p) return;
+            _cmpCurrentMeasurement = { type: 'area', points: [{ x: p.x, y: p.y }] };
+        }
+        function _cmpUpdateMeasurement(x, y) {
+            if (!_cmpCurrentMeasurement) return;
+            const p = _cmpCanvasPointToImagePx(x, y);
+            if (!p) return;
+            if (_cmpCurrentMeasurement.type === 'distance') {
+                _cmpCurrentMeasurement.endX = p.x;
+                _cmpCurrentMeasurement.endY = p.y;
+            } else if (_cmpCurrentMeasurement.type === 'angle' || _cmpCurrentMeasurement.type === 'area') {
+                if (_cmpCurrentMeasurement.points.length < 3) _cmpCurrentMeasurement.points.push({ x: p.x, y: p.y });
+                else _cmpCurrentMeasurement.points[_cmpCurrentMeasurement.points.length - 1] = { x: p.x, y: p.y };
+            }
+            _cmpRedraw();
+        }
+
+        async function _cmpSaveMeasurement(measurement) {
+            // The backend only accepts length/area/angle/cobb_angle — ROI has no persisted type
+            // here (matches how the main viewer's ROI tool also only keeps stats in-session).
+            const typeMap = { distance: 'length', angle: 'angle', area: 'area' };
+            const backendType = typeMap[measurement.type];
+            if (!backendType || measurement.image_id == null) return;
+            try {
+                await fetch('/dicom-viewer/measurements/save/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                    body: JSON.stringify({
+                        image_id: measurement.image_id,
+                        measurement_type: backendType,
+                        points: JSON.stringify(measurement),
+                        value: measurement.value,
+                        unit: measurement.unit,
+                    })
+                });
+            } catch (e) {
+                console.error('Error saving compare measurement:', e);
+            }
+        }
+
+        function _cmpFinalizeMeasurement() {
+            if (!_cmpCurrentMeasurement) return;
+            const finalized = { ..._cmpCurrentMeasurement };
+            if (finalized.type === 'distance') {
+                const d = _cmpCalculateDistance(finalized);
+                finalized.value = d.mm != null ? d.mm : d.pixels;
+                finalized.unit = d.mm != null ? 'mm' : 'px';
+            } else if (finalized.type === 'angle' && finalized.points && finalized.points.length >= 3) {
+                const angle = calculateAngle(finalized.points[0], finalized.points[1], finalized.points[2]);
+                finalized.value = Math.round(angle.degrees * 10) / 10;
+                finalized.unit = 'deg';
+            } else if (finalized.type === 'area' && finalized.points && finalized.points.length >= 3) {
+                const a = _cmpCalculateArea(finalized.points);
+                finalized.value = a.mm2 != null ? a.mm2 : a.px2;
+                finalized.unit = a.mm2 != null ? 'mm2' : 'px2';
+            }
+            finalized.image_id = _cmpCurrentImageId();
+            _cmpMeasurements.push(finalized);
+            _cmpSaveMeasurement(finalized);
+            _cmpCurrentMeasurement = null;
+            // Return to windowing after each measurement, matching the main canvas's convention.
+            activeTool = 'windowing';
+            try { refreshToolButtonStates(activeTool); } catch (e) { }
+            _cmpRedraw();
+            showToast('Measurement saved', 'success');
+        }
+
+        async function _cmpFinalizeRoi() {
+            if (!_cmpRoiDraft) return;
+            const draft = _cmpRoiDraft;
+            _cmpRoiDraft = null;
+            try {
+                const start = draft.start, end = draft.end;
+                const cx = (start.x + end.x) / 2, cy = (start.y + end.y) / 2;
+                const rx = Math.max(1, Math.abs(end.x - start.x) / 2);
+                const ry = Math.max(1, Math.abs(end.y - start.y) / 2);
+                const imageId = _cmpCurrentImageId();
+                if (imageId == null) throw new Error('No image');
+                // Reuse the same server-side ROI-stats endpoint the main viewer falls back to —
+                // the compare pane only has a rendered PNG, not the raw pixel payload, so this is
+                // the only source of accurate (HU/pixel-value) stats here.
+                const url = `/dicom-viewer/api/hu/?mode=series&image_id=${encodeURIComponent(imageId)}&shape=ellipse&cx=${encodeURIComponent(Math.round(cx))}&cy=${encodeURIComponent(Math.round(cy))}&rx=${encodeURIComponent(Math.round(rx))}&ry=${encodeURIComponent(Math.round(ry))}`;
+                const resp = await fetch(url, { credentials: 'same-origin' });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error((data && (data.error || data.message)) || `HTTP ${resp.status}`);
+                const stats = data && data.stats ? data.stats : null;
+                if (!stats) throw new Error('Empty ROI');
+                const measurement = { type: 'roi', image_id: imageId, cx, cy, rx, ry, stats, createdAt: Date.now() };
+                _cmpMeasurements.push(measurement);
+                showToast(`ROI mean: ${stats.mean.toFixed(1)} HU`, 'success');
+            } catch (e) {
+                showToast(`ROI failed: ${(e && e.message) || e}`, 'error');
+            } finally {
+                activeTool = 'windowing';
+                try { refreshToolButtonStates(activeTool); } catch (e) { }
+                _cmpRedraw();
+            }
+        }
+
+        function _cmpAddAnnotation(x, y) {
+            const text = prompt('Enter annotation text:');
+            if (!text) return;
+            const p = _cmpCanvasPointToImagePx(x, y);
+            if (!p) return;
+            const annotation = { image_id: _cmpCurrentImageId(), x: p.x, y: p.y, text, color: '#ffff00' };
+            _cmpAnnotations.push(annotation);
+            _cmpRedraw();
+            showToast('Annotation added', 'success');
+        }
+
+        function _cmpFindMeasurementAtPoint(x, y) {
+            for (let i = _cmpMeasurements.length - 1; i >= 0; i--) {
+                const m = _cmpMeasurements[i];
+                if (m.bounds && x >= m.bounds.x1 && x <= m.bounds.x2 && y >= m.bounds.y1 && y <= m.bounds.y2) return i;
+            }
+            return -1;
+        }
+
+        function _cmpDeleteMeasurement(index) {
+            if (index < 0 || index >= _cmpMeasurements.length) return;
+            const m = _cmpMeasurements[index];
+            _cmpMeasurements.splice(index, 1);
+            _cmpRedraw();
+            showToast(`${m.type} measurement deleted`, 'success');
+            _cmpHideContextMenu();
+        }
+
+        function _cmpShowContextMenu(clientX, clientY, index) {
+            _cmpHideContextMenu();
+            const menu = document.createElement('div');
+            menu.id = 'cmpMeasurementContextMenu';
+            menu.style.cssText = `position:fixed;left:${clientX}px;top:${clientY}px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:10000;min-width:150px;padding:5px 0;font-size:14px;`;
+            const del = document.createElement('div');
+            del.style.cssText = 'padding:8px 16px;cursor:pointer;color:var(--danger-color);';
+            del.innerHTML = '<i class="fas fa-trash"></i> Delete Measurement';
+            del.addEventListener('mouseenter', () => { del.style.background = 'rgba(255,68,68,0.1)'; });
+            del.addEventListener('mouseleave', () => { del.style.background = 'transparent'; });
+            del.addEventListener('click', () => _cmpDeleteMeasurement(index));
+            menu.appendChild(del);
+            document.body.appendChild(menu);
+            setTimeout(() => { document.addEventListener('click', _cmpHideContextMenu, { once: true }); }, 100);
+        }
+
+        function _cmpHideContextMenu() {
+            const m = document.getElementById('cmpMeasurementContextMenu');
+            if (m) m.remove();
+        }
+
+        function _cmpDrawMeasurements(ctx) {
+            if (!_cmpMeasurements.length) return;
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 2;
+            ctx.fillStyle = '#ff0000';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            const curImageId = _cmpCurrentImageId();
+
+            _cmpMeasurements.forEach((measurement, index) => {
+                if (curImageId != null && measurement.image_id != null && String(measurement.image_id) !== String(curImageId)) return;
+
+                if (measurement.type === 'distance') {
+                    const a = _cmpImagePxToCanvasPoint({ x: measurement.startX, y: measurement.startY });
+                    const b = _cmpImagePxToCanvasPoint({ x: measurement.endX, y: measurement.endY });
+                    if (!a || !b) return;
+                    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+                    ctx.fillStyle = '#ff0000';
+                    ctx.beginPath(); ctx.arc(a.x, a.y, 4, 0, 2 * Math.PI); ctx.fill();
+                    ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, 2 * Math.PI); ctx.fill();
+                    const distance = _cmpCalculateDistance(measurement);
+                    const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+                    ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(midX - 30, midY - 20, 60, 16);
+                    ctx.fillStyle = '#ffff00'; ctx.fillText(distance.text, midX, midY - 8);
+                    measurement.bounds = { x1: Math.min(a.x, b.x) - 10, y1: Math.min(a.y, b.y) - 10, x2: Math.max(a.x, b.x) + 10, y2: Math.max(a.y, b.y) + 10, index };
+                } else if (measurement.type === 'angle' && measurement.points && measurement.points.length >= 3) {
+                    const points = measurement.points.map(p => _cmpImagePxToCanvasPoint(p)).filter(Boolean);
+                    if (points.length < 3) return;
+                    ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y); ctx.lineTo(points[1].x, points[1].y); ctx.lineTo(points[2].x, points[2].y); ctx.stroke();
+                    const angle = calculateAngle(points[0], points[1], points[2]);
+                    ctx.beginPath(); ctx.arc(points[1].x, points[1].y, 20, 0, angle.radians); ctx.stroke();
+                    ctx.fillStyle = '#ffff00'; ctx.fillText(`${angle.degrees.toFixed(1)}°`, points[1].x + 25, points[1].y - 10);
+                    measurement.bounds = { x1: Math.min(...points.map(p => p.x)) - 10, y1: Math.min(...points.map(p => p.y)) - 10, x2: Math.max(...points.map(p => p.x)) + 10, y2: Math.max(...points.map(p => p.y)) + 10, index };
+                } else if (measurement.type === 'area' && measurement.points && measurement.points.length >= 3) {
+                    const points = measurement.points.map(p => _cmpImagePxToCanvasPoint(p)).filter(Boolean);
+                    if (points.length < 3) return;
+                    ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+                    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+                    ctx.closePath(); ctx.stroke();
+                    ctx.fillStyle = 'rgba(255,0,0,0.2)'; ctx.fill();
+                    const area = _cmpCalculateArea(points);
+                    const cx2 = points.reduce((s, p) => s + p.x, 0) / points.length;
+                    const cy2 = points.reduce((s, p) => s + p.y, 0) / points.length;
+                    ctx.fillStyle = '#ffff00'; ctx.fillText(area.text, cx2, cy2);
+                    measurement.bounds = { x1: Math.min(...points.map(p => p.x)) - 10, y1: Math.min(...points.map(p => p.y)) - 10, x2: Math.max(...points.map(p => p.x)) + 10, y2: Math.max(...points.map(p => p.y)) + 10, index };
+                } else if (measurement.type === 'roi') {
+                    const c0 = _cmpImagePxToCanvasPoint({ x: measurement.cx, y: measurement.cy });
+                    const cxPt = _cmpImagePxToCanvasPoint({ x: measurement.cx + measurement.rx, y: measurement.cy });
+                    const cyPt = _cmpImagePxToCanvasPoint({ x: measurement.cx, y: measurement.cy + measurement.ry });
+                    if (!c0 || !cxPt || !cyPt) return;
+                    const rX = Math.hypot(cxPt.x - c0.x, cxPt.y - c0.y);
+                    const rY = Math.hypot(cyPt.x - c0.x, cyPt.y - c0.y);
+                    const ang = Math.atan2(cxPt.y - c0.y, cxPt.x - c0.x);
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(0, 212, 255, 0.95)'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.ellipse(c0.x, c0.y, rX, rY, ang, 0, Math.PI * 2); ctx.stroke();
+                    if (measurement.stats && typeof measurement.stats.mean === 'number') {
+                        ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(c0.x - 46, c0.y - rY - 24, 92, 16);
+                        ctx.fillStyle = '#ffff00'; ctx.fillText(`${measurement.stats.mean.toFixed(1)} HU`, c0.x, c0.y - rY - 12);
+                    }
+                    ctx.restore();
+                    measurement.bounds = { x1: c0.x - rX - 10, y1: c0.y - rY - 30, x2: c0.x + rX + 10, y2: c0.y + rY + 10, index };
+                }
+            });
+        }
+
+        function _cmpDrawCurrentMeasurement(ctx) {
+            if (_cmpRoiDraft) {
+                const start = _cmpRoiDraft.start, end = _cmpRoiDraft.end;
+                const cx = (start.x + end.x) / 2, cy = (start.y + end.y) / 2;
+                const c0 = _cmpImagePxToCanvasPoint({ x: cx, y: cy });
+                const cxPt = _cmpImagePxToCanvasPoint({ x: end.x, y: cy });
+                const cyPt = _cmpImagePxToCanvasPoint({ x: cx, y: end.y });
+                if (!c0 || !cxPt || !cyPt) return;
+                const rX = Math.hypot(cxPt.x - c0.x, cxPt.y - c0.y);
+                const rY = Math.hypot(cyPt.x - c0.x, cyPt.y - c0.y);
+                ctx.save();
+                ctx.strokeStyle = 'rgba(0, 212, 255, 0.7)'; ctx.setLineDash([4, 3]); ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.ellipse(c0.x, c0.y, rX, rY, 0, 0, Math.PI * 2); ctx.stroke();
+                ctx.restore();
+                return;
+            }
+            if (!_cmpCurrentMeasurement) return;
+            const m = _cmpCurrentMeasurement;
+            ctx.save();
+            ctx.strokeStyle = '#00d4ff'; ctx.lineWidth = 2; ctx.fillStyle = '#00d4ff';
+            if (m.type === 'distance') {
+                const a = _cmpImagePxToCanvasPoint({ x: m.startX, y: m.startY });
+                const b = _cmpImagePxToCanvasPoint({ x: m.endX, y: m.endY });
+                if (a && b) {
+                    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+                    const d = _cmpCalculateDistance(m);
+                    ctx.fillStyle = '#00d4ff'; ctx.font = '14px Arial'; ctx.textAlign = 'center';
+                    ctx.fillText(d.text, (a.x + b.x) / 2, (a.y + b.y) / 2 - 8);
+                }
+            } else if ((m.type === 'angle' || m.type === 'area') && m.points && m.points.length >= 2) {
+                const points = m.points.map(p => _cmpImagePxToCanvasPoint(p)).filter(Boolean);
+                ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+                for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        function _cmpDrawAnnotations(ctx) {
+            if (!_cmpAnnotations.length) return;
+            const curImageId = _cmpCurrentImageId();
+            ctx.save();
+            ctx.font = '13px Arial';
+            _cmpAnnotations.forEach((a) => {
+                if (curImageId != null && a.image_id != null && String(a.image_id) !== String(curImageId)) return;
+                const p = _cmpImagePxToCanvasPoint({ x: a.x, y: a.y });
+                if (!p) return;
+                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                const w = ctx.measureText(a.text).width + 12;
+                ctx.fillRect(p.x - 4, p.y - 16, w, 20);
+                ctx.fillStyle = a.color || '#ffff00';
+                ctx.fillText(a.text, p.x, p.y);
+                ctx.beginPath(); ctx.arc(p.x - 4, p.y - 4, 3, 0, 2 * Math.PI); ctx.fill();
+            });
+            ctx.restore();
         }
 
         function _cmpRenderSlice(idx) {
@@ -10427,11 +10803,12 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             const entry = _cmpImageData[idx];
             if (!entry) return;
 
-            // Fetch + render as PNG — use the compare series' own WW/WL when known,
-            // otherwise fall back to the main viewer's current windowing.
+            // Fetch + render as PNG — use the compare series' own WW/WL/inverted when known
+            // (a MONOCHROME1 prior needs its own inversion regardless of the main viewer's
+            // current invert toggle), otherwise fall back to the main viewer's current state.
             const ww  = _cmpWW || windowWidth  || 400;
             const wl  = _cmpWL || windowLevel  || 40;
-            const inv = inverted ? 'true' : 'false';
+            const inv = (_cmpInverted != null ? _cmpInverted : inverted) ? 'true' : 'false';
 
             // Update overlays
             const tl = document.getElementById('cmpOverlayTL');
@@ -10482,8 +10859,8 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             _cmpApplyDraw(_cmpLastBitmap, cv, cv.getContext('2d'));
         }
 
-        // Per-compare-series WW/WL (auto-detected from series metadata, not locked to main viewer)
-        let _cmpWW = null, _cmpWL = null;
+        // Per-compare-series WW/WL/inverted (auto-detected from series metadata, not locked to main viewer)
+        let _cmpWW = null, _cmpWL = null, _cmpInverted = null;
         // Compare pane independent zoom / pan / cached bitmap
         let _cmpZoom = 1, _cmpPanX = 0, _cmpPanY = 0;
         let _cmpLastBitmap = null; // cached drawable for instant pan/zoom redraws
@@ -10543,17 +10920,53 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
             // Compare canvas mouse: left-drag → pan, right-drag → windowing
             const cmpCv = document.getElementById('compareCanvas');
             if (cmpCv) {
+                // Left-click behavior mirrors the main canvas: it dispatches on the shared
+                // `activeTool` (windowing/pan/zoom/measure/angle/area/roi/annotate) instead of a
+                // fixed left=pan mapping, so switching tools in the main toolbar also changes what
+                // clicking in the compare pane does. Right-click is reserved for the measurement
+                // context menu, matching the main canvas (no more right-click-always-windows).
                 let _cmpDrag = null; // { mode, startX, startY, startPanX, startPanY, startWW, startWL }
                 let _cmpWinDebounce = null;
+                let _cmpIsDragging = false;
 
                 cmpCv.addEventListener('mousedown', function (e) {
                     if (!_cmpActive || !_cmpImageData.length) return;
+                    const pxy = _canvasClientToCanvasPx(cmpCv, e.clientX, e.clientY);
+
+                    if (e.button === 2) {
+                        e.preventDefault();
+                        const idx = _cmpFindMeasurementAtPoint(pxy.x, pxy.y);
+                        if (idx !== -1) _cmpShowContextMenu(e.clientX, e.clientY, idx);
+                        else _cmpHideContextMenu();
+                        return;
+                    }
+                    if (e.button !== 0) return;
                     e.preventDefault();
-                    if (e.button === 0) {
-                        _cmpDrag = { mode: 'pan', startX: e.clientX, startY: e.clientY,
-                                     startPanX: _cmpPanX, startPanY: _cmpPanY };
+                    _cmpIsDragging = true;
+
+                    if (activeTool === 'roi') {
+                        const p = _cmpCanvasPointToImagePx(pxy.x, pxy.y);
+                        if (!p) return;
+                        _cmpRoiDraft = { start: { x: p.x, y: p.y }, end: { x: p.x, y: p.y } };
+                        _cmpRedraw();
+                    } else if (activeTool === 'measure') {
+                        _cmpStartMeasurement(pxy.x, pxy.y);
+                    } else if (activeTool === 'angle' || activeTool === 'cobb_angle') {
+                        _cmpStartAngleMeasurement(pxy.x, pxy.y);
+                    } else if (activeTool === 'area') {
+                        _cmpStartAreaMeasurement(pxy.x, pxy.y);
+                    } else if (activeTool === 'annotate') {
+                        _cmpAddAnnotation(pxy.x, pxy.y);
+                        _cmpIsDragging = false;
+                    } else if (activeTool === 'pan') {
+                        _cmpDrag = { mode: 'pan', startX: e.clientX, startY: e.clientY, startPanX: _cmpPanX, startPanY: _cmpPanY };
                         cmpCv.style.cursor = 'grabbing';
-                    } else if (e.button === 2) {
+                    } else if (activeTool === 'zoom') {
+                        _cmpDrag = { mode: 'zoom', startX: e.clientX, startY: e.clientY, startZoom: _cmpZoom };
+                        cmpCv.style.cursor = 'ns-resize';
+                    } else {
+                        // 'windowing' (default tool) and any other/unknown tool fall back to windowing,
+                        // same as the main canvas treats an unrecognized activeTool.
                         _cmpDrag = { mode: 'window', startX: e.clientX, startY: e.clientY,
                                      startWW: _cmpWW || windowWidth || 400,
                                      startWL: _cmpWL || windowLevel || 40 };
@@ -10564,12 +10977,29 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                 cmpCv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
                 document.addEventListener('mousemove', function (e) {
+                    if (!_cmpActive) return;
+                    const pxy = _canvasClientToCanvasPx(cmpCv, e.clientX, e.clientY);
+
+                    if (_cmpIsDragging && (activeTool === 'roi') && _cmpRoiDraft) {
+                        const p = _cmpCanvasPointToImagePx(pxy.x, pxy.y);
+                        if (p) { _cmpRoiDraft.end = { x: p.x, y: p.y }; _cmpRedraw(); }
+                        return;
+                    }
+                    if (_cmpIsDragging && (activeTool === 'measure' || activeTool === 'angle' || activeTool === 'cobb_angle' || activeTool === 'area') && _cmpCurrentMeasurement) {
+                        _cmpUpdateMeasurement(pxy.x, pxy.y);
+                        return;
+                    }
+
                     if (!_cmpDrag) return;
                     const dx = e.clientX - _cmpDrag.startX;
                     const dy = e.clientY - _cmpDrag.startY;
                     if (_cmpDrag.mode === 'pan') {
                         _cmpPanX = _cmpDrag.startPanX + dx;
                         _cmpPanY = _cmpDrag.startPanY + dy;
+                        _cmpRedraw();
+                    } else if (_cmpDrag.mode === 'zoom') {
+                        const zoomDelta = 1 + (dy * 0.01);
+                        _cmpZoom = Math.max(0.1, Math.min(10.0, _cmpDrag.startZoom * zoomDelta));
                         _cmpRedraw();
                     } else if (_cmpDrag.mode === 'window') {
                         const baseWW = _cmpDrag.startWW;
@@ -10587,6 +11017,15 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                 });
 
                 document.addEventListener('mouseup', function () {
+                    if (!_cmpIsDragging && !_cmpDrag) return;
+                    _cmpIsDragging = false;
+
+                    if (activeTool === 'roi' && _cmpRoiDraft) {
+                        _cmpFinalizeRoi();
+                    } else if ((activeTool === 'measure' || activeTool === 'angle' || activeTool === 'cobb_angle' || activeTool === 'area') && _cmpCurrentMeasurement) {
+                        _cmpFinalizeMeasurement();
+                    }
+
                     if (_cmpDrag) {
                         if (_cmpDrag.mode === 'window') {
                             clearTimeout(_cmpWinDebounce);
@@ -10602,7 +11041,74 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                     _cmpZoom = 1; _cmpPanX = 0; _cmpPanY = 0;
                     _cmpRedraw();
                 });
+
+                // Drag a series (from the sidebar, or from this picker) and drop it onto the
+                // compare pane to load it there directly — no need to open the picker modal.
+                const cmpPane = document.getElementById('comparePane');
+                if (cmpPane) {
+                    cmpPane.addEventListener('dragover', function (e) {
+                        if (!e.dataTransfer.types.includes('application/x-noctis-series-id')) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'copy';
+                        cmpPane.classList.add('drag-over');
+                    });
+                    cmpPane.addEventListener('dragleave', function (e) {
+                        if (e.target === cmpPane) cmpPane.classList.remove('drag-over');
+                    });
+                    cmpPane.addEventListener('drop', function (e) {
+                        const seriesId = e.dataTransfer.getData('application/x-noctis-series-id') || e.dataTransfer.getData('text/plain');
+                        cmpPane.classList.remove('drag-over');
+                        if (!seriesId) return;
+                        e.preventDefault();
+                        e.stopPropagation(); // don't also let the viewport-level handler below re-process this drop
+                        if (String(seriesId) === String(currentSeries && currentSeries.id)) {
+                            showToast("That's the series already shown in the main view", 'warning');
+                            return;
+                        }
+                        _loadCompareSeriesImages(seriesId);
+                    });
+                }
             }
+        });
+
+        // Dropping a series onto the LEFT/main pane:
+        // - Compare mode off → starts comparing (drops into the compare pane, main view unchanged).
+        // - Compare mode on  → replaces the MAIN series (same as clicking it in the sidebar), since
+        //   #comparePane (right side) already has its own drop handler for the comparison slot and
+        //   calls stopPropagation(), so a drop that reaches here while active was never on the right
+        //   pane in the first place.
+        document.addEventListener('DOMContentLoaded', function () {
+            const viewport = document.querySelector('.viewport');
+            const singleView = document.getElementById('singleView');
+            if (!viewport) return;
+            viewport.addEventListener('dragover', function (e) {
+                if (!e.dataTransfer.types.includes('application/x-noctis-series-id')) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+                if (singleView) singleView.classList.add('drag-over');
+            });
+            viewport.addEventListener('dragleave', function (e) {
+                if (singleView && e.target === viewport) singleView.classList.remove('drag-over');
+            });
+            viewport.addEventListener('drop', function (e) {
+                if (singleView) singleView.classList.remove('drag-over');
+                const seriesId = e.dataTransfer.getData('application/x-noctis-series-id') || e.dataTransfer.getData('text/plain');
+                if (!seriesId) return;
+                e.preventDefault();
+                if (String(seriesId) === String(currentSeries && currentSeries.id)) {
+                    showToast("That's the series already shown in the main view", 'warning');
+                    return;
+                }
+                if (_cmpActive) {
+                    loadSeries(seriesId);
+                    return;
+                }
+                if (viewMode !== 'single') { showToast('Exit MPR/3D view first to use Compare', 'warning'); return; }
+                if (!imageData || !imageData.length) { showToast('Load a study first before using Compare', 'warning'); return; }
+                toggleCompareMode();
+                document.getElementById('comparePickerModal').style.display = 'none';
+                _loadCompareSeriesImages(seriesId);
+            });
         });
 
         async function _loadCompareSeriesImages(seriesId) {
@@ -10613,17 +11119,42 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                 const data = await resp.json();
                 _cmpImageData = Array.isArray(data && data.images) ? data.images : [];
                 _cmpMeta = data && data.series ? data.series : null;
-                _cmpWW = null; _cmpWL = null;
+                _cmpWW = null; _cmpWL = null; _cmpInverted = null;
                 _cmpZoom = 1; _cmpPanX = 0; _cmpPanY = 0;
                 if (_cmpLastBitmap && typeof _cmpLastBitmap.close === 'function') { _cmpLastBitmap.close(); }
                 _cmpLastBitmap = null;
-
-                // Use main viewer's WW/WL as the starting window for the comparison pane.
-                // The user can adjust windowing in the main viewer and compare will sync.
-                // _cmpWW / _cmpWL stay null → falls back to windowWidth/windowLevel in _cmpRenderSlice.
+                // A new comparison series is a new context — clear measurements/annotations/drafts
+                // from whatever was being compared before (matches the main viewer's series switch).
+                _cmpMeasurements = [];
+                _cmpAnnotations = [];
+                _cmpCurrentMeasurement = null;
+                _cmpRoiDraft = null;
+                _cmpHideContextMenu();
 
                 _cmpIndex = 0;
                 _cmpRenderSlice(0);
+
+                // Fetch this series' own modality-aware default window/level (e.g. an MR prior
+                // compared against a CT study needs MR-appropriate windowing, not whatever the
+                // main viewer currently has). _cmpRenderSlice falls back to the main viewer's
+                // windowWidth/windowLevel only until this resolves, or if it fails.
+                if (_cmpImageData.length) {
+                    const _cmpLoadSeq = (_loadCompareSeriesImages._seq = (_loadCompareSeriesImages._seq || 0) + 1);
+                    const firstId = _cmpImageData[0].id;
+                    fetch(`/dicom-viewer/api/image/${encodeURIComponent(firstId)}/display/?mode=url`, { credentials: 'same-origin' })
+                        .then(r => r.ok ? r.json() : null)
+                        .then(d => {
+                            if (_loadCompareSeriesImages._seq !== _cmpLoadSeq) return; // a newer compare series loaded meanwhile
+                            const w = d && d.windowing;
+                            if (w && Number.isFinite(Number(w.window_width)) && Number.isFinite(Number(w.window_level))) {
+                                _cmpWW = Number(w.window_width);
+                                _cmpWL = Number(w.window_level);
+                                _cmpInverted = !!w.inverted;
+                                _cmpRenderSlice(_cmpIndex);
+                            }
+                        })
+                        .catch(() => { /* keep the main-viewer-windowing fallback */ });
+                }
                 if (!_cmpImageData.length) {
                     showToast('Comparison series has no images', 'warning');
                 } else {
@@ -10637,20 +11168,96 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
 
         function _cmpSeriesRow(s, groupLabel) {
             const row = document.createElement('div');
-            row.style.cssText = 'padding:8px 10px;border-radius:6px;cursor:pointer;border:1px solid rgba(255,255,255,0.07);margin-bottom:4px;display:flex;align-items:center;gap:10px;';
+            // Distinguish the series currently shown in the main pane from the ones available
+            // to compare against — e.g. an AP series is "current"; picking a lateral series from
+            // the same study (or any series from a prior study) is the one you're comparing in.
+            const isCurrent = !!(currentSeries && String(currentSeries.id) === String(s.id));
+            row.style.cssText = `padding:8px 10px;border-radius:6px;cursor:${isCurrent ? 'default' : 'pointer'};border:1px solid ${isCurrent ? 'rgba(0,212,255,0.5)' : 'rgba(255,255,255,0.07)'};background:${isCurrent ? 'rgba(0,212,255,0.06)' : ''};margin-bottom:4px;display:flex;align-items:center;gap:10px;`;
             const desc = (s.description || s.series_description || '').replace(/</g,'&lt;') || '—';
             row.innerHTML = `<i class="fas fa-x-ray" style="color:var(--accent-color);width:16px;text-align:center;flex-shrink:0;"></i>
-                <div style="min-width:0;">
+                <div style="min-width:0;flex:1;">
                     <div style="font-size:12px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">S${s.series_number || '?'}: ${desc}</div>
                     <div style="font-size:10px;color:var(--text-muted);">${s.modality || '?'} &bull; ${s.image_count || '?'} images${groupLabel ? ' &bull; <span style="color:rgba(0,212,255,0.7);">' + groupLabel + '</span>' : ''}</div>
-                </div>`;
+                </div>
+                ${isCurrent ? '<span style="font-size:9px;font-weight:700;color:var(--accent-color);text-transform:uppercase;letter-spacing:0.05em;flex-shrink:0;">Current</span>' : ''}`;
+            if (isCurrent) {
+                // Currently displayed in the main pane — nothing to compare it against itself.
+                return row;
+            }
             row.addEventListener('mouseenter', function () { row.style.background = 'rgba(0,212,255,0.08)'; });
             row.addEventListener('mouseleave', function () { row.style.background = ''; });
             row.addEventListener('click', function () {
                 document.getElementById('comparePickerModal').style.display = 'none';
                 _loadCompareSeriesImages(s.id);
             });
+            // Also draggable — drop onto the compare pane directly, same as sidebar series items.
+            row.draggable = true;
+            row.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('application/x-noctis-series-id', String(s.id));
+                e.dataTransfer.setData('text/plain', String(s.id));
+                e.dataTransfer.effectAllowed = 'copy';
+            });
             return row;
+        }
+
+        function _cmpReportIcon(att) {
+            const ext = (att.extension || '').toLowerCase();
+            if (ext === '.pdf') return 'fa-file-pdf';
+            if (['.jpg', '.jpeg', '.png', '.gif'].includes(ext)) return 'fa-file-image';
+            if (['.doc', '.docx'].includes(ext)) return 'fa-file-word';
+            return 'fa-file-lines';
+        }
+
+        function _cmpReportRow(att, groupLabel) {
+            const row = document.createElement('div');
+            row.style.cssText = 'padding:8px 10px;border-radius:6px;cursor:pointer;border:1px solid rgba(255,196,0,0.18);background:rgba(255,196,0,0.05);margin-bottom:4px;display:flex;align-items:center;gap:10px;';
+            const name = (att.name || 'Report').replace(/</g, '&lt;');
+            row.innerHTML = `<i class="fas ${_cmpReportIcon(att)}" style="color:#ffc400;width:16px;text-align:center;flex-shrink:0;"></i>
+                <div style="min-width:0;">
+                    <div style="font-size:12px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
+                    <div style="font-size:10px;color:var(--text-muted);">Report${groupLabel ? ' &bull; <span style="color:rgba(0,212,255,0.7);">' + groupLabel + '</span>' : ''}${att.viewable ? '' : ' &bull; download only'}</div>
+                </div>`;
+            row.addEventListener('mouseenter', function () { row.style.background = 'rgba(255,196,0,0.12)'; });
+            row.addEventListener('mouseleave', function () { row.style.background = 'rgba(255,196,0,0.05)'; });
+            row.addEventListener('click', function () { _cmpOpenReportPreview(att); });
+            return row;
+        }
+
+        function _cmpOpenReportPreview(att) {
+            const modal = document.getElementById('reportPreviewModal');
+            const title = document.getElementById('reportPreviewTitle');
+            const body = document.getElementById('reportPreviewBody');
+            const openNew = document.getElementById('reportPreviewOpenNew');
+            if (!modal || !body) return;
+            title.textContent = att.name || 'Report';
+            openNew.href = att.url;
+            const ext = (att.extension || '').toLowerCase();
+            body.innerHTML = '';
+            if (['.jpg', '.jpeg', '.png', '.gif'].includes(ext)) {
+                const img = document.createElement('img');
+                img.src = att.url;
+                img.style.cssText = 'max-width:100%;max-height:80vh;object-fit:contain;';
+                body.appendChild(img);
+            } else if (ext === '.pdf') {
+                const frame = document.createElement('iframe');
+                frame.src = att.url;
+                frame.style.cssText = 'width:100%;height:80vh;border:none;background:#fff;';
+                body.appendChild(frame);
+            } else {
+                body.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-secondary);font-size:13px;">
+                    <i class="fas fa-file-arrow-down" style="font-size:32px;color:#ffc400;display:block;margin-bottom:12px;"></i>
+                    This file type can't be previewed inline.<br>
+                    <a href="${att.url}" target="_blank" rel="noopener" style="color:var(--accent-color);">Open / download it</a>
+                </div>`;
+            }
+            modal.style.display = 'flex';
+        }
+
+        function _cmpCloseReportPreview() {
+            const modal = document.getElementById('reportPreviewModal');
+            const body = document.getElementById('reportPreviewBody');
+            if (modal) modal.style.display = 'none';
+            if (body) body.innerHTML = ''; // stop any playing/loading content
         }
 
         async function _populateCompareSeriesList() {
@@ -10680,12 +11287,15 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                         const rd = await resp.json();
                         const relatedStudies = Array.isArray(rd.studies) ? rd.studies : [];
                         relatedStudies.forEach(function (st) {
-                            if (!Array.isArray(st.series) || !st.series.length) return;
+                            const seriesList = Array.isArray(st.series) ? st.series : [];
+                            const reportsList = Array.isArray(st.reports) ? st.reports : [];
+                            if (!seriesList.length && !reportsList.length) return;
                             const stHdr = document.createElement('div');
                             stHdr.style.cssText = 'font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;padding:8px 2px 4px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.07);';
                             stHdr.textContent = (st.study_date || st.date || '') + (st.modality ? ' — ' + st.modality : '') + (st.description ? ': ' + st.description : '');
                             container.appendChild(stHdr);
-                            st.series.forEach(function (s) { container.appendChild(_cmpSeriesRow(s, 'prior')); });
+                            seriesList.forEach(function (s) { container.appendChild(_cmpSeriesRow(s, 'prior')); });
+                            reportsList.forEach(function (att) { container.appendChild(_cmpReportRow(att, 'prior')); });
                         });
                     }
                 } catch (e) { /* related studies fetch failed — ignore */ }
@@ -11360,6 +11970,22 @@ body { background:#000; color:#ccc; font-family:'Courier New',monospace; font-si
                     Cancel
                 </button>
             </div>
+        </div>
+    </div>
+
+    <div id="reportPreviewModal" onclick="if(event.target===this)_cmpCloseReportPreview()"
+        style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:900;align-items:center;justify-content:center;">
+        <div style="background:#1e1e1e;border:1px solid #404040;border-radius:10px;padding:16px 20px;width:min(900px,94vw);max-height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0;">
+                <div id="reportPreviewTitle" style="font-size:13px;font-weight:700;color:var(--accent-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:12px;">Report</div>
+                <div style="display:flex;align-items:center;gap:14px;flex-shrink:0;">
+                    <a id="reportPreviewOpenNew" href="#" target="_blank" rel="noopener" style="font-size:11px;color:var(--text-secondary);text-decoration:none;">
+                        <i class="fas fa-external-link-alt"></i> Open in new tab
+                    </a>
+                    <span onclick="_cmpCloseReportPreview()" style="cursor:pointer;color:var(--text-muted);font-size:18px;">&times;</span>
+                </div>
+            </div>
+            <div id="reportPreviewBody" style="flex:1;min-height:0;overflow:auto;background:#111;border-radius:6px;display:flex;align-items:center;justify-content:center;"></div>
         </div>
     </div>
 </body>

@@ -694,11 +694,11 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // Check total size limit (5GB max)
+        // Check total size limit (50GB max)
         const totalSize = dicomFiles.reduce((sum, file) => sum + file.size, 0);
-        const maxSize = 5 * 1024 * 1024 * 1024; // 5GB
+        const maxSize = 50 * 1024 * 1024 * 1024; // 50GB
         if (totalSize > maxSize) {
-            showNotification(`Total file size too large. Maximum allowed: 5GB. Your files: ${formatFileSize(totalSize)}`, 'error');
+            showNotification(`Total file size too large. Maximum allowed: 50GB. Your files: ${formatFileSize(totalSize)}`, 'error');
             return;
         }
 
@@ -1145,14 +1145,21 @@ document.addEventListener('DOMContentLoaded', function() {
         // Using smaller chunks keeps each request short and reliably completes.
         const host = (window.location && window.location.host ? String(window.location.host).toLowerCase() : '');
         const isTunnelHost = host.includes('ngrok') || host.includes('trycloudflare.com') || host.includes('loca.lt');
+        // Detect low-bandwidth connections (Network Information API) so we can shrink chunks
+        // proactively rather than waiting for timeouts to teach us the network is slow.
+        const netInfo = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        const isSlowConnection = !!(netInfo && (netInfo.saveData || ['slow-2g', '2g', '3g'].includes(netInfo.effectiveType)));
         // Use conservative chunk sizing for production stability (avoid upstream/proxy idle timeouts and 413s).
         // Note: this chunks *across files*; a single very large multi-frame DICOM still uploads as one request.
         // Performance vs reliability tradeoff:
         // - Larger chunks reduce request overhead and speed up uploads on stable connections.
         // - Tunnels/proxies often kill long requests; keep those small.
+        // - Low-bandwidth links (2G/3G/save-data) need small chunks too: a 48MB chunk can take
+        //   longer than the request timeout to transfer at low speeds, so every retry re-sends
+        //   the whole chunk. Smaller chunks mean less re-transmitted data per dropped connection.
         // ngrok/tunnels: keep requests short to avoid upstream idle timeouts and "status 0" network errors.
-        const MAX_CHUNK_BYTES = isTunnelHost ? (4 * 1024 * 1024) : (48 * 1024 * 1024); // 4MB on tunnels, 48MB otherwise
-        const MAX_CHUNK_FILES = isTunnelHost ? 80 : 600;
+        const MAX_CHUNK_BYTES = (isTunnelHost || isSlowConnection) ? (2 * 1024 * 1024) : (48 * 1024 * 1024); // 2MB on tunnels/slow links, 48MB otherwise
+        const MAX_CHUNK_FILES = (isTunnelHost || isSlowConnection) ? 40 : 600;
 
         // IMPORTANT:
         // The server defers DICOM parsing/DB work until the *final* chunk arrives (background processing).
@@ -1273,9 +1280,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const xhr = new XMLHttpRequest();
                 xhr.open('POST', url, true);
-                // Give slow servers enough time, but keep each chunk small on tunnels so we don't hit proxy idle timeouts.
-                // Give slow servers enough time. Keep chunks small to avoid long request times.
-                xhr.timeout = isTunnelHost ? 600000 : 1800000; // 10m on tunnels, 30m otherwise
+                // Give slow servers/links enough time, but keep tunnel requests short so we don't hit proxy idle timeouts.
+                xhr.timeout = isTunnelHost ? 600000 : (isSlowConnection ? 2700000 : 1800000); // 10m on tunnels, 45m on detected slow links, 30m otherwise
                 xhr.setRequestHeader('X-CSRFToken', token);
                 xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
 
@@ -1296,10 +1302,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const handleFailure = (reason) => {
                     const msg = reason || 'Upload failed';
-                    // Retry transient network failures (XHR status 0 / timeout) a couple times.
-                    if (attempt < 3 && (String(msg).includes('HTTP 0') || String(msg).toLowerCase().includes('timeout') || String(msg).toLowerCase().includes('network'))) {
-                        const backoff = 800 * Math.pow(2, attempt - 1);
-                        updateProgress((uploadedBytes / Math.max(1, totalBytes)) * 100, `${uploadedCount} / ${totalFiles} files`, `Retrying chunk ${chunkIdx + 1}/${chunks.length} in ${Math.round(backoff/100)/10}s...`);
+                    // Retry transient network failures (XHR status 0 / timeout) — generously, since a
+                    // flaky/low-bandwidth connection can drop repeatedly over a long upload session.
+                    const MAX_RETRY_ATTEMPTS = 8;
+                    if (attempt < MAX_RETRY_ATTEMPTS && (String(msg).includes('HTTP 0') || String(msg).toLowerCase().includes('timeout') || String(msg).toLowerCase().includes('network'))) {
+                        const backoff = Math.min(30000, 800 * Math.pow(2, attempt - 1)); // cap at 30s
+                        updateProgress((uploadedBytes / Math.max(1, totalBytes)) * 100, `${uploadedCount} / ${totalFiles} files`, `Retrying chunk ${chunkIdx + 1}/${chunks.length} in ${Math.round(backoff/100)/10}s... (attempt ${attempt + 1}/${MAX_RETRY_ATTEMPTS})`);
                         setTimeout(() => {
                             uploadChunkXHR(chunkIdx, chunk, attempt + 1).then(resolve);
                         }, backoff);

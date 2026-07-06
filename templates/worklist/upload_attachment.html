@@ -106,7 +106,8 @@
 					<button type="button" class="btn-mini mt-2"
 						onclick="document.getElementById('filesInput').click()"><i class="fas fa-folder-open"></i>
 						Choose Files</button>
-					<div class="small-muted mt-2">Up to 5GB per file. Multiple files supported.</div>
+					<div class="small-muted mt-2">Up to 50GB per file. Multiple files supported.</div>
+					<div class="small-muted mt-1">This form sends each file in one request with no resume — on a slow or unstable connection, prefer the DICOM upload page for large studies, which uploads in small resumable chunks.</div>
 				</div>
 				<input type="file" id="filesInput" name="files" multiple class="d-none" />
 				<div class="d-flex justify-content-end gap-2 mt-3">

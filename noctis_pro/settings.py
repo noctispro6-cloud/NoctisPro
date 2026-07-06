@@ -249,6 +249,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'noctis_pro.middleware.SubscriptionRequiredMiddleware',
     'noctis_pro.middleware.PublicViewerMiddleware',
+    'noctis_pro.middleware.SessionTimeoutMiddleware' 
 ]
 
 ROOT_URLCONF = 'noctis_pro.urls'
@@ -620,9 +621,9 @@ SESSION_SAVE_EVERY_REQUEST = True
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 # File upload settings
-# - Allow up to 5GB total upload payloads (e.g., large DICOM batches)
+# - Allow up to 50GB total upload payloads (e.g., large DICOM batches)
 # - Keep per-file in-memory buffering modest so large files stream to disk
-MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024 * 1024  # 5GB
+MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024 * 1024  # 50GB
 DATA_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_SIZE_BYTES
 DATA_UPLOAD_MAX_NUMBER_FILES = 5000  # Support for up to 5000 uploaded files per request
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 15000  # Support for up to 5000 images with metadata
@@ -855,7 +856,7 @@ USE_X_FORWARDED_PORT = os.environ.get('USE_X_FORWARDED_PORT', 'False').lower() =
 
 # DICOM viewer masterpiece settings
 DICOM_VIEWER_SETTINGS = {
-    'MAX_UPLOAD_SIZE': MAX_UPLOAD_SIZE_BYTES,  # 5GB
+    'MAX_UPLOAD_SIZE': MAX_UPLOAD_SIZE_BYTES,  # 50GB
     'SUPPORTED_MODALITIES': ['CT', 'MR', 'CR', 'DX', 'US', 'XA'],
     'CACHE_TIMEOUT': 3600,
     'ENABLE_3D_RECONSTRUCTION': True,

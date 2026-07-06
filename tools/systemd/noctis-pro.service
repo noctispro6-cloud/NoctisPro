@@ -20,7 +20,7 @@ WorkingDirectory=/
 #   `manage.py migrate`, uploads can fail with errors like:
 #   "no such column: accounts_facility.has_ai_subscription"
 # - Use a multi-worker ASGI server so uploads (CPU-heavy header parsing) don't stall the whole system.
-ExecStart=/usr/bin/env bash -lc 'APP_DIR="${APP_DIR:-/opt/noctispro}"; cd "${APP_DIR}"; "${APP_DIR}/venv/bin/python" manage.py migrate --noinput && "${APP_DIR}/venv/bin/python" manage.py collectstatic --noinput && exec "${APP_DIR}/venv/bin/gunicorn" noctis_pro.asgi:application -k uvicorn.workers.UvicornWorker --bind 127.0.0.1:8000 --workers ${WEB_CONCURRENCY:-3} --timeout ${GUNICORN_TIMEOUT:-3600} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT:-30} --keep-alive ${GUNICORN_KEEPALIVE:-5}'
+ExecStart=/usr/bin/env bash -lc 'APP_DIR="${APP_DIR:-/opt/noctispro}"; cd "${APP_DIR}"; "${APP_DIR}/venv/bin/python" manage.py migrate --noinput && "${APP_DIR}/venv/bin/python" manage.py collectstatic --noinput && exec "${APP_DIR}/venv/bin/gunicorn" noctis_pro.asgi:application -k uvicorn.workers.UvicornWorker --bind 127.0.0.1:8000 --workers ${WEB_CONCURRENCY:-3} --timeout ${GUNICORN_TIMEOUT:-21600} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT:-30} --keep-alive ${GUNICORN_KEEPALIVE:-5}'
 Restart=always
 RestartSec=5
 

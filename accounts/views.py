@@ -14,6 +14,17 @@ from django_ratelimit.decorators import ratelimit
 from django_ratelimit.exceptions import Ratelimited
 import json
 
+PROFILE_COLOR_PRESETS = [
+    ("#00d4ff", "Cyan (default dark)"),
+    ("#1848C8", "Blue (default light)"),
+    ("#000000", "Black"),
+    ("#222222", "Dark charcoal"),
+    ("#1a7340", "Forest green"),
+    ("#7c3aed", "Violet"),
+    ("#c0392b", "Red"),
+    ("#e67e22", "Orange"),
+]
+
 def _get_or_create_session_key(request) -> str:
     """
     Ensure a session key exists for the current request.
@@ -240,12 +251,54 @@ def profile_view(request):
         pref = None
     
     if request.method == 'POST':
+        form_type = request.POST.get('form_type', 'profile_info')
+
+        if form_type == 'signature':
+            # Restricted to radiologists/admins — facility users don't sign reports.
+            if not (user.is_admin() or user.is_radiologist()):
+                messages.error(request, 'You do not have permission to set a signature.')
+                return redirect('accounts:profile')
+            if request.POST.get('clear_signature'):
+                user.signature = ''
+                user.save(update_fields=['signature', 'updated_at'])
+                messages.success(request, 'Signature removed.')
+            else:
+                sig = (request.POST.get('signature_data') or '').strip()
+                if sig.startswith('data:image/'):
+                    user.signature = sig
+                    user.save(update_fields=['signature', 'updated_at'])
+                    messages.success(request, 'Signature saved.')
+                else:
+                    messages.error(request, 'No signature data received.')
+            return redirect('accounts:profile')
+
+        if form_type == 'theme_color':
+            # Restricted to facility users — admins/radiologists follow the system theme.
+            if not user.is_facility_user():
+                messages.error(request, 'You do not have permission to set a personal accent colour.')
+                return redirect('accounts:profile')
+            if request.POST.get('clear_theme_color'):
+                user.theme_color = ''
+                user.save(update_fields=['theme_color', 'updated_at'])
+                messages.success(request, 'Accent colour reset to the system default.')
+            else:
+                import re
+                color = (request.POST.get('theme_color') or '').strip()
+                if re.match(r'^#[0-9a-fA-F]{6}$', color):
+                    user.theme_color = color
+                    user.save(update_fields=['theme_color', 'updated_at'])
+                    messages.success(request, 'Accent colour saved.')
+                else:
+                    messages.error(request, 'Invalid colour value.')
+            return redirect('accounts:profile')
+
+        # form_type == 'profile_info' (default)
         # Validate email uniqueness before saving
         new_email = request.POST.get('email', '').strip().lower()
         if new_email and new_email != (user.email or '').lower():
             if User.objects.filter(email__iexact=new_email).exclude(pk=user.pk).exists():
                 messages.error(request, 'That email address is already in use by another account.')
-                return render(request, 'accounts/profile.html', {'user': user, 'notification_pref': pref, 'recent_sessions': UserSession.objects.filter(user=user).order_by('-login_time')[:10]})
+                return render(request, 'accounts/profile.html', {'user': user, 'notification_pref': pref, 'recent_sessions': UserSession.objects.filter(user=user).order_by('-login_time')[:10], 'color_presets': PROFILE_COLOR_PRESETS})
 
         # Update profile information
         user.first_name = request.POST.get('first_name', user.first_name)
@@ -265,14 +318,15 @@ def profile_view(request):
                     pref.save(update_fields=['preferred_method', 'updated_at'])
         except Exception:
             pass
-        
+
         messages.success(request, 'Profile updated successfully.')
         return redirect('accounts:profile')
-    
+
     context = {
         'user': user,
         'notification_pref': pref,
-        'recent_sessions': UserSession.objects.filter(user=user).order_by('-login_time')[:10]
+        'recent_sessions': UserSession.objects.filter(user=user).order_by('-login_time')[:10],
+        'color_presets': PROFILE_COLOR_PRESETS,
     }
     return render(request, 'accounts/profile.html', context)
 

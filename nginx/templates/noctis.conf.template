@@ -53,12 +53,12 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers off;
 
-    # Upload size: DICOM studies can be large (DICOMweb STOW-RS)
-    client_max_body_size 6g;
-    # Avoid client-side "network error" during large uploads
-    client_body_timeout 3600;
+    # Upload size: DICOM studies can be large (DICOMweb STOW-RS), up to 50GB
+    client_max_body_size 55g;
+    # Avoid client-side "network error" during large uploads on slow/low-bandwidth links
+    client_body_timeout 21600;
     client_header_timeout 60;
-    send_timeout 3600;
+    send_timeout 21600;
 
     # Static files (built by collectstatic into STATIC_ROOT)
     location /static/ {
@@ -86,8 +86,8 @@ server {
         proxy_request_buffering off;
         proxy_buffering off;
         proxy_connect_timeout 60;
-        proxy_read_timeout 3600;
-        proxy_send_timeout 3600;
+        proxy_read_timeout 21600;
+        proxy_send_timeout 21600;
     }
 }
 

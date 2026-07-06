@@ -29,7 +29,6 @@ from django.conf import settings
 from io import BytesIO
 from PIL import Image, ImageFilter
 import base64
-from pydicom.pixels import apply_voi_lut
 import scipy.ndimage as ndimage
 import logging
 import subprocess
@@ -511,7 +510,7 @@ def _schedule_mpr_prewarm(series_id: int, quality: str = 'high') -> None:
         with _MPR_PREWARM_LOCK:
             _MPR_PREWARM_INFLIGHT.discard(key)
 
-def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=None, zoom_z=None):
+def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=None, zoom_z=None, rot_z=None, center_xyz=None):
     """
     Build a stable cache key for an encoded MPR slice.
 
@@ -519,6 +518,11 @@ def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=None
     Never let that crash the request path (users otherwise see: "must be real number, not NoneType").
     zoom_z encodes the residual aspect-ratio correction applied at render time so that
     cached slices with and without correction are stored under different keys.
+
+    rot_z/center_xyz let oblique (crosshair-rotated) reslices be cached too — an oblique slice's
+    pixels depend on the rotation angle and rotation center, not just plane/slice/ww/wl, so both
+    must be part of the key. Left as None (the default) for the orthogonal path, which keeps the
+    key format identical to before — existing behaviour for non-rotated MPR is unaffected.
     """
     def _safe_round_int(v, fallback):
         try:
@@ -539,7 +543,16 @@ def _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=None
         zz = f"{float(zoom_z):.2f}" if zoom_z is not None else "1.00"
     except Exception:
         zz = "1.00"
-    return f"v2|{series_id}|{q}|{plane}|{int(slice_index)}|{ww_i}|{wl_i}|{1 if inverted else 0}|{zz}"
+    key = f"v2|{series_id}|{q}|{plane}|{int(slice_index)}|{ww_i}|{wl_i}|{1 if inverted else 0}|{zz}"
+    try:
+        if rot_z is not None and abs(float(rot_z)) >= 0.5:
+            rz = round(float(rot_z) * 2) / 2.0  # nearest 0.5 degree — tolerate float jitter
+            cx = center_xyz if center_xyz is not None else (0, 0, 0)
+            cx_r = tuple(round(float(v) * 2) / 2.0 for v in cx)  # nearest 0.5 voxel
+            key += f"|rz:{rz}|c:{cx_r[0]}:{cx_r[1]}:{cx_r[2]}"
+    except Exception:
+        pass
+    return key
 
 def _mpr_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=None, zoom_z=None):
     key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality, zoom_z=zoom_z)
@@ -567,8 +580,8 @@ def _mpr_cache_set(series_id, plane, slice_index, ww, wl, inverted, img_b64, qua
             pass
         _MPR_IMG_CACHE_ORDER.append(key)
 
-def _mpr_png_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=None, zoom_z=None):
-    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality, zoom_z=zoom_z)
+def _mpr_png_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=None, zoom_z=None, rot_z=None, center_xyz=None):
+    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality, zoom_z=zoom_z, rot_z=rot_z, center_xyz=center_xyz)
     with _MPR_PNG_CACHE_LOCK:
         val = _MPR_PNG_CACHE.get(key)
         if val is not None:
@@ -579,8 +592,8 @@ def _mpr_png_cache_get(series_id, plane, slice_index, ww, wl, inverted, quality=
             _MPR_PNG_CACHE_ORDER.append(key)
         return val
 
-def _mpr_png_cache_set(series_id, plane, slice_index, ww, wl, inverted, png_bytes, quality=None, zoom_z=None):
-    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality, zoom_z=zoom_z)
+def _mpr_png_cache_set(series_id, plane, slice_index, ww, wl, inverted, png_bytes, quality=None, zoom_z=None, rot_z=None, center_xyz=None):
+    key = _mpr_cache_key(series_id, plane, slice_index, ww, wl, inverted, quality=quality, zoom_z=zoom_z, rot_z=rot_z, center_xyz=center_xyz)
     with _MPR_PNG_CACHE_LOCK:
         if key not in _MPR_PNG_CACHE:
             while len(_MPR_PNG_CACHE_ORDER) >= _MAX_MPR_PNG_CACHE:
@@ -1137,7 +1150,9 @@ def api_image_data(request, image_id):
             # windowing using the DICOM WW/WL sent in the response headers. Pre-applying the
             # VOI LUT would produce pixel values in a different space than the WW/WL tags,
             # causing double-windowing that clips DX/CR/MG images to near-binary output.
-            # apply_voi_lut belongs only in the server-rendered PNG path (api_dicom_image_display).
+            # The same reasoning applies to every other pixel-decode path in this module
+            # (api_dicom_image_display, api_dicom_image_png, the MPR/auto-window endpoints) —
+            # none of them call apply_voi_lut either, for the same reason.
             # If multi-frame, select a single frame (default first; caller can pass ?frame=)
             try:
                 pixel_array = _select_frame(pixel_array, frame_index=frame_index)
@@ -2456,12 +2471,27 @@ def api_dicom_image_display(request, image_id):
             default_window_level = _first_or_none(getattr(ds, 'WindowCenter', None)) if ds is not None else None
 
             if default_window_width is None or default_window_level is None:
-                if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG'):
-                    default_window_width = default_window_width if default_window_width is not None else 2500.0
-                    default_window_level = default_window_level if default_window_level is not None else 1200.0
-                else:
-                    default_window_width = default_window_width if default_window_width is not None else 400.0
-                    default_window_level = default_window_level if default_window_level is not None else 40.0
+                # No WW/WC tags on this image — don't guess with a fixed constant (it can be wildly
+                # off from the image's actual pixel range, e.g. ~2500/1200 vs an actual ~21000/12000
+                # for some untagged X-rays). Reuse the same pixel-based estimator that render.png and
+                # series thumbnails already use (_decode_dicom_pixels_cached, LRU-cached — free after
+                # the first request) so every caller agrees on the default for a given image. This is
+                # what the compare pane fetches to seed its own windowing, so keeping it consistent
+                # with what render.png will actually draw matters most there.
+                try:
+                    _px_probe, _dww_probe, _dwl_probe, _is_col_probe, _is_mono1_probe = _decode_dicom_pixels_cached(image.id, frame_index)
+                    if not _is_col_probe:
+                        default_window_width = default_window_width if default_window_width is not None else _dww_probe
+                        default_window_level = default_window_level if default_window_level is not None else _dwl_probe
+                except Exception:
+                    pass
+                if default_window_width is None or default_window_level is None:
+                    if modality_code in ('DX', 'CR', 'XA', 'RF', 'MG'):
+                        default_window_width = default_window_width if default_window_width is not None else 2500.0
+                        default_window_level = default_window_level if default_window_level is not None else 1200.0
+                    else:
+                        default_window_width = default_window_width if default_window_width is not None else 400.0
+                        default_window_level = default_window_level if default_window_level is not None else 40.0
 
             default_inverted = (photo == 'MONOCHROME1')
 
@@ -2543,12 +2573,9 @@ def api_dicom_image_display(request, image_id):
             try:
                 pixel_array = ds.pixel_array
                 pixel_array = _select_frame(pixel_array, frame_index=frame_index)
-                try:
-                    modality = str(getattr(ds, 'Modality', '')).upper()
-                    if modality in ['DX','CR','XA','RF','MG']:
-                        pixel_array = apply_voi_lut(pixel_array, ds)
-                except Exception:
-                    pass
+                # NOTE: Do NOT apply apply_voi_lut here — see the comment on the sibling decode
+                # block above (~line 1136). This endpoint applies rescale + WW/WL windowing itself
+                # below; pre-applying the VOI LUT on top would double-window DX/CR/XA/RF/MG images.
                 # Color => prefer server-rendered PNG path (skip grayscale conversion)
                 if _is_color_pixel_array(pixel_array):
                     warnings["color_mode"] = "server_render"
@@ -2835,7 +2862,7 @@ def api_dicom_image_display(request, image_id):
 def _decode_dicom_pixels_cached(image_id: int, frame_index: int):
     """
     Decode one DICOM frame, apply rescale, and return
-    (pixel_array_f32, default_ww, default_wl, is_color).
+    (pixel_array_f32, default_ww, default_wl, is_color, is_monochrome1).
     Raises RuntimeError on failure so the failed entry is never stored in cache.
     """
     _image = DicomImage.objects.get(id=image_id)
@@ -2862,16 +2889,16 @@ def _decode_dicom_pixels_cached(image_id: int, frame_index: int):
         raise RuntimeError(f"Cannot read DICOM file for image {image_id}")
 
     # Decode pixel array
+    # NOTE: we deliberately do NOT call apply_voi_lut() here. It maps raw pixels through the
+    # DICOM VOI LUT/windowing into a display-ready range, but the windowing step further below
+    # (_array_to_png_bytes with _dww/_dwl or a user-supplied ww/wl) re-applies WindowWidth/Center
+    # to whatever array it receives — doubling the windowing for DX/CR/XA/RF/MG and producing
+    # wrong contrast. Keep this in sync with api_image_data(), which uses the same single-pass
+    # rescale -> (MONOCHROME1 invert) -> window approach and does not call apply_voi_lut either.
     _px = None
     try:
         _px = _ds.pixel_array
         _px = _select_frame(_px, frame_index=frame_index)
-        _mod = str(getattr(_ds, 'Modality', '')).upper()
-        if _mod in ('DX', 'CR', 'XA', 'RF', 'MG'):
-            try:
-                _px = apply_voi_lut(_px, _ds)
-            except Exception:
-                pass
     except Exception as _e1:
         try:
             import SimpleITK as _sitk
@@ -2928,19 +2955,33 @@ def _decode_dicom_pixels_cached(image_id: int, frame_index: int):
         _dwl = float(_v) if _v is not None else None
     except Exception:
         pass
-    if _dww is None or _dwl is None:
+    _mod = str(getattr(_ds, 'Modality', '') or '').upper()
+    if (_dww is None or _dwl is None) and not _is_col:
         try:
-            if not _is_col:
-                _flat = _px.flatten()
-                _p2, _p98 = float(np.percentile(_flat, 2)), float(np.percentile(_flat, 98))
-                _dww = _dww or max(1.0, _p98 - _p2)
-                _dwl = _dwl or ((_p98 + _p2) / 2.0)
+            # Use the same medical-tuned estimator as api_image_data() so both endpoints
+            # agree on the default window for a given image.
+            _processor = DicomProcessor()
+            _ww, _wl = _processor.auto_window_from_data(_px, percentile_range=(2, 98), modality=(_mod or 'CT'))
+            _dww = _dww if _dww is not None else _ww
+            _dwl = _dwl if _dwl is not None else _wl
         except Exception:
             pass
-        _dww = _dww or 400.0
-        _dwl = _dwl or 40.0
+    if _dww is None or _dwl is None:
+        # Last-resort fallback — modality-aware so CR/DX/XA/RF/MG don't get a CT-tuned default.
+        if _mod in ('DX', 'CR', 'XA', 'RF', 'MG'):
+            _dww = _dww or 2500.0
+            _dwl = _dwl or 1200.0
+        else:
+            _dww = _dww or 400.0
+            _dwl = _dwl or 40.0
 
-    return (_px, float(_dww), float(_dwl), _is_col)
+    _is_mono1 = False
+    try:
+        _is_mono1 = str(getattr(_ds, 'PhotometricInterpretation', '') or '').strip().upper() == 'MONOCHROME1'
+    except Exception:
+        pass
+
+    return (_px, float(_dww), float(_dwl), _is_col, _is_mono1)
 
 
 @login_required
@@ -2964,7 +3005,14 @@ def api_dicom_image_png(request, image_id):
         inverted_param = request.GET.get('inverted')
         if inverted_param is None:
             inverted_param = request.GET.get('invert')
+        inverted_provided = inverted_param is not None
         inverted = (inverted_param or 'false').lower() == 'true'
+        # When the caller asks for the fully-default rendering (no ww/wl, no inverted), auto-invert
+        # MONOCHROME1 images — otherwise callers that don't know a given image is MONOCHROME1 (e.g.
+        # a plain series thumbnail) get inverted-looking grayscale. Only applied when no windowing
+        # params are supplied at all, so the ETag fast-path below (skips decode entirely on a cache
+        # hit) still works for callers that pass explicit ww/wl+inverted, as today.
+        _use_default_inversion = not inverted_provided and ww_param is None and wl_param is None
         frame_index = _get_requested_frame_index(request, default_index=0)
 
         # ETag: computed purely from URL params — no file I/O needed for 304 responses
@@ -2986,7 +3034,9 @@ def api_dicom_image_png(request, image_id):
 
         # Fast path: cached pixel array (avoids DICOM file read + decompression)
         try:
-            _px, _dww, _dwl, _is_col = _decode_dicom_pixels_cached(image.id, frame_index)
+            _px, _dww, _dwl, _is_col, _is_mono1 = _decode_dicom_pixels_cached(image.id, frame_index)
+            if _use_default_inversion:
+                inverted = _is_mono1
             if _is_col:
                 _rgb = _convert_color_to_rgb_uint8(_px)
                 if _rgb is None:
@@ -3050,12 +3100,8 @@ def api_dicom_image_png(request, image_id):
         try:
             pixel_array = ds.pixel_array
             pixel_array = _select_frame(pixel_array, frame_index=frame_index)
-            try:
-                modality = str(getattr(ds, 'Modality', '')).upper()
-                if modality in ['DX', 'CR', 'XA', 'RF', 'MG']:
-                    pixel_array = apply_voi_lut(pixel_array, ds)
-            except Exception:
-                pass
+            # NOTE: Do NOT apply apply_voi_lut here — the windowing step below re-applies
+            # WW/WL to this array, which would double-window DX/CR/XA/RF/MG images.
             # Color images: render as RGB PNG directly (no W/L).
             if _is_color_pixel_array(pixel_array):
                 rgb = _convert_color_to_rgb_uint8(pixel_array, ds=ds)
@@ -3136,6 +3182,7 @@ def api_dicom_image_png(request, image_id):
                 pass
             return v
 
+        _mod_slow = str(getattr(ds, 'Modality', '') or '').upper()
         default_ww = _first_or_none(getattr(ds, 'WindowWidth', None))
         default_wl = _first_or_none(getattr(ds, 'WindowCenter', None))
         if default_ww is None or default_wl is None:
@@ -3146,8 +3193,20 @@ def api_dicom_image_png(request, image_id):
                 default_ww = default_ww or max(1.0, (p98 - p2))
                 default_wl = default_wl or ((p98 + p2) / 2.0)
             except Exception:
-                default_ww = default_ww or 400.0
-                default_wl = default_wl or 40.0
+                pass
+            if default_ww is None or default_wl is None:
+                if _mod_slow in ('DX', 'CR', 'XA', 'RF', 'MG'):
+                    default_ww = default_ww or 2500.0
+                    default_wl = default_wl or 1200.0
+                else:
+                    default_ww = default_ww or 400.0
+                    default_wl = default_wl or 40.0
+
+        if _use_default_inversion:
+            try:
+                inverted = str(getattr(ds, 'PhotometricInterpretation', '') or '').strip().upper() == 'MONOCHROME1'
+            except Exception:
+                pass
 
         # Respect request params when provided; otherwise use defaults
         try:
@@ -3344,12 +3403,9 @@ def api_auto_window(request, image_id):
             # Get pixel data and convert to HU
             try:
                 pixel_array = ds.pixel_array
-                try:
-                    modality = str(getattr(ds, 'Modality', '')).upper()
-                    if modality in ['DX','CR','XA','RF','MG']:
-                        pixel_array = apply_voi_lut(pixel_array, ds)
-                except Exception:
-                    pass
+                # NOTE: Do NOT apply apply_voi_lut here — rescale + auto-window derivation below
+                # expects raw (rescaled) pixel values, not VOI-LUT-mapped display values; applying
+                # both would double-window DX/CR/XA/RF/MG images.
                 pixel_array = pixel_array.astype(np.float32)
             except Exception:
                 try:
@@ -4839,14 +4895,9 @@ def web_dicom_image(request, image_id):
                 pixel_array = px
             except Exception:
                 return HttpResponse(status=500)
-        # Apply VOI LUT only for projection modalities (CR/DX/XA/RF/MG) to avoid CT distortion
-        try:
-            modality = str(getattr(ds, 'Modality', '')).upper()
-            if modality in ['DX', 'CR', 'XA', 'RF', 'MG']:
-                from pydicom.pixels import apply_voi_lut as _apply_voi_lut
-                pixel_array = _apply_voi_lut(pixel_array, ds)
-        except Exception:
-            pass
+        # NOTE: Do NOT apply apply_voi_lut here — `processor.apply_windowing()` below re-applies
+        # WW/WL to this array, which would double-window DX/CR/XA/RF/MG images (see the identical
+        # note in api_dicom_image_display above).
         # apply slope/intercept (DICOM tags can exist but be None)
         slope = _safe_float(getattr(ds, 'RescaleSlope', None), 1.0)
         intercept = _safe_float(getattr(ds, 'RescaleIntercept', None), 0.0)
@@ -4872,9 +4923,9 @@ def web_dicom_image(request, image_id):
                 dww, dwl = _derive_window(pixel_array)
                 dw = dw or dww
                 dl = dl or dwl
-            if modality in ['DX','CR','XA','RF']:
-                dw = float(dw) if dw is not None else 3000.0
-                dl = float(dl) if dl is not None else 1500.0
+            if modality in ['DX','CR','XA','RF','MG']:
+                dw = float(dw) if dw is not None else 2500.0
+                dl = float(dl) if dl is not None else 1200.0
             if ww_param is None:
                 window_width = float(dw)
             if wl_param is None:
@@ -7594,7 +7645,9 @@ def mpr_slice_api(request, series_id, plane, slice_index):
         else:  # coronal
             slice_index = max(0, min(int(volume.shape[1]) - 1, slice_index))
 
-        # Oblique path: bypass cache, use map_coordinates sampling
+        # Oblique path: cached by (plane, slice, ww/wl, rotation angle, rotation center) — scrolling
+        # back and forth at a fixed crosshair rotation is then served from cache instead of re-running
+        # map_coordinates sampling on every request.
         if abs(rot_z) >= 0.5:
             nz, ny, nx = volume.shape
             center_xyz = [
@@ -7602,6 +7655,15 @@ def mpr_slice_api(request, series_id, plane, slice_index):
                 cvy if cvy is not None else ny / 2.0,
                 cvz if cvz is not None else nz / 2.0,
             ]
+            cached_png = _mpr_png_cache_get(
+                series_id, plane, slice_index, window_width, window_level, inverted,
+                quality=quality, rot_z=rot_z, center_xyz=center_xyz,
+            )
+            if cached_png:
+                resp = HttpResponse(cached_png, content_type='image/png')
+                resp['Cache-Control'] = 'no-store'
+                return resp
+
             png_bytes = _get_png_oblique_mpr_slice_bytes(
                 volume, plane, slice_index, rot_z, center_xyz,
                 window_width, window_level, inverted, spacing=spacing
@@ -7609,6 +7671,10 @@ def mpr_slice_api(request, series_id, plane, slice_index):
             if not png_bytes:
                 from django.http import Http404
                 raise Http404("Oblique MPR slice not available")
+            _mpr_png_cache_set(
+                series_id, plane, slice_index, window_width, window_level, inverted, png_bytes,
+                quality=quality, rot_z=rot_z, center_xyz=center_xyz,
+            )
             resp = HttpResponse(png_bytes, content_type='image/png')
             resp['Cache-Control'] = 'no-store'
             return resp
@@ -7854,7 +7920,11 @@ def api_study_related(request, study_id):
     if hasattr(user, 'is_facility_user') and user.is_facility_user() and getattr(user, 'facility', None):
         qs = qs.filter(facility=user.facility)
 
-    qs = qs.order_by('-study_date').prefetch_related('series_set')[:10]
+    qs = qs.order_by('-study_date').prefetch_related('series_set', 'attachments')[:10]
+
+    # Report-like attachments only — exclude DICOM/previous-study cross-links, which are handled
+    # via the `series` list above, not the report viewer.
+    _report_types = {'report', 'pdf_document', 'word_document', 'image', 'document', 'other'}
 
     studies_data = []
     for st in qs:
@@ -7868,13 +7938,33 @@ def api_study_related(request, study_id):
                 'modality': s.modality or '',
                 'image_count': s.images.count(),
             })
-        if series_list:
+
+        reports_list = []
+        for att in st.attachments.all():
+            if att.file_type not in _report_types:
+                continue
+            try:
+                reports_list.append({
+                    'id': att.id,
+                    'name': att.name or att.get_file_extension().lstrip('.').upper(),
+                    'file_type': att.file_type,
+                    'extension': att.get_file_extension(),
+                    'viewable': att.is_viewable_in_browser(),
+                    'url': f'/worklist/attachment/{att.id}/view/',
+                })
+            except Exception:
+                continue
+
+        # Include the study if it has images to compare OR a report to read — a report-only
+        # prior (no DICOM series uploaded) should still be reachable from the compare picker.
+        if series_list or reports_list:
             studies_data.append({
                 'id': st.id,
                 'study_date': str(st.study_date) if st.study_date else '',
                 'modality': str(st.modality) if st.modality else '',
                 'description': st.study_description or '',
                 'series': series_list,
+                'reports': reports_list,
             })
 
     return JsonResponse({'studies': studies_data})

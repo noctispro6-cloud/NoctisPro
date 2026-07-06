@@ -19,7 +19,6 @@ from typing import Optional
 import numpy as np
 import pydicom
 from fastapi import FastAPI, Request
-from pydicom.pixels import apply_voi_lut
 from starlette.responses import FileResponse, RedirectResponse, Response
 
 from django.conf import settings
@@ -186,15 +185,22 @@ def _read_dicom_dataset(image: DicomImage):
     return ds
 
 
+def _is_monochrome1(ds) -> bool:
+    try:
+        return str(getattr(ds, "PhotometricInterpretation", "") or "").strip().upper() == "MONOCHROME1"
+    except Exception:
+        return False
+
+
 def _decode_pixel_array(image: DicomImage, ds):
     try:
         px = ds.pixel_array
-        try:
-            modality = str(getattr(ds, "Modality", "")).upper()
-            if modality in ["DX", "CR", "XA", "RF", "MG"]:
-                px = apply_voi_lut(px, ds)
-        except Exception:
-            pass
+        # NOTE: Do NOT apply apply_voi_lut here. It maps raw pixels through the DICOM VOI
+        # LUT/windowing into a display-ready range, but _render_png_bytes below re-applies
+        # WindowWidth/Center to whatever array it receives — doubling the windowing for
+        # DX/CR/XA/RF/MG and producing near-binary/washed-out output. This mirrors
+        # dicom_viewer.views's _decode_dicom_pixels_cached/api_image_data, which don't call
+        # apply_voi_lut for the same reason — keep this file in sync with those.
         return px.astype(np.float32)
     except Exception:
         # SimpleITK fallback needs local path
@@ -253,6 +259,20 @@ def _derive_default_window(arr: np.ndarray, ds) -> tuple[float, float]:
     except Exception:
         pass
 
+    modality = str(getattr(ds, "Modality", "") or "").upper()
+
+    # Use the same medical-tuned estimator as dicom_viewer.views so every endpoint (this one,
+    # render.png's Django fallback, series thumbnails, the compare pane) agrees on the default
+    # window for a given image.
+    try:
+        from dicom_viewer.dicom_utils import DicomProcessor
+
+        processor = DicomProcessor()
+        ww, wl = processor.auto_window_from_data(arr, percentile_range=(2, 98), modality=(modality or "CT"))
+        return float(ww), float(wl)
+    except Exception:
+        pass
+
     # Robust percentiles (fast enough for single-slice)
     try:
         flat = arr.astype(np.float32, copy=False).ravel()
@@ -262,7 +282,12 @@ def _derive_default_window(arr: np.ndarray, ds) -> tuple[float, float]:
         wl = (p98 + p2) / 2.0
         return ww, wl
     except Exception:
-        return 400.0, 40.0
+        pass
+
+    # Last-resort fallback — modality-aware so CR/DX/XA/RF/MG don't get a CT-tuned default.
+    if modality in ("DX", "CR", "XA", "RF", "MG"):
+        return 2500.0, 1200.0
+    return 400.0, 40.0
 
 
 def _render_png_bytes(pixel_array: np.ndarray, window_width: float, window_level: float, inverted: bool) -> Optional[bytes]:
@@ -275,7 +300,7 @@ def _render_png_bytes(pixel_array: np.ndarray, window_width: float, window_level
         return None
 
 
-def _compute_png_for_request(image_id: int, ww: Optional[float], wl: Optional[float], inverted: bool, user):
+def _compute_png_for_request(image_id: int, ww: Optional[float], wl: Optional[float], inverted: bool, use_default_inversion: bool, user):
     # Close stale DB connections; this function runs in a worker thread and
     # uses Django ORM, but is not wrapped in Django's normal request lifecycle.
     close_old_connections()
@@ -283,27 +308,27 @@ def _compute_png_for_request(image_id: int, ww: Optional[float], wl: Optional[fl
         try:
             image = DicomImage.objects.select_related("series__study__facility").get(id=image_id)
         except DicomImage.DoesNotExist:
-            return None, 404, None, None
+            return None, 404, None, None, None
 
         # Permission parity with Django views
         if getattr(user, "is_facility_user", None) and user.is_facility_user():
             try:
                 if getattr(user, "facility", None) and image.series.study.facility != user.facility:
-                    return None, 403, None, None
+                    return None, 403, None, None, None
             except Exception:
-                return None, 403, None, None
+                return None, 403, None, None, None
 
         ds = _read_dicom_dataset(image)
         if ds is None:
-            return None, 404, None, None
+            return None, 404, None, None, None
 
         pixel = _decode_pixel_array(image, ds)
         if pixel is None:
-            return None, 404, None, None
+            return None, 404, None, None, None
 
         pixel = _normalize_to_2d_grayscale(pixel)
         if pixel is None:
-            return None, 404, None, None
+            return None, 404, None, None, None
 
         pixel = _apply_rescale_if_present(pixel, ds)
 
@@ -312,11 +337,17 @@ def _compute_png_for_request(image_id: int, ww: Optional[float], wl: Optional[fl
             ww = dww if ww is None else ww
             wl = dwl if wl is None else wl
 
+        # Auto-invert MONOCHROME1 images when the caller didn't explicitly request an inversion —
+        # otherwise every caller that doesn't know a given image is MONOCHROME1 (series thumbnails,
+        # the compare pane before it forwards its own inverted flag) gets wrong-contrast grayscale.
+        if use_default_inversion:
+            inverted = _is_monochrome1(ds)
+
         png_bytes = _render_png_bytes(pixel, float(ww), float(wl), bool(inverted))
         if not png_bytes:
-            return None, 404, None, None
+            return None, 404, None, None, None
 
-        return png_bytes, 200, float(ww), float(wl)
+        return png_bytes, 200, float(ww), float(wl), bool(inverted)
     finally:
         close_old_connections()
 
@@ -339,10 +370,21 @@ async def dicom_image_render_png(request: Request, image_id: int):
     inv_raw = request.query_params.get("inverted")
     if inv_raw is None:
         inv_raw = request.query_params.get("invert")
+    inverted_provided = inv_raw is not None
     inverted = (inv_raw or "false").strip().lower() == "true"
+    # When the caller doesn't say whether to invert, auto-detect from MONOCHROME1 instead of
+    # silently defaulting to "not inverted" — see _compute_png_for_request.
+    use_default_inversion = not inverted_provided
 
     # If no ww/wl provided, we still compute them, then cache using derived values.
     # This makes repeated "default window" requests fast.
+    # NOTE: the memory/disk cache below is keyed on the *requested* `inverted` (pre-auto-detect);
+    # that's fine when the caller is explicit, but when use_default_inversion is True the actual
+    # rendered bytes may end up inverted differently than this key implies. We only ever read
+    # from this cache with the same not-yet-resolved key, so a repeat "give me the default" request
+    # still gets back the same (correctly auto-inverted) bytes — see the persist step below, which
+    # writes using the *resolved* inverted value so an explicit follow-up request for the opposite
+    # inverted value doesn't collide with it.
     tmp_ww = ww if ww is not None else 0.0
     tmp_wl = wl if wl is not None else 0.0
     mem_key = _cache_key(image_id, tmp_ww, tmp_wl, inverted) if (ww is not None and wl is not None) else None
@@ -368,19 +410,23 @@ async def dicom_image_render_png(request: Request, image_id: int):
 
     def _do_render_sync():
         with lock:
-            return _compute_png_for_request(image_id, ww, wl, inverted, user)
+            return _compute_png_for_request(image_id, ww, wl, inverted, use_default_inversion, user)
 
-    png_bytes, status, ww_used, wl_used = await asyncio.to_thread(_do_render_sync)
+    png_bytes, status, ww_used, wl_used, inverted_used = await asyncio.to_thread(_do_render_sync)
 
     if status != 200 or not png_bytes:
         return Response(status_code=int(status))
 
-    # Persist cache using the actual ww/wl used (covers default-window requests too).
+    # Persist cache using the actual ww/wl/inverted used (covers default-window/auto-invert
+    # requests too) — using the pre-resolution `inverted` here would mislabel MONOCHROME1 images
+    # that got auto-inverted, so a later explicit request for the opposite value could wrongly
+    # hit this entry.
     try:
         ww_used = float(ww_used if ww_used is not None else ww or 0.0)
         wl_used = float(wl_used if wl_used is not None else wl or 0.0)
-        stable_key = _cache_key(image_id, ww_used, wl_used, inverted)
-        out_path = _cache_path(image_id, ww_used, wl_used, inverted)
+        inverted_used = bool(inverted_used) if inverted_used is not None else inverted
+        stable_key = _cache_key(image_id, ww_used, wl_used, inverted_used)
+        out_path = _cache_path(image_id, ww_used, wl_used, inverted_used)
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
             tmp_path = f"{out_path}.tmp"

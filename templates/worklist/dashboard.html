@@ -1162,8 +1162,11 @@
             {% if mob_caps.ai_visible %}
             <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i class="fas fa-robot"></i> AI WORKLIST</div>
             {% endif %}
-            {% if user.is_admin or mob_caps.manage_settings or mob_caps.manage_permissions or mob_caps.manage_users or mob_caps.manage_facilities or mob_caps.view_logs %}
+            {% if user.role == 'admin' or mob_caps.manage_settings or mob_caps.manage_permissions or mob_caps.manage_users or mob_caps.manage_facilities or mob_caps.view_logs %}
             <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'admin_panel:dashboard' %}'"><i class="fas fa-user-cog"></i> ADMIN PANEL</div>
+            {% endif %}
+            {% if user.is_authenticated %}
+            <div class="nav-tab" onclick="closeMobDrawer();window.location.href='{% url 'accounts:profile' %}'"><i class="fas fa-user"></i> PROFILE</div>
             {% endif %}
         </div>
 
@@ -1207,7 +1210,7 @@
                     <div class="nav-tab" onclick="window.location.href='{% url 'ai_analysis:ai_dashboard' %}'"><i
                             class="fas fa-robot"></i> AI WORKLIST</div>
                     {% endif %}
-                    {% if user.is_admin or caps.manage_settings or caps.manage_permissions or caps.manage_users or caps.manage_facilities or caps.view_logs %}
+                    {% if user.role == 'admin' or caps.manage_settings or caps.manage_permissions or caps.manage_users or caps.manage_facilities or caps.view_logs %}
                     <div class="nav-tab" onclick="window.location.href='{% url 'admin_panel:dashboard' %}'"><i
                             class="fas fa-user-cog"></i> ADMIN PANEL</div>
                     {% endif %}
@@ -1233,27 +1236,31 @@
                     </div>
                 </div>
                 {% if user.is_authenticated %}
+                <button type="button" class="btn-control"
+                    onclick="window.location.href='{% url 'accounts:profile' %}'" title="Profile">
+                    <i class="fas fa-user"></i> PROFILE
+                </button>
                 {% user_caps as caps %}
-                {% if user.is_admin or caps.manage_settings %}
+                {% if user.role == 'admin' or caps.manage_settings %}
                 <button type="button" class="admin-btn"
                     onclick="window.location.href='{% url 'admin_panel:dashboard' %}'" title="Administrator Dashboard">
                     <i class="fas fa-shield-alt"></i> ADMIN PANEL
                 </button>
                 {% endif %}
-                {% if user.is_admin or caps.manage_users %}
+                {% if user.role == 'admin' or caps.manage_users %}
                 <button type="button" class="btn-control"
                     onclick="window.location.href='{% url 'admin_panel:user_create' %}'" title="Create New User">
                     <i class="fas fa-user-plus"></i>
                 </button>
                 {% endif %}
-                {% if user.is_admin or caps.manage_facilities %}
+                {% if user.role == 'admin' or caps.manage_facilities %}
                 <button type="button" class="btn-control"
                     onclick="window.location.href='{% url 'admin_panel:facility_create' %}'"
                     title="Create New Facility">
                     <i class="fas fa-hospital"></i>
                 </button>
                 {% endif %}
-                {% if user.is_admin or caps.manage_users %}
+                {% if user.role == 'admin' or caps.manage_users %}
                 <button type="button" class="btn-control"
                     onclick="window.location.href='{% url 'admin_panel:user_management' %}'" title="Manage All Users">
                     <i class="fas fa-users-cog"></i>

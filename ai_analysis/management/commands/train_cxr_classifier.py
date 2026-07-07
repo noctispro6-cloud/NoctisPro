@@ -232,17 +232,26 @@ def _load_hf_samples(max_samples: int = 0) -> List[Tuple[str, np.ndarray]]:
     _tmpdir = tempfile.mkdtemp(prefix="cxr_hf_")
 
     # ── 1. hf-vision/chest-xray-pneumonia ────────────────────────────────────
+    # Streamed rather than fully materialised: a non-streaming load pulls the
+    # whole ~1.3 GB dataset (both splits) to disk before --max-samples ever
+    # gets a chance to trim it — a single large blocking transfer that a slow
+    # or flaky connection can silently die on partway through. Streaming lets
+    # bytes flow incrementally and --max-samples cap what's actually fetched.
     try:
-        print("Downloading hf-vision/chest-xray-pneumonia …")
+        print("Downloading hf-vision/chest-xray-pneumonia (streaming) …")
         ds = load_dataset("hf-vision/chest-xray-pneumonia", split="train+test",
-                          trust_remote_code=True)
-        label_col = "label" if "label" in ds.column_names else "labels"
-        img_col   = "image" if "image" in ds.column_names else "img"
+                          streaming=True)
+        label_col = None
+        img_col = None
         added = 0
+        cap = max_samples if max_samples else 2000  # sane ceiling even when "unlimited"
         for i, row in enumerate(ds):
-            if max_samples and added >= max_samples:
+            if added >= cap:
                 break
             try:
+                if label_col is None:
+                    label_col = "label" if "label" in row else "labels"
+                    img_col   = "image" if "image" in row else "img"
                 pil_img = row[img_col]
                 lbl     = row[label_col]
                 vec = np.zeros(NUM_CLASSES, dtype=np.float32)
@@ -263,15 +272,18 @@ def _load_hf_samples(max_samples: int = 0) -> List[Tuple[str, np.ndarray]]:
     # ── 2. NIH 14-class subset via HuggingFace ────────────────────────────────
     if not max_samples or len(samples) < max_samples:
         label_to_idx = {l: i for i, l in enumerate(CXR_LABELS)}
-        remaining = (max_samples - len(samples)) if max_samples else 0
+        # This dataset is 100k+ images; with no cap the streaming loop below
+        # would run unbounded. Fall back to the same sane ceiling used above
+        # when the caller didn't ask for a specific --max-samples.
+        remaining = (max_samples - len(samples)) if max_samples else 2000
         try:
             print("Downloading alkzar90/NIH-Chest-X-ray-dataset (streaming) …")
             ds_nih = load_dataset("alkzar90/NIH-Chest-X-ray-dataset",
                                   "image-classification", split="train",
-                                  streaming=True, trust_remote_code=True)
+                                  streaming=True)
             added = 0
             for i, row in enumerate(ds_nih):
-                if remaining and added >= remaining:
+                if added >= remaining:
                     break
                 try:
                     pil_img = row.get("image") or row.get("img")

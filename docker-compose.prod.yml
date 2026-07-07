@@ -13,6 +13,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    mem_limit: ${DB_MEM_LIMIT:-512m}
     restart: unless-stopped
 
   pgbouncer:
@@ -37,6 +38,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    mem_limit: ${PGBOUNCER_MEM_LIMIT:-128m}
     restart: unless-stopped
 
   redis:
@@ -44,6 +46,7 @@ services:
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
     volumes:
       - noctis_redis:/data
+    mem_limit: ${REDIS_MEM_LIMIT:-256m}
     restart: unless-stopped
 
   web:
@@ -88,6 +91,7 @@ services:
     volumes:
       - noctis_media:/data/media
       - noctis_static:/data/staticfiles
+    mem_limit: ${WEB_MEM_LIMIT:-1024m}
     restart: unless-stopped
 
   celery:
@@ -126,6 +130,7 @@ services:
     volumes:
       - noctis_media:/data/media
       - noctis_static:/data/staticfiles
+    mem_limit: ${CELERY_MEM_LIMIT:-512m}
     restart: unless-stopped
 
   dicom:
@@ -154,6 +159,10 @@ services:
         condition: service_healthy
       pgbouncer:
         condition: service_started
+    # 256MB floor — measured ~466MB baseline (pydicom/numpy import overhead) on a real deploy
+    # with the old 3%/64MB floor from deploy-docker.sh's compute_mem_limits; that left it at
+    # ~58% of its own cap just sitting idle. See the matching note there.
+    mem_limit: ${DICOM_MEM_LIMIT:-256m}
     restart: unless-stopped
 
   nginx:
@@ -173,6 +182,7 @@ services:
       - ./nginx/www:/var/www/certbot:ro
       - ./nginx/letsencrypt:/etc/letsencrypt:ro
       - noctis_static:/static:ro
+    mem_limit: ${NGINX_MEM_LIMIT:-128m}
     restart: unless-stopped
 
 volumes:

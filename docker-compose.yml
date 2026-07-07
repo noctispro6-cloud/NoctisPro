@@ -165,7 +165,7 @@ services:
       - "${DICOM_PORT:-11112}:11112"
     volumes:
       - noctis_media:/data/media
-    mem_limit: ${DICOM_MEM_LIMIT:-192m}
+    mem_limit: ${DICOM_MEM_LIMIT:-256m}
     restart: unless-stopped
 
   ngrok:

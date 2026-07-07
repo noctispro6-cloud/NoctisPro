@@ -12,6 +12,27 @@ log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOGFILE"; }
 
 cd "$APP_DIR"
 
+# Auto-size each service's Docker `mem_limit` from this host's actual RAM (same approach as
+# deploy-docker.sh — see the longer comment there). web/celery/dicom get recreated by this script
+# on every run, so they pick up a fresh limit each time; db/redis/pgbouncer/nginx only pick up a
+# changed limit the next time *they* happen to be recreated (this script deliberately leaves them
+# running for zero-downtime updates), but exporting these now means a fresh `up` of the full stack
+# always gets sane values without anyone hand-tuning them.
+total_mb="$(awk '/MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 1024)"
+allocatable_mb=$(( total_mb * 85 / 100 ))
+DB_MEM_LIMIT="$(( allocatable_mb * 20 / 100 ))"; (( DB_MEM_LIMIT < 256 )) && DB_MEM_LIMIT=256
+PGBOUNCER_MEM_LIMIT="$(( allocatable_mb * 3 / 100 ))"; (( PGBOUNCER_MEM_LIMIT < 32 )) && PGBOUNCER_MEM_LIMIT=32
+REDIS_MEM_LIMIT="$(( allocatable_mb * 7 / 100 ))"; (( REDIS_MEM_LIMIT < 64 )) && REDIS_MEM_LIMIT=64
+WEB_MEM_LIMIT="$(( allocatable_mb * 45 / 100 ))"; (( WEB_MEM_LIMIT < 256 )) && WEB_MEM_LIMIT=256
+CELERY_MEM_LIMIT="$(( allocatable_mb * 17 / 100 ))"; (( CELERY_MEM_LIMIT < 192 )) && CELERY_MEM_LIMIT=192
+DICOM_MEM_LIMIT="$(( allocatable_mb * 6 / 100 ))"; (( DICOM_MEM_LIMIT < 256 )) && DICOM_MEM_LIMIT=256
+NGINX_MEM_LIMIT="$(( allocatable_mb * 2 / 100 ))"; (( NGINX_MEM_LIMIT < 64 )) && NGINX_MEM_LIMIT=64
+export DB_MEM_LIMIT="${DB_MEM_LIMIT}m" PGBOUNCER_MEM_LIMIT="${PGBOUNCER_MEM_LIMIT}m" \
+       REDIS_MEM_LIMIT="${REDIS_MEM_LIMIT}m" WEB_MEM_LIMIT="${WEB_MEM_LIMIT}m" \
+       CELERY_MEM_LIMIT="${CELERY_MEM_LIMIT}m" DICOM_MEM_LIMIT="${DICOM_MEM_LIMIT}m" \
+       NGINX_MEM_LIMIT="${NGINX_MEM_LIMIT}m"
+log "Detected ${total_mb}MB host RAM -> mem_limit db=${DB_MEM_LIMIT} pgbouncer=${PGBOUNCER_MEM_LIMIT} redis=${REDIS_MEM_LIMIT} web=${WEB_MEM_LIMIT} celery=${CELERY_MEM_LIMIT} dicom=${DICOM_MEM_LIMIT} nginx=${NGINX_MEM_LIMIT}"
+
 log "=== NoctisPro update started ==="
 
 # 1. Pull latest code

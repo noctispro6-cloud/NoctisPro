@@ -288,12 +288,15 @@ compute_mem_limits() {
   allocatable_mb=$(( total_mb * 85 / 100 ))
 
   # name  percent  floor_mb
+  # dicom's percent/floor bumped from 3%/64MB after measuring ~466MB baseline (pydicom/numpy
+  # import overhead) at idle on a real deploy — 3% left it at ~58% of its own cap doing nothing.
+  # Pulled from celery, which measured at ~10% of its own allocation under the same conditions.
   DB_MEM_LIMIT="$(( allocatable_mb * 20 / 100 ))"; (( DB_MEM_LIMIT < 256 )) && DB_MEM_LIMIT=256
   PGBOUNCER_MEM_LIMIT="$(( allocatable_mb * 3 / 100 ))"; (( PGBOUNCER_MEM_LIMIT < 32 )) && PGBOUNCER_MEM_LIMIT=32
   REDIS_MEM_LIMIT="$(( allocatable_mb * 7 / 100 ))"; (( REDIS_MEM_LIMIT < 64 )) && REDIS_MEM_LIMIT=64
   WEB_MEM_LIMIT="$(( allocatable_mb * 45 / 100 ))"; (( WEB_MEM_LIMIT < 256 )) && WEB_MEM_LIMIT=256
-  CELERY_MEM_LIMIT="$(( allocatable_mb * 20 / 100 ))"; (( CELERY_MEM_LIMIT < 192 )) && CELERY_MEM_LIMIT=192
-  DICOM_MEM_LIMIT="$(( allocatable_mb * 3 / 100 ))"; (( DICOM_MEM_LIMIT < 64 )) && DICOM_MEM_LIMIT=64
+  CELERY_MEM_LIMIT="$(( allocatable_mb * 17 / 100 ))"; (( CELERY_MEM_LIMIT < 192 )) && CELERY_MEM_LIMIT=192
+  DICOM_MEM_LIMIT="$(( allocatable_mb * 6 / 100 ))"; (( DICOM_MEM_LIMIT < 256 )) && DICOM_MEM_LIMIT=256
   NGROK_MEM_LIMIT="$(( allocatable_mb * 2 / 100 ))"; (( NGROK_MEM_LIMIT < 32 )) && NGROK_MEM_LIMIT=32
 
   export DB_MEM_LIMIT="${DB_MEM_LIMIT}m" PGBOUNCER_MEM_LIMIT="${PGBOUNCER_MEM_LIMIT}m" \
@@ -350,6 +353,29 @@ if [[ ! -f ".env.docker" ]]; then
     err "Missing .env.docker and .env.docker.example."
     exit 2
   fi
+fi
+
+# Refuse to run against a box that's actually deployed via docker-compose.prod.yml (the
+# nginx+domain/TLS setup). This script targets plain docker-compose.yml (no nginx); its
+# `docker compose down --remove-orphans` call below would delete that stack's nginx container
+# as an "orphan" the moment both files share a Compose project name (which they do by default —
+# Compose derives it from the directory alone). That's not hypothetical: it took down a real
+# production domain once already. If you're updating an existing prod deployment, use
+# `sudo bash scripts/update.sh` instead — it targets docker-compose.prod.yml correctly and never
+# runs down/--remove-orphans.
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qE '(^|-)nginx(-|$)'; then
+  err "A running nginx container was found — this looks like a docker-compose.prod.yml deployment"
+  err "(the nginx+domain/TLS setup), not the plain docker-compose.yml this script manages."
+  err ""
+  err "Running this script now would very likely delete that nginx container as an orphaned"
+  err "service the moment 'docker compose down --remove-orphans' runs below."
+  err ""
+  err "If you're updating an EXISTING production deployment, use this instead:"
+  err "  sudo bash scripts/update.sh"
+  err ""
+  err "If you really do want to switch this box to the plain (no-nginx) deployment this script"
+  err "manages, stop the prod stack explicitly first: sudo docker compose -f docker-compose.prod.yml down"
+  exit 2
 fi
 
 debug_val="$(read_env_kv DEBUG .env.docker | xargs || true)"

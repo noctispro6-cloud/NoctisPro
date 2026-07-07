@@ -90,6 +90,10 @@ services:
       # ML bone segmentation model (optional — classical fallback used when unset).
       # Set BONE_ML_MODEL_PATH=/models/bone_seg.pt and mount the file below.
       BONE_ML_MODEL_PATH: ${BONE_ML_MODEL_PATH:-}
+      # Persist HuggingFace dataset/model downloads across `docker compose run`
+      # invocations (e.g. train_cxr_classifier/train_bone_model --download) so a
+      # slow connection only pays the download cost once, not on every run.
+      HF_HOME: /data/hf_cache
     depends_on:
       db:
         condition: service_healthy
@@ -104,6 +108,7 @@ services:
     volumes:
       - noctis_media:/data/media
       - noctis_static:/data/staticfiles
+      - noctis_hf_cache:/data/hf_cache
     # Setting this actually lets tools/auto_concurrency.py (Dockerfile CMD) and
     # noctis_pro/resource_budget.py (in-process image/MPR caches) detect a real per-container
     # cgroup limit instead of the whole host's RAM, so worker count and cache sizes auto-tune
@@ -191,3 +196,4 @@ volumes:
   noctis_media: {}
   noctis_static: {}
   noctis_redis: {}
+  noctis_hf_cache: {}

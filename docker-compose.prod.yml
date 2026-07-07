@@ -79,6 +79,10 @@ services:
       USE_X_FORWARDED_PORT: "true"
       # ML bone segmentation model (optional — classical fallback used when unset)
       BONE_ML_MODEL_PATH: ${BONE_ML_MODEL_PATH:-}
+      # Persist HuggingFace dataset/model downloads across `docker compose run`
+      # invocations (e.g. train_cxr_classifier/train_bone_model --download) so a
+      # slow connection only pays the download cost once, not on every run.
+      HF_HOME: /data/hf_cache
     depends_on:
       db:
         condition: service_healthy
@@ -91,6 +95,7 @@ services:
     volumes:
       - noctis_media:/data/media
       - noctis_static:/data/staticfiles
+      - noctis_hf_cache:/data/hf_cache
     mem_limit: ${WEB_MEM_LIMIT:-1024m}
     restart: unless-stopped
 
@@ -190,4 +195,5 @@ volumes:
   noctis_media:
   noctis_static:
   noctis_redis:
+  noctis_hf_cache:
 

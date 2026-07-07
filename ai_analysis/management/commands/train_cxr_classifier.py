@@ -142,7 +142,8 @@ class _CXRDataset:
 
         # Load image
         img_arr = None
-        if path.lower().endswith('.dcm') or path.lower().endswith(''):
+        ext = os.path.splitext(path)[1].lower()
+        if ext in ('.dcm', '.dicom', ''):
             img_arr = _dicom_to_uint8(path)
         if img_arr is None:
             try:
@@ -355,15 +356,29 @@ def _pseudo_label_samples(dicom_paths: List[str], device) -> List[Tuple[str, np.
 # Model: DenseNet-121 with 14-class multi-label head
 # ---------------------------------------------------------------------------
 
-def _build_model(device):
-    """DenseNet-121 pretrained on ImageNet; replace classifier with 14-class head."""
+def _build_model(device, resume_path: Optional[str] = None):
+    """
+    DenseNet-121 with a 14-class head.
+
+    If resume_path is given, weights are loaded from that checkpoint instead
+    of (re-)downloading ImageNet weights — faster and works offline, which
+    matters when "continuing" training on a low-bandwidth server.
+    """
     import torch
     import torch.nn as nn
     from torchvision import models as tv_models
 
-    model = tv_models.densenet121(weights=tv_models.DenseNet121_Weights.IMAGENET1K_V1)
-    in_features = model.classifier.in_features
-    model.classifier = nn.Linear(in_features, NUM_CLASSES)
+    if resume_path:
+        model = tv_models.densenet121(weights=None)
+        in_features = model.classifier.in_features
+        model.classifier = nn.Linear(in_features, NUM_CLASSES)
+        ckpt = torch.load(resume_path, map_location=device)
+        state_dict = ckpt.get('model_state_dict', ckpt) if isinstance(ckpt, dict) else ckpt
+        model.load_state_dict(state_dict, strict=False)
+    else:
+        model = tv_models.densenet121(weights=tv_models.DenseNet121_Weights.IMAGENET1K_V1)
+        in_features = model.classifier.in_features
+        model.classifier = nn.Linear(in_features, NUM_CLASSES)
     return model.to(device)
 
 
@@ -508,6 +523,10 @@ class Command(BaseCommand):
                             help='Cap total samples for quick test runs (0=unlimited)')
         parser.add_argument('--cpu',          action='store_true',
                             help='Force CPU training')
+        parser.add_argument('--resume',       type=str,   default=None,
+                            help='Path to an existing .pth checkpoint to resume/fine-tune '
+                                 'from (continuous learning). If omitted, auto-resumes from '
+                                 '--output when that file already exists.')
 
     def handle(self, *args, **options):
         import torch
@@ -524,6 +543,17 @@ class Command(BaseCommand):
         output_path = options['output'] or os.path.join(
             media_root, 'models', 'cxr_classifier.pth'
         )
+
+        # ── Resume / continuous-learning checkpoint ──────────────────────────
+        resume_path = options.get('resume')
+        if resume_path and os.path.exists(resume_path):
+            print(f"Resuming from checkpoint: {resume_path}")
+        elif resume_path:
+            self.stderr.write(f"Warning: resume path not found ({resume_path}); starting fresh.")
+            resume_path = None
+        elif os.path.exists(output_path):
+            resume_path = output_path
+            print(f"Continuous learning: resuming from existing {output_path}")
 
         # ── Collect samples ──────────────────────────────────────────────────
         samples = []
@@ -600,8 +630,9 @@ class Command(BaseCommand):
         val_ds   = _CXRDataset(val_samples,   augment=False)
 
         # ── Build model ──────────────────────────────────────────────────────
-        print("Building DenseNet-121 (ImageNet pretrained) …")
-        model = _build_model(device)
+        print("Building DenseNet-121 …" if resume_path else
+              "Building DenseNet-121 (ImageNet pretrained) …")
+        model = _build_model(device, resume_path=resume_path)
         total_params = sum(p.numel() for p in model.parameters())
         trainable    = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f"  Parameters: {total_params:,}  (trainable head: {trainable:,})")

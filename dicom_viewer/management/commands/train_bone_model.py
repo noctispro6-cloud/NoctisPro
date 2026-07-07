@@ -226,20 +226,19 @@ def _download_bone_volumes(tmpdir: str):
     # Synthetic fallback: build simple bone phantom for minimal testing
     if not downloaded:
         print("  Generating synthetic bone phantoms (fallback) …")
+        yy, xx = np.mgrid[0:256, 0:256]
         for _ in range(3):
             vol = np.random.uniform(-500, 200, (32, 256, 256)).astype(np.float32)
-            # Insert synthetic cortical bone cylinder
-            cy, cx = 128, 128
-            r = 40
-            for z in range(32):
-                for y in range(256):
-                    for x in range(256):
-                        d = np.sqrt((y - cy) ** 2 + (x - cx) ** 2)
-                        if r - 4 < d < r:
-                            vol[z, y, x] = 700.0   # cortical bone HU
-                        elif d < r - 4:
-                            vol[z, y, x] = 100.0   # marrow
-        downloaded.append(vol)
+            # Insert synthetic cortical bone cylinder (vectorised — avoids a
+            # 32*256*256 pure-Python triple loop, which is both slow and
+            # unnecessary on constrained/CPU-only hardware)
+            cy, cx, r = 128, 128, 40
+            d = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+            cortical = (d > r - 4) & (d < r)
+            marrow = d < r - 4
+            vol[:, cortical] = 700.0   # cortical bone HU
+            vol[:, marrow] = 100.0     # marrow
+            downloaded.append(vol)
 
     return downloaded
 

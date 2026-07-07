@@ -36,18 +36,31 @@ log "Detected ${total_mb}MB host RAM -> mem_limit db=${DB_MEM_LIMIT} pgbouncer=$
 log "=== NoctisPro update started ==="
 
 # 1. Pull latest code
+# --force (or FORCE_UPDATE=1) skips the "nothing changed" shortcut below and always
+# rebuilds/restarts — needed after someone `git pull`s by hand (e.g. to inspect a
+# file) without rebuilding, or after a prior run of this script died before it
+# reached the build step; in both cases HEAD == origin but the running containers
+# are still on stale code/deps.
+FORCE=0
+[ "${1:-}" = "--force" ] && FORCE=1
+[ "${FORCE_UPDATE:-}" = "1" ] && FORCE=1
+
 log "Pulling $BRANCH from origin..."
 git fetch origin
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse "origin/$BRANCH")
 
-if [ "$LOCAL" = "$REMOTE" ]; then
-    log "Already up to date ($LOCAL). Nothing to do."
+if [ "$LOCAL" = "$REMOTE" ] && [ "$FORCE" -ne 1 ]; then
+    log "Already up to date ($LOCAL). Nothing to do. (use --force to rebuild/restart anyway)"
     exit 0
 fi
 
-log "New commits available: $LOCAL -> $REMOTE"
-git pull origin "$BRANCH"
+if [ "$LOCAL" = "$REMOTE" ]; then
+    log "Already up to date ($LOCAL); --force given, rebuilding/restarting anyway."
+else
+    log "New commits available: $LOCAL -> $REMOTE"
+    git pull origin "$BRANCH"
+fi
 
 # 2. Build new images without stopping current containers
 log "Building new images..."

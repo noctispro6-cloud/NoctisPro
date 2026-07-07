@@ -51,6 +51,10 @@ torchvision
 accelerate
 sentencepiece
 
+# --download support for train_cxr_classifier / train_bone_model
+# (public HuggingFace dataset loading; only touched when --download is passed)
+datasets
+
 # Imaging / math used by viewer + recon
 numpy
 scipy

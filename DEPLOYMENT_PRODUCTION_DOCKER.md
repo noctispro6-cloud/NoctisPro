@@ -1,4 +1,9 @@
-# Production deployment (Contabo Ubuntu 24.04 + Docker)
+# Production deployment — manual steps (any Docker host)
+
+For an automated install on a fresh VPS instead (recommended — installs Docker, firewall,
+systemd auto-start, and a nightly auto-update cron for you), see
+[DEPLOY_CONTABO.md](DEPLOY_CONTABO.md) or [DEPLOY_AWS_CLOUDFLARE.md](DEPLOY_AWS_CLOUDFLARE.md).
+This doc is the manual path: every step by hand, on whatever Docker host you already have.
 
 This repo can be deployed publicly **only over HTTPS**. The production setup uses:
 

@@ -23,13 +23,15 @@ details.
 | Path | Use case | Guide |
 |---|---|---|
 | `deploy-docker.sh` | Local machine / quick evaluation, Docker Compose | this doc, [§ Local Docker](#local-docker-quick-start-automated) |
-| `scripts/install-server.sh` + `docker-compose.prod.yml` | Production on a fresh Ubuntu VPS, fully automated | [DEPLOY_AWS_CLOUDFLARE.md](DEPLOY_AWS_CLOUDFLARE.md) |
+| `scripts/install-server.sh` + `docker-compose.prod.yml` | Production on a fresh Ubuntu VPS, fully automated — **any provider**: Contabo, AWS, DigitalOcean, Hetzner, bare metal... `install-server.sh` only assumes plain Ubuntu 22.04/24.04 + root SSH, nothing cloud-specific | [DEPLOY_CONTABO.md](DEPLOY_CONTABO.md) (Contabo), [DEPLOY_AWS_CLOUDFLARE.md](DEPLOY_AWS_CLOUDFLARE.md) (AWS) |
 | `docker-compose.prod.yml` (manual steps) | Production on any Docker host, step by step | [DEPLOYMENT_PRODUCTION_DOCKER.md](DEPLOYMENT_PRODUCTION_DOCKER.md), [§ Manual production deploy](#manual-production-deploy-docker) |
 | `deploy.sh` | Native systemd install, no Docker (sqlite or postgres) | `./deploy.sh --help` |
 | `docker-compose.node.yml` | Add opportunistic secondary capacity (e.g. a laptop) to an existing prod deploy | [DEPLOY_OPPORTUNISTIC_NODE.md](DEPLOY_OPPORTUNISTIC_NODE.md) |
 
 All Docker paths share one codebase and one `Dockerfile`; they differ only in which compose
-file and which services are involved.
+file and which services are involved. The two production guides are almost entirely the same
+document — they only differ in Part 1 (how you provision the VPS itself); everything from
+Cloudflare DNS onward is identical regardless of provider.
 
 ---
 
@@ -53,8 +55,12 @@ remote modality during testing): `./deploy-docker.sh --ngrok` (requires `NGROK_A
 
 ## Production deploy — automated
 
-Full walkthrough (AWS EC2 + Cloudflare, but the same script targets any fresh Ubuntu
-22.04/24.04 host): **[DEPLOY_AWS_CLOUDFLARE.md](DEPLOY_AWS_CLOUDFLARE.md)**. Short version:
+Full walkthrough: **[DEPLOY_CONTABO.md](DEPLOY_CONTABO.md)** (Contabo) or
+**[DEPLOY_AWS_CLOUDFLARE.md](DEPLOY_AWS_CLOUDFLARE.md)** (AWS EC2) — pick based on your VPS
+provider; both drive the same `scripts/install-server.sh` / `docker-compose.prod.yml`
+automation underneath and only differ in how the VPS itself gets provisioned. On any other
+Ubuntu 22.04/24.04 host, skip straight to Part 2 of either guide (Cloudflare DNS onward) —
+none of it is provider-specific. Short version:
 
 ```bash
 git clone <this-repo-url> /opt/noctispro && cd /opt/noctispro
@@ -228,7 +234,8 @@ have, not a checkbox to tick now.
 
 ## Docs index
 
-- [DEPLOY_AWS_CLOUDFLARE.md](DEPLOY_AWS_CLOUDFLARE.md) — full automated production walkthrough
+- [DEPLOY_CONTABO.md](DEPLOY_CONTABO.md) — full automated production walkthrough (Contabo)
+- [DEPLOY_AWS_CLOUDFLARE.md](DEPLOY_AWS_CLOUDFLARE.md) — full automated production walkthrough (AWS)
 - [DEPLOYMENT_PRODUCTION_DOCKER.md](DEPLOYMENT_PRODUCTION_DOCKER.md) — manual production deploy, any Docker host
 - [DEPLOY_OPPORTUNISTIC_NODE.md](DEPLOY_OPPORTUNISTIC_NODE.md) — add a secondary node over Tailscale
 - [RECOVERY.md](RECOVERY.md) — restore database/media from backup

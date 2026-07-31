@@ -1,0 +1,87 @@
+# Opportunistic secondary node (e.g. a laptop, joined to the cloud server over Tailscale).
+# See DEPLOY_OPPORTUNISTIC_NODE.md for the full setup. Deliberately minimal compared to
+# docker-compose.prod.yml: no db/redis/pgbouncer/nginx/dicom here — this node borrows all of
+# those from the cloud server over the Tailscale link, so there's exactly one Postgres, one
+# Redis, and one canonical copy of media, no matter how many opportunistic nodes join.
+#
+# Run from scripts/setup-laptop-node.sh, or directly:
+#   docker compose -f docker-compose.node.yml --env-file .env.docker.node up -d --build
+services:
+  web:
+    build:
+      context: .
+    env_file:
+      - .env.docker.node
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      # Cloud server's Tailscale IP/hostname — set in .env.docker.node.
+      DB_HOST: ${CLOUD_TAILSCALE_ADDR:?Set CLOUD_TAILSCALE_ADDR in .env.docker.node}
+      DB_PORT: "6432"
+      DB_NAME: ${DB_NAME:-noctispro}
+      DB_USER: ${DB_USER:-noctispro}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env.docker.node (same value as the cloud's .env.docker)}
+      USE_PGBOUNCER: "true"
+      REDIS_URL: ${REDIS_URL:?Set REDIS_URL in .env.docker.node, e.g. redis://<cloud-tailscale-addr>:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?Set CELERY_BROKER_URL in .env.docker.node}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:?Set CELERY_RESULT_BACKEND in .env.docker.node}
+      # Local (not shared) — nginx on the cloud server serves /static/ directly from its own
+      # noctis_static volume regardless of which node handled the underlying request, so this
+      # node's collected static files are never actually read over the network.
+      STATIC_ROOT: /data/staticfiles
+      # NFS-mounted from the cloud server's media volume by scripts/setup-laptop-node.sh —
+      # must be the SAME data both nodes read/write, or a study uploaded via one node would
+      # be invisible to requests HAProxy routes to the other.
+      MEDIA_ROOT: /data/media
+      SSL_ENABLED: "true"
+      USE_X_FORWARDED_HOST: "true"
+      USE_X_FORWARDED_PORT: "true"
+      BONE_ML_MODEL_PATH: ${BONE_ML_MODEL_PATH:-}
+    expose:
+      - "8000"
+    ports:
+      # Reachable from the cloud server's HAProxy over Tailscale only if this host's firewall
+      # allows the tailscale0 interface (Tailscale's own ACLs handle this by default — see
+      # DEPLOY_OPPORTUNISTIC_NODE.md). Not bound to a specific IP here because Tailscale
+      # already scopes reachability; the setup doc explains the alternative if you want belt
+      # and suspenders.
+      - "8000:8000"
+    volumes:
+      - ${NODE_MEDIA_MOUNT:?Set NODE_MEDIA_MOUNT in .env.docker.node to the NFS mount path from scripts/setup-laptop-node.sh}:/data/media
+      - noctis_node_static:/data/staticfiles
+    mem_limit: ${WEB_MEM_LIMIT:-1024m}
+    restart: unless-stopped
+
+  celery:
+    build:
+      context: .
+    env_file:
+      - .env.docker.node
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_HOST: ${CLOUD_TAILSCALE_ADDR:?Set CLOUD_TAILSCALE_ADDR in .env.docker.node}
+      DB_PORT: "6432"
+      DB_NAME: ${DB_NAME:-noctispro}
+      DB_USER: ${DB_USER:-noctispro}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env.docker.node}
+      USE_PGBOUNCER: "true"
+      REDIS_URL: ${REDIS_URL:?Set REDIS_URL in .env.docker.node}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?Set CELERY_BROKER_URL in .env.docker.node}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:?Set CELERY_RESULT_BACKEND in .env.docker.node}
+      MEDIA_ROOT: /data/media
+      STATIC_ROOT: /data/staticfiles
+      DJANGO_SETTINGS_MODULE: noctis_pro.settings
+      BONE_ML_MODEL_PATH: ${BONE_ML_MODEL_PATH:-}
+    command:
+      [
+        "bash",
+        "-lc",
+        "WORKERS=\"${CELERY_CONCURRENCY:-}\"; if [ -z \"$$WORKERS\" ]; then WORKERS=\"$(python3 /app/tools/auto_concurrency.py celery 2>/dev/null || true)\"; fi; case \"$$WORKERS\" in (''|*[!0-9]*) WORKERS=1 ;; esac; exec celery -A noctis_pro worker -l info --concurrency \"$$WORKERS\"",
+      ]
+    volumes:
+      - ${NODE_MEDIA_MOUNT:?Set NODE_MEDIA_MOUNT in .env.docker.node}:/data/media
+      - noctis_node_static:/data/staticfiles
+    mem_limit: ${CELERY_MEM_LIMIT:-512m}
+    restart: unless-stopped
+
+volumes:
+  noctis_node_static:

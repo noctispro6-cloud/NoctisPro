@@ -12,26 +12,22 @@ log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOGFILE"; }
 
 cd "$APP_DIR"
 
-# Auto-size each service's Docker `mem_limit` from this host's actual RAM (same approach as
-# deploy-docker.sh — see the longer comment there). web/celery/dicom get recreated by this script
-# on every run, so they pick up a fresh limit each time; db/redis/pgbouncer/nginx only pick up a
-# changed limit the next time *they* happen to be recreated (this script deliberately leaves them
-# running for zero-downtime updates), but exporting these now means a fresh `up` of the full stack
-# always gets sane values without anyone hand-tuning them.
-total_mb="$(awk '/MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 1024)"
-allocatable_mb=$(( total_mb * 85 / 100 ))
-DB_MEM_LIMIT="$(( allocatable_mb * 20 / 100 ))"; (( DB_MEM_LIMIT < 256 )) && DB_MEM_LIMIT=256
-PGBOUNCER_MEM_LIMIT="$(( allocatable_mb * 3 / 100 ))"; (( PGBOUNCER_MEM_LIMIT < 32 )) && PGBOUNCER_MEM_LIMIT=32
-REDIS_MEM_LIMIT="$(( allocatable_mb * 7 / 100 ))"; (( REDIS_MEM_LIMIT < 64 )) && REDIS_MEM_LIMIT=64
-WEB_MEM_LIMIT="$(( allocatable_mb * 45 / 100 ))"; (( WEB_MEM_LIMIT < 256 )) && WEB_MEM_LIMIT=256
-CELERY_MEM_LIMIT="$(( allocatable_mb * 17 / 100 ))"; (( CELERY_MEM_LIMIT < 192 )) && CELERY_MEM_LIMIT=192
-DICOM_MEM_LIMIT="$(( allocatable_mb * 6 / 100 ))"; (( DICOM_MEM_LIMIT < 256 )) && DICOM_MEM_LIMIT=256
-NGINX_MEM_LIMIT="$(( allocatable_mb * 2 / 100 ))"; (( NGINX_MEM_LIMIT < 64 )) && NGINX_MEM_LIMIT=64
-export DB_MEM_LIMIT="${DB_MEM_LIMIT}m" PGBOUNCER_MEM_LIMIT="${PGBOUNCER_MEM_LIMIT}m" \
-       REDIS_MEM_LIMIT="${REDIS_MEM_LIMIT}m" WEB_MEM_LIMIT="${WEB_MEM_LIMIT}m" \
-       CELERY_MEM_LIMIT="${CELERY_MEM_LIMIT}m" DICOM_MEM_LIMIT="${DICOM_MEM_LIMIT}m" \
-       NGINX_MEM_LIMIT="${NGINX_MEM_LIMIT}m"
-log "Detected ${total_mb}MB host RAM -> mem_limit db=${DB_MEM_LIMIT} pgbouncer=${PGBOUNCER_MEM_LIMIT} redis=${REDIS_MEM_LIMIT} web=${WEB_MEM_LIMIT} celery=${CELERY_MEM_LIMIT} dicom=${DICOM_MEM_LIMIT} nginx=${NGINX_MEM_LIMIT}"
+# Auto-size each service's Docker `mem_limit` from this host's actual RAM (shared with
+# scripts/start-stack.sh, which applies the same sizing on initial boot). web/celery/dicom get
+# recreated by this script on every run, so they pick up a fresh limit each time; db/redis/pgbouncer/
+# nginx only pick up a changed limit the next time *they* happen to be recreated (this script
+# deliberately leaves them running for zero-downtime updates), but exporting these now means a
+# fresh `up` of the full stack always gets sane values without anyone hand-tuning them.
+# shellcheck source=./compute-prod-mem-limits.sh
+source "$APP_DIR/scripts/compute-prod-mem-limits.sh"
+log "Detected ${total_mb}MB host RAM -> mem_limit db=${DB_MEM_LIMIT} pgbouncer=${PGBOUNCER_MEM_LIMIT} redis=${REDIS_MEM_LIMIT} web=${WEB_MEM_LIMIT} celery=${CELERY_MEM_LIMIT} dicom=${DICOM_MEM_LIMIT} nginx=${NGINX_MEM_LIMIT} lb=${HAPROXY_MEM_LIMIT}"
+
+# Preserve a manually-scaled replica count across this update. `up -d` without --scale
+# would otherwise reset web/celery back down to 1 replica each, since Compose doesn't
+# remember an ad-hoc --scale count between separate `up` invocations.
+# shellcheck source=./read-replica-counts.sh
+source "$APP_DIR/scripts/read-replica-counts.sh"
+log "Replica counts -> web=${WEB_REPLICAS} celery=${CELERY_REPLICAS}"
 
 log "=== NoctisPro update started ==="
 
@@ -78,6 +74,13 @@ $COMPOSE run --rm --no-deps web python manage.py collectstatic --noinput --clear
 # 5. Reload services — Compose replaces containers one service at a time.
 # web + celery + dicom restart with new image; db/redis/pgbouncer are unchanged.
 log "Restarting application services..."
-$COMPOSE up -d --no-deps web celery dicom
+$COMPOSE up -d --no-deps --scale "web=${WEB_REPLICAS}" --scale "celery=${CELERY_REPLICAS}" web celery dicom
+
+# 6. Restart the load balancer unconditionally. haproxy/haproxy.cfg is bind-mounted, so a
+# `git pull` that changed it wouldn't otherwise take effect — Compose only recreates a
+# container when the *service definition* changes, not when a bind-mounted file's contents do.
+# Cheap: HAProxy holds no state, and web/celery/dicom above already introduce a brief blip.
+log "Restarting load balancer..."
+$COMPOSE up -d --no-deps --force-recreate lb
 
 log "=== Update complete. Running revision: $(git rev-parse --short HEAD) ==="

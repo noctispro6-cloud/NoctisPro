@@ -30,26 +30,56 @@ services:
       AUTH_TYPE: ${PGBOUNCER_AUTH_TYPE:-plain}
       POOL_MODE: transaction
       MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-1000}
-      DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-20}
-      RESERVE_POOL_SIZE: ${PGBOUNCER_RESERVE_POOL_SIZE:-5}
+      # Real backend connections to Postgres. Bumped from 20: at max_connections=200 (above),
+      # 20 real backends behind 1000 pooled clients under transaction pooling was the first
+      # thing to saturate under real traffic. 50 (+10 reserve) still leaves headroom under 200
+      # for manual psql/admin connections; raise POSTGRES_MAX_CONNECTIONS too if you raise this.
+      DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-50}
+      RESERVE_POOL_SIZE: ${PGBOUNCER_RESERVE_POOL_SIZE:-10}
       SERVER_RESET_QUERY: DISCARD ALL
       IGNORE_STARTUP_PARAMETERS: extra_float_digits
       LISTEN_PORT: "6432"
     depends_on:
       db:
         condition: service_healthy
+    # Opt-in exposure for an opportunistic secondary node (see scripts/setup-cloud-node.sh
+    # and DEPLOY_OPPORTUNISTIC_NODE.md) reaching this pgbouncer over Tailscale. Binding to
+    # a specific interface IP (not 0.0.0.0) means this is unreachable from the public
+    # internet even if TAILSCALE_IP is set; the 127.0.0.1 default is a harmless no-op —
+    # it doesn't expose anything beyond what already existed (container-to-container only).
+    ports:
+      - "${TAILSCALE_IP:-127.0.0.1}:6432:6432"
     mem_limit: ${PGBOUNCER_MEM_LIMIT:-128m}
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    # Unlike pgbouncer (which already requires DB_USER/DB_PASSWORD from any client), redis
+    # has no auth by default — fine when it's only reachable from containers on this host,
+    # not fine once TAILSCALE_IP below makes it reachable from another node. Set
+    # REDIS_PASSWORD in .env.docker before exposing this beyond localhost, and update
+    # REDIS_URL/CELERY_BROKER_URL/CELERY_RESULT_BACKEND (below, and in docker-compose.node.yml)
+    # to `redis://:<password>@...` to match — the container's own `sh` evaluates the
+    # ${VAR:+...} conditional below (Compose's interpolation doesn't support that form),
+    # which is why every $ in it is doubled: that's escaping Compose's interpolation, not
+    # a typo — same convention the celery command below uses for $$WORKERS.
+    command: ["sh", "-c", "exec redis-server --save 60 1 --loglevel warning $${REDIS_PASSWORD:+--requirepass \"$$REDIS_PASSWORD\"}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
       - noctis_redis:/data
+    # See the matching comment on pgbouncer above — same opt-in Tailscale exposure.
+    ports:
+      - "${TAILSCALE_IP:-127.0.0.1}:6379:6379"
     mem_limit: ${REDIS_MEM_LIMIT:-256m}
     restart: unless-stopped
 
   web:
+    # Horizontal scaling on this single host: `docker compose -f docker-compose.prod.yml
+    # up -d --scale web=3`. Safe because web is stateless — media/static are shared named
+    # volumes, sessions/channels go through the shared redis, DB access is pooled through
+    # the shared pgbouncer. The `lb` (HAProxy) service below is what actually load-balances
+    # across every replica, with active health checks against /health/simple/.
     build:
       context: .
     env_file:
@@ -64,7 +94,7 @@ services:
       USE_PGBOUNCER: "true"
 
       # Redis for Channels (websockets / realtime)
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       # Redis for Celery (background jobs / post-processing)
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
@@ -100,6 +130,8 @@ services:
     restart: unless-stopped
 
   celery:
+    # Scales the same way as web (`--scale celery=N`), and needs no nginx-side change:
+    # workers pull independently from the shared redis broker, there's no proxy in front.
     build:
       context: .
     env_file:
@@ -139,6 +171,8 @@ services:
     restart: unless-stopped
 
   dicom:
+    # Cannot be scaled with --scale: it binds a fixed host port (below), so a second
+    # replica would fail to start with an "address already in use" error.
     build:
       context: .
     env_file:
@@ -170,10 +204,25 @@ services:
     mem_limit: ${DICOM_MEM_LIMIT:-256m}
     restart: unless-stopped
 
+  lb:
+    # Dedicated load-balancing tier for the `web` replicas: active health checks
+    # (evicts a dead/unhealthy replica instead of nginx silently retrying it),
+    # least-connections balancing, and automatic pickup of new replicas via Docker
+    # DNS — see haproxy/haproxy.cfg. nginx (below) still owns TLS termination,
+    # static files, and the Cloudflare real-IP mapping; it just proxies to `lb`
+    # instead of `web` directly.
+    image: haproxy:2.9-alpine
+    depends_on:
+      - web
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    mem_limit: ${HAPROXY_MEM_LIMIT:-64m}
+    restart: unless-stopped
+
   nginx:
     image: nginx:1.25-alpine
     depends_on:
-      - web
+      - lb
     ports:
       - "80:80"
       - "443:443"

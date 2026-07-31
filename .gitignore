@@ -4,8 +4,9 @@
 # Local saved ngrok credentials/settings (do not commit)
 .ngrok.env
 
-# Docker env file (contains secrets)
+# Docker env files (contain secrets) — .env.docker.node too, see DEPLOY_OPPORTUNISTIC_NODE.md
 .env.docker
+.env.docker.node
 
 # Python bytecode / caches
 __pycache__/

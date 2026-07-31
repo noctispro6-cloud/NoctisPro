@@ -57,7 +57,7 @@ SSHD=/etc/ssh/sshd_config
 sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/'  "$SSHD"
 sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/'  "$SSHD"
 sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/'                        "$SSHD"
-systemctl reload sshd
+systemctl reload ssh 2>/dev/null || systemctl reload sshd
 log "SSH: password auth disabled, root login restricted."
 
 # ── 5. Fail2ban ──────────────────────────────────────────────────────────────

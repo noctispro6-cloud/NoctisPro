@@ -16,15 +16,6 @@ import threading
 import time
 import re
 import requests
-try:
-    import onnxruntime as ort
-except Exception:
-    ort = None
-try:
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
-except Exception:
-    AutoTokenizer = None
-    AutoModelForSequenceClassification = None
 
 from worklist.models import Study, DicomImage, Series
 from accounts.models import User

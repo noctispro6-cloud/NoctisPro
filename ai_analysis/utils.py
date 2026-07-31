@@ -9,12 +9,6 @@ from django.utils import timezone
 from worklist.models import Study
 from .models import AIAnalysis
 
-try:
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
-except Exception:
-    AutoTokenizer = None
-    AutoModelForSequenceClassification = None
-
 logger = logging.getLogger(__name__)
 
 # Comprehensive medical book references with topic mapping
@@ -582,6 +576,11 @@ def simulate_ai_analysis(analysis):
     modality = analysis.study.modality.code
     # Heavier text classification demo for AI summary confidence, if transformers available
     confidence = 0.85
+    try:
+        from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    except Exception:
+        AutoTokenizer = None
+        AutoModelForSequenceClassification = None
     if AutoTokenizer and AutoModelForSequenceClassification:
         try:
             # Lightweight sentiment-like proxy to modulate confidence

@@ -5,14 +5,30 @@ import json
 import numpy as np
 import pydicom
 from django.conf import settings
-try:
-    import torch
-    import torchvision.transforms as transforms
-    from PIL import Image
-except ImportError:
-    torch = None
 
 logger = logging.getLogger(__name__)
+
+# torch/torchvision/PIL are only needed when a real model actually runs. Importing them
+# at module load (as opposed to on first use) forces every gunicorn/celery worker to pay
+# their import cost on startup, even for workers that never touch AI inference.
+_torch = None
+_torchvision_transforms = None
+_PIL_Image = None
+_torch_import_attempted = False
+
+
+def _load_torch():
+    global _torch, _torchvision_transforms, _PIL_Image, _torch_import_attempted
+    if not _torch_import_attempted:
+        _torch_import_attempted = True
+        try:
+            import torch
+            import torchvision.transforms as transforms
+            from PIL import Image
+            _torch, _torchvision_transforms, _PIL_Image = torch, transforms, Image
+        except ImportError:
+            pass
+    return _torch, _torchvision_transforms, _PIL_Image
 
 class BaseInferenceModel(abc.ABC):
     """
@@ -25,6 +41,7 @@ class BaseInferenceModel(abc.ABC):
         self.config = config or {}
         self.model = None
         self.device = 'cpu'
+        torch, _, _ = _load_torch()
         if torch and torch.cuda.is_available():
             self.device = 'cuda'
         
@@ -49,10 +66,11 @@ class SegmentationModel(BaseInferenceModel):
     Returns binary or multi-class masks.
     """
     def load(self):
+        torch, _, _ = _load_torch()
         if not torch:
             logger.error("PyTorch not installed.")
             return False
-            
+
         try:
             if not os.path.exists(self.model_path):
                 logger.info(f"Model file not found at {self.model_path}. Running in dummy/simulation mode.")
@@ -63,7 +81,7 @@ class SegmentationModel(BaseInferenceModel):
             except Exception:
                 logger.error("Only TorchScript (.pt/.pth) models supported.")
                 return False
-                
+
             self.model.eval()
             logger.info(f"Loaded segmentation model from {self.model_path} on {self.device}")
             return True
@@ -74,30 +92,31 @@ class SegmentationModel(BaseInferenceModel):
     def preprocess(self, dicom_path):
         # Similar preprocessing to Classification but might need different size
         try:
+            _, transforms, Image = _load_torch()
             ds = pydicom.dcmread(dicom_path)
             pixel_array = ds.pixel_array.astype(float)
-            
+
             slope = getattr(ds, 'RescaleSlope', 1)
             intercept = getattr(ds, 'RescaleIntercept', 0)
             pixel_array = (pixel_array * slope) + intercept
-            
+
             pixel_array = (pixel_array - pixel_array.min()) / (pixel_array.max() - pixel_array.min() + 1e-6) * 255
             pixel_array = pixel_array.astype(np.uint8)
-            
+
             img = Image.fromarray(pixel_array)
             if img.mode != 'RGB':
                 img = img.convert('RGB')
-                
+
             preprocess = transforms.Compose([
                 transforms.Resize(256),
                 transforms.CenterCrop(224),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
-            
+
             input_tensor = preprocess(img)
             return input_tensor.unsqueeze(0).to(self.device)
-            
+
         except Exception as e:
             logger.error(f"Preprocessing error: {e}")
             return None
@@ -105,11 +124,12 @@ class SegmentationModel(BaseInferenceModel):
     def predict(self, dicom_path):
         if not self.model:
             return self._simulate_predict(dicom_path)
-            
+
         input_tensor = self.preprocess(dicom_path)
         if input_tensor is None:
             return {'error': 'Preprocessing failed'}
-            
+
+        torch, _, _ = _load_torch()
         with torch.no_grad():
             output = self.model(input_tensor)
             # Assuming output is [1, C, H, W] or [1, H, W]
@@ -169,10 +189,11 @@ class ClassificationModel(BaseInferenceModel):
     Expects a standard TorchScript or state_dict model.
     """
     def load(self):
+        torch, _, _ = _load_torch()
         if not torch:
             logger.error("PyTorch not installed.")
             return False
-            
+
         try:
             if not os.path.exists(self.model_path):
                 logger.info(f"Model file not found at {self.model_path}. Running in dummy/simulation mode.")
@@ -202,23 +223,24 @@ class ClassificationModel(BaseInferenceModel):
         4. Normalize
         """
         try:
+            _, transforms, Image = _load_torch()
             ds = pydicom.dcmread(dicom_path)
             pixel_array = ds.pixel_array.astype(float)
-            
+
             # Simple Windowing (Rescale Slope/Intercept)
             slope = getattr(ds, 'RescaleSlope', 1)
             intercept = getattr(ds, 'RescaleIntercept', 0)
             pixel_array = (pixel_array * slope) + intercept
-            
+
             # Normalize to 0-255
             pixel_array = (pixel_array - pixel_array.min()) / (pixel_array.max() - pixel_array.min() + 1e-6) * 255
             pixel_array = pixel_array.astype(np.uint8)
-            
+
             # Convert to PIL for Transforms
             img = Image.fromarray(pixel_array)
             if img.mode != 'RGB':
                 img = img.convert('RGB')
-                
+
             # Standard Transforms
             preprocess = transforms.Compose([
                 transforms.Resize(256),
@@ -242,7 +264,8 @@ class ClassificationModel(BaseInferenceModel):
         input_tensor = self.preprocess(dicom_path)
         if input_tensor is None:
             return {'error': 'Preprocessing failed'}
-            
+
+        torch, _, _ = _load_torch()
         with torch.no_grad():
             output = self.model(input_tensor)
             probs = torch.nn.functional.softmax(output[0], dim=0)

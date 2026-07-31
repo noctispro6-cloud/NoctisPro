@@ -45,7 +45,7 @@ ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp     comment 'SSH'
-ufw allow 80/tcp     comment 'HTTP (Let'\''s Encrypt / redirect)'
+ufw allow 80/tcp     comment 'HTTP (ACME redirect)'
 ufw allow 443/tcp    comment 'HTTPS'
 ufw allow 11112/tcp  comment 'DICOM C-STORE'
 ufw --force enable

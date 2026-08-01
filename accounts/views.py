@@ -440,33 +440,6 @@ def heartbeat(request):
     return JsonResponse({'status': 'ok'})
 
 
-@csrf_exempt
-def heartbeat_close(request):
-    """
-    Best-effort immediate logout, fired via navigator.sendBeacon() on the
-    browser's `pagehide` event (tab/window closing). sendBeacon can't reliably
-    attach a CSRF header across browsers, hence csrf_exempt here -- it only
-    ever logs out the caller's own session, so there's nothing to protect.
-    The heartbeat staleness check in SessionTimeoutMiddleware is the
-    guaranteed fallback if this beacon never arrives (network loss, browser
-    killed outright, etc).
-    """
-    if request.method == 'POST' and request.user.is_authenticated:
-        try:
-            session = UserSession.objects.get(
-                user=request.user,
-                session_key=request.session.session_key,
-                is_active=True
-            )
-            session.logout_time = timezone.now()
-            session.is_active = False
-            session.save()
-        except UserSession.DoesNotExist:
-            pass
-        logout(request)
-    return JsonResponse({'status': 'ok'})
-
-
 @ratelimit(key='ip', rate='10/m', method='POST', block=False)
 def portal_login(request):
     """Staff portal login for radiologists and facility users (no admin-only restriction)."""

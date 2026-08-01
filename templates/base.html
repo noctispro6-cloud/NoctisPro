@@ -1085,12 +1085,16 @@
             // Pings the server every ~20s while this tab is open. If pings stop --
             // tab/browser closed, crashed, network lost -- SessionTimeoutMiddleware
             // force-logs-out the session after a short grace period, independent of
-            // the 10-minute mouse/keyboard idle timer above. `pagehide` fires a
-            // best-effort immediate logout beacon on close; the heartbeat staleness
-            // check is the guaranteed fallback if that beacon never arrives.
+            // the 10-minute mouse/keyboard idle timer above.
+            //
+            // Deliberately NOT hooked to `pagehide`/`beforeunload` for an "instant"
+            // logout beacon: those events fire on ANY navigation away from the page,
+            // including clicking a normal in-app link (e.g. Home) -- that incorrectly
+            // logged users out on every click instead of only on an actual close. The
+            // heartbeat-staleness check below is the only detection mechanism; it
+            // still catches a real close within ~90s, just not instantly.
             try {
                 var _hbUrl = '{% url "accounts:heartbeat" %}';
-                var _hbCloseUrl = '{% url "accounts:heartbeat_close" %}';
                 function _csrfToken() {
                     var meta = document.querySelector('meta[name="csrf-token"]');
                     return meta ? meta.getAttribute('content') : '';
@@ -1104,9 +1108,6 @@
                 }
                 _sendHeartbeat();
                 setInterval(_sendHeartbeat, 20000);
-                window.addEventListener('pagehide', function () {
-                    try { navigator.sendBeacon(_hbCloseUrl); } catch (e) { }
-                });
             } catch (e) { }
             {% endif %}
 

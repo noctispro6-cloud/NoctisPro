@@ -1080,6 +1080,36 @@
                 }
             } catch (e) { }
 
+            {% if user.is_authenticated %}
+            // ── Heartbeat: force logout when the tab/browser actually closes ──────
+            // Pings the server every ~20s while this tab is open. If pings stop --
+            // tab/browser closed, crashed, network lost -- SessionTimeoutMiddleware
+            // force-logs-out the session after a short grace period, independent of
+            // the 10-minute mouse/keyboard idle timer above. `pagehide` fires a
+            // best-effort immediate logout beacon on close; the heartbeat staleness
+            // check is the guaranteed fallback if that beacon never arrives.
+            try {
+                var _hbUrl = '{% url "accounts:heartbeat" %}';
+                var _hbCloseUrl = '{% url "accounts:heartbeat_close" %}';
+                function _csrfToken() {
+                    var meta = document.querySelector('meta[name="csrf-token"]');
+                    return meta ? meta.getAttribute('content') : '';
+                }
+                function _sendHeartbeat() {
+                    fetch(_hbUrl, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'X-CSRFToken': _csrfToken() }
+                    }).catch(function () { });
+                }
+                _sendHeartbeat();
+                setInterval(_sendHeartbeat, 20000);
+                window.addEventListener('pagehide', function () {
+                    try { navigator.sendBeacon(_hbCloseUrl); } catch (e) { }
+                });
+            } catch (e) { }
+            {% endif %}
+
             // Unread notification count
             async function updateUnread() {
                 try {

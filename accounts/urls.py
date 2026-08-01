@@ -13,4 +13,6 @@ urlpatterns = [
     path('api/user-info/', views.user_api_info, name='user_api_info'),
     path('session-extend/', views.session_extend, name='session_extend'),
     path('session-keep-alive/', views.session_keep_alive, name='session_keep_alive'),
+    path('heartbeat/', views.heartbeat, name='heartbeat'),
+    path('heartbeat/close/', views.heartbeat_close, name='heartbeat_close'),
 ]

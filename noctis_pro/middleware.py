@@ -363,11 +363,12 @@ logger = logging.getLogger(__name__)
 
 
 class SessionTimeoutMiddleware(MiddlewareMixin):
-    # NOTE: This middleware is defined but NOT registered in settings.MIDDLEWARE.
-    # To activate it, add 'noctis_pro.middleware.SessionTimeoutMiddleware' to MIDDLEWARE
-    # and ensure the session-extend URL endpoints exist in accounts/urls.py.
+    # Registered in settings.MIDDLEWARE. Uses accounts/urls.py's
+    # session-extend/session-keep-alive/heartbeat endpoints.
     """
-    Middleware to handle automatic logout on inactivity
+    Middleware to handle automatic logout on inactivity, and on browser/tab
+    close via heartbeat staleness (see the check near the top of
+    process_request).
     """
     
     def process_request(self, request):
@@ -383,12 +384,35 @@ class SessionTimeoutMiddleware(MiddlewareMixin):
             # User attribute not properly initialized
             return None
         
+        # ── Tab/window-close detection (heartbeat) ──────────────────────────
+        # base.html pings /heartbeat/ every ~20s while a logged-in user has a
+        # tab open. If those pings stop -- tab/browser closed, crashed, lost
+        # network -- for longer than HEARTBEAT_GRACE_SECONDS, treat the
+        # session as abandoned and force logout on the next request, whatever
+        # it is. This is independent of the SESSION_COOKIE_AGE inactivity
+        # timeout below, which must stay generous for someone actively
+        # reading a study without touching the mouse/keyboard.
+        # `last_heartbeat` only exists once the JS has actually pinged once,
+        # so sessions from clients that never run it (API/service accounts)
+        # are unaffected.
+        heartbeat_grace = getattr(settings, 'HEARTBEAT_GRACE_SECONDS', 90)
+        last_heartbeat = request.session.get('last_heartbeat')
+        if last_heartbeat and (time.time() - last_heartbeat) > heartbeat_grace:
+            logout(request)
+            if request.headers.get('Accept', '').startswith('application/json') or \
+               request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({
+                    'error': 'Session expired (browser/tab closed)',
+                    'redirect': reverse('accounts:login')
+                }, status=401)
+            return redirect('accounts:login')
+
         # Skip timeout for AJAX requests to avoid interrupting operations
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             # Update last activity for AJAX requests but don't timeout
             request.session['last_activity'] = time.time()
             return None
-        
+
         # Check if this is a session timeout check request
         if request.path == '/accounts/session-status/':
             return None

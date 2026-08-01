@@ -13,6 +13,7 @@ from .models import User, UserSession, Facility
 from django_ratelimit.decorators import ratelimit
 from django_ratelimit.exceptions import Ratelimited
 import json
+import time
 
 PROFILE_COLOR_PRESETS = [
     ("#00d4ff", "Cyan (default dark)"),
@@ -423,6 +424,47 @@ def session_extend(request):
 def session_keep_alive(request):
     """Keep-alive endpoint for session management."""
     return JsonResponse({'status': 'ok', 'session_age': request.session.get_expiry_age()})
+
+
+@login_required
+def heartbeat(request):
+    """
+    Pinged every ~20s by base.html while a logged-in user has a tab open (see
+    the heartbeat script there). SessionTimeoutMiddleware force-logs-out the
+    session if these stop arriving for HEARTBEAT_GRACE_SECONDS -- catching a
+    closed/crashed browser promptly, independent of the SESSION_COOKIE_AGE
+    mouse/keyboard inactivity timeout (which stays generous for someone
+    actively reading a study without clicking).
+    """
+    request.session['last_heartbeat'] = time.time()
+    return JsonResponse({'status': 'ok'})
+
+
+@csrf_exempt
+def heartbeat_close(request):
+    """
+    Best-effort immediate logout, fired via navigator.sendBeacon() on the
+    browser's `pagehide` event (tab/window closing). sendBeacon can't reliably
+    attach a CSRF header across browsers, hence csrf_exempt here -- it only
+    ever logs out the caller's own session, so there's nothing to protect.
+    The heartbeat staleness check in SessionTimeoutMiddleware is the
+    guaranteed fallback if this beacon never arrives (network loss, browser
+    killed outright, etc).
+    """
+    if request.method == 'POST' and request.user.is_authenticated:
+        try:
+            session = UserSession.objects.get(
+                user=request.user,
+                session_key=request.session.session_key,
+                is_active=True
+            )
+            session.logout_time = timezone.now()
+            session.is_active = False
+            session.save()
+        except UserSession.DoesNotExist:
+            pass
+        logout(request)
+    return JsonResponse({'status': 'ok'})
 
 
 @ratelimit(key='ip', rate='10/m', method='POST', block=False)

@@ -620,8 +620,17 @@ SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_AGE = int(os.environ.get('SESSION_TIMEOUT_SECONDS', 600))
 # Refresh expiry on each request to implement inactivity-based expiry
 SESSION_SAVE_EVERY_REQUEST = True
-# Expire session at browser close to require fresh login on new window
+# Expire session at browser close to require fresh login on new window. Relies on the
+# browser actually discarding the cookie -- some browsers' "continue where you left off" /
+# session-restore features re-send it anyway, which is what HEARTBEAT_GRACE_SECONDS below
+# (noctis_pro.middleware.SessionTimeoutMiddleware) is a stronger, server-enforced backstop for.
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+# How long (seconds) the server waits without a heartbeat ping (base.html, every ~20s while
+# a tab is open) before treating the session as abandoned and forcing logout on the next
+# request -- catches a closed/crashed browser even if its session-restore feature would
+# otherwise have resurrected the cookie. Independent of SESSION_COOKIE_AGE above, which stays
+# generous for someone actively reading a study without touching the mouse/keyboard.
+HEARTBEAT_GRACE_SECONDS = int(os.environ.get('HEARTBEAT_GRACE_SECONDS', 90))
 
 # File upload settings
 # - Allow up to 50GB total upload payloads (e.g., large DICOM batches)

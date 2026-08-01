@@ -17,5 +17,5 @@ echo "[start-stack] Detected ${total_mb}MB host RAM -> mem_limit db=${DB_MEM_LIM
 source "$APP_DIR/scripts/read-replica-counts.sh"
 echo "[start-stack] Replica counts -> web=${WEB_REPLICAS} celery=${CELERY_REPLICAS}"
 
-exec docker compose -f docker-compose.prod.yml up -d --remove-orphans \
+exec docker compose -f docker-compose.prod.yml --env-file .env.docker up -d --remove-orphans \
   --scale "web=${WEB_REPLICAS}" --scale "celery=${CELERY_REPLICAS}"

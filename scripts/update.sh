@@ -4,7 +4,7 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-COMPOSE="docker compose -f $APP_DIR/docker-compose.prod.yml"
+COMPOSE="docker compose -f $APP_DIR/docker-compose.prod.yml --env-file $APP_DIR/.env.docker"
 LOGFILE="/var/log/noctispro-update.log"
 BRANCH="${NOCTISPRO_BRANCH:-main}"
 

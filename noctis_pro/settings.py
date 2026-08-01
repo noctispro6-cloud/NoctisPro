@@ -664,6 +664,11 @@ if IS_TUNNEL:
 # Production security enhancements (only if not using ngrok)
 if not DEBUG and not IS_NGROK:
     SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True' if SSL_ENABLED else 'False').lower() == 'true'
+    # HAProxy's health check (haproxy/haproxy.cfg, backend be_web) hits this container over
+    # plain HTTP -- it never goes through nginx's TLS termination. Without this exemption,
+    # SECURE_SSL_REDIRECT 301s the check to https://web:8000/..., which nginx/lb never serve
+    # on this container, so the check always fails and HAProxy marks the backend DOWN.
+    SECURE_REDIRECT_EXEMPT = [r'^health/simple/?$']
     SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'True' if SSL_ENABLED else 'False').lower() == 'true'
     CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'True' if SSL_ENABLED else 'False').lower() == 'true'
 

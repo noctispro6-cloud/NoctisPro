@@ -9,6 +9,16 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$APP_DIR"
 
+# Compose only auto-loads a file literally named ".env" for ${VAR} interpolation inside
+# docker-compose.prod.yml (DOMAIN_NAME, DB_PASSWORD, etc.) -- env_file: entries on individual
+# services do NOT feed that interpolation. This script always passes --env-file .env.docker
+# explicitly below, but a bare symlink here means any *manual* `docker compose ...` command
+# run without that flag (e.g. while debugging) picks up the real values too, instead of
+# silently falling back to the hardcoded defaults in docker-compose.prod.yml.
+if [ -f .env.docker ] && [ ! -e .env ]; then
+  ln -sf .env.docker .env
+fi
+
 # shellcheck source=./compute-prod-mem-limits.sh
 source "$APP_DIR/scripts/compute-prod-mem-limits.sh"
 echo "[start-stack] Detected ${total_mb}MB host RAM -> mem_limit db=${DB_MEM_LIMIT} pgbouncer=${PGBOUNCER_MEM_LIMIT} redis=${REDIS_MEM_LIMIT} web=${WEB_MEM_LIMIT} celery=${CELERY_MEM_LIMIT} dicom=${DICOM_MEM_LIMIT} nginx=${NGINX_MEM_LIMIT} lb=${HAPROXY_MEM_LIMIT}"

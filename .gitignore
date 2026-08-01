@@ -7,6 +7,9 @@
 # Docker env files (contain secrets) — .env.docker.node too, see DEPLOY_OPPORTUNISTIC_NODE.md
 .env.docker
 .env.docker.node
+# scripts/start-stack.sh symlinks this to .env.docker so plain `docker compose` commands
+# (no --env-file flag) still interpolate the real values instead of hardcoded defaults.
+.env
 
 # Python bytecode / caches
 __pycache__/

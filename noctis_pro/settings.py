@@ -172,6 +172,9 @@ ALLOWED_HOSTS.extend([
     'localhost',
     '127.0.0.1',
     '0.0.0.0',
+    # HAProxy's health check (haproxy/haproxy.cfg, backend be_web) hits this container by
+    # its Compose service name, sending "Host: web" — not the public domain.
+    'web',
     *DOMAIN_HOSTS,
     *EXTRA_ALLOWED_HOSTS,
 ])

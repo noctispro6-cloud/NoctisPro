@@ -1679,11 +1679,12 @@ def upload_study(request):
 								)
 								close_old_connections()
 							except Exception:
+								logger.exception(f"Failed to create new-study notification for study {study_id}")
 								return
 
 						threading.Thread(target=_notify_new_study_async, daemon=True).start()
 					except Exception:
-						pass
+						logger.exception(f"Failed to start new-study notification thread for study {getattr(study, 'id', None)}")
 			
 			# Professional upload completion with comprehensive statistics
 			upload_stats['invalid_files'] = invalid_files
@@ -2208,7 +2209,7 @@ def upload_attachment(request, study_id):
                         data={'study_id': study.id}
                     )
             except Exception:
-                pass
+                logger.exception(f"Failed to create new-attachment notification for study {study.id}")
             
             # If the request prefers JSON (AJAX), return JSON; otherwise redirect back to study detail.
             wants_json = (

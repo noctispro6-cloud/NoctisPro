@@ -282,7 +282,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         data={'room_id': str(room.id), 'action_url': f'/chat/room/{room.id}/'},
                     )
             except Exception:
-                pass
+                logger.exception(f"Failed to create new-chat-message notification for room {room.id}")
 
             return message
         except Exception as e:

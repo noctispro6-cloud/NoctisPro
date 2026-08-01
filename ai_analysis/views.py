@@ -423,9 +423,15 @@ def api_analyze_series(request, series_id):
             pass # Fallback to auto-selection if invalid/unauthorized
     
     if not ai_model:
-        # Prefer a model whose modality matches; fall back to any active model
+        # Prefer a model whose modality AND body part match this study (e.g. don't pick
+        # the Chest X-Ray Classifier for a foot X-ray just because both are modality=CR);
+        # fall back to any active model if nothing matches that specifically.
         if modality_code:
-            ai_model = models_query.filter(modality__in=[modality_code, 'ALL']).order_by('model_type', '-created_at').first()
+            modality_matched = models_query.filter(modality__in=[modality_code, 'ALL'])
+            from ai_analysis.model_selection import filter_models_for_study
+            body_part_matched = filter_models_for_study(modality_matched, study)
+            ai_model = body_part_matched.order_by('model_type', '-created_at').first() \
+                or modality_matched.order_by('model_type', '-created_at').first()
         if not ai_model:
             ai_model = models_query.order_by('model_type', '-created_at').first()
 
@@ -601,9 +607,14 @@ def api_analyze_study(request, study_id):
         except AIModel.DoesNotExist:
             ai_model = None
     if not ai_model:
-        # Prefer modality match; fall back to any active model
+        # Prefer modality AND body-part match (e.g. don't pick the Chest X-Ray Classifier
+        # for a foot X-ray just because both are modality=CR); fall back to any active model.
         if modality_code:
-            ai_model = models_query.filter(modality__in=[modality_code, 'ALL']).order_by('model_type', '-created_at').first()
+            modality_matched = models_query.filter(modality__in=[modality_code, 'ALL'])
+            from ai_analysis.model_selection import filter_models_for_study
+            body_part_matched = filter_models_for_study(modality_matched, study)
+            ai_model = body_part_matched.order_by('model_type', '-created_at').first() \
+                or modality_matched.order_by('model_type', '-created_at').first()
         if not ai_model:
             ai_model = models_query.order_by('model_type', '-created_at').first()
     if not ai_model:

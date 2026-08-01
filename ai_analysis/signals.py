@@ -73,12 +73,19 @@ def trigger_ai_analysis_on_upload(sender, instance, created, **kwargs):
             
         # Select all active models for the modality
         ai_models = AIModel.objects.filter(
-            is_active=True, 
+            is_active=True,
             modality__in=[modality_code, 'ALL']
         )
-        
+
         if not ai_models.exists():
             return
+
+        # Narrow to models matching this study's actual body part (e.g. don't run the
+        # Chest X-Ray Classifier on a foot X-ray just because both are modality=CR).
+        from ai_analysis.model_selection import filter_models_for_study
+        narrowed = filter_models_for_study(ai_models, study)
+        if narrowed.exists():
+            ai_models = narrowed
 
         analyses_to_run = []
         for ai_model in ai_models:

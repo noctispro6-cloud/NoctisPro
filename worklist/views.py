@@ -145,6 +145,13 @@ def _auto_start_ai_for_study(study: Study) -> None:
 		# If the system has no modality-specific or ALL models for this study, still run something.
 		if not candidates.exists():
 			candidates = active
+		else:
+			# Narrow to models matching this study's actual body part (e.g. don't run the
+			# Chest X-Ray Classifier on a foot X-ray just because both are modality=CR).
+			from ai_analysis.model_selection import filter_models_for_study
+			narrowed = filter_models_for_study(candidates, study)
+			if narrowed.exists():
+				candidates = narrowed
 		# Prefer classification/detection first for triage signal.
 		order = {'classification': 0, 'detection': 1, 'segmentation': 2, 'quality_assessment': 3, 'report_generation': 4, 'reconstruction': 5}
 		models = sorted(list(candidates), key=lambda x: order.get(getattr(x, 'model_type', ''), 99))[:3]

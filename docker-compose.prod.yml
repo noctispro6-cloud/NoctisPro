@@ -74,6 +74,44 @@ services:
     mem_limit: ${REDIS_MEM_LIMIT:-256m}
     restart: unless-stopped
 
+  # Run database migrations and collect static assets once, before web replicas start.
+  # This prevents concurrent collectstatic operations against the shared static volume.
+  web-init:
+    build:
+      context: .
+    env_file:
+      - .env.docker
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_HOST: pgbouncer
+      DB_PORT: "6432"
+      DB_NAME: ${DB_NAME:-noctispro}
+      DB_USER: ${DB_USER:-noctispro}
+      DB_PASSWORD: ${DB_PASSWORD:-change-me}
+      USE_PGBOUNCER: "true"
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      MEDIA_ROOT: /data/media
+      STATIC_ROOT: /data/staticfiles
+      SSL_ENABLED: "true"
+      USE_X_FORWARDED_HOST: "true"
+      USE_X_FORWARDED_PORT: "true"
+      BONE_ML_MODEL_PATH: ${BONE_ML_MODEL_PATH:-}
+      HF_HOME: /data/hf_cache
+    command:
+      ["bash", "-lc", "python manage.py migrate --noinput && python manage.py collectstatic --noinput"]
+    depends_on:
+      db:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    volumes:
+      - noctis_media:/data/media
+      - noctis_static:/data/staticfiles
+      - noctis_hf_cache:/data/hf_cache
+    restart: "no"
+
   web:
     # Horizontal scaling on this single host: `docker compose -f docker-compose.prod.yml
     # up -d --scale web=3`. Safe because web is stateless — media/static are shared named
@@ -114,6 +152,8 @@ services:
       # slow connection only pays the download cost once, not on every run.
       HF_HOME: /data/hf_cache
     depends_on:
+      web-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       pgbouncer:
@@ -229,7 +269,7 @@ services:
     env_file:
       - .env.docker
     environment:
-      DOMAIN_NAME: ${DOMAIN_NAME:-example.com}
+      DOMAIN_NAME: ${DOMAIN_NAME:-noctis-pro.com}
     volumes:
       # nginx image will envsubst *.template into /etc/nginx/conf.d/
       - ./nginx/templates:/etc/nginx/templates:ro

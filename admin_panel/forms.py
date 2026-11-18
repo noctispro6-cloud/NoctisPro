@@ -5,6 +5,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.forms import inlineformset_factory
 from accounts.models import User, Facility, FacilityModalityNode
 import re
+import ipaddress
 
 
 class CustomUserCreationForm(UserCreationForm):
@@ -493,35 +494,125 @@ class FacilityForm(forms.ModelForm):
 
 
 class ModalityNodeForm(forms.ModelForm):
-    """Inline form for a single per-modality DICOM sender node."""
+    """Validated configuration for one registered DICOM sender."""
+
     class Meta:
         model = FacilityModalityNode
-        fields = ['modality', 'ae_title', 'host', 'port']
+        fields = ['modality', 'ae_title', 'host', 'port', 'enabled']
         widgets = {
-            'modality': forms.Select(attrs={'class': 'form-select form-control-medical form-select-sm'}),
+            'modality': forms.Select(attrs={
+                'class': 'form-select form-control-medical form-select-sm'
+            }),
             'ae_title': forms.TextInput(attrs={
                 'class': 'form-control form-control-medical form-control-sm',
-                'placeholder': 'AE Title (optional)',
-                'maxlength': 32,
+                'placeholder': 'DICOM Calling AE Title',
+                'maxlength': 16,
             }),
             'host': forms.TextInput(attrs={
                 'class': 'form-control form-control-medical form-control-sm',
-                'placeholder': 'IP / CIDR (e.g. 192.168.1.5)',
+                'placeholder': 'IP or CIDR; comma-separated',
             }),
             'port': forms.NumberInput(attrs={
                 'class': 'form-control form-control-medical form-control-sm',
                 'min': 1, 'max': 65535,
             }),
+            'enabled': forms.CheckboxInput(attrs={
+                'class': 'form-check-input'
+            }),
         }
+
+    def clean_ae_title(self):
+        value = (self.cleaned_data.get('ae_title') or '').strip().upper()
+        if not value:
+            if self.cleaned_data.get('enabled'):
+                raise ValidationError(
+                    "An enabled sender must have a Calling AE Title."
+                )
+            return ''
+
+        if len(value) > 16:
+            raise ValidationError("DICOM AE Titles cannot exceed 16 characters.")
+
+        if not re.fullmatch(r"[A-Z0-9_ ]+", value):
+            raise ValidationError(
+                "Use only uppercase letters, numbers, spaces and underscores."
+            )
+        return value
+
+    def clean_host(self):
+        value = (self.cleaned_data.get('host') or '').strip()
+        if not value:
+            if self.cleaned_data.get('enabled'):
+                raise ValidationError(
+                    "An enabled sender must have at least one IP address or CIDR."
+                )
+            return ''
+
+        normalized = []
+        for item in value.split(','):
+            item = item.strip()
+            if not item:
+                raise ValidationError("Remove empty IP/CIDR entries.")
+            try:
+                if '/' in item:
+                    network = ipaddress.ip_network(item, strict=False)
+                else:
+                    address = ipaddress.ip_address(item)
+                    network = ipaddress.ip_network(
+                        f"{address}/{address.max_prefixlen}", strict=False
+                    )
+                normalized.append(str(network))
+            except ValueError:
+                raise ValidationError(f"Invalid IP address or CIDR: {item}")
+
+        return ','.join(normalized)
+
+    def clean_port(self):
+        port = self.cleaned_data.get('port')
+        if port is None or not 1 <= port <= 65535:
+            raise ValidationError("Port must be between 1 and 65535.")
+        return port
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get('enabled'):
+            if not cleaned.get('ae_title') or not cleaned.get('host'):
+                raise ValidationError(
+                    "Enabled senders require both an AE Title and an IP/CIDR."
+                )
+        return cleaned
+
+
+class ModalityNodeFormSetBase(forms.BaseInlineFormSet):
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+
+        seen = set()
+        for form in self.forms:
+            if not form.cleaned_data or form.cleaned_data.get('DELETE'):
+                continue
+            if not form.cleaned_data.get('enabled'):
+                continue
+
+            aet = (form.cleaned_data.get('ae_title') or '').strip().upper()
+            if aet in seen:
+                raise ValidationError(
+                    f"Duplicate enabled Calling AE Title: {aet}"
+                )
+            seen.add(aet)
 
 
 ModalityNodeFormSet = inlineformset_factory(
     Facility,
     FacilityModalityNode,
     form=ModalityNodeForm,
+    formset=ModalityNodeFormSetBase,
     extra=1,
     can_delete=True,
     max_num=12,
+    validate_max=True,
 )
 
 

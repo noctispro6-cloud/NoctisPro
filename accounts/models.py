@@ -75,6 +75,11 @@ class FacilityModalityNode(models.Model):
         help_text='DICOM port this modality sends on.'
     )
 
+    enabled = models.BooleanField(
+        default=False,
+        help_text='Allow this registered modality to send DICOM studies.'
+    )
+
     class Meta:
         ordering = ['modality']
 

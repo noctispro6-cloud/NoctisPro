@@ -49,7 +49,7 @@ import numpy as np
 from PIL import Image
 
 from worklist.models import Patient, Study, Series, DicomImage, Modality
-from accounts.models import User, Facility
+from accounts.models import User, Facility, FacilityModalityNode
 from django.utils import timezone
 from django.db import transaction, connection
 from notifications.models import Notification, NotificationType
@@ -304,67 +304,92 @@ class DicomReceiver:
 
     @staticmethod
     def _parse_allowed_nets(value: str):
+        """Parse optional additional network restrictions; invalid config fails closed."""
         nets = []
         for raw in (value or "").split(","):
             raw = raw.strip()
             if not raw:
                 continue
             try:
-                # Accept both IPs and CIDRs
                 if "/" in raw:
                     nets.append(ipaddress.ip_network(raw, strict=False))
                 else:
-                    nets.append(ipaddress.ip_network(f"{raw}/32", strict=False))
-            except ValueError:
-                # Ignore invalid entries (but don't crash receiver)
-                logging.getLogger('dicom_receiver').warning(f"Ignoring invalid DICOM_ALLOWED_NETS entry: '{raw}'")
+                    address = ipaddress.ip_address(raw)
+                    nets.append(ipaddress.ip_network(
+                        f"{address}/{address.max_prefixlen}", strict=False
+                    ))
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid DICOM_ALLOWED_NETS entry {raw!r}: {exc}"
+                ) from exc
         return nets
 
     def _peer_allowed(self, peer_ip: str) -> bool:
-        """
-        Allow a connecting peer if:
-          1. No static allowlist (DICOM_ALLOWED_NETS) AND no DB facility hosts configured → open.
-          2. Static allowlist matches → allow.
-          3. Any active Facility.dicom_host entry matches → allow.
-        """
+        """Apply only the optional additional network restriction."""
         try:
-            ip = ipaddress.ip_address(peer_ip)
+            ip = ipaddress.ip_address(str(peer_ip).split("%", 1)[0])
         except ValueError:
             return False
 
-        # Check static env-var allowlist first
-        if self.allowed_nets and any(ip in net for net in self.allowed_nets):
+        if not self.allowed_nets:
             return True
 
-        # Check DB-stored facility hosts (Tailscale IPs, clinic CIDRs, etc.)
+        return any(
+            ip.version == net.version and ip in net
+            for net in self.allowed_nets
+        )
+
+    def _authorize_sender(self, calling_aet: str, peer_ip: str, modality=None):
+        """
+        Return (facility, node) only for an active facility with an enabled
+        registered node matching Calling AE Title, source IP and modality.
+        """
         try:
-            from accounts.models import Facility as _Facility
-            db_nets = []
-            for host in _Facility.objects.filter(is_active=True).exclude(dicom_host='').values_list('dicom_host', flat=True):
-                for raw in host.split(','):
+            calling_aet = (calling_aet or "").strip().upper()
+            if not calling_aet or len(calling_aet) > 16:
+                return None
+
+            try:
+                ip = ipaddress.ip_address(str(peer_ip).split("%", 1)[0])
+            except ValueError:
+                return None
+
+            if not self._peer_allowed(str(ip)):
+                return None
+
+            nodes = FacilityModalityNode.objects.select_related("facility").filter(
+                enabled=True,
+                facility__is_active=True,
+                ae_title__iexact=calling_aet,
+            )
+
+            for node in nodes:
+                if modality and node.modality.upper() != str(modality).strip().upper():
+                    continue
+
+                for raw in (node.host or "").split(","):
                     raw = raw.strip()
                     if not raw:
                         continue
                     try:
-                        db_nets.append(ipaddress.ip_network(raw if '/' in raw else f'{raw}/32', strict=False))
+                        if "/" in raw:
+                            network = ipaddress.ip_network(raw, strict=False)
+                        else:
+                            address = ipaddress.ip_address(raw)
+                            network = ipaddress.ip_network(
+                                f"{address}/{address.max_prefixlen}", strict=False
+                            )
+                        if ip.version == network.version and ip in network:
+                            return node.facility, node
                     except ValueError:
-                        pass
-            if db_nets and any(ip in net for net in db_nets):
-                return True
+                        # A malformed stored node cannot authorize a sender.
+                        continue
+
+            return None
         except Exception:
-            pass
+            self.logger.exception("DICOM sender authorization failed closed")
+            return None
 
-        # If neither static list nor DB list is configured at all → open to all
-        if not self.allowed_nets:
-            try:
-                from accounts.models import Facility as _Facility
-                if not _Facility.objects.filter(is_active=True).exclude(dicom_host='').exists():
-                    return True
-            except Exception:
-                return True
-
-        return False
-    
     def setup_ae(self):
         """Setup Application Entity with optimized settings"""
         self.ae = AE(ae_title=self.aet)
@@ -379,39 +404,33 @@ class DicomReceiver:
         self.ae.acse_timeout = 30
         self.ae.dimse_timeout = 30
         
-        # Allow any Called AE Title (facilities identify via Calling AE)
-        if hasattr(self.ae, 'require_called_aet'):
-            try:
-                self.ae.require_called_aet = False
-            except Exception:
-                pass
+        # Reject associations addressed to a different Called AE Title.
+        self.ae.require_called_aet = True
         
         self.logger.info("Application Entity configured successfully")
     
     def handle_echo(self, event):
-        """Handle C-ECHO requests (DICOM ping) with enhanced logging (pynetdicom evt style)"""
+        """C-ECHO succeeds only for a registered sender IP and Calling AE."""
         try:
-            calling_aet = event.assoc.requestor.ae_title.strip()
-            peer_ip = getattr(event.assoc.requestor, 'address', 'unknown')
+            requestor = event.assoc.requestor
+            calling_aet = str(getattr(requestor, "ae_title", "")).strip()
+            peer_ip = getattr(requestor, "address", None)
+            authorized = self._authorize_sender(calling_aet, peer_ip)
+            if not authorized:
+                self.logger.warning(
+                    "C-ECHO denied for Calling AE %r from %r",
+                    calling_aet, peer_ip
+                )
+                return 0x0124
+            self.logger.info(
+                "C-ECHO accepted from %s at %s",
+                calling_aet, peer_ip
+            )
+            return 0x0000
+        except Exception:
+            self.logger.exception("C-ECHO authorization failed")
+            return 0x0124
 
-            if not self._peer_allowed(peer_ip):
-                self.logger.warning(f"C-ECHO rejected (IP not allowed): '{calling_aet}' from {peer_ip}")
-                return 0x0000  # Keep success to avoid noisy connectivity failures; C-STORE will still reject.
-            
-            # Log the echo request
-            self.logger.info(f"C-ECHO received from '{calling_aet}' at {peer_ip}")
-            
-            # Check if facility exists (optional warning)
-            facility = Facility.objects.filter(ae_title__iexact=calling_aet, is_active=True).first()
-            if not facility:
-                self.logger.warning(f"C-ECHO from unknown AE Title '{calling_aet}' - facility not registered")
-            
-            return 0x0000  # Success
-            
-        except Exception as e:
-            self.logger.error(f"Error handling C-ECHO: {str(e)}")
-            return 0x0000  # Still return success for basic connectivity
-    
     def handle_store(self, event):
         """Handle C-STORE requests with comprehensive error handling (pynetdicom evt style)"""
         calling_aet = None
@@ -426,40 +445,29 @@ class DicomReceiver:
             calling_aet = event.assoc.requestor.ae_title.strip()
             peer_ip = getattr(event.assoc.requestor, 'address', 'unknown')
 
-            # Optional network allowlist check
-            if not self._peer_allowed(peer_ip):
-                self.logger.warning(f"C-STORE rejected (IP not allowed): '{calling_aet}' from {peer_ip}")
-                self.stats['total_errors'] += 1
-                return 0xC000
-            
-            # Validate facility authorization
-            # 1. Match by exact AE title
-            facility = Facility.objects.filter(ae_title__iexact=calling_aet, is_active=True).first()
-            if not facility:
-                # 2. Fall back to any active facility with a blank AE title (catch-all)
-                facility = Facility.objects.filter(ae_title='', is_active=True).first()
-            if not facility:
-                # 3. If only one active facility exists, use it regardless of AE title
-                active = Facility.objects.filter(is_active=True)
-                if active.count() == 1:
-                    facility = active.first()
-            if not facility:
-                self.logger.warning(
-                    f"C-STORE rejected: no matching or default facility for AET '{calling_aet}' from {peer_ip}. "
-                    f"Set a facility's AE Title to '{calling_aet}' in the admin panel, or leave one facility's AE Title blank to accept all."
-                )
-                self.stats['total_errors'] += 1
-                return 0xC000
-            
-            # Get the dataset
+            # Retrieve dataset before authorization so its Modality can be checked.
             try:
                 ds = event.dataset
                 if ds is None:
                     raise ValueError("Empty dataset received")
             except Exception as e:
-                self.logger.error(f"Failed to retrieve dataset: {str(e)}")
+                self.logger.error("Failed to retrieve dataset: %s", str(e))
                 self.stats['total_errors'] += 1
-                return 0xA700  # Out of Resources
+                return 0xA700
+
+            dataset_modality = str(getattr(ds, "Modality", "")).strip().upper()
+            authorized = self._authorize_sender(
+                calling_aet, peer_ip, dataset_modality
+            )
+            if not authorized:
+                self.logger.warning(
+                    "C-STORE denied: AE=%r IP=%r Modality=%r",
+                    calling_aet, peer_ip, dataset_modality
+                )
+                self.stats['total_errors'] += 1
+                return 0xC000
+
+            facility, modality_node = authorized
             
             # Extract basic identifiers for logging
             study_uid = getattr(ds, 'StudyInstanceUID', 'Unknown')

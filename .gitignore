@@ -20,3 +20,10 @@ logs/
 media/
 key
 key.pub
+
+# Local TLS certificates and private keys - never commit
+nginx/letsencrypt/
+*.key
+*.pem
+*.p12
+*.pfx

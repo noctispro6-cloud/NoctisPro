@@ -1,3 +1,4 @@
+from admin_panel.forms import ModalityNodeFormSet
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib import messages
@@ -1200,10 +1201,13 @@ def facility_create(request):
 
     if request.method == 'POST':
         form = FacilityForm(request.POST, request.FILES)
-        if form.is_valid():
+        node_formset = ModalityNodeFormSet(request.POST, instance=None)
+        if form.is_valid() and node_formset.is_valid():
             try:
                 # Save the facility
                 facility = form.save()
+                node_formset.instance = facility
+                node_formset.save()
                 
                 # Handle optional facility user creation
                 if form.cleaned_data.get('create_facility_user'):
@@ -1295,6 +1299,7 @@ def facility_create(request):
                         messages.error(request, f'{field_name}: {error}')
     else:
         form = FacilityForm()
+        node_formset = ModalityNodeFormSet(instance=None)
 
     context = {
         'form': form,
@@ -1302,6 +1307,7 @@ def facility_create(request):
         'dicom_server': _get_dicom_server_info(),
     }
 
+    context['node_formset'] = node_formset
     return render(request, 'admin_panel/facility_form.html', context)
 
 @login_required
@@ -1314,10 +1320,13 @@ def facility_edit(request, facility_id):
 
     if request.method == 'POST':
         form = FacilityForm(request.POST, request.FILES, instance=facility)
-        if form.is_valid():
+        node_formset = ModalityNodeFormSet(request.POST, instance=facility)
+        if form.is_valid() and node_formset.is_valid():
             try:
                 # Save the updated facility
                 updated_facility = form.save()
+                node_formset.instance = facility
+                node_formset.save()
                 
                 # Handle optional facility user creation during edit
                 if form.cleaned_data.get('create_facility_user'):
@@ -1406,6 +1415,7 @@ def facility_edit(request, facility_id):
                         messages.error(request, f'{field_name}: {error}')
     else:
         form = FacilityForm(instance=facility)
+        node_formset = ModalityNodeFormSet(instance=facility)
 
     context = {
         'form': form,
@@ -1414,6 +1424,7 @@ def facility_edit(request, facility_id):
         'dicom_server': _get_dicom_server_info(),
     }
 
+    context['node_formset'] = node_formset
     return render(request, 'admin_panel/facility_form.html', context)
 
 @login_required

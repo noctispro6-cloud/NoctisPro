@@ -236,6 +236,103 @@
                         {% endif %}
                     </div>
 
+                    <!-- Registered DICOM Modality Senders -->
+                    <div class="col-12 mt-4">
+                        <h5 class="text-white mb-2">
+                            <i class="fas fa-network-wired me-2"></i>Registered DICOM Modality Senders
+                        </h5>
+                        <p class="form-text text-secondary">
+                            Only explicitly enabled senders matching their Calling AE Title,
+                            source IP/CIDR and DICOM modality will be authorized.
+                            Existing legacy facility host settings do not authorize senders.
+                        </p>
+                        <hr class="border-secondary mb-3">
+                        {{ node_formset.management_form }}
+                        {% if node_formset.non_form_errors %}
+                            {% for error in node_formset.non_form_errors %}
+                                <div class="alert alert-danger">{{ error }}</div>
+                            {% endfor %}
+                        {% endif %}
+                        <div id="modality-node-forms">
+                            {% for node in node_formset %}
+                            <div class="row g-2 align-items-end border border-secondary rounded p-3 mb-3 modality-node-row">
+                                {{ node.id }}
+                                <div class="col-md-2">
+                                    <label class="form-label text-white">Modality</label>
+                                    {{ node.modality }}
+                                    {{ node.modality.errors }}
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label text-white">Calling AE Title</label>
+                                    {{ node.ae_title }}
+                                    {{ node.ae_title.errors }}
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-white">Sender IP / CIDR</label>
+                                    {{ node.host }}
+                                    {{ node.host.errors }}
+                                </div>
+                                <div class="col-md-1">
+                                    <label class="form-label text-white">Port</label>
+                                    {{ node.port }}
+                                    {{ node.port.errors }}
+                                </div>
+                                <div class="col-md-1">
+                                    <div class="form-check">
+                                        {{ node.enabled }}
+                                        <label class="form-check-label text-white">Enabled</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    {% if node_formset.can_delete %}
+                                        <div class="form-check">
+                                            {{ node.DELETE }}
+                                            <label class="form-check-label text-danger">Delete</label>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                                {% if node.non_field_errors %}
+                                    <div class="col-12 text-danger">{{ node.non_field_errors }}</div>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <template id="empty-modality-node-form">
+                            <div class="row g-2 align-items-end border border-secondary rounded p-3 mb-3 modality-node-row">
+                                {{ node_formset.empty_form.id }}
+                                <div class="col-md-2">
+                                    <label class="form-label text-white">Modality</label>
+                                    {{ node_formset.empty_form.modality }}
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label text-white">Calling AE Title</label>
+                                    {{ node_formset.empty_form.ae_title }}
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-white">Sender IP / CIDR</label>
+                                    {{ node_formset.empty_form.host }}
+                                </div>
+                                <div class="col-md-1">
+                                    <label class="form-label text-white">Port</label>
+                                    {{ node_formset.empty_form.port }}
+                                </div>
+                                <div class="col-md-1">
+                                    <div class="form-check">
+                                        {{ node_formset.empty_form.enabled }}
+                                        <label class="form-check-label text-white">Enabled</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    {{ node_formset.empty_form.DELETE }}
+                                    <label class="form-check-label text-danger">Delete</label>
+                                </div>
+                            </div>
+                        </template>
+                        <button type="button" class="btn-control" id="add-modality-node">
+                            <i class="fas fa-plus me-2"></i>Add Modality Sender
+                        </button>
+                    </div>
+
                     <!-- Subscription Management -->
                     <div class="col-12 mt-4">
                         <h5 class="text-white mb-3">
@@ -457,6 +554,27 @@
 
 {% block extra_js %}
 <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const addButton = document.getElementById('add-modality-node');
+        const container = document.getElementById('modality-node-forms');
+        const total = document.getElementById('id_modality_nodes-TOTAL_FORMS');
+        const template = document.getElementById('empty-modality-node-form');
+        if (!addButton || !container || !total || !template) return;
+
+        addButton.addEventListener('click', function () {
+            const count = parseInt(total.value, 10);
+            if (count >= 12) {
+                alert('A maximum of 12 modality senders is allowed.');
+                return;
+            }
+            const html = template.innerHTML.replace(/__prefix__/g, count);
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = html.trim();
+            container.appendChild(wrapper.firstElementChild);
+            total.value = count + 1;
+        });
+    });
+
     function resetForm() {
         document.querySelector('form').reset();
     }
